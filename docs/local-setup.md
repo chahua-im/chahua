@@ -25,6 +25,8 @@ node runspace/dev.mjs dev
 
 `init` creates configuration and shared services, configures the bucket, temporarily runs the backend to apply migrations, and seeds fixtures. It requires this worktree's backend to be stopped. To prepare a fresh environment **without fixtures**, use `up` instead of `init`, then run `dev`.
 
+Bucket initialization uses the official AWS CLI container from Amazon ECR Public (`public.ecr.aws/aws-cli/aws-cli`). It creates the bucket only when absent and reapplies anonymous download access and CORS for GET, PUT, and HEAD, exposing `ETag`. No host AWS CLI or MinIO client is needed.
+
 For daily use or an existing shared database:
 
 ```bash
@@ -76,6 +78,8 @@ Each worktree keeps its own `backend/target` and `pwa/node_modules`. Removing a 
 | `pwa/.env.local`                            | Optional `CHAHUA_DEV_TOKEN` preset; not required for startup                                                             |
 
 Locate the Git common directory with `git rev-parse --path-format=absolute --git-common-dir`. Shared files live outside the tracked tree; worktree env files are ignored. Keep credentials out of commits. The launcher supplies backend configuration through the process environment; a separate `backend/.env` is unnecessary. Production frontend builds do not load these development env files.
+
+`COMPOSE_PROJECT_NAME` selects the shared containers and named volumes; changing it selects a different data stack. All worktrees using the same stack must use its infrastructure endpoints and credentials, including `MEILI_MASTER_KEY`, JWT/service-token keys, and VAPID keys. Infrastructure ports are fixed settings, not automatically allocated: separate Compose projects on the same host need distinct ports and matching URLs. A port collision can indicate another stack already owns those ports; `dev` starts infrastructure just like `init` and `up`.
 
 The worktree port file contains values allocated starting from:
 

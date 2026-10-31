@@ -1,11 +1,11 @@
-import { HttpTestingController } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { Blob as NodeBlob, File as NodeFile } from 'node:buffer';
-import { vi } from 'vitest';
-import { AttachmentsService } from '../../generated/endpoints/attachments/attachments.service';
-import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
+import { type Mock, vi } from 'vitest';
+import { RpcApi } from '../../generated/rpc-api';
 import { AttachmentUploadPurpose, type SnowflakeID } from '../../generated/models';
-import { encodeId } from '../api/snowflake-id';
+import { RpcErrorCode } from '../api/rpc-error';
+import { provideRpcTesting, RpcTestPeer } from '../api/rpc-testing';
+import { decodeId, encodeId } from '../api/snowflake-id';
 import { AttachmentUpload, UploadStatus, uploadBlob } from './upload';
 import { UploadErrorCode, UploadStage } from './upload-error';
 
@@ -27,14 +27,17 @@ class FakeUpload {
     this.onabort?.();
     this.onloadend?.();
   });
+
   constructor() {
     FakeUpload.requests.push(this);
   }
+
   finish(status = 200) {
     this.status = status;
     this.onload?.();
     this.onloadend?.();
   }
+
   progress(loaded: number, total: number) {
     this.upload.onprogress?.({ lengthComputable: true, loaded, total });
   }
@@ -46,6 +49,7 @@ beforeEach(() => {
   vi.stubGlobal('File', NodeFile);
   vi.stubGlobal('Blob', NodeBlob);
 });
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -69,6 +73,7 @@ describe('Signed upload', () => {
     xhr.finish();
     await pending;
   });
+
   it('rejects HTTP errors and aborts removed uploads', async () => {
     let pending = uploadBlob('https://storage.invalid/signed', new Blob(), {});
     FakeUpload.requests[0].finish(403);
@@ -78,6 +83,7 @@ describe('Signed upload', () => {
     controller.abort();
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
   });
+
   it('does not send an already aborted upload', async () => {
     const controller = new AbortController();
     controller.abort();
@@ -134,14 +140,17 @@ describe('Upload activity deadlines', () => {
 });
 
 describe('Attachment upload tasks', () => {
-  let http: HttpTestingController;
+  let peer: RpcTestPeer;
+  let api: RpcApi;
   let tasks: AttachmentUpload[];
-  let convertToBlob: ReturnType<typeof vi.fn<() => Promise<Blob>>>;
-  let createBitmap: ReturnType<typeof vi.fn>;
+  let convertToBlob: Mock<() => Promise<Blob>>;
+  let createBitmap: Mock;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideChahuaBaseUrl('/_api')] });
-    http = TestBed.inject(HttpTestingController);
+    TestBed.configureTestingModule({ providers: [...provideRpcTesting()] });
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
+    api = TestBed.inject(RpcApi);
     tasks = [];
     let nextUrl = 0;
     vi.spyOn(URL, 'createObjectURL').mockImplementation(() => `blob:mock-${++nextUrl}`);
@@ -173,26 +182,44 @@ describe('Attachment upload tasks', () => {
       },
     );
   });
+
   afterEach(() => {
-    for (const task of tasks) task.dispose();
-    http.verify({ ignoreCancelled: true });
+    try {
+      for (const task of tasks) task.dispose();
+      peer.verify();
+    } finally {
+      TestBed.resetTestingModule();
+    }
   });
 
   function create(purpose = AttachmentUploadPurpose.file, file = new File(['hello'], 'note.txt')) {
-    const task = new AttachmentUpload(TestBed.inject(AttachmentsService), file, purpose);
+    const task = new AttachmentUpload(api, file, purpose);
     tasks.push(task);
     return task;
   }
+
   function photo() {
     return new File([new Uint8Array(100)], 'photo.jpg', { type: 'image/jpeg' });
   }
+
+  function config(maxFileSizeBytes = 1024) {
+    peer.expect('attachments.getConfig').flush({ maxFileSizeBytes });
+  }
+
   async function sign(id: SnowflakeID = encodeId('100')) {
-    await vi.waitFor(() => {
-      http.expectOne('/_api/attachments/upload-url').flush({
-        attachmentId: id,
-        uploadHeaders: { 'Content-Type': 'application/octet-stream' },
-        uploadUrl: 'https://storage.invalid/upload',
-      });
+    (
+      await peer.expectAsync(
+        'attachments.createUploadUrl',
+        (params) =>
+          typeof params['filename'] === 'string' &&
+          typeof params['contentType'] === 'string' &&
+          typeof params['size'] === 'number' &&
+          typeof params['purpose'] === 'string',
+      )
+    ).flush({
+      attachmentId: decodeId(id),
+      uploadHeaders: { 'Content-Type': 'application/octet-stream' },
+      uploadUrl: 'https://storage.invalid/upload',
     });
     await vi.waitFor(() => expect(FakeUpload.requests.at(-1)).toBeDefined());
     return FakeUpload.requests.at(-1)!;
@@ -206,21 +233,15 @@ describe('Attachment upload tasks', () => {
       const pending = task.retry();
       expect(task.retry()).toBe(pending);
       expect(task.state()).toEqual({ status: UploadStatus.Uploading, progress: 0 });
-      http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 1024 });
-      await vi.waitFor(() => {
-        const request = http.expectOne('/_api/attachments/upload-url');
-        expect(request.request.body).toEqual({
-          filename: file.name,
-          contentType: file.type,
-          size: file.size,
-          purpose,
-        });
-        request.flush({
-          attachmentId: encodeId('100'),
-          uploadHeaders: {},
-          uploadUrl: 'https://storage.invalid/upload',
-        });
+      config();
+      const request = await peer.expectAsync('attachments.createUploadUrl');
+      expect(request.params).toEqual({
+        filename: file.name,
+        contentType: file.type,
+        size: file.size,
+        purpose,
       });
+      request.flush({ attachmentId: '100', uploadHeaders: {}, uploadUrl: 'https://storage.invalid/upload' });
       await vi.waitFor(() => expect(FakeUpload.requests).toHaveLength(1));
       const xhr = FakeUpload.requests[0];
       expect(xhr.send).toHaveBeenCalledWith(file);
@@ -231,7 +252,7 @@ describe('Attachment upload tasks', () => {
       await expect(pending).resolves.toBe(encodeId('100'));
       expect(task.state()).toEqual({ status: UploadStatus.Ready, progress: 1, id: encodeId('100') });
       await expect(task.retry()).resolves.toBe(encodeId('100'));
-      http.expectNone('/_api/attachments/config');
+      peer.expectNone('attachments.getConfig');
       expect(FakeUpload.requests).toHaveLength(1);
       expect(task.file).toBe(file);
       expect(task.url).toBe('blob:mock-1');
@@ -245,24 +266,22 @@ describe('Attachment upload tasks', () => {
     convertToBlob.mockReturnValue(new Promise<Blob>((resolve) => (compressed = resolve)));
     const task = create(AttachmentUploadPurpose.media, photo());
     const pending = task.retry();
-    http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 10 });
+    config(10);
     await vi.waitFor(() => expect(convertToBlob).toHaveBeenCalledOnce());
     expect(task.state()).toEqual({ status: UploadStatus.Processing, progress: 0.25 });
     expect(task.retry()).toBe(pending);
-    http.expectNone('/_api/attachments/upload-url');
+    peer.expectNone('attachments.createUploadUrl');
     compressed(new Blob(['small'], { type: 'image/webp' }));
-    await vi.waitFor(() => {
-      const request = http.expectOne('/_api/attachments/upload-url');
-      expect(request.request.body).toEqual({
-        filename: 'photo.jpg.webp',
-        contentType: 'image/webp',
-        size: 5,
-        purpose: AttachmentUploadPurpose.media,
-        width: 1866,
-        height: 1400,
-      });
-      request.flush({ attachmentId: encodeId('100'), uploadHeaders: {}, uploadUrl: 'https://storage.invalid/upload' });
+    const request = await peer.expectAsync('attachments.createUploadUrl');
+    expect(request.params).toEqual({
+      filename: 'photo.jpg.webp',
+      contentType: 'image/webp',
+      size: 5,
+      purpose: AttachmentUploadPurpose.media,
+      width: 1866,
+      height: 1400,
     });
+    request.flush({ attachmentId: '100', uploadHeaders: {}, uploadUrl: 'https://storage.invalid/upload' });
     await vi.waitFor(() => expect(FakeUpload.requests).toHaveLength(1));
     expect(task.state()).toEqual({ status: UploadStatus.Uploading, progress: 0.5, width: 1866, height: 1400 });
     FakeUpload.requests[0].progress(1, 2);
@@ -277,7 +296,7 @@ describe('Attachment upload tasks', () => {
   it('contains failures and reuses prepared media and the preview URL on retry', async () => {
     const task = create(AttachmentUploadPurpose.media, photo());
     const pending = task.retry();
-    http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 1024 });
+    config();
     (await sign()).finish(403);
     await expect(pending).resolves.toBeUndefined();
     expect(task.state()).toMatchObject({ status: UploadStatus.Failed, width: 1866, height: 1400 });
@@ -285,7 +304,7 @@ describe('Attachment upload tasks', () => {
     const retry = task.retry();
     expect(task.state().progress).toBe(0.5);
     expect(task.retry()).toBe(retry);
-    http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 1024 });
+    config();
     await sign(encodeId('101'));
     await vi.waitFor(() => expect(FakeUpload.requests).toHaveLength(2));
     expect(FakeUpload.requests[1].send.mock.calls[0][0]).toBe(FakeUpload.requests[0].send.mock.calls[0][0]);
@@ -301,10 +320,10 @@ describe('Attachment upload tasks', () => {
     async (purpose) => {
       const task = create(purpose, new File(['oversized'], 'note.txt', { type: 'text/plain' }));
       const pending = task.retry();
-      http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 1 });
+      config(1);
       await expect(pending).resolves.toBeUndefined();
       expect(task.state().status).toBe(UploadStatus.Failed);
-      http.expectNone('/_api/attachments/upload-url');
+      peer.expectNone('attachments.createUploadUrl');
       expect(FakeUpload.requests).toHaveLength(0);
     },
   );
@@ -312,9 +331,9 @@ describe('Attachment upload tasks', () => {
   it.each(['config', 'upload-url'])('contains an API failure at %s', async (stage) => {
     const task = create();
     const pending = task.retry();
-    if (stage === 'upload-url') http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 1024 });
-    await vi.waitFor(() =>
-      http.expectOne('/_api/attachments/' + stage).flush({}, { status: 500, statusText: 'Failed' }),
+    if (stage === 'upload-url') config();
+    (await peer.expectAsync(stage === 'config' ? 'attachments.getConfig' : 'attachments.createUploadUrl')).error(
+      RpcErrorCode.Internal,
     );
     await expect(pending).resolves.toBeUndefined();
     expect(task.state().status).toBe(UploadStatus.Failed);
@@ -325,7 +344,7 @@ describe('Attachment upload tasks', () => {
     vi.useFakeTimers();
     const task = create();
     const pending = task.retry();
-    http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 4 });
+    config(4);
     await pending;
     expect(task.state().error).toMatchObject({
       code: UploadErrorCode.TooLarge,
@@ -335,8 +354,8 @@ describe('Attachment upload tasks', () => {
     await task.retry();
     await vi.advanceTimersByTimeAsync(120_000);
     window.dispatchEvent(new Event('online'));
-    http.expectNone('/_api/attachments/config');
-    http.expectNone('/_api/attachments/upload-url');
+    peer.expectNone('attachments.getConfig');
+    peer.expectNone('attachments.createUploadUrl');
     expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(task.url);
   });
 
@@ -344,7 +363,7 @@ describe('Attachment upload tasks', () => {
     vi.useFakeTimers();
     const task = create(AttachmentUploadPurpose.media, new File(['text'], 'note.txt', { type: 'text/plain' }));
     const pending = task.retry();
-    http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 1024 });
+    config();
     await pending;
     expect(task.state().error).toMatchObject({
       code: UploadErrorCode.UnsupportedMedia,
@@ -354,7 +373,7 @@ describe('Attachment upload tasks', () => {
     });
     await vi.advanceTimersByTimeAsync(120_000);
     window.dispatchEvent(new Event('online'));
-    http.expectNone('/_api/attachments/config');
+    peer.expectNone('attachments.getConfig');
     expect(FakeUpload.requests).toHaveLength(0);
   });
 
@@ -379,7 +398,7 @@ describe('Attachment upload tasks', () => {
     );
     const task = create(AttachmentUploadPurpose.media, photo());
     const pending = task.retry();
-    http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 1024 });
+    config();
     await vi.waitFor(() => expect(decode).toHaveBeenCalled());
     await vi.advanceTimersByTimeAsync(30_000);
     await pending;
@@ -391,8 +410,8 @@ describe('Attachment upload tasks', () => {
     });
     finish();
     await vi.advanceTimersByTimeAsync(60_000);
-    http.expectNone('/_api/attachments/upload-url');
-    http.expectNone('/_api/attachments/config');
+    peer.expectNone('attachments.createUploadUrl');
+    peer.expectNone('attachments.getConfig');
     expect(FakeUpload.requests).toHaveLength(0);
     expect(task.state().status).toBe(UploadStatus.Failed);
   });
@@ -401,23 +420,22 @@ describe('Attachment upload tasks', () => {
     ['', 'empty.txt', UploadErrorCode.Empty],
     ['text', 'x'.repeat(256), UploadErrorCode.Filename],
   ])('validates %s / %s before requesting config', async (contents, name, code) => {
-    const file = new File([contents], name);
-    const task = create(AttachmentUploadPurpose.file, file);
+    const task = create(AttachmentUploadPurpose.file, new File([contents], name));
     await task.retry();
     expect(task.state().error).toMatchObject({ code, canRetry: false, autoRetry: false });
-    http.expectNone('/_api/attachments/config');
+    peer.expectNone('attachments.getConfig');
   });
 
   it.each([
-    [400, 'Attachment content type is invalid', UploadErrorCode.InvalidType, false],
-    [401, 'Expired token', UploadErrorCode.Authentication, false],
-    [403, 'Forbidden', UploadErrorCode.Forbidden, false],
-    [429, 'Too many requests', UploadErrorCode.RateLimited, true],
-    [503, 'Unavailable', UploadErrorCode.Server, true],
-  ])('preserves the API error for status %s', async (status, detail, code, autoRetry) => {
+    [RpcErrorCode.BadRequest, 'Attachment content type is invalid', UploadErrorCode.InvalidType, false],
+    [RpcErrorCode.Unauthorized, 'Expired token', UploadErrorCode.Authentication, false],
+    [RpcErrorCode.Forbidden, 'Forbidden', UploadErrorCode.Forbidden, false],
+    [RpcErrorCode.Overloaded, 'Too many requests', UploadErrorCode.RateLimited, true],
+    [RpcErrorCode.Unavailable, 'Unavailable', UploadErrorCode.Server, true],
+  ])('preserves the API error for RPC code %s', async (rpcCode, detail, code, autoRetry) => {
     const task = create();
     const pending = task.retry();
-    http.expectOne('/_api/attachments/config').flush(detail, { status, statusText: 'Failed' });
+    peer.expect('attachments.getConfig').error(rpcCode, detail);
     await pending;
     expect(task.state().error).toMatchObject({ code, stage: UploadStage.Config, autoRetry });
     expect(task.retryable).toBe(autoRetry);
@@ -426,7 +444,7 @@ describe('Attachment upload tasks', () => {
   it('keeps a storage rejection distinct from account permission and renews the URL on retry', async () => {
     const task = create();
     const pending = task.retry();
-    http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 1024 });
+    config();
     (await sign()).finish(403);
     await pending;
     expect(task.state().error).toMatchObject({
@@ -437,21 +455,25 @@ describe('Attachment upload tasks', () => {
     });
     const retry = task.retry();
     expect(task.state().error?.code).toBe(UploadErrorCode.StorageRejected);
-    http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 1024 });
+    config();
     (await sign(encodeId('101'))).finish();
     await retry;
     expect(task.state().error).toBeUndefined();
   });
 
-  it.each(['config', 'upload-url'])('cancels a pending %s request when disposed', async (stage) => {
+  it.each(['config', 'upload-url'])('disposes a pending %s RPC request and ignores its late reply', async (stage) => {
     const task = create();
     const pending = task.retry();
-    if (stage === 'upload-url') http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 1024 });
-    await vi.waitFor(() => {
-      const request = http.expectOne('/_api/attachments/' + stage);
-      task.dispose();
-      expect(request.cancelled).toBe(true);
-    });
+    if (stage === 'upload-url') config();
+    const request = await peer.expectAsync(
+      stage === 'config' ? 'attachments.getConfig' : 'attachments.createUploadUrl',
+    );
+    task.dispose();
+    request.flush(
+      stage === 'config'
+        ? { maxFileSizeBytes: 1024 }
+        : { attachmentId: '100', uploadHeaders: {}, uploadUrl: 'https://storage.invalid/upload' },
+    );
     await expect(pending).resolves.toBeUndefined();
     await expect(task.retry()).resolves.toBeUndefined();
     expect(FakeUpload.requests).toHaveLength(0);
@@ -464,16 +486,15 @@ describe('Attachment upload tasks', () => {
     convertToBlob.mockReturnValue(new Promise<Blob>((resolve) => (compressed = resolve)));
     const task = create(AttachmentUploadPurpose.media, photo());
     const pending = task.retry();
-    http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 1024 });
+    config();
     await vi.waitFor(() => expect(convertToBlob).toHaveBeenCalledOnce());
     task.dispose();
     await expect(pending).resolves.toBeUndefined();
     const state = task.state();
     compressed(new Blob(['small'], { type: 'image/webp' }));
-    // Drain the compression continuation, which cannot start a signing request after disposal.
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(task.state()).toBe(state);
-    http.expectNone('/_api/attachments/upload-url');
+    peer.expectNone('attachments.createUploadUrl');
     expect(FakeUpload.requests).toHaveLength(0);
     expect(URL.revokeObjectURL).toHaveBeenCalledWith(task.url);
   });
@@ -481,15 +502,10 @@ describe('Attachment upload tasks', () => {
   it('does not start storage upload if disposed immediately after receiving a signed URL', async () => {
     const task = create();
     const pending = task.retry();
-    http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 1024 });
-    await vi.waitFor(() => {
-      http.expectOne('/_api/attachments/upload-url').flush({
-        attachmentId: encodeId('100'),
-        uploadHeaders: {},
-        uploadUrl: 'https://storage.invalid/upload',
-      });
-      task.dispose();
-    });
+    config();
+    const request = await peer.expectAsync('attachments.createUploadUrl');
+    request.flush({ attachmentId: '100', uploadHeaders: {}, uploadUrl: 'https://storage.invalid/upload' });
+    task.dispose();
     await expect(pending).resolves.toBeUndefined();
     expect(FakeUpload.requests).toHaveLength(0);
   });
@@ -497,7 +513,7 @@ describe('Attachment upload tasks', () => {
   it('aborts storage upload, releases the preview once and ignores late callbacks', async () => {
     const task = create();
     const pending = task.retry();
-    http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 1024 });
+    config();
     const xhr = await sign();
     task.dispose();
     await expect(pending).resolves.toBeUndefined();
@@ -509,13 +525,13 @@ describe('Attachment upload tasks', () => {
     expect(task.state()).toBe(state);
     expect(xhr.abort).toHaveBeenCalledOnce();
     expect(URL.revokeObjectURL).toHaveBeenCalledExactlyOnceWith(task.url);
-    http.expectNone('/_api/attachments/config');
+    peer.expectNone('attachments.getConfig');
   });
 
   it('aborts only the offline attempt and reuses the preview when online retries', async () => {
     const task = create();
     const pending = task.retry();
-    http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 1024 });
+    config();
     const xhr = await sign();
     const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
     window.dispatchEvent(new Event('offline'));
@@ -526,41 +542,41 @@ describe('Attachment upload tasks', () => {
     online.mockReturnValue(true);
     window.dispatchEvent(new Event('online'));
     const retry = task.retry();
-    http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 1024 });
+    config();
     (await sign(encodeId('101'))).finish();
     await expect(retry).resolves.toBe(encodeId('101'));
     expect(task.url).toBe('blob:mock-1');
     expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(task.url);
   });
 
-  it('times out a pending API round and automatically retries transient failure', async () => {
+  it('times out a pending RPC round, ignores its late reply and automatically retries transient failure', async () => {
     vi.useFakeTimers();
     const task = create();
     const pending = task.retry();
-    const config = http.expectOne('/_api/attachments/config');
+    const request = peer.expect('attachments.getConfig');
     await vi.advanceTimersByTimeAsync(30_000);
     await pending;
-    expect(config.cancelled).toBe(true);
+    request.flush({ maxFileSizeBytes: 1024 });
     expect(task.state().status).toBe(UploadStatus.Failed);
     expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(task.url);
     await vi.advanceTimersByTimeAsync(1_000);
-    const retried = http.expectOne('/_api/attachments/config');
+    const retried = peer.expect('attachments.getConfig');
     expect(task.state().status).toBe(UploadStatus.Uploading);
     task.dispose();
-    expect(retried.cancelled).toBe(true);
+    retried.flush({ maxFileSizeBytes: 1024 });
     await task.retry();
   });
 
-  it('does not automatically retry permanent API errors on timers or online', async () => {
+  it('does not automatically retry permanent RPC errors on timers or online', async () => {
     vi.useFakeTimers();
     const task = create();
     const pending = task.retry();
-    http.expectOne('/_api/attachments/config').flush({}, { status: 403, statusText: 'Forbidden' });
+    peer.expect('attachments.getConfig').error(RpcErrorCode.Forbidden);
     await pending;
     expect(task.retryable).toBe(false);
     await vi.advanceTimersByTimeAsync(120_000);
     window.dispatchEvent(new Event('online'));
-    http.expectNone('/_api/attachments/config');
+    peer.expectNone('attachments.getConfig');
     expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(task.url);
   });
 });

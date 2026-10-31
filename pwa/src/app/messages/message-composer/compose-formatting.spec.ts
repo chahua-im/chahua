@@ -1,6 +1,7 @@
-import { HttpTestingController } from '@angular/common/http/testing';
+import { provideHttpClient } from '@angular/common/http';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
+import { provideRpcTesting, RpcTestPeer } from '../../api/rpc-testing';
 import { testChat, testMessage } from '../../api/testing';
 import { markdownEngine } from '../../markdown/engine';
 import { MessageComposer } from './message-composer';
@@ -17,12 +18,15 @@ afterEach(() => vi.unstubAllGlobals());
 describe('Composer formatting shortcuts', () => {
   let fixture: ComponentFixture<MessageComposer>;
   let composer: MessageComposer;
-  let http: HttpTestingController;
+  let peer: RpcTestPeer;
   let input: HTMLTextAreaElement;
 
   beforeEach(async () => {
-    TestBed.configureTestingModule({ providers: [provideChahuaBaseUrl('/_api')] });
-    http = TestBed.inject(HttpTestingController);
+    TestBed.configureTestingModule({
+      providers: [provideHttpClient(), provideChahuaBaseUrl('/_api'), provideRpcTesting()],
+    });
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
     fixture = TestBed.createComponent(MessageComposer);
     fixture.componentRef.setInput('chatId', testChat.id);
     fixture.detectChanges();
@@ -31,7 +35,7 @@ describe('Composer formatting shortcuts', () => {
   });
   afterEach(() => {
     fixture.destroy();
-    http.verify({ ignoreCancelled: true });
+    peer.verify();
   });
 
   function select(text: string, display = text, start = 0, end = display.length) {

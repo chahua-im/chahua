@@ -21,7 +21,7 @@ import {
   IonToolbar,
 } from '@ionic/angular';
 import { addOutline, trashOutline } from 'ionicons/icons';
-import { FriendsService } from '../../../generated/endpoints/friends/friends.service';
+import { RpcApi } from '../../../generated/rpc-api';
 import {
   FriendPresenceOverride,
   FriendReadReceiptOverride,
@@ -61,7 +61,7 @@ import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 })
 export class PrivacyExceptions {
   readonly kind = input.required<PrivacyExceptionKind>();
-  private readonly api = inject(FriendsService);
+  private readonly api = inject(RpcApi);
   private readonly session = inject(SessionStore);
   private readonly alerts = inject(AlertController);
   private readonly text = inject(TranslocoService);
@@ -122,7 +122,7 @@ export class PrivacyExceptions {
     this.failed.set(false);
     try {
       const result = await firstValueFrom(
-        this.api.getPrivacyExceptions({ kind: scope.kind }).pipe(takeUntilDestroyed(this.destroy)),
+        this.api.privacy.listExceptions({ kind: scope.kind }).pipe(takeUntilDestroyed(this.destroy)),
       );
       if (this.current(scope) && version === this.version) this.rows.set(result.exceptions);
     } catch {
@@ -145,7 +145,7 @@ export class PrivacyExceptions {
     this.friendsLoading.set(true);
     this.friendsFailed.set(false);
     try {
-      const result = await firstValueFrom(this.api.getFriends().pipe(takeUntilDestroyed(this.destroy)));
+      const result = await firstValueFrom(this.api.friends.list().pipe(takeUntilDestroyed(this.destroy)));
       if (this.current(scope)) this.friends.set(result.friends.map((friend) => friend.user));
     } catch {
       if (this.current(scope)) this.friendsFailed.set(true);
@@ -211,8 +211,9 @@ export class PrivacyExceptions {
     try {
       if (scope.kind === PrivacyExceptionKind.presence) {
         await firstValueFrom(
-          this.api
-            .updateFriendPresenceSettings(user.uid, {
+          this.api.friends
+            .updatePresenceSettings({
+              uid: user.uid,
               override:
                 share == null
                   ? FriendPresenceOverride.inherit
@@ -224,8 +225,9 @@ export class PrivacyExceptions {
         );
       } else {
         await firstValueFrom(
-          this.api
-            .updateFriendReadReceiptSettings(user.uid, {
+          this.api.friends
+            .updateReadReceiptSettings({
+              uid: user.uid,
               override:
                 share == null
                   ? FriendReadReceiptOverride.inherit
@@ -269,7 +271,7 @@ export class PrivacyExceptions {
       await alert.present();
       if ((await alert.onDidDismiss()).role !== 'destructive' || !this.current(scope)) return;
       await firstValueFrom(
-        this.api.clearPrivacyExceptions({ kind: scope.kind }).pipe(takeUntilDestroyed(this.destroy)),
+        this.api.privacy.clearExceptions({ kind: scope.kind }).pipe(takeUntilDestroyed(this.destroy)),
       );
       if (!this.current(scope)) return;
       // Receipt invalidation arrives over WS for exactly the DMs changed by the server.

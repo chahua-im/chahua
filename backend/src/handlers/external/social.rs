@@ -10,9 +10,9 @@ use crate::dto::external::social::{
 };
 use crate::errors::AppError;
 use crate::extractors::DbConn;
+use crate::services::authentication::Principal;
 use crate::services::authz::Action as AuthzAction;
 use crate::services::social as social_service;
-use crate::utils::auth::Principal;
 use crate::AppState;
 
 /// Report stored relationship facts for arbitrary UID pairs.
@@ -34,7 +34,11 @@ async fn post_relationships(
     Json(body): Json<RelationshipQueryRequest>,
 ) -> Result<Json<RelationshipQueryResponse>, AppError> {
     let conn = &mut *conn;
-    principal.require_service_action(conn, &state, AuthzAction::OnBehalfOfSocialRead)?;
+    principal.require_service_action(
+        conn,
+        &state.authz_service,
+        AuthzAction::OnBehalfOfSocialRead,
+    )?;
     let peers = validate_relationship_request(&body)?;
     let relationships = social_service::peer_relationships(conn, body.uid, &peers)?;
 

@@ -1,10 +1,42 @@
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     dto::users::UserGroupTagInfo,
     models::{GroupRole, SpeakingMode},
+    services::user::UserSearchMode,
 };
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AddMemberBody {
+    pub uid: i32,
+    #[serde(default)]
+    pub role: Option<GroupRole>,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateMemberBody {
+    pub role: GroupRole,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListMembersQuery {
+    pub limit: Option<i64>,
+    pub after: Option<i32>,
+    pub q: Option<String>,
+    pub mode: Option<UserSearchMode>,
+}
+
+/// Query parameters for the remove-member endpoint.
+#[derive(Deserialize, utoipa::IntoParams, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveMemberQuery {
+    /// Optional: "last24h" to delete messages from last 24 hours, "all" to delete all messages.
+    pub delete_messages: Option<String>,
+}
 
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]

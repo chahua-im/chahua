@@ -1,15 +1,12 @@
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { AlertController, ModalController, provideIonicAngular } from '@ionic/angular';
-import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
 import { FriendAddVerificationMode as Mode } from '../../../generated/models';
+import { RpcTestPeer, provideRpcTesting } from '../../api/rpc-testing';
 import { PanelNavigation } from '../../navigation/panel-navigation';
 import { FriendVerificationSettings } from './friend-verification-settings';
 
 describe('Friend verification unsaved question', () => {
-  const url = '/_api/friends/me/settings';
-  let http: HttpTestingController;
+  let peer: RpcTestPeer;
   let confirm: ReturnType<typeof vi.fn>;
   let dismiss: ReturnType<typeof vi.fn>;
   beforeEach(() => {
@@ -18,9 +15,7 @@ describe('Friend verification unsaved question', () => {
     TestBed.configureTestingModule({
       providers: [
         provideIonicAngular({ animated: false }),
-        provideHttpClient(),
-        provideHttpClientTesting(),
-        provideChahuaBaseUrl('/_api'),
+        provideRpcTesting(),
         { provide: ModalController, useValue: { dismiss } },
         { provide: PanelNavigation, useValue: { back: dismiss, close: dismiss, registerLeaveCheck: () => () => {} } },
         {
@@ -29,12 +24,13 @@ describe('Friend verification unsaved question', () => {
         },
       ],
     });
-    http = TestBed.inject(HttpTestingController);
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
   });
-  afterEach(() => http.verify());
+  afterEach(() => peer.verify());
   async function page() {
     const fixture = TestBed.createComponent(FriendVerificationSettings);
-    http.expectOne(url).flush({ mode: Mode.need_message });
+    peer.expect('friends.getSettings').flush({ mode: Mode.need_message });
     await fixture.whenStable();
     fixture.detectChanges();
     return fixture.componentInstance;
@@ -52,7 +48,7 @@ describe('Friend verification unsaved question', () => {
     expect(component['dirty']()).toBe(false);
     expect(await component.canDismiss()).toBe(true);
     expect(confirm).toHaveBeenCalledTimes(2);
-    http.expectNone((request) => request.method === 'PUT');
+    peer.expectNone('friends.updateSettings');
   });
   it('keeps a failed question editable and closes only after a successful retry', async () => {
     const component = await page();
@@ -60,15 +56,16 @@ describe('Friend verification unsaved question', () => {
     component['verification'].update((value) => ({ ...value, question: ' 问题 ' }));
     const failure = component['saveVerification']();
     expect(await component.canDismiss()).toBe(false);
-    http.expectOne(url).flush({}, { status: 503, statusText: 'Unavailable' });
+    peer.expect('friends.updateSettings', { mode: Mode.question, question: '问题' }).error(1503);
     await failure;
     expect(component['verification']().question).toBe(' 问题 ');
     expect(component['dirty']()).toBe(true);
     expect(dismiss).not.toHaveBeenCalled();
     const success = component['saveVerification']();
-    const request = http.expectOne(url);
-    expect(request.request.body).toEqual({ mode: Mode.question, question: '问题' });
-    request.flush({ mode: Mode.question, question: '问题' });
+    peer.expect('friends.updateSettings', { mode: Mode.question, question: '问题' }).flush({
+      mode: Mode.question,
+      question: '问题',
+    });
     await success;
     expect(component['dirty']()).toBe(false);
     expect(dismiss).toHaveBeenCalledWith();

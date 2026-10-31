@@ -9,33 +9,14 @@ use utoipa_axum::router::OpenApiRouter;
 use crate::{
     dto::{
         messages::ForwardedMessagesResponse,
-        saved_messages::{ListSavedMessagesResponse, SavedMessageResponse},
+        saved_messages::{ListSavedMessagesQuery, ListSavedMessagesResponse, SavedMessageResponse},
     },
     errors::AppError,
     extractors::DbConn,
-    services::{
-        messages::{
-            deserialize_forwarded_bundle_payload, forwarded_messages_response_from_items,
-            load_forwarded_bundle, load_target_forwarded_bundle_from_root,
-        },
-        saved_messages as saved_messages_svc,
-    },
+    services::api::saved_messages as saved_messages_api,
     utils::auth::CurrentUid,
     AppState,
 };
-
-#[derive(Debug, Deserialize, utoipa::IntoParams)]
-#[serde(rename_all = "camelCase")]
-pub struct ListSavedMessagesQuery {
-    #[serde(
-        default,
-        deserialize_with = "crate::serde_i64_string::opt::deserialize"
-    )]
-    #[param(value_type = Option<String>)]
-    before: Option<i64>,
-    #[serde(default)]
-    limit: Option<i64>,
-}
 
 #[derive(Debug, Deserialize)]
 struct MessageIdPath {
@@ -72,12 +53,7 @@ async fn list_saved_messages(
     mut conn: DbConn,
     Query(query): Query<ListSavedMessagesQuery>,
 ) -> Result<Json<ListSavedMessagesResponse>, AppError> {
-    let conn = &mut *conn;
-
-    let response =
-        saved_messages_svc::list_saved_messages(conn, uid, None, query.before, query.limit)?;
-
-    Ok(Json(response))
+    saved_messages_api::list_saved_messages(uid, query, &mut conn).map(Json)
 }
 
 #[utoipa::path(
@@ -98,19 +74,16 @@ async fn put_saved_message(
     mut conn: DbConn,
     Path(MessageIdPath { message_id }): Path<MessageIdPath>,
 ) -> Result<Json<SavedMessageResponse>, AppError> {
-    let conn = &mut *conn;
-
-    let response = saved_messages_svc::save_message_snapshot(
-        conn,
+    saved_messages_api::put_saved_message(
+        uid,
+        message_id,
+        &mut conn,
         &state.media,
         &state.avatars,
         state.id_gen.as_ref(),
-        uid,
-        message_id,
     )
-    .await?;
-
-    Ok(Json(response))
+    .await
+    .map(Json)
 }
 
 #[utoipa::path(
@@ -130,9 +103,7 @@ async fn delete_saved_message_by_original(
     mut conn: DbConn,
     Path(MessageIdPath { message_id }): Path<MessageIdPath>,
 ) -> Result<StatusCode, AppError> {
-    let conn = &mut *conn;
-
-    saved_messages_svc::delete_saved_message_by_original(conn, uid, message_id)?;
+    saved_messages_api::delete_saved_message_by_original(uid, message_id, &mut conn)?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -154,9 +125,7 @@ async fn delete_saved_message_by_id(
     mut conn: DbConn,
     Path(SavedMessageIdPath { saved_message_id }): Path<SavedMessageIdPath>,
 ) -> Result<StatusCode, AppError> {
-    let conn = &mut *conn;
-
-    saved_messages_svc::delete_saved_message_by_id(conn, uid, saved_message_id)?;
+    saved_messages_api::delete_saved_message_by_id(uid, saved_message_id, &mut conn)?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -179,20 +148,14 @@ async fn get_saved_forwarded_messages(
     Path(SavedMessageIdPath { saved_message_id }): Path<SavedMessageIdPath>,
     mut conn: DbConn,
 ) -> Result<Json<ForwardedMessagesResponse>, AppError> {
-    let conn = &mut *conn;
-    let bundle_id =
-        saved_messages_svc::load_saved_forwarded_bundle_id(conn, uid, saved_message_id)?;
-    let bundle = load_forwarded_bundle(conn, bundle_id)?;
-    let (total, items) = deserialize_forwarded_bundle_payload(bundle)?;
-
-    Ok(Json(forwarded_messages_response_from_items(
-        conn,
+    saved_messages_api::get_saved_forwarded_messages(
+        uid,
+        saved_message_id,
+        &mut conn,
         &state.media,
         &state.avatars,
-        uid,
-        total,
-        items,
-    )))
+    )
+    .map(Json)
 }
 
 #[utoipa::path(
@@ -217,20 +180,15 @@ async fn get_saved_forwarded_bundle_messages(
     }): Path<SavedForwardedBundleMessagesPath>,
     mut conn: DbConn,
 ) -> Result<Json<ForwardedMessagesResponse>, AppError> {
-    let conn = &mut *conn;
-    let root_bundle_id =
-        saved_messages_svc::load_saved_forwarded_bundle_id(conn, uid, saved_message_id)?;
-    let bundle = load_target_forwarded_bundle_from_root(conn, root_bundle_id, bundle_id)?;
-    let (total, items) = deserialize_forwarded_bundle_payload(bundle)?;
-
-    Ok(Json(forwarded_messages_response_from_items(
-        conn,
+    saved_messages_api::get_saved_forwarded_bundle_messages(
+        uid,
+        saved_message_id,
+        bundle_id,
+        &mut conn,
         &state.media,
         &state.avatars,
-        uid,
-        total,
-        items,
-    )))
+    )
+    .map(Json)
 }
 
 pub fn router() -> OpenApiRouter<AppState> {

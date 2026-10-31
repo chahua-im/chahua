@@ -1,4 +1,4 @@
-import { HttpErrorResponse } from '@angular/common/http';
+import { RpcError, RpcErrorCode } from '../../api/rpc-error';
 import { Component, DestroyRef, effect, inject, input, signal, untracked } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { TranslocoPipe } from '@jsverse/transloco';
@@ -10,7 +10,7 @@ import {
   type InfiniteScrollCustomEvent,
 } from '@ionic/angular';
 import { firstValueFrom, Subject, takeUntil } from 'rxjs';
-import { ThreadsService } from '../../../generated/endpoints/threads/threads.service';
+import { RpcApi } from '../../../generated/rpc-api';
 import { ThreadOrder, type MessageResponse, type SnowflakeID } from '../../../generated/models';
 import { ConversationNavigation } from '../../conversations/conversation-navigation';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
@@ -42,7 +42,7 @@ export class ChatThreads {
   protected readonly opening = signal(false);
   protected readonly openFailed = signal(false);
   protected retryMore = false;
-  private readonly api = inject(ThreadsService);
+  private readonly api = inject(RpcApi);
   private readonly navigation = inject(ConversationNavigation);
   private readonly destroy = inject(DestroyRef);
   private readonly cancel = new Subject<void>();
@@ -83,8 +83,9 @@ export class ChatThreads {
     this.retryable.set(true);
     try {
       const page = await firstValueFrom(
-        this.api
-          .getChatThreads(this.chatId(), {
+        this.api.threads
+          .listForChat({
+            chatId: this.chatId(),
             limit: 50,
             cursor: more && cursor != null ? cursor : undefined,
             order: ThreadOrder.newest,
@@ -97,7 +98,12 @@ export class ChatThreads {
       this.loaded.set(true);
     } catch (error) {
       if (version === this.version && !this.destroy.destroyed) {
-        const retryable = !(error instanceof HttpErrorResponse && (error.status === 401 || error.status === 403));
+        const retryable = !(
+          error instanceof RpcError &&
+          [RpcErrorCode.Unauthorized, RpcErrorCode.Forbidden, RpcErrorCode.NotFound, RpcErrorCode.Gone].includes(
+            error.code,
+          )
+        );
         if (!retryable) {
           this.items.set([]);
           this.cursor.set(undefined);

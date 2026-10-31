@@ -15,8 +15,7 @@ import {
 } from '@ionic/angular';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { firstValueFrom } from 'rxjs';
-import { GroupsService } from '../../../generated/endpoints/groups/groups.service';
-import { InvitesService } from '../../../generated/endpoints/invites/invites.service';
+import { RpcApi } from '../../../generated/rpc-api';
 import { type InvitePreviewResponse, type SnowflakeID } from '../../../generated/models';
 import { ConversationNavigation } from '../../conversations/conversation-navigation';
 import { PanelNavigation } from '../../navigation/panel-navigation';
@@ -64,8 +63,7 @@ export class StartChat {
   protected readonly status = inviteStatus;
   protected readonly Status = InviteStatus;
   protected readonly panels = inject(PanelNavigation);
-  private readonly groups = inject(GroupsService);
-  private readonly invites = inject(InvitesService);
+  private readonly api = inject(RpcApi);
   private readonly navigation = inject(ConversationNavigation);
   private readonly lists = inject(ChatListStore);
   private readonly store = inject(ChatStore);
@@ -93,7 +91,7 @@ export class StartChat {
     this.preview.set(undefined);
     try {
       this.preview.set(
-        await firstValueFrom(this.invites.getInviteByCode({ inviteCode: inviteCode(this.values().code) })),
+        await firstValueFrom(this.api.invites.getByCode({ inviteCode: inviteCode(this.values().code) })),
       );
     } catch {
       this.error.set(true);
@@ -117,11 +115,11 @@ export class StartChat {
     try {
       let chatId: SnowflakeID;
       if (this.kind() === StartChatKind.Create) {
-        chatId = (await firstValueFrom(this.groups.postGroup({ name: this.values().name.trim() }))).id;
+        chatId = (await firstValueFrom(this.api.groups.create({ name: this.values().name.trim() }))).id;
       } else {
         const chat = alreadyMember
           ? this.preview()!.chat
-          : (await firstValueFrom(this.invites.postRedeemInvite({ code: inviteCode(this.values().code) }))).chat;
+          : (await firstValueFrom(this.api.invites.redeem({ code: inviteCode(this.values().code) }))).chat;
         if (uid !== this.session.user()?.uid) return;
         if (!alreadyMember) this.store.acceptJoinedChat(chat, version);
         chatId = chat.id;

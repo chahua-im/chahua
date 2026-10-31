@@ -32,7 +32,7 @@ import {
 } from '@ionic/angular';
 import { firstValueFrom, Subject, takeUntil } from 'rxjs';
 import { ellipsisVertical } from 'ionicons/icons';
-import { MembersService } from '../../../generated/endpoints/members/members.service';
+import { RpcApi } from '../../../generated/rpc-api';
 import {
   GroupRole,
   SpeakingMode,
@@ -79,7 +79,7 @@ export class ChatMembers {
   protected readonly moreIcon = ellipsisVertical;
   private readonly session = inject(SessionStore);
   protected readonly currentUid = computed(() => this.session.user()?.uid);
-  private readonly api = inject(MembersService);
+  private readonly api = inject(RpcApi);
   private readonly alerts = inject(AlertController);
   private readonly transloco = inject(TranslocoService);
   private readonly menu = viewChild.required<IonPopover>('menu');
@@ -202,7 +202,9 @@ export class ChatMembers {
     try {
       if (role != null) {
         const updated = await firstValueFrom(
-          this.api.patchMember(scope.chatId, member.uid, { role }).pipe(takeUntilDestroyed(this.destroy)),
+          this.api.groups
+            .updateMember({ chatId: scope.chatId, uid: member.uid, role })
+            .pipe(takeUntilDestroyed(this.destroy)),
         );
         if (this.isCurrent(scope))
           this.members.update((items) =>
@@ -210,7 +212,9 @@ export class ChatMembers {
           );
       } else {
         await firstValueFrom(
-          this.api.deleteRemoveMember(scope.chatId, member.uid).pipe(takeUntilDestroyed(this.destroy)),
+          this.api.groups
+            .removeMember({ chatId: scope.chatId, uid: member.uid })
+            .pipe(takeUntilDestroyed(this.destroy)),
         );
         if (this.isCurrent(scope)) this.members.update((items) => items.filter((item) => item.uid !== member.uid));
       }
@@ -246,8 +250,9 @@ export class ChatMembers {
       let cursor = more ? this.cursor() : undefined;
       do {
         const page = await firstValueFrom(
-          this.api
-            .getMembers(search.scope.chatId, {
+          this.api.groups
+            .listMembers({
+              chatId: search.scope.chatId,
               limit: 40,
               q: search.q || undefined,
               mode: UserSearchMode.autocomplete,

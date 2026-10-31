@@ -1,11 +1,10 @@
 import { signal } from '@angular/core';
+import type { Mock } from 'vitest';
 import { TestBed } from '@angular/core/testing';
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { AlertController, provideIonicAngular } from '@ionic/angular';
 import { Subject } from 'rxjs';
-import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
 import { PrivacyExceptionKind, type PrivacyException } from '../../../generated/models';
+import { RpcTestPeer, provideRpcTesting } from '../../api/rpc-testing';
 import { testUser } from '../../api/testing';
 import { ChatStore } from '../../chats/chat-store';
 import { Presence } from '../../presence/presence';
@@ -15,14 +14,15 @@ import { PrivacyExceptions } from './privacy-exceptions';
 describe('Privacy exceptions', () => {
   const row: PrivacyException = { user: { uid: 2, username: '好友', gender: 0 }, share: true };
   const account = signal({ ...testUser });
-  let http: HttpTestingController;
-  let alerts: { create: ReturnType<typeof vi.fn> };
+  let peer: RpcTestPeer;
+  let alerts: { create: Mock };
   let chats: {
-    invalidateReadReceiptPrivacy: ReturnType<typeof vi.fn>;
-    publishPrivacyOverride: ReturnType<typeof vi.fn>;
+    invalidateReadReceiptPrivacy: Mock;
+    publishPrivacyOverride: Mock;
     privacyOverrides$: Subject<{ kind: PrivacyExceptionKind }>;
   };
   const presence = { invalidateUsers: vi.fn() };
+  type FriendOverrideMethod = 'friends.updatePresenceSettings' | 'friends.updateReadReceiptSettings';
   beforeEach(() => {
     account.set({ ...testUser });
     presence.invalidateUsers.mockClear();
@@ -40,27 +40,40 @@ describe('Privacy exceptions', () => {
     TestBed.configureTestingModule({
       providers: [
         provideIonicAngular({ animated: false }),
-        provideHttpClient(),
-        provideHttpClientTesting(),
-        provideChahuaBaseUrl('/_api'),
+        provideRpcTesting(),
         { provide: SessionStore, useValue: { user: account } },
         { provide: ChatStore, useValue: chats },
         { provide: Presence, useValue: presence },
         { provide: AlertController, useValue: alerts },
       ],
     });
-    http = TestBed.inject(HttpTestingController);
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
   });
-  afterEach(() => http.verify());
+
+  afterEach(() => {
+    try {
+      peer.verify();
+    } finally {
+      TestBed.resetTestingModule();
+    }
+  });
+
+  async function expectOverride(method: FriendOverrideMethod, override: string) {
+    const request = await peer.expectAsync(method, (params) => params['uid'] === row.user.uid);
+    expect(request.params).toEqual({ uid: row.user.uid, override });
+    return request;
+  }
   function open(kind = PrivacyExceptionKind.presence) {
     const fixture = TestBed.createComponent(PrivacyExceptions);
     fixture.componentRef.setInput('kind', kind);
     fixture.detectChanges();
     return fixture;
   }
+
   async function loaded(kind = PrivacyExceptionKind.presence) {
     const fixture = open(kind);
-    http.expectOne(`/_api/me/privacy-exceptions?kind=${kind}`).flush({ exceptions: [row] });
+    peer.expect('privacy.listExceptions', { kind }).flush({ exceptions: [row] });
     await fixture.whenStable();
     fixture.detectChanges();
     return fixture;
@@ -69,19 +82,19 @@ describe('Privacy exceptions', () => {
   it('only shows empty after a successful read and preserves rows during refresh failure', async () => {
     const fixture = open();
     const component = fixture.componentInstance;
-    http.expectOne('/_api/me/privacy-exceptions?kind=presence').flush({}, { status: 503, statusText: 'Unavailable' });
+    peer.expect('privacy.listExceptions', { kind: PrivacyExceptionKind.presence }).error(1503);
     await fixture.whenStable();
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).not.toContain('暂无例外');
     const retry = component['load']();
-    http.expectOne('/_api/me/privacy-exceptions?kind=presence').flush({ exceptions: [row] });
+    peer.expect('privacy.listExceptions', { kind: PrivacyExceptionKind.presence }).flush({ exceptions: [row] });
     await retry;
     fixture.detectChanges();
     const avatar = fixture.nativeElement.querySelector('app-chat-avatar');
     const refresh = component['load']();
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('app-chat-avatar')).toBe(avatar);
-    http.expectOne('/_api/me/privacy-exceptions?kind=presence').flush({}, { status: 503, statusText: 'Unavailable' });
+    peer.expect('privacy.listExceptions', { kind: PrivacyExceptionKind.presence }).error(1503);
     await refresh;
     expect(component['rows']()).toEqual([row]);
   });
@@ -95,10 +108,9 @@ describe('Privacy exceptions', () => {
     expect(typeof picker.canDismiss).toBe('function');
     const canDismiss = picker.canDismiss as (_data?: unknown, role?: string) => Promise<boolean>;
     expect(await canDismiss(undefined, 'backdrop')).toBe(false);
-    for (const role of ['navigate', 'parent-dismissed', 'parent-removed']) {
+    for (const role of ['navigate', 'parent-dismissed', 'parent-removed'])
       expect(await canDismiss(undefined, role)).toBe(true);
-    }
-    http.expectOne('/_api/friends/2/presence-settings').flush({ override: 'inherit' });
+    (await expectOverride('friends.updatePresenceSettings', 'inherit')).flush({});
     await saving;
     expect(await canDismiss(undefined, 'backdrop')).toBe(true);
   });
@@ -107,37 +119,32 @@ describe('Privacy exceptions', () => {
     'saves and removes %s overrides without changing the global policy',
     async (kind) => {
       const component = (await loaded(kind)).componentInstance;
-      const endpoint = kind === PrivacyExceptionKind.presence ? 'presence-settings' : 'read-receipt-settings';
       const saving = component['choose'](row.user, true);
       await vi.waitFor(() => expect(alerts.create).toHaveBeenCalledOnce());
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
-      const request = http.expectOne(`/_api/friends/2/${endpoint}`);
-      expect(request.request.body).toEqual({ override: 'hide' });
-      request.flush({ override: 'hide' });
+      const method: FriendOverrideMethod =
+        kind === PrivacyExceptionKind.presence ? 'friends.updatePresenceSettings' : 'friends.updateReadReceiptSettings';
+      (await expectOverride(method, 'hide')).flush({});
       await saving;
       expect(component['rows']()).toEqual([{ ...row, share: false }]);
       expect(chats.publishPrivacyOverride).toHaveBeenCalledWith(kind, 2, false);
       const removal = component['remove'](row);
-      const removeRequest = http.expectOne(`/_api/friends/2/${endpoint}`);
-      expect(removeRequest.request.body).toEqual({ override: 'inherit' });
-      removeRequest.flush({ override: 'inherit' });
+      (await expectOverride(method, 'inherit')).flush({});
       await removal;
       expect(component['rows']()).toEqual([]);
-      http.expectNone(`/_api/me/${endpoint}`);
     },
   );
 
   it('retains an exception after a failed write and ignores an older list arriving after removal', async () => {
     const component = (await loaded()).componentInstance;
     const failure = component['remove'](row);
-    http.expectOne('/_api/friends/2/presence-settings').flush({}, { status: 503, statusText: 'Unavailable' });
+    (await expectOverride('friends.updatePresenceSettings', 'inherit')).error(1503);
     await failure;
     expect(component['rows']()).toEqual([row]);
     expect(component['saveFailed']()).toBe(true);
     const refresh = component['load']();
-    const old = http.expectOne('/_api/me/privacy-exceptions?kind=presence');
+    const old = peer.expect('privacy.listExceptions', { kind: PrivacyExceptionKind.presence });
     const removal = component['remove'](row);
-    http.expectOne('/_api/friends/2/presence-settings').flush({ override: 'inherit' });
+    (await expectOverride('friends.updatePresenceSettings', 'inherit')).flush({});
     await removal;
     old.flush({ exceptions: [row] });
     await refresh;
@@ -148,20 +155,19 @@ describe('Privacy exceptions', () => {
     const component = (await loaded()).componentInstance;
     alerts.create.mockResolvedValueOnce({ present: async () => {}, onDidDismiss: async () => ({ role: 'cancel' }) });
     await component['clear']();
-    http.expectNone((request) => request.method === 'DELETE');
+    peer.expectNone('privacy.clearExceptions');
     alerts.create.mockResolvedValue({ present: async () => {}, onDidDismiss: async () => ({ role: 'destructive' }) });
     const failed = component['clear']();
     await vi.waitFor(() => expect(alerts.create).toHaveBeenCalledTimes(2));
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    http.expectOne('/_api/me/privacy-exceptions?kind=presence').flush({}, { status: 503, statusText: 'Unavailable' });
+    (await peer.expectAsync('privacy.clearExceptions', { kind: PrivacyExceptionKind.presence })).error(1503);
     await failed;
     expect(component['rows']()).toEqual([row]);
     const success = component['clear']();
     await vi.waitFor(() => expect(alerts.create).toHaveBeenCalledTimes(3));
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    http.expectOne('/_api/me/privacy-exceptions?kind=presence').flush(null);
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    http.expectOne('/_api/me/privacy-exceptions?kind=presence').flush({ exceptions: [] });
+    (await peer.expectAsync('privacy.clearExceptions', { kind: PrivacyExceptionKind.presence })).flush(null);
+    (await peer.expectAsync('privacy.listExceptions', { kind: PrivacyExceptionKind.presence })).flush({
+      exceptions: [],
+    });
     await success;
     expect(component['rows']()).toEqual([]);
     expect(chats.publishPrivacyOverride).toHaveBeenCalledWith(PrivacyExceptionKind.presence);
@@ -170,11 +176,8 @@ describe('Privacy exceptions', () => {
   it('loads friend choices in one request, filters them and excludes existing exceptions', async () => {
     const component = (await loaded()).componentInstance;
     const loading = component['loadFriends']();
-    http.expectOne('/_api/friends').flush({
-      friends: [
-        { user: row.user, since: '' },
-        { user: { ...row.user, uid: 3, username: '另一个' }, since: '' },
-      ],
+    peer.expect('friends.list').flush({
+      friends: [{ user: row.user }, { user: { ...row.user, uid: 3, username: '另一个' } }],
     });
     await loading;
     component['query'].set('另');
@@ -182,12 +185,14 @@ describe('Privacy exceptions', () => {
     expect(component['existing']().has(2)).toBe(true);
   });
 
-  it('uses scoped WS receipt invalidation instead of refreshing every DM after clearing exceptions', async () => {
+  it('uses scoped receipt invalidation instead of refreshing every DM after clearing exceptions', async () => {
     const component = (await loaded(PrivacyExceptionKind.readReceipts)).componentInstance;
     alerts.create.mockResolvedValue({ present: async () => {}, onDidDismiss: async () => ({ role: 'destructive' }) });
     const clearing = component['clear']();
-    await vi.waitFor(() => http.expectOne('/_api/me/privacy-exceptions?kind=readReceipts').flush(null));
-    await vi.waitFor(() => http.expectOne('/_api/me/privacy-exceptions?kind=readReceipts').flush({ exceptions: [] }));
+    (await peer.expectAsync('privacy.clearExceptions', { kind: PrivacyExceptionKind.readReceipts })).flush(null);
+    (await peer.expectAsync('privacy.listExceptions', { kind: PrivacyExceptionKind.readReceipts })).flush({
+      exceptions: [],
+    });
     await clearing;
     expect(component['rows']()).toEqual([]);
     expect(chats.publishPrivacyOverride).toHaveBeenCalledWith(PrivacyExceptionKind.readReceipts);
@@ -199,11 +204,11 @@ describe('Privacy exceptions', () => {
     const fixture = await loaded();
     const component = fixture.componentInstance;
     const refresh = component['load']();
-    const old = http.expectOne('/_api/me/privacy-exceptions?kind=presence');
+    const old = peer.expect('privacy.listExceptions', { kind: PrivacyExceptionKind.presence });
     account.set({ ...testUser, uid: 8 });
     fixture.detectChanges();
     expect(component['rows']()).toBeUndefined();
-    http.expectOne('/_api/me/privacy-exceptions?kind=presence').flush({ exceptions: [] });
+    peer.expect('privacy.listExceptions', { kind: PrivacyExceptionKind.presence }).flush({ exceptions: [] });
     old.flush({ exceptions: [row] });
     await refresh;
     await fixture.whenStable();

@@ -1,16 +1,16 @@
-import { HttpErrorResponse } from '@angular/common/http';
+import { RpcError, RpcErrorCode } from '../../api/rpc-error';
 import { inject } from '@angular/core';
 import { RedirectCommand, Router, type CanActivateFn } from '@angular/router';
 import { ToastController } from '@ionic/angular';
 import { TranslocoService } from '@jsverse/transloco';
 import { catchError, defer, map } from 'rxjs';
-import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
+import { RpcApi } from '../../../generated/rpc-api';
 import { decodeId, encodeId } from '../../api/snowflake-id';
 
 /** Resolve before leaving the current page so an unavailable message only needs a toast. */
 export const openMessageLink: CanActivateFn = (route) => {
   const router = inject(Router);
-  const chats = inject(ChatsService);
+  const chats = inject(RpcApi);
   const toasts = inject(ToastController);
   const i18n = inject(TranslocoService);
   const navigationId = router.currentNavigation()!.id;
@@ -22,8 +22,8 @@ export const openMessageLink: CanActivateFn = (route) => {
     const view = new DataView(bytes.buffer);
     const chatId = encodeId(view.getBigUint64(0).toString());
     const messageId = encodeId(view.getBigUint64(8).toString());
-    return chats
-      .getMessage(chatId, messageId)
+    return chats.messages
+      .get({ chatId, messageId })
       .pipe(
         map(
           (message) =>
@@ -43,7 +43,7 @@ export const openMessageLink: CanActivateFn = (route) => {
     catchError(async (error: unknown) => {
       const toast = await toasts.create({
         message: i18n.translate(
-          error instanceof HttpErrorResponse && error.status === 404
+          error instanceof RpcError && (error.code === RpcErrorCode.NotFound || error.code === RpcErrorCode.Gone)
             ? 'chats.link.messageUnavailable'
             : 'chats.link.failed',
         ),

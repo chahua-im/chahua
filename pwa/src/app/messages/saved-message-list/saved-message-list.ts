@@ -13,7 +13,7 @@ import {
   type InfiniteScrollCustomEvent,
 } from '@ionic/angular';
 import { firstValueFrom, Subject, takeUntil } from 'rxjs';
-import { SavedMessagesService } from '../../../generated/endpoints/saved-messages/saved-messages.service';
+import { RpcApi } from '../../../generated/rpc-api';
 import type { SavedMessageResponse } from '../../../generated/models';
 import { Connection } from '../../api/connection';
 import type { SnowflakeID } from '../../api/snowflake-id';
@@ -44,7 +44,7 @@ import { savedMessageContent } from './saved-message-content';
 })
 export class SavedMessageList {
   protected readonly session = inject(SessionStore);
-  private readonly savedApi = inject(SavedMessagesService);
+  private readonly savedApi = inject(RpcApi);
   private readonly navigation = inject(ConversationNavigation);
   private readonly destroyRef = inject(DestroyRef);
   private version = 0;
@@ -99,8 +99,8 @@ export class SavedMessageList {
     this.failed.set(false);
     try {
       const page = await firstValueFrom(
-        this.savedApi
-          .listSavedMessages({ limit: 50, ...(more ? { before: this.nextCursor()! } : {}) })
+        this.savedApi.savedMessages
+          .list({ limit: 50, ...(more ? { before: this.nextCursor()! } : {}) })
           .pipe(takeUntil(this.cancelReads), takeUntilDestroyed(this.destroyRef)),
       );
       if (version !== this.version) return;
@@ -128,7 +128,9 @@ export class SavedMessageList {
     this.removing.set(true);
     this.removeFailed.set(false);
     try {
-      await firstValueFrom(this.savedApi.deleteSavedMessageById(saved.id).pipe(takeUntilDestroyed(this.destroyRef)));
+      await firstValueFrom(
+        this.savedApi.savedMessages.delete({ savedMessageId: saved.id }).pipe(takeUntilDestroyed(this.destroyRef)),
+      );
     } catch {
       if (version === this.version) {
         this.saved.update((items) => [...items.slice(0, index), saved, ...items.slice(index)]);

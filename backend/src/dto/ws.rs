@@ -1,11 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::dto::{
-    messages::{MessageResponse, ReactionSummary},
-    pins::PinResponse,
-    users::StickerPackOrderItem,
-};
+use crate::dto::{messages::ReactionSummary, pins::PinResponse, users::StickerPackOrderItem};
 
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -63,9 +59,9 @@ pub enum OnlineClientStatus {
 pub struct OnlineClientConnectionResponse {
     /// Server-assigned identifier unique to this connection.
     pub connection_id: u64,
-    /// Authenticated client identifier carried by the WebSocket ticket.
+    /// Authenticated client identifier retained by this connection.
     pub client_id: String,
-    /// Most recently recorded HTTP application version for this client, when known.
+    /// Most recently recorded application version for this client, when known.
     pub last_app_version: Option<String>,
     /// Current app-presence state reported by this connection.
     pub status: OnlineClientStatus,
@@ -83,83 +79,74 @@ pub struct BulkDeletedPayload {
     pub message_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
-#[serde(tag = "type", content = "payload", rename_all = "camelCase")]
-pub enum ServerWsMessage {
-    ChatMembershipChanged(ChatMembershipChangedPayload),
-    MembershipMessagePolicyChanged(crate::dto::groups::MembershipMessagePolicyChanged),
-    Message(MessageResponse),
-    MessageUpdated(MessageResponse),
-    MessageDeleted(MessageResponse),
-    MessagesBulkDeleted(BulkDeletedPayload),
-    ReactionUpdated(ReactionUpdatePayload),
-    PresenceUpdate(PresenceUpdatePayload),
-    PresenceSnapshot(PresenceSnapshotPayload),
-    ConversationUnread(crate::dto::conversations::ConversationUnreadPayload),
-    ConversationStates(crate::dto::conversations::ConversationStatesPayload),
-    ConversationStatesError(crate::dto::conversations::ConversationUnreadErrorPayload),
-    ConversationUnreadError(crate::dto::conversations::ConversationUnreadErrorPayload),
-    ThreadUpdate(ThreadUpdatePayload),
-    ThreadMembershipChanged(ThreadMembershipChangedPayload),
-    ChatArchiveStateChanged(ChatArchiveStateChangedPayload),
-    NotificationExceptionsCleared(crate::dto::groups::NotificationExceptionsCleared),
-    NotificationSettingsChanged(crate::dto::users::NotificationSettingsResponse),
-    ChatNotificationSettingChanged(crate::dto::groups::ChatNotificationSettingResponse),
-    GroupSpeakingModeChanged(crate::dto::speaking::GroupSpeakingModeResponse),
-    MemberSpeakingModeChanged(crate::dto::speaking::MemberSpeakingModeResponse),
-    ReadReceiptChanged(ReadReceiptChangedPayload),
-    /// Chat-level pin event. Kept stable for already-deployed clients.
-    PinAdded(PinUpdatePayload),
-    /// Thread-scoped pin event. Old clients ignore this unknown event type.
-    ThreadPinAdded(PinUpdatePayload),
-    /// Chat-level pin event. Kept stable for already-deployed clients.
-    PinRemoved(PinUpdatePayload),
-    /// Thread-scoped pin event. Old clients ignore this unknown event type.
-    ThreadPinRemoved(PinUpdatePayload),
-    StickerPackOrderUpdated(StickerPackOrderUpdatePayload),
-    FriendRequestReceived(FriendRequestReceivedPayload),
-    FriendRequestResolved(FriendRequestResolvedPayload),
-    FriendshipRemoved(FriendshipRemovedPayload),
-    Notification(NotificationPayload),
+/// The one source of truth for legacy server event variants and their wire
+/// literals. RPC event metadata and encoding consume this list as well.
+macro_rules! server_ws_messages {
+    ($callback:ident) => {
+        $callback! {
+            ChatMembershipChanged(crate::dto::ws::ChatMembershipChangedPayload) => "chatMembershipChanged",
+            MembershipMessagePolicyChanged(crate::dto::groups::MembershipMessagePolicyChanged) => "membershipMessagePolicyChanged",
+            Message(crate::dto::messages::MessageResponse) => "message",
+            MessageUpdated(crate::dto::messages::MessageResponse) => "messageUpdated",
+            MessageDeleted(crate::dto::messages::MessageResponse) => "messageDeleted",
+            MessagesBulkDeleted(crate::dto::ws::BulkDeletedPayload) => "messagesBulkDeleted",
+            ReactionUpdated(crate::dto::ws::ReactionUpdatePayload) => "reactionUpdated",
+            PresenceUpdate(crate::dto::ws::PresenceUpdatePayload) => "presenceUpdate",
+            PresenceSnapshot(crate::dto::ws::PresenceSnapshotPayload) => "presenceSnapshot",
+            ConversationUnread(crate::dto::conversations::ConversationUnreadPayload) => "conversationUnread",
+            ConversationStates(crate::dto::conversations::ConversationStatesPayload) => "conversationStates",
+            ConversationStatesError(crate::dto::conversations::ConversationUnreadErrorPayload) => "conversationStatesError",
+            ConversationUnreadError(crate::dto::conversations::ConversationUnreadErrorPayload) => "conversationUnreadError",
+            ThreadUpdate(crate::dto::ws::ThreadUpdatePayload) => "threadUpdate",
+            ThreadMembershipChanged(crate::dto::ws::ThreadMembershipChangedPayload) => "threadMembershipChanged",
+            ChatArchiveStateChanged(crate::dto::ws::ChatArchiveStateChangedPayload) => "chatArchiveStateChanged",
+            NotificationExceptionsCleared(crate::dto::groups::NotificationExceptionsCleared) => "notificationExceptionsCleared",
+            NotificationSettingsChanged(crate::dto::users::NotificationSettingsResponse) => "notificationSettingsChanged",
+            ChatNotificationSettingChanged(crate::dto::groups::ChatNotificationSettingResponse) => "chatNotificationSettingChanged",
+            GroupSpeakingModeChanged(crate::dto::speaking::GroupSpeakingModeResponse) => "groupSpeakingModeChanged",
+            MemberSpeakingModeChanged(crate::dto::speaking::MemberSpeakingModeResponse) => "memberSpeakingModeChanged",
+            ReadReceiptChanged(crate::dto::ws::ReadReceiptChangedPayload) => "readReceiptChanged",
+            /// Chat-level pin event. Kept stable for already-deployed clients.
+            PinAdded(crate::dto::ws::PinUpdatePayload) => "pinAdded",
+            /// Thread-scoped pin event. Old clients ignore this unknown event type.
+            ThreadPinAdded(crate::dto::ws::PinUpdatePayload) => "threadPinAdded",
+            /// Chat-level pin event. Kept stable for already-deployed clients.
+            PinRemoved(crate::dto::ws::PinUpdatePayload) => "pinRemoved",
+            /// Thread-scoped pin event. Old clients ignore this unknown event type.
+            ThreadPinRemoved(crate::dto::ws::PinUpdatePayload) => "threadPinRemoved",
+            StickerPackOrderUpdated(crate::dto::ws::StickerPackOrderUpdatePayload) => "stickerPackOrderUpdated",
+            FriendRequestReceived(crate::dto::ws::FriendRequestReceivedPayload) => "friendRequestReceived",
+            FriendRequestResolved(crate::dto::ws::FriendRequestResolvedPayload) => "friendRequestResolved",
+            FriendshipRemoved(crate::dto::ws::FriendshipRemovedPayload) => "friendshipRemoved",
+            Notification(crate::dto::ws::NotificationPayload) => "notification",
+        }
+    };
 }
 
-impl ServerWsMessage {
-    pub fn message_type(&self) -> &'static str {
-        match self {
-            Self::ChatMembershipChanged(_) => "chatMembershipChanged",
-            Self::MembershipMessagePolicyChanged(_) => "membershipMessagePolicyChanged",
-            Self::Message(_) => "message",
-            Self::MessageUpdated(_) => "messageUpdated",
-            Self::MessageDeleted(_) => "messageDeleted",
-            Self::MessagesBulkDeleted(_) => "messagesBulkDeleted",
-            Self::ReactionUpdated(_) => "reactionUpdated",
-            Self::PresenceUpdate(_) => "presenceUpdate",
-            Self::PresenceSnapshot(_) => "presenceSnapshot",
-            Self::ConversationUnread(_) => "conversationUnread",
-            Self::ConversationStates(_) => "conversationStates",
-            Self::ConversationStatesError(_) => "conversationStatesError",
-            Self::ConversationUnreadError(_) => "conversationUnreadError",
-            Self::ThreadUpdate(_) => "threadUpdate",
-            Self::ThreadMembershipChanged(_) => "threadMembershipChanged",
-            Self::ChatArchiveStateChanged(_) => "chatArchiveStateChanged",
-            Self::NotificationExceptionsCleared(_) => "notificationExceptionsCleared",
-            Self::NotificationSettingsChanged(_) => "notificationSettingsChanged",
-            Self::ChatNotificationSettingChanged(_) => "chatNotificationSettingChanged",
-            Self::GroupSpeakingModeChanged(_) => "groupSpeakingModeChanged",
-            Self::MemberSpeakingModeChanged(_) => "memberSpeakingModeChanged",
-            Self::ReadReceiptChanged(_) => "readReceiptChanged",
-            Self::PinAdded(_) => "pinAdded",
-            Self::ThreadPinAdded(_) => "threadPinAdded",
-            Self::PinRemoved(_) => "pinRemoved",
-            Self::ThreadPinRemoved(_) => "threadPinRemoved",
-            Self::StickerPackOrderUpdated(_) => "stickerPackOrderUpdated",
-            Self::FriendRequestReceived(_) => "friendRequestReceived",
-            Self::FriendRequestResolved(_) => "friendRequestResolved",
-            Self::FriendshipRemoved(_) => "friendshipRemoved",
-            Self::Notification(_) => "notification",
+pub(crate) use server_ws_messages;
+
+macro_rules! define_server_ws_message {
+    ($($(#[$doc:meta])* $variant:ident($payload:ty) => $message_type:literal,)*) => {
+        #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+        #[serde(tag = "type", content = "payload", rename_all = "camelCase")]
+        pub enum ServerWsMessage {
+            $(
+                $(#[$doc])*
+                $variant($payload),
+            )*
         }
-    }
+
+        impl ServerWsMessage {
+            pub fn message_type(&self) -> &'static str {
+                match self {
+                    $(Self::$variant(_) => $message_type,)*
+                }
+            }
+        }
+    };
 }
+
+server_ws_messages!(define_server_ws_message);
 
 /// Invalidate the recipient's chat-list row after joining, independently of system messages.
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]

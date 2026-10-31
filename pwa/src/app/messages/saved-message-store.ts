@@ -1,7 +1,6 @@
-import { Service, computed, inject, signal } from '@angular/core';
+import { Service, inject, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
-import { ChatsService } from '../../generated/endpoints/chats/chats.service';
-import { SavedMessagesService } from '../../generated/endpoints/saved-messages/saved-messages.service';
+import { RpcApi } from '../../generated/rpc-api';
 import type { MessageResponse } from '../../generated/models';
 import type { SnowflakeID } from '../api/snowflake-id';
 
@@ -12,8 +11,7 @@ import type { SnowflakeID } from '../api/snowflake-id';
  */
 @Service()
 export class SavedMessageStore {
-  private readonly chatsApi = inject(ChatsService);
-  private readonly savedApi = inject(SavedMessagesService);
+  private readonly api = inject(RpcApi);
   private readonly scopes = signal<ReadonlyMap<SnowflakeID, ReadonlySet<SnowflakeID>>>(new Map());
   private readonly loadingScopes = signal<ReadonlySet<SnowflakeID>>(new Set());
   private readonly ensures = new Map<SnowflakeID, Promise<void>>();
@@ -47,8 +45,8 @@ export class SavedMessageStore {
     const previous = this.isSaved(message.chatId, message.id);
     this.write(message.chatId, message.id, saved);
     try {
-      if (saved) await firstValueFrom(this.savedApi.putSavedMessage(message.id));
-      else await firstValueFrom(this.savedApi.deleteSavedMessageByOriginal(message.id));
+      if (saved) await firstValueFrom(this.api.savedMessages.save({ messageId: message.id }));
+      else await firstValueFrom(this.api.savedMessages.deleteByMessage({ messageId: message.id }));
     } catch (error) {
       this.write(message.chatId, message.id, previous);
       throw error;
@@ -62,7 +60,7 @@ export class SavedMessageStore {
       let before: SnowflakeID | undefined;
       for (;;) {
         const page = await firstValueFrom(
-          this.chatsApi.listChatSavedMessages(chatId, { limit: 50, ...(before ? { before } : {}) }),
+          this.api.savedMessages.listForChat({ chatId, limit: 50, ...(before ? { before } : {}) }),
         );
         for (const item of page.savedMessages) ids.add(item.originalMessageId);
         const next = page.nextCursor;

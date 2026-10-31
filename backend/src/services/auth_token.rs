@@ -1,4 +1,7 @@
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Once;
+
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
@@ -32,18 +35,6 @@ pub struct VerifiedSession {
 pub enum AuthTokenError {
     InvalidToken,
     IssueFailed,
-}
-
-impl AuthTokenError {
-    pub fn into_rejection(self) -> (axum::http::StatusCode, &'static str) {
-        match self {
-            Self::InvalidToken => (axum::http::StatusCode::UNAUTHORIZED, "Invalid auth token"),
-            Self::IssueFailed => (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to create auth token",
-            ),
-        }
-    }
 }
 
 impl From<AuthTokenError> for AppError {
@@ -106,6 +97,8 @@ struct SessionClaimsV2Ref<'a> {
 pub struct AuthTokenService {
     encoding_key: EncodingKey,
     decoding_key: DecodingKey,
+    #[cfg(test)]
+    verify_invocations: AtomicUsize,
 }
 
 impl AuthTokenService {
@@ -114,10 +107,19 @@ impl AuthTokenService {
         Self {
             encoding_key: EncodingKey::from_secret(signing_key),
             decoding_key: DecodingKey::from_secret(signing_key),
+            #[cfg(test)]
+            verify_invocations: AtomicUsize::new(0),
         }
     }
 
+    #[cfg(test)]
+    pub fn verifier_invocations(&self) -> usize {
+        self.verify_invocations.load(Ordering::Relaxed)
+    }
+
     pub fn verify(&self, token: &str) -> Result<VerifiedSession, AuthTokenError> {
+        #[cfg(test)]
+        self.verify_invocations.fetch_add(1, Ordering::Relaxed);
         let data = decode::<Value>(token, &self.decoding_key, &jwt_validation())
             .map_err(|_| AuthTokenError::InvalidToken)?;
         let has_version = data
@@ -341,6 +343,21 @@ mod tests {
         );
 
         assert_eq!(service.verify(&token), Err(AuthTokenError::InvalidToken));
+    }
+
+    #[test]
+    fn verifier_instrumentation_is_per_service_instance() {
+        let first = AuthTokenService::new(TEST_KEY);
+        let second = AuthTokenService::new(TEST_KEY);
+        let token = first.issue_session(7, "client-7", 0).unwrap();
+
+        first.verify(&token).unwrap();
+        assert_eq!(first.verifier_invocations(), 1);
+        assert_eq!(second.verifier_invocations(), 0);
+
+        second.verify(&token).unwrap();
+        assert_eq!(first.verifier_invocations(), 1);
+        assert_eq!(second.verifier_invocations(), 1);
     }
 
     fn encode_value(claims: Value, kid: Option<&str>) -> String {

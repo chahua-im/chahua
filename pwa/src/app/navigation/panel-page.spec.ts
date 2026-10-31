@@ -1,9 +1,6 @@
-import { provideHttpClient, withInterceptors } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { Component, reflectComponentType, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
-import { jsonInterceptor } from '../api/json.interceptor';
+import { RpcTestPeer, provideRpcTesting } from '../api/rpc-testing';
 import { decodeId, encodeId } from '../api/snowflake-id';
 import { testMessage } from '../api/testing';
 import { ChatDetails } from '../chats/chat-details/chat-details';
@@ -24,17 +21,20 @@ class ResumablePage {
 }
 
 describe('Panel preloading', () => {
+  let peer: RpcTestPeer;
   beforeEach(() => {
-    TestBed.configureTestingModule({
-      providers: [
-        provideHttpClient(withInterceptors([jsonInterceptor])),
-        provideHttpClientTesting(),
-        provideChahuaBaseUrl('/_api'),
-      ],
-    });
+    TestBed.configureTestingModule({ providers: [provideRpcTesting()] });
     TestBed.overrideComponent(PanelPage, { set: { template: '' } });
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
   });
-  afterEach(() => TestBed.inject(HttpTestingController).verify());
+  afterEach(() => {
+    try {
+      peer.verify();
+    } finally {
+      TestBed.resetTestingModule();
+    }
+  });
 
   it.each(panelDefinitions)('binds only supported component inputs for $path', (definition) => {
     const path = definition.path.replace(/:\w+/g, '9007199254740993');
@@ -79,7 +79,8 @@ describe('Panel preloading', () => {
     fixture.detectChanges();
     expect(fixture.componentInstance['content']()).toEqual({ component, props });
     expect(fixture.componentInstance['failed']()).toBe(false);
-    TestBed.inject(HttpTestingController).expectNone(() => true);
+    peer.expectNone('users.search');
+    peer.expectNone('messages.get');
   });
 
   it.each(['known', 'missing', 'other-thread', 'other-chat'] as const)(
@@ -99,16 +100,15 @@ describe('Panel preloading', () => {
       );
       fixture.componentRef.setInput('source', source);
       fixture.detectChanges();
-      const http = TestBed.inject(HttpTestingController);
       const fetchedRoot = { ...testMessage, message: 'Fetched root' };
       if (scope === 'known') {
-        http.expectNone(() => true);
+        peer.expectNone('messages.get');
         expect(fixture.componentInstance['content']()).toBeDefined();
       } else {
         expect(fixture.componentInstance['content']()).toBeUndefined();
-        http
-          .expectOne(`/_api/chats/${decodeId(testMessage.chatId)}/messages/${decodeId(testMessage.id)}`)
-          .flush({ ...fetchedRoot, id: decodeId(testMessage.id), chatId: decodeId(testMessage.chatId) });
+        peer
+          .expect('messages.get', { chatId: decodeId(testMessage.chatId), messageId: decodeId(testMessage.id) })
+          .flush(fetchedRoot);
         await fixture.whenStable();
       }
       const inputs = fixture.componentInstance['inputs']();
@@ -119,18 +119,18 @@ describe('Panel preloading', () => {
         const updatedRoot = { ...testMessage, message: 'Updated while open' };
         source.detailsContext.set({ ...source.detailsContext(), threadRoot: updatedRoot });
         expect(fixture.componentInstance['inputs']()['threadRoot']).toBe(updatedRoot);
-        http.expectNone(() => true);
+        peer.expectNone('messages.get');
       }
     },
   );
 
-  it('cancels the profile lookup when its panel is removed before loading finishes', async () => {
+  it('ignores a late profile lookup after its panel is removed', async () => {
     const fixture = TestBed.createComponent(PanelPage);
     fixture.componentRef.setInput('path', '/profile/2');
     fixture.detectChanges();
-    const request = TestBed.inject(HttpTestingController).expectOne('/_api/users/search?q=2&limit=20');
+    const request = peer.expect('users.search', { q: '2', limit: 20 });
     fixture.destroy();
-    expect(request.cancelled).toBe(true);
+    request.flush({ members: [{ uid: 2, username: 'Alice', gender: 0 }] });
     await Promise.resolve();
     expect(fixture.componentInstance['content']()).toBeUndefined();
   });
@@ -139,12 +139,11 @@ describe('Panel preloading', () => {
     const fixture = TestBed.createComponent(PanelPage);
     fixture.componentRef.setInput('path', '/profile/2');
     fixture.detectChanges();
-    const http = TestBed.inject(HttpTestingController);
-    http.expectOne('/_api/users/search?q=2&limit=20').flush({}, { status: 503, statusText: 'Unavailable' });
+    peer.expect('users.search', { q: '2', limit: 20 }).error(1503);
     await fixture.whenStable();
     expect(fixture.componentInstance['failed']()).toBe(true);
     const retry = fixture.componentInstance['load']();
-    http.expectOne('/_api/users/search?q=2&limit=20').flush({ members: [{ uid: 2, username: 'Alice', gender: 0 }] });
+    peer.expect('users.search', { q: '2', limit: 20 }).flush({ members: [{ uid: 2, username: 'Alice', gender: 0 }] });
     await retry;
     expect(fixture.componentInstance['failed']()).toBe(false);
     expect(fixture.componentInstance['content']()?.props['user']).toMatchObject({ uid: 2, username: 'Alice' });
@@ -152,12 +151,19 @@ describe('Panel preloading', () => {
 });
 
 describe('Retained panel activation', () => {
+  let peer: RpcTestPeer;
   beforeEach(() => {
-    TestBed.configureTestingModule({
-      providers: [provideHttpClient(), provideHttpClientTesting(), provideChahuaBaseUrl('/_api')],
-    });
+    TestBed.configureTestingModule({ providers: [provideRpcTesting()] });
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
   });
-  afterEach(() => TestBed.inject(HttpTestingController).verify());
+  afterEach(() => {
+    try {
+      peer.verify();
+    } finally {
+      TestBed.resetTestingModule();
+    }
+  });
 
   it.each([true, false])('refreshes only previously hidden instances (initially active: %s)', async (active) => {
     const fixture = TestBed.createComponent(PanelPage);
@@ -182,19 +188,18 @@ describe('Retained panel activation', () => {
   });
 
   it('refreshes a copied privacy parent on first display while preserving known summary DOM', async () => {
-    const http = TestBed.inject(HttpTestingController);
     const fixture = TestBed.createComponent(PanelPage);
     fixture.componentRef.setInput('path', '/settings/privacy');
     fixture.componentRef.setInput('active', false);
     fixture.detectChanges();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.resolve();
     TestBed.tick();
     fixture.detectChanges();
     const flush = (visibility: string, exceptionCount: number) => {
-      http.expectOne('/_api/blocks').flush({ blocks: [] });
-      http.expectOne('/_api/friends/me/settings').flush({ mode: 'direct' });
-      http.expectOne('/_api/me/presence-settings').flush({ visibility, exceptionCount });
-      http.expectOne('/_api/me/read-receipt-settings').flush({ visibility: 'friends', exceptionCount: 0 });
+      peer.expect('blocks.list').flush({ blocks: [] });
+      peer.expect('friends.getSettings').flush({ mode: 'direct' });
+      peer.expect('privacy.getPresenceSettings').flush({ visibility, exceptionCount });
+      peer.expect('privacy.getReadReceiptSettings').flush({ visibility: 'friends', exceptionCount: 0 });
     };
     flush('everyone', 0);
     await fixture.whenStable();
@@ -204,7 +209,7 @@ describe('Retained panel activation', () => {
     expect(summary.textContent).toContain('所有人');
     fixture.componentRef.setInput('active', true);
     fixture.detectChanges();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.resolve();
     TestBed.tick();
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('ion-item[href="/settings/presence"] ion-note')).toBe(summary);

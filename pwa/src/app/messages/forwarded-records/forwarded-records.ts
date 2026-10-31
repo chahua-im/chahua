@@ -30,9 +30,9 @@ import {
 import { TranslocoPipe } from '@jsverse/transloco';
 import { chevronBack, documentTextOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
-import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
-import { SavedMessagesService } from '../../../generated/endpoints/saved-messages/saved-messages.service';
+import { RpcApi } from '../../../generated/rpc-api';
 import { ServerWsMessageType, type ForwardedMessagesResponse, type MessagePreview } from '../../../generated/models';
+import { RpcError, RpcErrorCode } from '../../api/rpc-error';
 import { Connection, ResyncReason } from '../../api/connection';
 import { ChatChangeKind, ChatStore } from '../../chats/chat-store';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
@@ -114,8 +114,7 @@ export class ForwardedRecords {
   readonly bundleId = input<SnowflakeID | undefined, string | undefined>(undefined, {
     transform: (id) => (id ? encodeId(id) : undefined),
   });
-  private readonly chats = inject(ChatsService);
-  private readonly saved = inject(SavedMessagesService);
+  private readonly api = inject(RpcApi);
   private readonly router = inject(Router);
   private readonly nav = inject(NavController);
   private readonly outlet = inject(IonRouterOutlet, { optional: true });
@@ -261,17 +260,24 @@ export class ForwardedRecords {
       const request =
         savedId != null
           ? bundleId != null
-            ? this.saved.getSavedForwardedBundleMessages(savedId, bundleId)
-            : this.saved.getSavedForwardedMessages(savedId)
+            ? this.api.savedMessages.listForwardedBundleMessages({ savedMessageId: savedId, bundleId })
+            : this.api.savedMessages.listForwardedMessages({ savedMessageId: savedId })
           : bundleId != null
-            ? this.chats.getForwardedBundleMessages(this.chatId()!, this.messageId()!, bundleId)
-            : this.chats.getForwardedMessages(this.chatId()!, this.messageId()!);
+            ? this.api.messages.listForwardedBundleMessages({
+                chatId: this.chatId()!,
+                messageId: this.messageId()!,
+                bundleId,
+              })
+            : this.api.messages.listForwardedMessages({ chatId: this.chatId()!, messageId: this.messageId()! });
       const data = await firstValueFrom(request.pipe(takeUntilDestroyed(this.destroyRef)));
       if (!this.destroyRef.destroyed && version === this.version) this.data.set(data);
     } catch (error) {
       if (!this.destroyRef.destroyed && version === this.version) {
-        const status = error && typeof error === 'object' && 'status' in error ? error.status : undefined;
-        if (status === 403 || status === 404 || status === 410) this.invalidate();
+        if (
+          error instanceof RpcError &&
+          [RpcErrorCode.Forbidden, RpcErrorCode.NotFound, RpcErrorCode.Gone].includes(error.code)
+        )
+          this.invalidate();
         else this.failed.set(true);
       }
     } finally {

@@ -165,19 +165,19 @@ ForwardPlaceholder 枚举定义后端原因代码，placeholderLabel 返回翻�
 
 上传任务提交后归 MessageOutbox，编辑只借用任务引用。输入区可以继续输入和录音。VoicePlayer 不显示原生音频控制条，挂载即下载音频并解码波形，波形读取失败时仍保留可用播放。消息语音的播放由根服务 VoicePlayback 独占：播放中的语音在离开或切换会话后继续播放，VoiceBar 吸顶播放条随语音出现在会话页和聊天列表页的 header 底部，接管播放/暂停、跳转原消息、已播时长与倍速，关闭或播完即收起；倍速由 VoicePlayback 全局记忆，跨语音保持；录音预览与待发送预览不进吸顶条。
 
-创建贴纸包直接使用创建响应中的完整详情，并追加到包列表；贴纸库上传新贴纸后重读该包，包详情页上传后把响应追加到当前列表。收藏状态写回当前 content，随后订阅更新不会恢复过期的收藏值。
+创建贴纸包使用创建返回的摘要与空 stickers 列表构成详情，并追加到包列表，不额外补读；贴纸库上传新贴纸后重读该包，包详情页上传后把响应追加到当前列表。更新包元数据时合并返回摘要，保留同一包的已知贴纸。收藏状态写回当前 content，随后订阅更新不会恢复过期的收藏值。
 
 ## 资料、搜索与管理
 
 | 组件               | 输入与局部字段                                                                                                                                                                                               | 共享数据/输出                                                                                                             |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
-| ChatDetails        | chatId 或 user、view、currentConversation、threadId、threadRoot；tab、字段编辑草稿、头像上传进度、pending/error、详情 loading、当前好友的 presenceOverride/readReceiptOverride 及其 loading/error 与请求版本 | ChatStore 的头像、标题、详情、订阅与好友关系；FriendsService 读取/保存本人在线状态和已读回执覆盖值，Presence 失效个人状态 |
-| ChatThreads        | chatId；items、cursor、loaded、loading/error、retryable、失败请求分页方式、打开状态                                                                                                                          | ThreadsService 的聊天话题分页；MessageResponse 根消息直接展示，点击导航                                                   |
-| ChatMembers        | chatId、canManage；query、members、cursor、loading/error、selectedUid、pending、成员实时更新版本                                                                                                             | MembersService、ChatStore；行点击打开资料，管理员可管理其他成员身份与个人发言权限，权限来自 ChatDetails                   |
-| ThreadParticipants | chatId、rootId；participants、cursor、loaded、loading/error、retryable、失败请求分页方式                                                                                                                     | ThreadsService 的话题参与者分页；点击打开资料，不依赖 ChatStore 或会话消息                                                |
+| ChatDetails        | chatId 或 user、view、currentConversation、threadId、threadRoot；tab、字段编辑草稿、头像上传进度、pending/error、详情 loading、当前好友的 presenceOverride/readReceiptOverride 及其 loading/error 与请求版本 | ChatStore 的头像、标题、详情、订阅与好友关系；RpcApi.friends 读取/保存本人在线状态和已读回执覆盖值，Presence 失效个人状态 |
+| ChatThreads        | chatId；items、cursor、loaded、loading/error、retryable、失败请求分页方式、打开状态                                                                                                                          | RpcApi.threads 的聊天话题分页；MessageResponse 根消息直接展示，点击导航                                                   |
+| ChatMembers        | chatId、canManage；query、members、cursor、loading/error、selectedUid、pending、成员实时更新版本                                                                                                             | RpcApi.groups、ChatStore；行点击打开资料，管理员可管理其他成员身份与个人发言权限，权限来自 ChatDetails                    |
+| ThreadParticipants | chatId、rootId；participants、cursor、loaded、loading/error、retryable、失败请求分页方式                                                                                                                     | RpcApi.threads 的话题参与者分页；点击打开资料，不依赖 ChatStore 或会话消息                                                |
 | ChatAttachments    | chatId、kind；items、cursor、loading/error、打开/定位状态                                                                                                                                                    | 列表归组件，打开原消息媒体或定位上下文                                                                                    |
 | ChatSearch         | chatId；query、sort、messages、cursor、loading/error                                                                                                                                                         | 聊天消息搜索，点击定位原消息                                                                                              |
-| ChatInvites        | chatId；邀请列表、创建限制、目标用户与操作状态                                                                                                                                                               | InvitesService；DirectorySearch 选择指定用户                                                                              |
+| ChatInvites        | chatId；邀请列表、创建限制、目标用户与操作状态                                                                                                                                                               | RpcApi.invites；DirectorySearch 选择指定用户                                                                              |
 | StartChat          | kind、code；创建/加入表单、搜索词、邀请预览、busy/error                                                                                                                                                      | 点击提交才创建或加入；改邀请码会使旧预览不可提交                                                                          |
 | ChatMute           | 公开 toggle(chatId)；根据共享永久偏好筛选临时静音选项，首次展示与菜单打开期间均同步                                                                                                                          | 调用 ChatStore.setNotificationSetting，原调用按钮持有等待状态                                                             |
 
@@ -218,7 +218,7 @@ ChatDetails 和 ConversationPage 激活同一个好友关系查询。用户资�
 
 ChatList 的四个 tab 数字消费集合 `unreadUnmutedConversationCount`，有未静音 mention 时由 `@` 替代数字，两者均为零时隐藏。ChatList 与 PushNotifications 的后台标题共用 ChatListStore.tabBadges，其 `@` 仅消费集合 `unreadUnmutedAttentionCount`，原始 attention 不驱动这两处提醒；会话内标题改用该会话的共享读状态。ChatListContent 使用话题响应的 `chatKind` 决定 mention、作者与头像徽标；父聊天详情仅补充名称和头像，不影响类型判断。ChatListItem 保留静音群聊和归档话题的行内 mention badge，使用 medium 色，选中时仍保持灰色。
 
-`conversationUnread` 管理 ChatListStore 的连接级未读订阅、消费者、快照和 requestId；Connection 负责 WS 编解码与发送。系统图标和列表共享订阅，不创建单独的未读 HTTP 查询。
+`conversationUnread` 管理 ChatListStore 的连接级未读订阅、消费者、快照和 requestId；Connection 提供监看与领域事件门面，RpcTransport 负责唯一连接的收发。系统图标和列表共享订阅，不创建单独的未读查询。
 
 SpeakingModeSelect 由 ChatDetails 与 ChatMembers 复用，输入 label、disabled，value model 为 SpeakingMode；Ionic 选择框只负责选择，调用方持有保存状态和错误。群模式与有效发言权限由 ChatStore 共享，ConversationPage 将当前操作的 restriction 传给 MessageComposer；VoiceRecorder 接收 disabled，限制生效时保留尚未发送的录音。
 

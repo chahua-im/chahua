@@ -17,7 +17,7 @@ import {
 import { TranslocoPipe } from '@jsverse/transloco';
 import { chevronBackOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
-import { FriendsService } from '../../../generated/endpoints/friends/friends.service';
+import { RpcApi } from '../../../generated/rpc-api';
 import { PrivacyExceptionKind, ReadReceiptVisibility } from '../../../generated/models';
 import { ChatStore } from '../../chats/chat-store';
 import { PanelNavigation } from '../../navigation/panel-navigation';
@@ -51,7 +51,7 @@ import { PrivacyExceptions } from '../privacy-exceptions/privacy-exceptions';
   host: { class: 'ion-page' },
 })
 export class ReadReceiptSettings {
-  private readonly friends = inject(FriendsService);
+  private readonly api = inject(RpcApi);
   private readonly chats = inject(ChatStore);
   protected readonly ExceptionKind = PrivacyExceptionKind;
   protected readonly panels = inject(PanelNavigation);
@@ -74,7 +74,7 @@ export class ReadReceiptSettings {
     this.loading.set(true);
     this.loadError.set(false);
     try {
-      const settings = await firstValueFrom(this.friends.getMyReadReceiptSettings());
+      const settings = await firstValueFrom(this.api.privacy.getReadReceiptSettings());
       this.visibility.set(settings.visibility);
       this.savedVisibility = settings.visibility;
       this.requestedVisibility = settings.visibility;
@@ -99,7 +99,7 @@ export class ReadReceiptSettings {
     this.saveError.set(false);
     try {
       const settings = await firstValueFrom(
-        this.friends.updateMyReadReceiptSettings({ visibility: this.visibility() }),
+        this.api.privacy.updateReadReceiptSettings({ visibility: this.visibility() }),
       );
       this.visibility.set(settings.visibility);
       this.savedVisibility = settings.visibility;

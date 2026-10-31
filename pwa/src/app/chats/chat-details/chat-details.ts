@@ -63,10 +63,7 @@ import {
   videocamOutline,
 } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
-import { BlocksService } from '../../../generated/endpoints/blocks/blocks.service';
-import { FriendsService } from '../../../generated/endpoints/friends/friends.service';
-import { GroupsService } from '../../../generated/endpoints/groups/groups.service';
-import { MembersService } from '../../../generated/endpoints/members/members.service';
+import { RpcApi } from '../../../generated/rpc-api';
 import {
   ChatAttachmentKindFilter,
   FriendAddVerificationMode,
@@ -203,7 +200,7 @@ export class ChatDetails {
     videocamOutline,
     documentTextOutline,
   };
-  private readonly friends = inject(FriendsService);
+  private readonly api = inject(RpcApi);
   private readonly destroy = inject(DestroyRef);
   private loadVersion = 0;
   private presenceSettingsVersion = 0;
@@ -224,14 +221,11 @@ export class ChatDetails {
     const person = this.person();
     return person && this.otherUser() && this.relationship()?.isFriend ? person.uid : undefined;
   });
-  private readonly blocks = inject(BlocksService);
   private readonly navigation = inject(ConversationNavigation);
   protected readonly modals = inject(ModalController);
   private readonly panels = inject(PanelNavigation);
   protected readonly hasParentPanel = computed(() => this.panels.paths().length > 1);
   private readonly router = inject(Router);
-  private readonly api = inject(GroupsService);
-  private readonly members = inject(MembersService);
   private readonly session = inject(SessionStore);
   private readonly presence = inject(Presence);
   private readonly store = inject(ChatStore);
@@ -299,7 +293,7 @@ export class ChatDetails {
     await this.perform(
       DetailAction.MembershipVisibility,
       async () => {
-        await firstValueFrom(this.api.patchGroup(chatId, { membershipMessageVisibility: visibility }));
+        await firstValueFrom(this.api.groups.update({ chatId, membershipMessageVisibility: visibility }));
         if (account === this.session.user()?.uid) await this.store.refreshMembershipPolicy(chatId);
       },
       true,
@@ -479,7 +473,7 @@ export class ChatDetails {
     this.presenceOverrideLoading.set(true);
     this.presenceOverrideError.set(false);
     try {
-      const settings = await firstValueFrom(this.friends.getFriendPresenceSettings(uid));
+      const settings = await firstValueFrom(this.api.friends.getPresenceSettings({ uid }));
       if (version === this.presenceSettingsVersion && uid === this.presenceSettingsUid() && !this.destroy.destroyed)
         this.presenceOverride.set(settings.override);
     } catch {
@@ -498,7 +492,7 @@ export class ChatDetails {
     this.receiptOverrideLoading.set(true);
     this.receiptOverrideError.set(false);
     try {
-      const settings = await firstValueFrom(this.friends.getFriendReadReceiptSettings(uid));
+      const settings = await firstValueFrom(this.api.friends.getReadReceiptSettings({ uid }));
       if (version === this.receiptSettingsVersion && uid === this.presenceSettingsUid() && !this.destroy.destroyed)
         this.receiptOverride.set(settings.override);
     } catch {
@@ -527,7 +521,7 @@ export class ChatDetails {
     const saved = await this.perform(
       DetailAction.ReadReceipt,
       async () => {
-        const settings = await firstValueFrom(this.friends.updateFriendReadReceiptSettings(uid, { override }));
+        const settings = await firstValueFrom(this.api.friends.updateReadReceiptSettings({ uid, override }));
         this.store.invalidateReadReceiptPrivacy(uid);
         if (this.isCurrent(scope) && uid === this.presenceSettingsUid()) {
           this.receiptOverride.set(settings.override);
@@ -562,7 +556,7 @@ export class ChatDetails {
     const saved = await this.perform(
       DetailAction.Presence,
       async () => {
-        const settings = await firstValueFrom(this.friends.updateFriendPresenceSettings(uid, { override }));
+        const settings = await firstValueFrom(this.api.friends.updatePresenceSettings({ uid, override }));
         this.presence.invalidateUsers([uid]);
         if (this.isCurrent(scope) && uid === this.presenceSettingsUid()) {
           this.presenceOverride.set(settings.override);
@@ -646,7 +640,7 @@ export class ChatDetails {
       await this.perform(
         field === GroupField.Name ? DetailAction.Name : DetailAction.Description,
         async () => {
-          await firstValueFrom(this.api.patchGroup(chatId, { [field]: value }));
+          await firstValueFrom(this.api.groups.update({ chatId, [field]: value }));
           await this.refreshDetails(chatId);
         },
         true,
@@ -667,7 +661,8 @@ export class ChatDetails {
       async () => {
         const dimensions = await mediaDimensions(file);
         const upload = await firstValueFrom(
-          this.api.postAvatarUploadUrl(chatId, {
+          this.api.groups.createAvatarUploadUrl({
+            chatId,
             filename: file.name,
             contentType: file.type,
             size: file.size,
@@ -677,7 +672,7 @@ export class ChatDetails {
         await uploadBlob(upload.uploadUrl, file, upload.uploadHeaders, undefined, (value) => {
           if (this.isCurrent(scope)) this.avatarProgress.set(value);
         });
-        await firstValueFrom(this.api.patchGroup(chatId, { avatarImageId: upload.imageId }));
+        await firstValueFrom(this.api.groups.update({ chatId, avatarImageId: upload.imageId }));
         await this.refreshDetails(chatId);
       },
       true,
@@ -705,8 +700,8 @@ export class ChatDetails {
       await this.perform(DetailAction.Leave, async () => {
         await firstValueFrom(
           isDm
-            ? this.friends.deleteFriend(person!.uid)
-            : this.members.deleteRemoveMember(chatId, this.session.user()!.uid),
+            ? this.api.friends.remove({ uid: person!.uid })
+            : this.api.groups.removeMember({ chatId, uid: this.session.user()!.uid }),
         );
         if (isDm) this.store.invalidateReadReceiptPrivacy(person!.uid);
         this.lists.refreshChats();
@@ -750,7 +745,7 @@ export class ChatDetails {
     await this.perform(DetailAction.AddFriend, async () => {
       const relation = this.relationship()!;
       const info = await firstValueFrom(
-        this.friends.getUserFriendAddInfo(user.uid).pipe(takeUntilDestroyed(this.destroy)),
+        this.api.friends.getAddInfo({ uid: user.uid }).pipe(takeUntilDestroyed(this.destroy)),
       );
       if (!this.isCurrent(scope)) return;
       const unavailable = relation.hasPendingOutgoingRequest
@@ -786,7 +781,7 @@ export class ChatDetails {
       const result = await alert.onDidDismiss<{ values?: { message?: string } }>();
       if (result.role !== 'confirm' || !this.isCurrent(scope)) return;
       await firstValueFrom(
-        this.friends.createFriendRequest({
+        this.api.friends.createRequest({
           toUid: user.uid,
           message: result.data?.values?.message?.trim() || undefined,
         }),
@@ -810,7 +805,9 @@ export class ChatDetails {
     await alert.present();
     if ((await alert.onDidDismiss()).role !== 'confirm' || !this.isCurrent(scope)) return;
     await this.perform(DetailAction.Block, async () => {
-      await firstValueFrom(blocking ? this.blocks.unblockUser(user.uid) : this.blocks.blockUser({ uid: user.uid }));
+      await firstValueFrom(
+        blocking ? this.api.blocks.delete({ uid: user.uid }) : this.api.blocks.create({ uid: user.uid }),
+      );
       this.store.invalidateReadReceiptPrivacy(user.uid);
       this.lists.refreshChats();
       await this.store.relationship(user.uid).refresh();

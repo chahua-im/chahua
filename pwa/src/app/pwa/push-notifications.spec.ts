@@ -1,12 +1,13 @@
-import { signal } from '@angular/core';
+import { signal, type WritableSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
 import { SwPush } from '@angular/service-worker';
 import { ModalController } from '@ionic/angular';
-import { BehaviorSubject, NEVER, of, Subject, throwError } from 'rxjs';
-import { vi } from 'vitest';
-import { PushService } from '../../generated/endpoints/push/push.service';
+import { BehaviorSubject, NEVER, Subject } from 'rxjs';
+import { type Mock, vi } from 'vitest';
 import { ApiPushProvider, GroupKind } from '../../generated/models';
+import { RpcTestPeer, type RpcTestRequest, provideRpcTesting } from '../api/rpc-testing';
+import { RpcErrorCode } from '../api/rpc-error';
 import { Connection } from '../api/connection';
 import { encodeId } from '../api/snowflake-id';
 import { testChat, testMessage, testUser } from '../api/testing';
@@ -31,25 +32,47 @@ describe('PushNotifications', () => {
   let browser: {
     isEnabled: boolean;
     subscription: BehaviorSubject<PushSubscription | null> | typeof NEVER;
-    requestSubscription: ReturnType<typeof vi.fn>;
-    unsubscribe: ReturnType<typeof vi.fn>;
+    requestSubscription: Mock<(options: { serverPublicKey: string }) => Promise<PushSubscription>>;
+    unsubscribe: Mock<() => Promise<void>>;
   };
-  let notification: { permission: NotificationPermission; requestPermission: ReturnType<typeof vi.fn> };
-  let api: {
-    getVapidPublicKey: ReturnType<typeof vi.fn>;
-    postSubscribe: ReturnType<typeof vi.fn>;
-    postUnsubscribe: ReturnType<typeof vi.fn>;
-    getSubscriptionStatus: ReturnType<typeof vi.fn>;
+  let notification: {
+    permission: NotificationPermission;
+    requestPermission: Mock<() => Promise<NotificationPermission>>;
   };
+  let peer: RpcTestPeer;
+  let sessionUser: WritableSignal<typeof testUser>;
 
   const dependencies = () => [
     provideRouter([]),
+    provideRpcTesting(),
     { provide: Connection, useValue: { events$: new Subject(), resync$: new Subject() } },
     { provide: ChatStore, useValue: { changes$: new Subject() } },
     { provide: ChatListStore, useValue: {} },
-    { provide: SessionStore, useValue: { user: signal(testUser) } },
+    { provide: SessionStore, useValue: { user: sessionUser } },
     { provide: ModalController, useValue: { getTop: async () => undefined } },
   ];
+
+  function request(method: string, params?: Record<string, unknown>): Promise<RpcTestRequest> {
+    return peer.expectAsync(method, params);
+  }
+
+  async function vapid() {
+    (await request('push.getVapidPublicKey', {})).flush({ publicKey: 'vapid-key' });
+  }
+
+  async function subscribe(value: PushSubscription = subscription) {
+    const keys = value.toJSON().keys!;
+    return request('push.subscribe', {
+      provider: ApiPushProvider.webPush,
+      endpoint: value.endpoint,
+      keys: { p256dh: keys['p256dh'], auth: keys['auth'] },
+    });
+  }
+
+  async function unsubscribe(value: PushSubscription = subscription) {
+    return request('push.unsubscribe', { provider: ApiPushProvider.webPush, endpoint: value.endpoint });
+  }
+
   beforeEach(() => {
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', {
@@ -64,6 +87,7 @@ describe('PushNotifications', () => {
     vi.stubGlobal('PushManager', class {});
     vi.stubGlobal('navigator', { serviceWorker: {} });
     current = new BehaviorSubject<PushSubscription | null>(null);
+    sessionUser = signal(testUser);
     browser = {
       isEnabled: true,
       subscription: current,
@@ -75,20 +99,21 @@ describe('PushNotifications', () => {
         current.next(null);
       }),
     };
-    api = {
-      getVapidPublicKey: vi.fn().mockReturnValue(of({ publicKey: 'vapid-key' })),
-      postSubscribe: vi.fn().mockReturnValue(of(undefined)),
-      postUnsubscribe: vi.fn().mockReturnValue(of(undefined)),
-      getSubscriptionStatus: vi.fn().mockReturnValue(of({ hasActiveSubscription: true, hasMatchingEndpoint: true })),
-    };
     TestBed.configureTestingModule({
-      providers: [...dependencies(), { provide: SwPush, useValue: browser }, { provide: PushService, useValue: api }],
+      providers: [...dependencies(), { provide: SwPush, useValue: browser }],
     });
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
   });
 
   afterEach(() => {
-    vi.useRealTimers();
-    vi.unstubAllGlobals();
+    try {
+      peer.verify();
+    } finally {
+      TestBed.resetTestingModule();
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
   });
 
   it('does not treat a covered conversation as being read, but permits a non-blocking sidebar', async () => {
@@ -135,11 +160,12 @@ describe('PushNotifications', () => {
       await service.refresh();
       expect(service.shouldPrompt()).toBe(true);
       expect(localStorage.getItem(preferenceKey)).toBeNull();
-      expect(api.postSubscribe).not.toHaveBeenCalled();
+      peer.expectNone('push.subscribe');
       service.declinePermission();
       expect(service.shouldPrompt()).toBe(false);
       expect(localStorage.getItem(preferenceKey)).toBe('false');
       expect(notification.requestPermission).not.toHaveBeenCalled();
+      (await unsubscribe()).flush(null);
     },
   );
 
@@ -148,8 +174,10 @@ describe('PushNotifications', () => {
     expect(service.shouldPrompt()).toBe(false);
     expect(service.enabled()).toBe(true);
     expect(localStorage.getItem(preferenceKey)).toBe('true');
-    await service.refresh();
-    expect(api.postSubscribe).toHaveBeenCalledOnce();
+    const refreshed = service.refresh();
+    await vapid();
+    (await subscribe()).flush(null);
+    await refreshed;
     expect(notification.requestPermission).not.toHaveBeenCalled();
   });
 
@@ -159,7 +187,7 @@ describe('PushNotifications', () => {
     await service.refresh();
     expect(service.enabled()).toBe(false);
     expect(service.shouldPrompt()).toBe(false);
-    expect(api.postSubscribe).not.toHaveBeenCalled();
+    peer.expectNone('push.subscribe');
   });
 
   it('leaves the initial permission click available while startup has no saved choice', async () => {
@@ -169,9 +197,11 @@ describe('PushNotifications', () => {
     await service.refresh();
     expect(service.busy()).toBe(false);
     browser.subscription = current;
-    const request = service.setEnabled(true);
+    const requestEnabled = service.setEnabled(true);
     expect(notification.requestPermission).toHaveBeenCalledOnce();
-    expect(await request).toBe(true);
+    await vapid();
+    (await subscribe()).flush(null);
+    expect(await requestEnabled).toBe(true);
   });
 
   it('requests permission synchronously from the toggle, then registers VAPID and backend keys', async () => {
@@ -179,13 +209,10 @@ describe('PushNotifications', () => {
     const service = TestBed.inject(PushNotifications);
     const result = service.setEnabled(true);
     expect(notification.requestPermission).toHaveBeenCalledOnce();
-    expect(api.getVapidPublicKey).not.toHaveBeenCalled();
+    await vapid();
+    (await subscribe()).flush(null);
     expect(await result).toBe(true);
     expect(browser.requestSubscription).toHaveBeenCalledWith({ serverPublicKey: 'vapid-key' });
-    expect(api.postSubscribe).toHaveBeenCalledWith(
-      { provider: ApiPushProvider.webPush, endpoint, keys: { p256dh: 'public-key', auth: 'auth-key' } },
-      { timeout: 10000 },
-    );
     expect(service.permission()).toBe('granted');
     expect(service.enabled()).toBe(true);
     expect(service.busy()).toBe(false);
@@ -208,9 +235,10 @@ describe('PushNotifications', () => {
     expect(localStorage.getItem(preferenceKey)).toBe('true');
     expect(browser.requestSubscription).not.toHaveBeenCalled();
     grant();
+    await vapid();
+    (await subscribe()).flush(null);
     await vi.waitFor(() => expect(service.busy()).toBe(false));
     expect(service.enabled()).toBe(true);
-    expect(api.postSubscribe).toHaveBeenCalledOnce();
   });
 
   it.each(['default', 'denied'] as const)(
@@ -220,11 +248,12 @@ describe('PushNotifications', () => {
       notification.permission = permission;
       current.next(subscription);
       const service = TestBed.inject(PushNotifications);
-      const refresh = service.refresh();
+      const refreshed = service.refresh();
       expect(service.enabled()).toBe(false);
       expect(service.busy()).toBe(false);
       expect(localStorage.getItem(preferenceKey)).toBe('false');
-      await refresh;
+      (await unsubscribe()).flush(null);
+      await refreshed;
       expect(notification.requestPermission).not.toHaveBeenCalled();
       expect(browser.requestSubscription).not.toHaveBeenCalled();
       expect(browser.unsubscribe).toHaveBeenCalledOnce();
@@ -233,17 +262,16 @@ describe('PushNotifications', () => {
 
   it('shows enabled immediately and repairs a missing subscription without a gesture', async () => {
     localStorage.setItem(preferenceKey, 'true');
-    const pending = new Subject<void>();
-    api.postSubscribe.mockReturnValue(pending);
     const service = TestBed.inject(PushNotifications);
-    const refresh = service.refresh();
+    const refreshed = service.refresh();
     expect(service.enabled()).toBe(true);
     expect(service.busy()).toBe(false);
-    await vi.waitFor(() => expect(api.postSubscribe).toHaveBeenCalledOnce());
+    await vapid();
+    const registration = await subscribe();
     expect(notification.requestPermission).not.toHaveBeenCalled();
     expect(browser.requestSubscription).toHaveBeenCalledOnce();
-    pending.next();
-    await refresh;
+    registration.flush(null);
+    await refreshed;
     expect(service.error()).toBeUndefined();
   });
 
@@ -251,14 +279,12 @@ describe('PushNotifications', () => {
     localStorage.setItem(preferenceKey, 'false');
     current.next(subscription);
     const service = TestBed.inject(PushNotifications);
-    await service.refresh();
+    const refreshed = service.refresh();
+    (await unsubscribe()).flush(null);
+    await refreshed;
     expect(service.enabled()).toBe(false);
     expect(notification.requestPermission).not.toHaveBeenCalled();
     expect(browser.requestSubscription).not.toHaveBeenCalled();
-    expect(api.postUnsubscribe).toHaveBeenCalledWith(
-      { provider: ApiPushProvider.webPush, endpoint },
-      { timeout: 10000 },
-    );
     expect(browser.unsubscribe).toHaveBeenCalledOnce();
   });
 
@@ -271,7 +297,7 @@ describe('PushNotifications', () => {
     expect(service.enabled()).toBe(false);
     expect(localStorage.getItem(preferenceKey)).toBe('false');
     expect(service.error()).toBe(PushNotificationError.PermissionDenied);
-    expect(api.postSubscribe).not.toHaveBeenCalled();
+    peer.expectNone('push.subscribe');
   });
 
   it.each(['browser', 'worker'])('stops synchronously when the %s environment cannot support push', async (missing) => {
@@ -285,43 +311,54 @@ describe('PushNotifications', () => {
     expect(await service.setEnabled(true)).toBe(false);
     expect(notification.requestPermission).not.toHaveBeenCalled();
     expect(browser.requestSubscription).not.toHaveBeenCalled();
-    expect(api.postSubscribe).not.toHaveBeenCalled();
+    peer.expectNone('push.subscribe');
   });
 
   it('keeps a new browser endpoint and enabled choice when backend registration fails, then retries silently', async () => {
-    api.postSubscribe.mockReturnValue(throwError(() => new Error('backend offline')));
     const service = TestBed.inject(PushNotifications);
-    expect(await service.setEnabled(true)).toBe(false);
+    const first = service.setEnabled(true);
+    await vapid();
+    (await subscribe()).error(RpcErrorCode.Unavailable, 'temporarily unavailable');
+    expect(await first).toBe(false);
     expect(browser.unsubscribe).not.toHaveBeenCalled();
     expect(service.error()).toBe(PushNotificationError.BackendSubscribeFailed);
     expect(service.enabled()).toBe(true);
-    api.postSubscribe.mockReturnValue(of(undefined));
-    await service.refresh();
+    const retry = service.refresh();
+    (await subscribe()).flush(null);
+    await retry;
     expect(service.error()).toBeUndefined();
-    expect(api.postSubscribe).toHaveBeenCalledTimes(2);
     expect(browser.requestSubscription).toHaveBeenCalledOnce();
   });
 
   it('coalesces registration and reuses success until the subscription or account changes', async () => {
     const service = TestBed.inject(PushNotifications);
-    await Promise.all([service.refresh(), service.refresh(), service.refresh()]);
+    const refreshes = [service.refresh(), service.refresh(), service.refresh()];
+    await vapid();
+    (await subscribe()).flush(null);
+    await Promise.all(refreshes);
     await service.refresh();
-    expect(api.postSubscribe).toHaveBeenCalledOnce();
-    (TestBed.inject(SessionStore).user as ReturnType<typeof signal<typeof testUser>>).set({ ...testUser, uid: 2 });
-    await service.refresh();
-    expect(api.postSubscribe).toHaveBeenCalledTimes(2);
-    current.next({ ...subscription, endpoint: 'https://push.example/rotated' });
-    await service.refresh();
-    expect(api.postSubscribe).toHaveBeenCalledTimes(3);
+    sessionUser.set({ ...testUser, uid: 2 });
+    const accountRefresh = service.refresh();
+    (await subscribe()).flush(null);
+    await accountRefresh;
+    const rotated = { ...subscription, endpoint: 'https://push.example/rotated' };
+    current.next(rotated);
+    const endpointRefresh = service.refresh();
+    (await subscribe(rotated)).flush(null);
+    await endpointRefresh;
   });
 
   it('periodically repairs an unchanged registration without checking every resume', async () => {
     const service = TestBed.inject(PushNotifications);
-    await service.refresh();
+    const first = service.refresh();
+    await vapid();
+    (await subscribe()).flush(null);
+    await first;
     const now = Date.now();
     vi.spyOn(Date, 'now').mockReturnValue(now + 24 * 60 * 60 * 1000 + 1);
-    await service.refresh();
-    expect(api.postSubscribe).toHaveBeenCalledTimes(2);
+    const refreshed = service.refresh();
+    (await subscribe()).flush(null);
+    await refreshed;
     vi.restoreAllMocks();
   });
 
@@ -329,17 +366,20 @@ describe('PushNotifications', () => {
     localStorage.setItem(preferenceKey, 'true');
     current.next(subscription);
     const service = TestBed.inject(PushNotifications);
-    await service.refresh();
-    expect(api.getSubscriptionStatus).not.toHaveBeenCalled();
-    expect(api.postSubscribe).toHaveBeenCalledOnce();
-    expect(api.getVapidPublicKey).not.toHaveBeenCalled();
+    const refreshed = service.refresh();
+    (await subscribe()).flush(null);
+    await refreshed;
+    peer.expectNone('push.getSubscriptionStatus');
+    peer.expectNone('push.getVapidPublicKey');
   });
 
   it('silently preserves the enabled choice on a background subscription failure with granted permission', async () => {
     localStorage.setItem(preferenceKey, 'true');
     browser.requestSubscription.mockRejectedValue(new DOMException('service unavailable', 'NotAllowedError'));
     const service = TestBed.inject(PushNotifications);
-    await service.refresh();
+    const refreshed = service.refresh();
+    await vapid();
+    await refreshed;
     expect(service.enabled()).toBe(true);
     expect(localStorage.getItem(preferenceKey)).toBe('true');
     expect(service.error()).toBeUndefined();
@@ -350,10 +390,10 @@ describe('PushNotifications', () => {
   it('keeps notifications off and removes the browser endpoint even when backend deletion fails', async () => {
     localStorage.setItem(preferenceKey, 'true');
     current.next(subscription);
-    api.postUnsubscribe.mockReturnValue(throwError(() => new Error('offline')));
     const service = TestBed.inject(PushNotifications);
     const disabled = service.setEnabled(false);
     expect(service.enabled()).toBe(false);
+    (await unsubscribe()).error(RpcErrorCode.Unavailable, 'temporarily unavailable');
     expect(await disabled).toBe(false);
     expect(service.error()).toBe(PushNotificationError.UnsubscribeFailed);
     expect(browser.unsubscribe).toHaveBeenCalledOnce();
@@ -364,11 +404,15 @@ describe('PushNotifications', () => {
     current.next(subscription);
     browser.unsubscribe.mockRejectedValue(new Error('browser failure'));
     const service = TestBed.inject(PushNotifications);
-    expect(await service.setEnabled(false)).toBe(false);
+    const disabled = service.setEnabled(false);
+    (await unsubscribe()).flush(null);
+    expect(await disabled).toBe(false);
     expect(service.enabled()).toBe(false);
     expect(service.error()).toBe(PushNotificationError.UnsubscribeFailed);
     browser.unsubscribe.mockImplementation(async () => current.next(null));
-    await service.refresh();
+    const refreshed = service.refresh();
+    (await unsubscribe()).flush(null);
+    await refreshed;
     expect(browser.unsubscribe).toHaveBeenCalledTimes(2);
   });
 
@@ -376,21 +420,20 @@ describe('PushNotifications', () => {
     'honors switching off during a pending background registration (success=%s)',
     async (success) => {
       localStorage.setItem(preferenceKey, 'true');
-      const pending = new Subject<void>();
-      api.postSubscribe.mockReturnValue(pending);
       const service = TestBed.inject(PushNotifications);
-      const refresh = service.refresh();
-      await vi.waitFor(() => expect(api.postSubscribe).toHaveBeenCalledOnce());
+      const refreshed = service.refresh();
+      await vapid();
+      const registration = await subscribe();
       const disabled = service.setEnabled(false);
       expect(service.enabled()).toBe(false);
-      expect(api.postUnsubscribe).not.toHaveBeenCalled();
-      if (success) pending.next();
-      else pending.error(new Error('offline'));
-      await refresh;
+      peer.expectNone('push.unsubscribe');
+      if (success) registration.flush(null);
+      else registration.error(RpcErrorCode.Unavailable, 'temporarily unavailable');
+      await refreshed;
+      (await unsubscribe()).flush(null);
       expect(await disabled).toBe(true);
       expect(service.enabled()).toBe(false);
       expect(localStorage.getItem(preferenceKey)).toBe('false');
-      expect(api.postUnsubscribe).toHaveBeenCalledOnce();
       expect(browser.unsubscribe).toHaveBeenCalledOnce();
       expect(service.error()).toBeUndefined();
     },
@@ -400,20 +443,19 @@ describe('PushNotifications', () => {
     localStorage.setItem(preferenceKey, 'false');
     notification.permission = 'default';
     current.next(subscription);
-    const pending = new Subject<void>();
-    api.postUnsubscribe.mockReturnValue(pending);
     const service = TestBed.inject(PushNotifications);
-    const refresh = service.refresh();
-    await vi.waitFor(() => expect(api.postUnsubscribe).toHaveBeenCalledOnce());
+    const refreshed = service.refresh();
+    const cleanup = await unsubscribe();
     const enabled = service.setEnabled(true);
     expect(notification.requestPermission).toHaveBeenCalledOnce();
-    expect(api.postSubscribe).not.toHaveBeenCalled();
-    pending.next();
-    await refresh;
+    peer.expectNone('push.subscribe');
+    cleanup.flush(null);
+    await refreshed;
+    await vapid();
+    (await subscribe()).flush(null);
     expect(await enabled).toBe(true);
     expect(service.enabled()).toBe(true);
     expect(browser.unsubscribe).toHaveBeenCalledOnce();
-    expect(api.postSubscribe).toHaveBeenCalledOnce();
   });
 
   it('releases loading state when a worker registration never becomes available', async () => {

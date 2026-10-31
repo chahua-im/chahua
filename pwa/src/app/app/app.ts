@@ -1,5 +1,4 @@
 import { DOCUMENT, NgOptimizedImage } from '@angular/common';
-import { HttpErrorResponse } from '@angular/common/http';
 import {
   afterRenderEffect,
   Component,
@@ -35,6 +34,7 @@ import { NotificationPrompt } from '../pwa/notification-prompt/notification-prom
 import { PushNotifications } from '../pwa/push-notifications';
 import { ContentScrollbars } from '../scrolling/content-scrollbars';
 import { SessionStore } from '../session/session-store';
+import { RpcError, RpcErrorCode, RpcTransportError } from '../api/rpc-error';
 
 enum EntryState {
   Loading = 'loading',
@@ -108,6 +108,7 @@ export class App {
   );
   protected readonly needsLogin = computed(() => [EntryState.Missing, EntryState.Expired].includes(this.entryState()));
   protected readonly EntryState = EntryState;
+  private initializationEpoch = 0;
   private slowTimer?: ReturnType<typeof setTimeout>;
   protected readonly updates = inject(AppUpdates);
   protected readonly updateReady = translateSignal('app.updateReady');
@@ -167,24 +168,27 @@ export class App {
 
   protected async initialize() {
     if (this.loading()) return;
+    const epoch = ++this.initializationEpoch;
     this.loading.set(true);
     this.slow.set(false);
     this.error.set(undefined);
     this.slowTimer = setTimeout(() => this.slow.set(true), 10000);
     try {
       await this.session.initialize();
-      if (this.session.user()) this.notifications.start();
+      if (epoch === this.initializationEpoch && this.session.user()) this.notifications.start();
     } catch (error) {
+      if (epoch !== this.initializationEpoch) return;
       this.error.set(
-        error instanceof TimeoutError || (error instanceof HttpErrorResponse && error.status === 0)
+        error instanceof TimeoutError || error instanceof RpcTransportError
           ? EntryState.Network
-          : error instanceof HttpErrorResponse && error.status === 401
+          : error instanceof RpcError && error.code === RpcErrorCode.Unauthorized
             ? EntryState.Expired
-            : error instanceof HttpErrorResponse && error.status >= 500
+            : error instanceof RpcError && [RpcErrorCode.Unavailable, RpcErrorCode.Internal].includes(error.code)
               ? EntryState.Server
               : EntryState.Failed,
       );
     } finally {
+      if (epoch !== this.initializationEpoch) return;
       clearTimeout(this.slowTimer);
       this.loading.set(false);
     }

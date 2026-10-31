@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::dto::{messages::MessagePreview, users::User};
 use crate::models::GroupKind;
@@ -47,6 +47,51 @@ pub enum ThreadOrder {
     Oldest,
     #[default]
     Newest,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListThreadsQuery {
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[schema(schema_with = crate::serde_i64_string::schema_opt)]
+    pub root_id: Option<i64>,
+    #[serde(default)]
+    pub limit: Option<i64>,
+    #[serde(default)]
+    pub before: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub archived: Option<bool>,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListChatThreadsQuery {
+    pub limit: Option<i64>,
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[schema(schema_with = crate::serde_i64_string::schema_opt)]
+    pub cursor: Option<i64>,
+    #[serde(default)]
+    pub order: ThreadOrder,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct ListThreadParticipantsQuery {
+    pub limit: Option<i64>,
+    pub cursor: Option<i32>,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkThreadReadBody {
+    #[serde(deserialize_with = "crate::serde_i64_string::deserialize")]
+    #[schema(schema_with = crate::serde_i64_string::schema)]
+    pub message_id: i64,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]

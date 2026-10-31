@@ -1,20 +1,16 @@
-import { provideHttpClient, withInterceptors } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { ChangeDetectorRef, Component, getDebugNode, signal } from '@angular/core';
+import { ChangeDetectorRef, Component, getDebugNode, signal, type WritableSignal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { IonNav, ModalController, provideIonicAngular } from '@ionic/angular';
-import { vi } from 'vitest';
-import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
+import { type Mock, vi } from 'vitest';
 import {
   FriendAddVerificationMode as Mode,
+  GroupKind,
   PresenceVisibility,
   type FriendSettingsResponse,
   type PresenceSettingsResponse,
 } from '../../../generated/models';
-import { Connection } from '../../api/connection';
-import { jsonInterceptor } from '../../api/json.interceptor';
-import { mockRealtime, testUser } from '../../api/testing';
+import { RpcTestPeer, provideRpcTesting } from '../../api/rpc-testing';
 import { PanelNavigation } from '../../navigation/panel-navigation';
 import { Presence } from '../../presence/presence';
 import { AppUpdates, UpdateCheckResult } from '../../pwa/app-updates';
@@ -29,6 +25,7 @@ import { PresenceSettings } from '../presence-settings/presence-settings';
 import { PrivacySettings } from '../privacy-settings/privacy-settings';
 import { StickerPreferences } from '../sticker-preferences';
 import { StickerSettings } from '../sticker-settings/sticker-settings';
+import { testUser } from '../../api/testing';
 import { Settings } from './settings';
 
 @Component({ imports: [IonNav], template: '<ion-nav [root]="root"></ion-nav>' })
@@ -40,34 +37,33 @@ describe('Settings', () => {
   let fixture: ComponentFixture<SettingsHost>;
   let nav: HTMLIonNavElement;
   let page: HTMLElement;
-  let http: HttpTestingController;
-  let dismiss: ReturnType<typeof vi.fn>;
+  let peer: RpcTestPeer;
+  let dismiss: Mock;
   let notifications: {
     supported: boolean;
-    permission: ReturnType<typeof signal<NotificationPermission>>;
-    enabled: ReturnType<typeof signal<boolean>>;
-    busy: ReturnType<typeof signal<boolean>>;
-    error: ReturnType<typeof signal<PushNotificationError | undefined>>;
-    refresh: ReturnType<typeof vi.fn>;
-    setEnabled: ReturnType<typeof vi.fn>;
+    permission: WritableSignal<NotificationPermission>;
+    enabled: WritableSignal<boolean>;
+    busy: WritableSignal<boolean>;
+    error: WritableSignal<PushNotificationError | undefined>;
+    refresh: Mock;
+    setEnabled: Mock;
   };
   let updates: {
     supported: boolean;
     version: string;
-    checking: ReturnType<typeof signal<boolean>>;
-    available: ReturnType<typeof signal<boolean>>;
-    check: ReturnType<typeof vi.fn>;
-    reload: ReturnType<typeof vi.fn>;
+    checking: WritableSignal<boolean>;
+    available: WritableSignal<boolean>;
+    check: Mock;
+    reload: Mock;
   };
-  let presence: { invalidateUsers: () => void };
-  const presenceEndpoint = '/_api/me/presence-settings';
-  const endpoint = '/_api/friends/me/settings';
+  let presence: { invalidateUsers: Mock };
 
   beforeEach(async () => {
     const values = new Map<string, string>();
     vi.stubGlobal('localStorage', {
       getItem: (key: string) => values.get(key) ?? null,
       setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
     });
     dismiss = vi.fn().mockResolvedValue(true);
     notifications = {
@@ -88,16 +84,14 @@ describe('Settings', () => {
       reload: vi.fn(),
     };
     presence = { invalidateUsers: vi.fn() };
-    TestBed.configureTestingModule({
+    await TestBed.configureTestingModule({
       imports: [SettingsHost],
       providers: [
         provideIonicAngular({ animated: false }),
         provideRouter([]),
-        provideHttpClient(withInterceptors([jsonInterceptor])),
-        provideHttpClientTesting(),
-        provideChahuaBaseUrl('/_api'),
-        { provide: Connection, useValue: mockRealtime() },
+        provideRpcTesting(),
         SessionStore,
+        Preferences,
         { provide: ModalController, useValue: { dismiss } },
         { provide: PanelNavigation, useValue: { back: dismiss, close: dismiss, registerLeaveCheck: () => () => {} } },
         { provide: PushNotifications, useValue: notifications },
@@ -114,11 +108,13 @@ describe('Settings', () => {
           },
         },
       ],
-    });
-    TestBed.inject(SessionStore).user.set({ ...testUser, avatarUrl: '/avatar.jpg' });
-    vi.spyOn(TestBed.inject(SessionStore), 'devUid').mockReturnValue(1);
-    vi.spyOn(TestBed.inject(SessionStore), 'switchDevUid').mockImplementation(() => {});
-    http = TestBed.inject(HttpTestingController);
+    }).compileComponents();
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
+    const session = TestBed.inject(SessionStore);
+    session.user.set({ ...testUser, avatarUrl: '/avatar.jpg' });
+    vi.spyOn(session, 'devUid').mockReturnValue(1);
+    vi.spyOn(session, 'switchDevUid').mockImplementation(() => {});
     fixture = TestBed.createComponent(SettingsHost);
     fixture.detectChanges();
     nav = fixture.nativeElement.querySelector('ion-nav');
@@ -131,12 +127,12 @@ describe('Settings', () => {
   });
 
   afterEach(() => {
-    http.verify();
+    peer.verify();
     vi.unstubAllGlobals();
   });
 
   async function load(settings: FriendSettingsResponse = { mode: Mode.direct }) {
-    http.expectOne(endpoint).flush(settings);
+    peer.expect('friends.getSettings').flush(settings);
     await fixture.whenStable();
     fixture.detectChanges();
   }
@@ -144,7 +140,7 @@ describe('Settings', () => {
   async function loadPresence(
     settings: PresenceSettingsResponse = { visibility: PresenceVisibility.everyone, exceptionCount: 0 },
   ) {
-    http.expectOne(presenceEndpoint).flush(settings);
+    peer.expect('privacy.getPresenceSettings').flush(settings);
     await fixture.whenStable();
     fixture.detectChanges();
   }
@@ -157,10 +153,10 @@ describe('Settings', () => {
       await nav.push(PrivacySettings);
       page = (await nav.getActive())!.element!;
       TestBed.tick();
-      http.expectOne('/_api/blocks').flush({ blocks: [] });
-      http.expectOne('/_api/me/read-receipt-settings').flush({ visibility: 'friends' });
-      http.expectOne(endpoint).flush({ mode: Mode.direct });
-      http.expectOne(presenceEndpoint).flush({ visibility: PresenceVisibility.everyone });
+      peer.expect('blocks.list').flush({ blocks: [] });
+      peer.expect('privacy.getReadReceiptSettings').flush({ visibility: 'friends' });
+      peer.expect('friends.getSettings').flush({ mode: Mode.direct });
+      peer.expect('privacy.getPresenceSettings').flush({ visibility: PresenceVisibility.everyone });
       await fixture.whenStable();
     }
     const destination =
@@ -173,7 +169,7 @@ describe('Settings', () => {
     await nav.push(destination.component);
     page = (await nav.getActive())!.element!;
     await fixture.whenStable();
-    if (label === '在线状态隐私') http.expectOne('/_api/me/privacy-exceptions?kind=presence').flush({ exceptions: [] });
+    if (label === '在线状态隐私') peer.expect('privacy.listExceptions', { kind: 'presence' }).flush({ exceptions: [] });
   }
 
   async function openNotifications() {
@@ -181,10 +177,12 @@ describe('Settings', () => {
     await nav.push(NotificationSettings);
     page = (await nav.getActive())!.element!;
     TestBed.tick();
-    http
-      .expectOne('/_api/users/me/notification-exceptions?kind=group&limit=1')
+    peer
+      .expect('users.listNotificationExceptions', { kind: GroupKind.group, limit: 1 })
       .flush({ exceptions: [], totalCount: 0 });
-    http.expectOne('/_api/users/me/notification-exceptions?kind=dm&limit=1').flush({ exceptions: [], totalCount: 0 });
+    peer
+      .expect('users.listNotificationExceptions', { kind: GroupKind.dm, limit: 1 })
+      .flush({ exceptions: [], totalCount: 0 });
     await fixture.whenStable();
   }
 
@@ -228,8 +226,8 @@ describe('Settings', () => {
     expect(page.querySelector('ion-radio-group')).toBeNull();
     expect(page.textContent).not.toContain('在“消息”标签页中显示话题');
     expect(page.textContent).not.toContain('允许任何人');
-    http.expectNone(endpoint);
-    http.expectNone(presenceEndpoint);
+    peer.expectNone('friends.getSettings');
+    peer.expectNone('privacy.getPresenceSettings');
   });
 
   it('keeps chat preferences on the chat settings page and preserves saved choices', async () => {
@@ -288,10 +286,7 @@ describe('Settings', () => {
     await fixture.whenStable();
     expect(membership.disabled).toBe(true);
     expect(TestBed.inject(Preferences).showMembershipMessages()).toBe(false);
-    const save = http.expectOne('/_api/users/me/chat-settings');
-    expect(save.request.method).toBe('PUT');
-    expect(save.request.body).toEqual({ showMembershipMessages: true });
-    save.flush({ showMembershipMessages: true });
+    peer.expect('users.updateChatSettings', { showMembershipMessages: true }).flush({ showMembershipMessages: true });
     await fixture.whenStable();
     expect(TestBed.inject(Preferences).showMembershipMessages()).toBe(true);
     expect(localStorage.getItem('chahua.preferences.showMembershipMessages')).toBeNull();
@@ -308,7 +303,7 @@ describe('Settings', () => {
     await fixture.whenStable();
     expect(toggle.disabled).toBe(true);
     expect(page.querySelector('ion-spinner')).not.toBeNull();
-    http.expectOne('/_api/users/me/chat-settings').flush('', { status: 503, statusText: 'Unavailable' });
+    peer.expect('users.updateChatSettings', { showMembershipMessages: false }).error(1503);
     await vi.waitFor(() => expect(toggle.checked).toBe(true));
     await fixture.whenStable();
     expect(toggle.checked).toBe(true);
@@ -316,7 +311,7 @@ describe('Settings', () => {
     expect(TestBed.inject(Preferences).showMembershipMessages()).toBe(true);
     expect(page.textContent).toContain('保存失败，请重试。');
     toggle.dispatchEvent(new CustomEvent('ionChange', { detail: { checked: false } }));
-    http.expectOne('/_api/users/me/chat-settings').flush({ showMembershipMessages: false });
+    peer.expect('users.updateChatSettings', { showMembershipMessages: false }).flush({ showMembershipMessages: false });
     await fixture.whenStable();
     expect(toggle.checked).toBe(false);
     expect(TestBed.inject(Preferences).showMembershipMessages()).toBe(false);
@@ -357,16 +352,15 @@ describe('Settings', () => {
       (button) => button.textContent?.trim() === '保存',
     )!;
     expect(apply.disabled).toBe(true);
-    http.expectNone(endpoint);
+    peer.expectNone('friends.updateSettings');
     expect(page.textContent).toContain('请填写 1–100 字的问题');
     await enterQuestion('  我们在哪里认识的？  ');
-    http.expectNone(endpoint);
+    peer.expectNone('friends.updateSettings');
     expect(apply.disabled).toBe(false);
     apply.click();
-    const request = http.expectOne(endpoint);
-    expect(request.request.method).toBe('PUT');
-    expect(request.request.body).toEqual({ mode: Mode.question, question: '我们在哪里认识的？' });
-    request.flush({ mode: Mode.question, question: '我们在哪里认识的？' });
+    peer
+      .expect('friends.updateSettings', { mode: Mode.question, question: '我们在哪里认识的？' })
+      .flush({ mode: Mode.question, question: '我们在哪里认识的？' });
     await fixture.whenStable();
     await vi.waitFor(() => {
       fixture.detectChanges();
@@ -388,10 +382,9 @@ describe('Settings', () => {
     ).toBe(false);
     await choose(PresenceVisibility.nobody);
     await choose(PresenceVisibility.friends);
-    const request = http.expectOne(presenceEndpoint);
-    expect(request.request.method).toBe('PUT');
-    expect(request.request.body).toEqual({ visibility: PresenceVisibility.nobody });
-    request.flush({ visibility: PresenceVisibility.nobody });
+    peer
+      .expect('privacy.updatePresenceSettings', { visibility: PresenceVisibility.nobody })
+      .flush({ visibility: PresenceVisibility.nobody });
     await fixture.whenStable();
     expect(presence.invalidateUsers).toHaveBeenCalledOnce();
     await vi.waitFor(() => {
@@ -408,16 +401,14 @@ describe('Settings', () => {
     expect(
       Array.from(page.querySelectorAll('ion-button')).some((button) => button.textContent?.trim() === '保存'),
     ).toBe(false);
-    const request = http.expectOne(endpoint);
-    expect(request.request.body).toEqual({ mode: Mode.forbid });
-    request.flush({ mode: Mode.forbid });
+    peer.expect('friends.updateSettings', { mode: Mode.forbid }).flush({ mode: Mode.forbid });
     await fixture.whenStable();
     expect(friendPage()['verification']()).toEqual({ mode: Mode.forbid, question: '' });
   });
 
   it('retries a failed initial load before allowing settings to be changed', async () => {
     await openPage('好友验证');
-    http.expectOne(endpoint).flush('', { status: 503, statusText: 'Unavailable' });
+    peer.expect('friends.getSettings').error(1503);
     await fixture.whenStable();
     fixture.detectChanges();
     expect(page.querySelector('ion-radio-group')).toBeNull();
@@ -435,7 +426,7 @@ describe('Settings', () => {
     await load();
     await choose(Mode.need_message);
     await friendPage()['saveVerification']();
-    http.expectOne(endpoint).flush('', { status: 503, statusText: 'Unavailable' });
+    peer.expect('friends.updateSettings', { mode: Mode.need_message }).error(1503);
     await fixture.whenStable();
     await vi.waitFor(() => {
       fixture.detectChanges();
@@ -445,7 +436,7 @@ describe('Settings', () => {
     Array.from(page.querySelectorAll('ion-button'))
       .find((button) => button.textContent?.includes('重试'))!
       .click();
-    http.expectOne(endpoint).flush({ mode: Mode.need_message });
+    peer.expect('friends.updateSettings', { mode: Mode.need_message }).flush({ mode: Mode.need_message });
     await fixture.whenStable();
     await vi.waitFor(() => {
       fixture.detectChanges();
@@ -460,8 +451,8 @@ describe('Settings', () => {
     expect(item.getAttribute('href')).toBe('/settings/stickers');
     await nav.push(StickerSettings);
     page = (await nav.getActive())!.element!;
-    http.expectOne('/_api/stickers/packs/mine/owned').flush({ packs: [] });
-    http.expectOne('/_api/stickers/packs/mine/subscribed').flush({ packs: [] });
+    peer.expect('stickers.listOwnedPacks').flush({ packs: [] });
+    peer.expect('stickers.listSubscribedPacks').flush({ packs: [] });
     await fixture.whenStable();
     expect(page.querySelector('ion-title')!.textContent).toBe('表情和贴纸');
   });

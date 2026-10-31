@@ -1,4 +1,4 @@
-import { HttpErrorResponse } from '@angular/common/http';
+import { RpcError, RpcErrorCode } from '../../api/rpc-error';
 import { ChatAvatar } from '../chat-avatar/chat-avatar';
 import { RouterLink } from '@angular/router';
 import { Component, DestroyRef, effect, inject, input, signal, untracked } from '@angular/core';
@@ -14,7 +14,7 @@ import {
   type InfiniteScrollCustomEvent,
 } from '@ionic/angular';
 import { firstValueFrom, Subject, takeUntil } from 'rxjs';
-import { ThreadsService } from '../../../generated/endpoints/threads/threads.service';
+import { RpcApi } from '../../../generated/rpc-api';
 import type { SnowflakeID, User } from '../../../generated/models';
 import { fillScrollViewport } from '../../scrolling/fill-scroll-viewport';
 import { LoadError } from '../../ui/load-error/load-error';
@@ -38,7 +38,7 @@ import { LoadError } from '../../ui/load-error/load-error';
 export class ThreadParticipants {
   readonly chatId = input.required<SnowflakeID>();
   readonly rootId = input.required<SnowflakeID>();
-  private readonly api = inject(ThreadsService);
+  private readonly api = inject(RpcApi);
   private readonly destroy = inject(DestroyRef);
   private readonly cancel = new Subject<void>();
   private version = 0;
@@ -93,8 +93,10 @@ export class ThreadParticipants {
     this.retryMore = more;
     try {
       const page = await firstValueFrom(
-        this.api
-          .getThreadParticipants(this.chatId(), this.rootId(), {
+        this.api.threads
+          .listParticipants({
+            chatId: this.chatId(),
+            threadRootId: this.rootId(),
             limit: 100,
             cursor: more && cursor != null ? cursor : undefined,
           })
@@ -106,7 +108,12 @@ export class ThreadParticipants {
       this.loaded.set(true);
     } catch (error) {
       if (version !== this.version || this.destroy.destroyed) return;
-      if (error instanceof HttpErrorResponse && [401, 403, 404].includes(error.status)) {
+      if (
+        error instanceof RpcError &&
+        [RpcErrorCode.Unauthorized, RpcErrorCode.Forbidden, RpcErrorCode.NotFound, RpcErrorCode.Gone].includes(
+          error.code,
+        )
+      ) {
         this.participants.set([]);
         this.cursor.set(undefined);
         this.retryable.set(false);

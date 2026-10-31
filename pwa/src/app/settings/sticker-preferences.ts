@@ -2,9 +2,9 @@ import { Service, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom, filter } from 'rxjs';
 import { Connection } from '../api/connection';
-import type { SnowflakeID } from '../api/snowflake-id';
+import { decodeId, encodeId, type SnowflakeID } from '../api/snowflake-id';
 import { SessionStore } from '../session/session-store';
-import { UsersService } from '../../generated/endpoints/users/users.service';
+import { RpcApi } from '../../generated/rpc-api';
 import type { StickerPackOrderItem, UpdateStickerPackOrderItem } from '../../generated/models';
 import { ServerWsMessageType } from '../../generated/models';
 
@@ -23,7 +23,7 @@ export interface FavoriteStickerOrderItem {
 @Service()
 export class StickerPreferences {
   private readonly session = inject(SessionStore);
-  private readonly users = inject(UsersService);
+  private readonly users = inject(RpcApi);
   private readonly autoSortPacks = signal(window.localStorage.getItem(AUTO_SORT_PACKS_KEY) === 'true');
   private readonly autoSortFavorites = signal(window.localStorage.getItem(AUTO_SORT_FAVORITES_KEY) === 'true');
   private readonly favoriteOrder = signal(readFavoriteOrder());
@@ -65,17 +65,22 @@ export class StickerPreferences {
       normalized,
       ...current.filter((existing) => existing.stickerId !== item.stickerId),
     ]);
-    window.localStorage.setItem(FAVORITE_ORDER_KEY, JSON.stringify(this.favoriteOrder()));
+    window.localStorage.setItem(
+      FAVORITE_ORDER_KEY,
+      JSON.stringify(
+        this.favoriteOrder().map(({ stickerId, lastUsedOn }) => ({ stickerId: decodeId(stickerId), lastUsedOn })),
+      ),
+    );
   }
 
   /** Server owns the pack order; a failed sync is healed by re-reading it. */
   async syncPackOrder(items: UpdateStickerPackOrderItem[]) {
     try {
-      await firstValueFrom(this.users.putStickerpackOrder({ order: items }));
+      await firstValueFrom(this.users.users.updateStickerPackOrder({ order: items }));
       return true;
     } catch {
       try {
-        const user = await firstValueFrom(this.users.getMe());
+        const user = await firstValueFrom(this.users.users.getMe());
         this.session.replaceStickerPackOrder(user.stickerPackOrder);
       } catch {
         // Keep the local order when offline; the caller can offer to retry the write.
@@ -125,11 +130,22 @@ function readFavoriteOrder(): FavoriteStickerOrderItem[] {
     for (const entry of value) {
       if (typeof entry !== 'object' || entry == null) continue;
       const { stickerId, lastUsedOn } = entry as Record<string, unknown>;
-      if (typeof stickerId !== 'number' || !Number.isFinite(stickerId)) continue;
+      let id: SnowflakeID;
+      if (typeof stickerId === 'string' && /^\d+$/.test(stickerId)) {
+        try {
+          id = encodeId(stickerId);
+        } catch {
+          continue;
+        }
+      } else if (typeof stickerId === 'number' && Number.isFinite(stickerId)) {
+        id = stickerId as SnowflakeID;
+      } else {
+        continue;
+      }
       if (typeof lastUsedOn !== 'number' || !Number.isFinite(lastUsedOn)) continue;
-      if (seen.has(stickerId as SnowflakeID)) continue;
-      seen.add(stickerId as SnowflakeID);
-      items.push({ stickerId: stickerId as SnowflakeID, lastUsedOn: Math.trunc(lastUsedOn) });
+      if (seen.has(id)) continue;
+      seen.add(id);
+      items.push({ stickerId: id, lastUsedOn: Math.trunc(lastUsedOn) });
     }
     return items;
   } catch {

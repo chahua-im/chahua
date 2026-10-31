@@ -1,3 +1,4 @@
+use crate::services::message_search::MessageSearchSort;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -8,6 +9,38 @@ use crate::{
     },
     models::MessageType,
 };
+
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateMessageBody {
+    pub message: Option<String>,
+    pub message_type: MessageType,
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[schema(value_type = Option<String>)]
+    pub sticker_id: Option<i64>,
+    pub client_generated_id: String,
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[schema(value_type = Option<String>)]
+    pub reply_to_id: Option<i64>,
+    /// Uploaded attachment IDs in display order; allocation-time order is replaced.
+    #[serde(default)]
+    pub attachment_ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateMessageBody {
+    pub message: String,
+    /// Complete attachment selection in display order, including retained uploads.
+    #[serde(default)]
+    pub attachment_ids: Vec<String>,
+}
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -478,7 +511,7 @@ pub struct MessageStickerResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::ListMessagesResponse;
+    use super::{ForwardMessagesBody, ListMessagesResponse};
     use serde_json::json;
 
     #[test]
@@ -513,4 +546,92 @@ mod tests {
             })
         );
     }
+
+    #[test]
+    fn forward_request_requires_the_client_generated_id() {
+        let body = serde_json::from_value::<ForwardMessagesBody>(serde_json::json!({
+            "sourceChatId": "42",
+            "messageIds": ["10"],
+            "clientGeneratedId": "forward-retry-42"
+        }))
+        .expect("forward request should retain the caller-generated id");
+
+        assert_eq!(body.client_generated_id, "forward-retry-42");
+        assert!(
+            serde_json::from_value::<ForwardMessagesBody>(serde_json::json!({
+                "sourceChatId": "42",
+                "messageIds": ["10"]
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn merged_forward_request_accepts_an_optional_string_thread_id() {
+        let mut json = serde_json::json!({
+            "sourceChatId": "42",
+            "messageIds": ["10", "20"],
+            "clientGeneratedId": "forward-thread-42"
+        });
+        let body: ForwardMessagesBody = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(body.thread_id, None);
+        json["threadId"] = serde_json::Value::Null;
+        let body: ForwardMessagesBody = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(body.thread_id, None);
+        json["threadId"] = i64::MAX.to_string().into();
+        let body: ForwardMessagesBody = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(body.thread_id, Some(i64::MAX));
+        json["threadId"] = "invalid".into();
+        assert!(serde_json::from_value::<ForwardMessagesBody>(json).is_err());
+    }
+}
+#[derive(Debug, serde::Deserialize, utoipa::IntoParams, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+#[into_params(parameter_in = Query)]
+pub struct ListMessagesQuery {
+    /// Cursor: fetch messages before this ID
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[param(value_type = Option<String>)]
+    #[schema(schema_with = crate::serde_i64_string::schema_opt)]
+    pub before: Option<i64>,
+    /// Cursor: fetch messages around this ID
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[param(value_type = Option<String>)]
+    #[schema(schema_with = crate::serde_i64_string::schema_opt)]
+    pub around: Option<i64>,
+    /// Cursor: fetch messages after this ID
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[param(value_type = Option<String>)]
+    #[schema(schema_with = crate::serde_i64_string::schema_opt)]
+    pub after: Option<i64>,
+    /// Max number of messages to return
+    #[serde(default)]
+    pub max: Option<i64>,
+    /// Thread root ID to filter by
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[param(value_type = Option<String>)]
+    #[schema(schema_with = crate::serde_i64_string::schema_opt)]
+    pub thread_id: Option<i64>,
+}
+
+#[derive(Debug, serde::Deserialize, utoipa::IntoParams, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchMessagesQuery {
+    pub q: String,
+    #[serde(default)]
+    pub sort: Option<MessageSearchSort>,
+    pub limit: Option<i64>,
+    pub offset: Option<usize>,
 }

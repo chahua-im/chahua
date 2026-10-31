@@ -17,7 +17,7 @@ import {
 } from '@ionic/angular';
 import type { ToggleCustomEvent } from '@ionic/core';
 import { firstValueFrom } from 'rxjs';
-import { UsersService } from '../../../generated/endpoints/users/users.service';
+import { RpcApi } from '../../../generated/rpc-api';
 import { GroupKind, NotificationSettingMode, type NotificationExceptionsResponse } from '../../../generated/models';
 import { Connection, ResyncReason } from '../../api/connection';
 import { ChatStore } from '../../chats/chat-store';
@@ -60,7 +60,7 @@ export class NotificationCategory {
   private readonly clearAlert = viewChild.required(IonAlert);
   protected readonly Kind = GroupKind;
   protected readonly store = inject(ChatStore);
-  private readonly api = inject(UsersService);
+  private readonly api = inject(RpcApi);
   private readonly session = inject(SessionStore);
   private readonly account = computed(() => this.session.user()?.uid);
   private readonly realtime = inject(Connection);
@@ -177,8 +177,8 @@ export class NotificationCategory {
         try {
           do {
             result = await firstValueFrom(
-              this.api
-                .getExceptions({ kind, after: cursor, limit: this.compact() ? 1 : 20 })
+              this.api.users
+                .listNotificationExceptions({ kind, after: cursor, limit: this.compact() ? 1 : 20 })
                 .pipe(takeUntilDestroyed(this.destroy)),
             );
             if (this.destroy.destroyed || version !== this.revision || uid !== this.session.user()?.uid) break;

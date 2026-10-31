@@ -7,6 +7,7 @@
  */
 import type { SnowflakeID } from '../snowflakeID';
 import type { StickerPackPreviewSticker } from './stickerPackPreviewSticker';
+import type { StickerPackVisibility } from './stickerPackVisibility';
 
 export interface StickerPackSummary {
   createdAt: string;
@@ -19,4 +20,5 @@ export interface StickerPackSummary {
   previewSticker?: StickerPackPreviewSticker;
   stickerCount: number;
   updatedAt: string;
+  visibility: StickerPackVisibility;
 }

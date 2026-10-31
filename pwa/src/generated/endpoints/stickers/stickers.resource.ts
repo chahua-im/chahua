@@ -8,15 +8,18 @@ import { decodeId } from '../../../app/api/snowflake-id';
  */
 import type {
   FavoriteStickerListResponse,
+  GetPacksParams,
   SnowflakeID,
   StickerDetailResponse,
   StickerPackDetailResponse,
+  StickerPackDiscoveryResponse,
   StickerPackListResponse,
 } from '../../models';
 import { HttpHeaders, httpResource } from '@angular/common/http';
 import type { HttpContext, HttpResourceOptions, HttpResourceRef, HttpResourceRequest } from '@angular/common/http';
 import { inject } from '@angular/core';
 import type { ResourceStatus, Signal } from '@angular/core';
+import { map } from 'rxjs';
 import { CHAHUA_BASE_URL } from '../chahua.base-url';
 export interface OrvalHttpResourceRequestExtension {
   /** Extra headers merged over generated headers. Pass a function to read signals reactively. */
@@ -81,6 +84,73 @@ export function applyOrvalRequestExtension(
   }
   return options.request ? options.request(next) : next;
 }
+type AngularHttpParamValue = string | number | boolean | Array<string | number | boolean>;
+type AngularHttpParamValueWithNullable = AngularHttpParamValue | null;
+function filterParams(
+  params: Record<string, unknown>,
+  requiredNullableKeys?: ReadonlySet<string>,
+  preserveRequiredNullables?: false,
+  passthroughKeys?: undefined,
+): Record<string, AngularHttpParamValue>;
+function filterParams(
+  params: Record<string, unknown>,
+  requiredNullableKeys: ReadonlySet<string> | undefined,
+  preserveRequiredNullables: true,
+  passthroughKeys?: undefined,
+): Record<string, AngularHttpParamValueWithNullable>;
+function filterParams(
+  params: Record<string, unknown>,
+  requiredNullableKeys: ReadonlySet<string> | undefined,
+  preserveRequiredNullables: boolean | undefined,
+  passthroughKeys: ReadonlySet<string>,
+): Record<string, unknown>;
+function filterParams(
+  params: Record<string, unknown>,
+  requiredNullableKeys: ReadonlySet<string> = new Set(),
+  preserveRequiredNullables = false,
+  passthroughKeys: ReadonlySet<string> = new Set(),
+): Record<string, unknown> {
+  const filteredParams: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (passthroughKeys.has(key)) {
+      if (value !== undefined) {
+        filteredParams[key] = value;
+      }
+      continue;
+    }
+    if (Array.isArray(value)) {
+      const filtered = value
+        .filter(
+          (item) =>
+            item != null &&
+            (typeof item === 'string' ||
+              typeof item === 'number' ||
+              typeof item === 'boolean' ||
+              (item instanceof Date && !Number.isNaN(item.getTime()))),
+        )
+        .map((item) => (item instanceof Date ? item.toISOString() : item)) as Array<string | number | boolean>;
+      if (filtered.length) {
+        filteredParams[key] = filtered;
+      }
+    } else if (value === null && requiredNullableKeys.has(key)) {
+      // With a paramsSerializer (preserveRequiredNullables) the literal null
+      // is passed through for it to consume; without one, emit an empty
+      // string so the required key still reaches the wire as `?key=`
+      // instead of being silently dropped. See #3712.
+      filteredParams[key] = preserveRequiredNullables ? null : '';
+    } else if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      // useDates produces Date query params; serialize to ISO so they reach
+      // the wire instead of being dropped by the primitive check below. See #3856.
+      filteredParams[key] = value.toISOString();
+    } else if (
+      value != null &&
+      (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')
+    ) {
+      filteredParams[key] = value;
+    }
+  }
+  return filteredParams;
+}
 /**
  * @remarks httpResource is available in Angular 19.2 and later.
  */
@@ -100,6 +170,32 @@ export function getMyFavoritesResource(
     () => applyOrvalRequestExtension(`${baseUrl}/stickers/mine/favorites`, options),
     options,
   );
+}
+/**
+ * @remarks httpResource is available in Angular 19.2 and later.
+ */
+export function getPacksResource(
+  params: Signal<GetPacksParams> | undefined,
+  options: OrvalHttpResourceOptions<StickerPackDiscoveryResponse, unknown> & {
+    defaultValue: NoInfer<StickerPackDiscoveryResponse>;
+  },
+): HttpResourceRef<StickerPackDiscoveryResponse>;
+export function getPacksResource(
+  params?: Signal<GetPacksParams>,
+  options?: OrvalHttpResourceOptions<StickerPackDiscoveryResponse, unknown>,
+): HttpResourceRef<StickerPackDiscoveryResponse | undefined>;
+export function getPacksResource(
+  params?: Signal<GetPacksParams>,
+  options?: OrvalHttpResourceOptions<StickerPackDiscoveryResponse, unknown>,
+): HttpResourceRef<StickerPackDiscoveryResponse | undefined> {
+  const baseUrl = options?.injector ? options.injector.get(CHAHUA_BASE_URL) : inject(CHAHUA_BASE_URL);
+  return httpResource<StickerPackDiscoveryResponse>(() => {
+    const request = {
+      url: `${baseUrl}/stickers/packs`,
+      params: filterParams(params?.() ?? {}, new Set<string>([])),
+    };
+    return applyOrvalRequestExtension(request, options);
+  }, options);
 }
 /**
  * @remarks httpResource is available in Angular 19.2 and later.
@@ -188,6 +284,7 @@ export function getStickerResource(
   );
 }
 export type GetMyFavoritesResourceResult = NonNullable<FavoriteStickerListResponse>;
+export type GetPacksResourceResult = NonNullable<StickerPackDiscoveryResponse>;
 export type GetMyOwnedPacksResourceResult = NonNullable<StickerPackListResponse>;
 export type GetMySubscribedPacksResourceResult = NonNullable<StickerPackListResponse>;
 export type GetPackResourceResult = NonNullable<StickerPackDetailResponse>;

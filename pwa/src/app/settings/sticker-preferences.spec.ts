@@ -1,20 +1,37 @@
+import { signal, type WritableSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { vi, type MockInstance } from 'vitest';
-import { Subject, of, throwError } from 'rxjs';
-import { AuthService } from '../../generated/endpoints/auth/auth.service';
-import { UsersService } from '../../generated/endpoints/users/users.service';
-import { ServerWsMessageType, type MeResponse, type ServerWsMessage } from '../../generated/models';
-import { encodeId } from '../api/snowflake-id';
-import { mockRealtime, testUser } from '../api/testing';
+import { Subject } from 'rxjs';
+import { ServerWsMessageType, type ServerWsMessage } from '../../generated/models';
+import { RpcTestPeer, provideRpcTesting } from '../api/rpc-testing';
 import { Connection } from '../api/connection';
+import { decodeId, encodeId } from '../api/snowflake-id';
+import { testUser } from '../api/testing';
 import { SessionStore } from '../session/session-store';
 import { StickerPreferences, sortStickerPacksByPreference } from './sticker-preferences';
 
 describe('StickerPreferences', () => {
   let events$: Subject<ServerWsMessage>;
-  let getMe: MockInstance;
-  let putStickerpackOrder: MockInstance;
-  let session: SessionStore;
+  let peer: RpcTestPeer;
+  let session: {
+    user: WritableSignal<
+      (typeof testUser & { stickerPackOrder: { stickerPackId: number; lastUsedOn: number }[] }) | undefined
+    >;
+    upsertStickerPackOrderItem: (item: { stickerPackId: number; lastUsedOn: number }) => void;
+    removeStickerPackOrderItem: (packId: number) => void;
+    replaceStickerPackOrder: (stickerPackOrder: { stickerPackId: number; lastUsedOn: number }[]) => void;
+  };
+
+  function configure() {
+    TestBed.configureTestingModule({
+      providers: [
+        provideRpcTesting(),
+        { provide: SessionStore, useValue: session },
+        { provide: Connection, useValue: { events$ } },
+      ],
+    });
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
+  }
 
   beforeEach(() => {
     const values = new Map<string, string>();
@@ -22,33 +39,49 @@ describe('StickerPreferences', () => {
       getItem: (key: string) => values.get(key) ?? null,
       setItem: (key: string, value: string) => values.set(key, value),
     });
-    const realtime = mockRealtime();
-    events$ = realtime.events$ as Subject<ServerWsMessage>;
-    getMe = vi.fn();
-    putStickerpackOrder = vi.fn(() => of(undefined));
-    TestBed.configureTestingModule({
-      providers: [
-        { provide: AuthService, useValue: {} },
-        { provide: UsersService, useValue: { getMe, putStickerpackOrder } },
-        { provide: Connection, useValue: realtime },
-      ],
-    });
-    session = TestBed.inject(SessionStore);
-    session.user.set({ ...testUser, stickerPackOrder: [] });
+    events$ = new Subject<ServerWsMessage>();
+    session = {
+      user: signal({ ...testUser, stickerPackOrder: [] }),
+      upsertStickerPackOrderItem: vi.fn((item) =>
+        session.user.update((user) =>
+          user
+            ? {
+                ...user,
+                stickerPackOrder: [...user.stickerPackOrder, { ...item, lastUsedOn: Math.trunc(item.lastUsedOn) }],
+              }
+            : user,
+        ),
+      ),
+      removeStickerPackOrderItem: vi.fn(),
+      replaceStickerPackOrder: vi.fn((stickerPackOrder) =>
+        session.user.update((user) => (user ? { ...user, stickerPackOrder } : user)),
+      ),
+    };
+    configure();
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
-    TestBed.resetTestingModule();
+    try {
+      peer.verify();
+    } finally {
+      try {
+        vi.unstubAllGlobals();
+      } finally {
+        TestBed.resetTestingModule();
+      }
+    }
   });
 
-  it('defaults both auto-sort toggles to off and persists them across fresh services', () => {
+  it('defaults both auto-sort toggles to off and persists their values locally', () => {
     const preferences = TestBed.inject(StickerPreferences);
     expect(preferences.autoSortPacksEnabled()).toBe(false);
     expect(preferences.autoSortFavoritesEnabled()).toBe(false);
     preferences.setAutoSortPacks(true);
     preferences.setAutoSortFavorites(true);
+    expect(localStorage.getItem('chahua.preferences.autoSortStickerPacks')).toBe('true');
+    expect(localStorage.getItem('chahua.preferences.autoSortFavoriteStickers')).toBe('true');
     TestBed.resetTestingModule();
+    configure();
     const restored = TestBed.inject(StickerPreferences);
     expect(restored.autoSortPacksEnabled()).toBe(true);
     expect(restored.autoSortFavoritesEnabled()).toBe(true);
@@ -65,7 +98,12 @@ describe('StickerPreferences', () => {
       { stickerId: encodeId('101'), lastUsedOn: 70 },
       { stickerId: encodeId('102'), lastUsedOn: 60 },
     ]);
+    expect(JSON.parse(localStorage.getItem('chahua.preferences.favoriteStickerOrder')!)).toEqual([
+      { stickerId: '101', lastUsedOn: 70 },
+      { stickerId: '102', lastUsedOn: 60 },
+    ]);
     TestBed.resetTestingModule();
+    configure();
     expect(TestBed.inject(StickerPreferences).favoriteStickerOrder()).toEqual([
       { stickerId: encodeId('101'), lastUsedOn: 70 },
       { stickerId: encodeId('102'), lastUsedOn: 60 },
@@ -80,41 +118,42 @@ describe('StickerPreferences', () => {
   });
 
   it('heals a failed sync by re-reading the server order', async () => {
-    putStickerpackOrder.mockReturnValue(throwError(() => new Error('offline')));
     const serverOrder = [{ stickerPackId: encodeId('301'), lastUsedOn: 90 }];
-    getMe.mockReturnValue(of({ ...testUser, stickerPackOrder: serverOrder } satisfies MeResponse));
     const preferences = TestBed.inject(StickerPreferences);
     preferences.upsertPackOrderItem({ stickerPackId: encodeId('201'), lastUsedOn: 30 });
-    await preferences.syncPackOrder([{ stickerPackId: encodeId('201'), lastUsedOn: 30 }]);
+    const sync = preferences.syncPackOrder([{ stickerPackId: encodeId('201'), lastUsedOn: 30 }]);
+    peer
+      .expect('users.updateStickerPackOrder', {
+        order: [{ stickerPackId: '201', lastUsedOn: 30 }],
+      })
+      .error(1503);
+    (await peer.expectAsync('users.getMe')).flush({
+      ...testUser,
+      stickerPackOrder: serverOrder.map(({ stickerPackId, lastUsedOn }) => ({
+        stickerPackId: decodeId(stickerPackId),
+        lastUsedOn,
+      })),
+    });
+    expect(await sync).toBe(false);
     expect(session.user()?.stickerPackOrder).toEqual(serverOrder);
   });
 
   it('reports failure even when restoring the server order also fails', async () => {
-    putStickerpackOrder.mockReturnValueOnce(throwError(() => new Error('offline')));
-    getMe.mockReturnValueOnce(throwError(() => new Error('offline')));
     const preferences = TestBed.inject(StickerPreferences);
     const item = { stickerPackId: encodeId('201'), lastUsedOn: 30 };
     preferences.upsertPackOrderItem(item);
-    expect(await preferences.syncPackOrder([item])).toBe(false);
+    const sync = preferences.syncPackOrder([item]);
+    peer.expect('users.updateStickerPackOrder', { order: [{ stickerPackId: '201', lastUsedOn: 30 }] }).error(1503);
+    (await peer.expectAsync('users.getMe')).error(1503);
+    expect(await sync).toBe(false);
     expect(session.user()?.stickerPackOrder).toEqual([item]);
   });
 
   it('replaces the session order when the server pushes an update', () => {
-    const pushes = new Subject<ServerWsMessage>();
-    TestBed.resetTestingModule();
-    TestBed.configureTestingModule({
-      providers: [
-        { provide: AuthService, useValue: {} },
-        { provide: UsersService, useValue: { getMe, putStickerpackOrder } },
-        { provide: Connection, useValue: mockRealtime({ events$: pushes }) },
-      ],
-    });
-    const fresh = TestBed.inject(SessionStore);
-    fresh.user.set({ ...testUser, stickerPackOrder: [] });
     TestBed.inject(StickerPreferences);
     const order = [{ stickerPackId: encodeId('401'), lastUsedOn: 80 }];
-    pushes.next({ type: ServerWsMessageType.stickerPackOrderUpdated, payload: { order } });
-    expect(fresh.user()?.stickerPackOrder).toEqual(order);
+    events$.next({ type: ServerWsMessageType.stickerPackOrderUpdated, payload: { order } });
+    expect(session.user()?.stickerPackOrder).toEqual(order);
   });
 
   it('sorts packs by last used time, ordered before unordered, stable otherwise', () => {

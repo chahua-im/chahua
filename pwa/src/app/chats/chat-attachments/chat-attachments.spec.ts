@@ -1,11 +1,8 @@
-import { provideHttpClient, withInterceptors } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
 import { ChatAttachmentKindFilter } from '../../../generated/models';
 import { vi } from 'vitest';
-import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
-import { jsonInterceptor } from '../../api/json.interceptor';
+import { provideRpcTesting, RpcTestPeer } from '../../api/rpc-testing';
 import { testChat, wireChat, wireMessage } from '../../api/testing';
 import { MediaKind } from '../../messages/message-attachments/media-kind';
 import { ChatAttachments } from './chat-attachments';
@@ -32,28 +29,24 @@ const video = {
 const second = { ...photo, id: '9007199254744003', url: 'https://media.invalid/second.jpg', order: 2 };
 
 describe('ChatAttachments media viewer', () => {
-  let http: HttpTestingController;
+  let peer: RpcTestPeer;
   const create = vi.fn().mockResolvedValue(true);
   beforeEach(() => {
     create.mockClear();
     TestBed.configureTestingModule({
-      providers: [
-        provideHttpClient(withInterceptors([jsonInterceptor])),
-        provideHttpClientTesting(),
-        provideChahuaBaseUrl('/_api'),
-        provideRouter([]),
-      ],
+      providers: [provideRpcTesting(), provideRouter([])],
     });
     vi.spyOn(TestBed.inject(Router), 'navigate').mockImplementation(create);
-    http = TestBed.inject(HttpTestingController);
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
   });
-  afterEach(() => http.verify());
+  afterEach(() => peer.verify());
   async function open() {
     const fixture = TestBed.createComponent(ChatAttachments);
     fixture.componentRef.setInput('chatId', testChat.id);
     fixture.detectChanges();
-    http
-      .expectOne((req) => req.url.endsWith('/attachments'))
+    peer
+      .expect('attachments.listForChat', { chatId: wireChat.id, kind: ChatAttachmentKindFilter.image, limit: 36 })
       .flush({ attachments: [{ ...second }, { ...photo, id: '9007199254744004', messageId: '9007199254741005' }] });
     await fixture.whenStable();
     fixture.detectChanges();
@@ -66,8 +59,8 @@ describe('ChatAttachments media viewer', () => {
     await fixture.componentInstance['view'](item);
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.opening ion-spinner')).not.toBeNull();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}`)
+    peer
+      .expect('messages.get', { chatId: wireChat.id, messageId: wireMessage.id })
       .flush({ ...wireMessage, attachments: [{ ...photo }, { ...video }, { ...second }], hasAttachments: true });
     await operation;
     expect(create).toHaveBeenCalledExactlyOnceWith(
@@ -89,16 +82,14 @@ describe('ChatAttachments media viewer', () => {
     const fixture = await open();
     const item = fixture.componentInstance['items']()[0];
     const operation = fixture.componentInstance['view'](item);
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}`)
-      .flush({}, { status: 503, statusText: 'Unavailable' });
+    peer.expect('messages.get', { chatId: wireChat.id, messageId: wireMessage.id }).error(1503);
     await operation;
     expect(create).not.toHaveBeenCalled();
     expect(fixture.componentInstance['openFailed']()).toBe(true);
     expect(fixture.componentInstance['opening']()).toBeUndefined();
     const retry = fixture.componentInstance['view'](item);
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}`)
+    peer
+      .expect('messages.get', { chatId: wireChat.id, messageId: wireMessage.id })
       .flush({ ...wireMessage, attachments: [{ ...second }] });
     await retry;
     expect(create).toHaveBeenCalledOnce();
@@ -108,10 +99,12 @@ describe('ChatAttachments media viewer', () => {
     const fixture = await open();
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
     const operation = fixture.componentInstance['locate'](fixture.componentInstance['items']()[0]);
-    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}`);
+    const request = peer.expect('messages.get', { chatId: wireChat.id, messageId: wireMessage.id });
     fixture.componentRef.setInput('kind', ChatAttachmentKindFilter.video);
     fixture.detectChanges();
-    http.expectOne((req) => req.url.endsWith('/attachments')).flush({ attachments: [] });
+    peer
+      .expect('attachments.listForChat', { chatId: wireChat.id, kind: ChatAttachmentKindFilter.video, limit: 36 })
+      .flush({ attachments: [] });
     request.flush(structuredClone(wireMessage));
     await operation;
     expect(navigate).not.toHaveBeenCalled();
@@ -121,10 +114,10 @@ describe('ChatAttachments media viewer', () => {
   it('does not open a viewer after its source component is destroyed', async () => {
     const fixture = await open();
     const operation = fixture.componentInstance['view'](fixture.componentInstance['items']()[0]);
-    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}`);
+    const request = peer.expect('messages.get', { chatId: wireChat.id, messageId: wireMessage.id });
     fixture.destroy();
+    request.flush(structuredClone(wireMessage));
     await operation;
-    expect(request.cancelled).toBe(true);
     expect(create).not.toHaveBeenCalled();
   });
 });

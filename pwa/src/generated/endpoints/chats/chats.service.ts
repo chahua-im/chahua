@@ -217,36 +217,6 @@ export class ChatsService {
     });
   }
   /**
-   * @summary DELETE /chats/:chat_id/archive — Unarchive a chat while preserving its notification preference.
-   */
-  unarchiveChat<TData = void>(chatId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
-  unarchiveChat<TData = void>(chatId: SnowflakeID, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
-  unarchiveChat<TData = void>(
-    chatId: SnowflakeID,
-    options?: HttpClientResponseOptions,
-  ): Observable<AngularHttpResponse<TData>>;
-  unarchiveChat<TData = void>(
-    chatId: SnowflakeID,
-    options?: HttpClientObserveOptions,
-  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
-    if (options?.observe === 'events') {
-      return this.http.delete<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/archive`, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'events',
-      });
-    }
-    if (options?.observe === 'response') {
-      return this.http.delete<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/archive`, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'response',
-      });
-    }
-    return this.http.delete<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/archive`, {
-      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-      observe: 'body',
-    });
-  }
-  /**
    * @summary PUT /chats/:chat_id/archive — Archive a chat without changing its notification preference.
    */
   archiveChat<TData = void>(chatId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
@@ -272,6 +242,36 @@ export class ChatsService {
       });
     }
     return this.http.put<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/archive`, undefined, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
+  /**
+   * @summary DELETE /chats/:chat_id/archive — Unarchive a chat while preserving its notification preference.
+   */
+  unarchiveChat<TData = void>(chatId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
+  unarchiveChat<TData = void>(chatId: SnowflakeID, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
+  unarchiveChat<TData = void>(
+    chatId: SnowflakeID,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  unarchiveChat<TData = void>(
+    chatId: SnowflakeID,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.delete<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/archive`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.delete<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/archive`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+      });
+    }
+    return this.http.delete<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/archive`, {
       ...(options as Omit<NonNullable<typeof options>, 'observe'>),
       observe: 'body',
     });
@@ -588,46 +588,6 @@ export class ChatsService {
     });
   }
   /**
-   * @summary DELETE /chats/:chat_id/messages/:message_id — Delete a message (soft delete).
-   */
-  deleteMessage<TData = void>(
-    chatId: SnowflakeID,
-    messageId: SnowflakeID,
-    options?: HttpClientBodyOptions,
-  ): Observable<TData>;
-  deleteMessage<TData = void>(
-    chatId: SnowflakeID,
-    messageId: SnowflakeID,
-    options?: HttpClientEventOptions,
-  ): Observable<HttpEvent<TData>>;
-  deleteMessage<TData = void>(
-    chatId: SnowflakeID,
-    messageId: SnowflakeID,
-    options?: HttpClientResponseOptions,
-  ): Observable<AngularHttpResponse<TData>>;
-  deleteMessage<TData = void>(
-    chatId: SnowflakeID,
-    messageId: SnowflakeID,
-    options?: HttpClientObserveOptions,
-  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
-    if (options?.observe === 'events') {
-      return this.http.delete<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/messages/${decodeId(messageId)}`, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'events',
-      });
-    }
-    if (options?.observe === 'response') {
-      return this.http.delete<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/messages/${decodeId(messageId)}`, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'response',
-      });
-    }
-    return this.http.delete<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/messages/${decodeId(messageId)}`, {
-      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-      observe: 'body',
-    });
-  }
-  /**
    * @summary GET /chats/:chat_id/messages/:message_id — Get a single message.
    */
   getMessage<TData = MessageResponse>(
@@ -663,6 +623,46 @@ export class ChatsService {
       });
     }
     return this.http.get<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/messages/${decodeId(messageId)}`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
+  /**
+   * @summary DELETE /chats/:chat_id/messages/:message_id — Delete a message (soft delete).
+   */
+  deleteMessage<TData = void>(
+    chatId: SnowflakeID,
+    messageId: SnowflakeID,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  deleteMessage<TData = void>(
+    chatId: SnowflakeID,
+    messageId: SnowflakeID,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  deleteMessage<TData = void>(
+    chatId: SnowflakeID,
+    messageId: SnowflakeID,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  deleteMessage<TData = void>(
+    chatId: SnowflakeID,
+    messageId: SnowflakeID,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.delete<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/messages/${decodeId(messageId)}`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.delete<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/messages/${decodeId(messageId)}`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+      });
+    }
+    return this.http.delete<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/messages/${decodeId(messageId)}`, {
       ...(options as Omit<NonNullable<typeof options>, 'observe'>),
       observe: 'body',
     });
@@ -924,56 +924,6 @@ export class ChatsService {
       observe: 'body',
     });
   }
-  deleteReaction<TData = void>(
-    chatId: SnowflakeID,
-    messageId: SnowflakeID,
-    emoji: string,
-    options?: HttpClientBodyOptions,
-  ): Observable<TData>;
-  deleteReaction<TData = void>(
-    chatId: SnowflakeID,
-    messageId: SnowflakeID,
-    emoji: string,
-    options?: HttpClientEventOptions,
-  ): Observable<HttpEvent<TData>>;
-  deleteReaction<TData = void>(
-    chatId: SnowflakeID,
-    messageId: SnowflakeID,
-    emoji: string,
-    options?: HttpClientResponseOptions,
-  ): Observable<AngularHttpResponse<TData>>;
-  deleteReaction<TData = void>(
-    chatId: SnowflakeID,
-    messageId: SnowflakeID,
-    emoji: string,
-    options?: HttpClientObserveOptions,
-  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
-    if (options?.observe === 'events') {
-      return this.http.delete<TData>(
-        `${this.baseUrl}/chats/${decodeId(chatId)}/messages/${decodeId(messageId)}/reactions/${emoji}`,
-        {
-          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-          observe: 'events',
-        },
-      );
-    }
-    if (options?.observe === 'response') {
-      return this.http.delete<TData>(
-        `${this.baseUrl}/chats/${decodeId(chatId)}/messages/${decodeId(messageId)}/reactions/${emoji}`,
-        {
-          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-          observe: 'response',
-        },
-      );
-    }
-    return this.http.delete<TData>(
-      `${this.baseUrl}/chats/${decodeId(chatId)}/messages/${decodeId(messageId)}/reactions/${emoji}`,
-      {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'body',
-      },
-    );
-  }
   putReaction<TData = void>(
     chatId: SnowflakeID,
     messageId: SnowflakeID,
@@ -1021,6 +971,56 @@ export class ChatsService {
     return this.http.put<TData>(
       `${this.baseUrl}/chats/${decodeId(chatId)}/messages/${decodeId(messageId)}/reactions/${emoji}`,
       undefined,
+      {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'body',
+      },
+    );
+  }
+  deleteReaction<TData = void>(
+    chatId: SnowflakeID,
+    messageId: SnowflakeID,
+    emoji: string,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  deleteReaction<TData = void>(
+    chatId: SnowflakeID,
+    messageId: SnowflakeID,
+    emoji: string,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  deleteReaction<TData = void>(
+    chatId: SnowflakeID,
+    messageId: SnowflakeID,
+    emoji: string,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  deleteReaction<TData = void>(
+    chatId: SnowflakeID,
+    messageId: SnowflakeID,
+    emoji: string,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.delete<TData>(
+        `${this.baseUrl}/chats/${decodeId(chatId)}/messages/${decodeId(messageId)}/reactions/${emoji}`,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'events',
+        },
+      );
+    }
+    if (options?.observe === 'response') {
+      return this.http.delete<TData>(
+        `${this.baseUrl}/chats/${decodeId(chatId)}/messages/${decodeId(messageId)}/reactions/${emoji}`,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'response',
+        },
+      );
+    }
+    return this.http.delete<TData>(
+      `${this.baseUrl}/chats/${decodeId(chatId)}/messages/${decodeId(messageId)}/reactions/${emoji}`,
       {
         ...(options as Omit<NonNullable<typeof options>, 'observe'>),
         observe: 'body',
@@ -1348,8 +1348,9 @@ export class ChatsService {
     });
   }
   /**
-   * @summary POST /chats/:chat_id/unread — Mark a chat as unread by rewinding the read pointer.
-   */
+     * @summary Optional body for the unread endpoint — allows resetting read position to a specific message.
+    POST /chats/:chat_id/unread — Mark a chat as unread by rewinding the read pointer.
+     */
   markAsUnread<TData = MarkChatReadStateResponse>(
     chatId: SnowflakeID,
     nullMarkAsUnreadBody?: null | __MarkAsUnreadBody,

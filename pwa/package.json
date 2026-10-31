@@ -12,8 +12,11 @@
     "dev:online": "node ../runspace/dev.mjs pwa --online",
     "build": "ng build",
     "build:prod": "node scripts/build-prod.mjs",
+    "format": "node scripts/format-changed.mjs",
+    "format:all": "prettier --write .",
     "test": "ng test",
-    "test:ci": "ng test --configuration=ci",
+    "test:ci": "npm run test:codegen && ng test --configuration=ci",
+    "test:codegen": "vitest run scripts/api-codegen.spec.ts --environment node",
     "test:pwa": "node --test scripts/push-worker.test.mjs scripts/startup-updates.test.mjs scripts/startup-recovery.test.mjs",
     "startup:copy": "node scripts/sync-startup-copy.mjs && prettier --write src/index.html",
     "preview:startup-failures": "npm run build && node scripts/preview-startup.mjs"

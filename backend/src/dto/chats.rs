@@ -1,9 +1,75 @@
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::dto::messages::MessagePreview;
 use crate::dto::users::MemberSummary;
 use crate::models::GroupKind;
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListChatsQuery {
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[schema(schema_with = crate::serde_i64_string::schema_opt)]
+    pub chat_id: Option<i64>,
+    #[serde(default)]
+    pub limit: Option<i64>,
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[schema(schema_with = crate::serde_i64_string::schema_opt)]
+    pub after: Option<i64>,
+    #[serde(default)]
+    pub archived: Option<bool>,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkAsReadBody {
+    #[serde(deserialize_with = "crate::serde_i64_string::deserialize")]
+    #[schema(schema_with = crate::serde_i64_string::schema)]
+    pub message_id: i64,
+}
+
+#[derive(Deserialize, utoipa::ToSchema, utoipa::IntoParams)]
+#[serde(rename_all = "camelCase")]
+#[into_params(parameter_in = Query)]
+pub struct ReadReceiptQuery {
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[param(value_type = Option<String>)]
+    #[schema(schema_with = crate::serde_i64_string::schema_opt)]
+    pub thread_id: Option<i64>,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkAsUnreadBody {
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[schema(schema_with = crate::serde_i64_string::schema_opt)]
+    pub message_id: Option<i64>,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UnreadMentionsQuery {
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[schema(schema_with = crate::serde_i64_string::schema_opt)]
+    pub thread_id: Option<i64>,
+    #[serde(default)]
+    pub max: Option<i64>,
+}
 
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]

@@ -1,15 +1,9 @@
 import { computed, DestroyRef, effect, inject, linkedSignal, Service, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom, Subject, takeUntil, timer, type Observable } from 'rxjs';
-import { UsersService } from '../../generated/endpoints/users/users.service';
+import { RpcApi } from '../../generated/rpc-api';
 import { notificationMuted } from './notification-setting';
-import { ChatsService } from '../../generated/endpoints/chats/chats.service';
-import { FriendsService } from '../../generated/endpoints/friends/friends.service';
-import { GroupsService } from '../../generated/endpoints/groups/groups.service';
-import { MembersService } from '../../generated/endpoints/members/members.service';
 import { allowsSpeaking, effectiveSpeakingMode, SpeakingAction } from './speaking';
-import { PinsService } from '../../generated/endpoints/pins/pins.service';
-import { ThreadsService } from '../../generated/endpoints/threads/threads.service';
 import type { FriendRelationshipResponse } from '../../generated/models';
 import {
   ServerWsMessageType,
@@ -76,7 +70,7 @@ export enum ChatChangeKind {
 
 @Service()
 export class ChatStore {
-  private readonly friends = inject(FriendsService);
+  private readonly rpc = inject(RpcApi);
   private readonly relationships = new Map<
     number,
     ReturnType<typeof activeQuery<FriendRelationshipResponse | undefined>>
@@ -86,7 +80,7 @@ export class ChatStore {
     if (!query) {
       query = activeQuery<FriendRelationshipResponse | undefined>(
         this.destroyRef,
-        (cancel) => firstValueFrom(this.friends.getFriendRelationship(uid).pipe(takeUntil(cancel))),
+        (cancel) => firstValueFrom(this.rpc.friends.getRelationship({ uid }).pipe(takeUntil(cancel))),
         undefined,
       );
       this.relationships.set(uid, query);
@@ -94,8 +88,8 @@ export class ChatStore {
     return query;
   }
 
-  private readonly api = inject(ChatsService);
-  private readonly usersApi = inject(UsersService);
+  private readonly api = this.rpc.chats;
+  private readonly usersApi = this.rpc.users;
   private readonly stateVersions = linkedSignal(() => {
     this.mentionAccount();
     return new Map<SnowflakeID, Partial<Record<keyof ChatState, number>>>();
@@ -136,6 +130,7 @@ export class ChatStore {
   });
 
   membershipPolicy(id: SnowflakeID) {
+    if (!this.isAccessible(id)) return undefined;
     return this.membershipPolicies().get(id);
   }
 
@@ -174,8 +169,8 @@ export class ChatStore {
     return true;
   }
 
-  private readonly groupsApi = inject(GroupsService);
-  private readonly membersApi = inject(MembersService);
+  private readonly groupsApi = this.rpc.groups;
+  private readonly membersApi = this.rpc.groups;
   private readonly speakingStates = linkedSignal(() => {
     this.mentionAccount();
     return new Map<SnowflakeID, { value: SpeakingState; groupVersion: number; memberVersion: number }>();
@@ -190,12 +185,23 @@ export class ChatStore {
     this.mentionAccount();
     return new Map<SnowflakeID, number>();
   });
-  private readonly threadsApi = inject(ThreadsService);
-  private readonly pinsApi = inject(PinsService);
+  private readonly threadsApi = this.rpc.threads;
   private readonly destroyRef = inject(DestroyRef);
   private readonly realtime = inject(Connection);
   private readonly session = inject(SessionStore);
   private readonly mentionAccount = computed(() => this.session.user()?.uid);
+  private readonly inaccessible = linkedSignal(() => {
+    this.mentionAccount();
+    return new Set<SnowflakeID>();
+  });
+  private readonly accessVersions = linkedSignal(() => {
+    this.mentionAccount();
+    return new Map<SnowflakeID, number>();
+  });
+  isAccessible(chatId: SnowflakeID, threadId?: SnowflakeID): boolean {
+    const inaccessible = this.inaccessible();
+    return !inaccessible.has(chatId) && (threadId == null || !inaccessible.has(threadId));
+  }
   private readonly knownMentions = new Map<SnowflakeID, { mentioned: boolean; version: number }>();
   private readonly scheduledReads = new Map<SnowflakeID, Promise<MarkChatReadStateResponse>>();
   private readonly threadReadRefreshes = new Map<SnowflakeID, Promise<MarkThreadReadResponse>>();
@@ -248,12 +254,48 @@ export class ChatStore {
   private acceptReadStates(states: ConversationState[]) {
     for (const state of states) {
       const { chatId, threadId, accessible } = state;
-      // HTTP mutations establish their own cursor. Replace the watch after their
+      const key = threadId ?? chatId;
+      this.inaccessible.update((scopes) => {
+        const next = new Set(scopes);
+        if (accessible) next.delete(key);
+        else next.add(key);
+        return next;
+      });
+      if (!accessible) {
+        this.accessVersions().set(key, this.snapshot());
+        for (const pins of this.pinScopes.values()) {
+          if (pins.chatId === chatId && (!threadId || pins.threadId === threadId)) pins.clear();
+        }
+        if (!threadId) {
+          this.fresh.delete(chatId);
+          this.detailsFresh.delete(chatId);
+          this.requests.delete(chatId);
+          this.entries.update((entries) => {
+            const next = new Map(entries);
+            next.delete(chatId);
+            return next;
+          });
+          this.summaries.update((summaries) => {
+            const next = new Map(summaries);
+            next.delete(chatId);
+            return next;
+          });
+        }
+        this.threadSummaries.update((summaries) => {
+          const next = new Map(summaries);
+          for (const [id, summary] of next) {
+            if (summary.value.chatId === chatId && (!threadId || id === threadId)) next.delete(id);
+          }
+          return next;
+        });
+      }
+      // Local mutations establish their own cursor. Replace the watch after their
       // response, so a snapshot started before the mutation cannot undo it.
       if (
-        threadId
+        accessible &&
+        (threadId
           ? this.readRequests.has(threadId)
-          : this.readOperations.get(chatId)?.read || this.readOperations.get(chatId)?.rewind
+          : this.readOperations.get(chatId)?.read || this.readOperations.get(chatId)?.rewind)
       )
         continue;
       if (threadId)
@@ -311,7 +353,7 @@ export class ChatStore {
         const version = ++this.defaultsVersion;
         this.defaultsError.set(false);
         try {
-          const saved = await this.response(this.usersApi.getSettings());
+          const saved = await this.response(this.usersApi.getNotificationSettings());
           if (this.session.user()?.uid !== uid || this.destroyRef.destroyed) return;
           if (version === this.defaultsVersion && !this.defaultsDirty) this.acceptDefaults(saved);
         } catch {
@@ -345,7 +387,7 @@ export class ChatStore {
     const version = this.defaultsVersion;
     this.defaultsSaving.set(true);
     try {
-      const saved = await this.response(this.usersApi.patchSettings({ [key]: muted }));
+      const saved = await this.response(this.usersApi.updateNotificationSettings({ [key]: muted }));
       if (this.session.user()?.uid === uid && this.defaultsVersion === version) this.acceptDefaults(saved);
     } catch (error) {
       if (this.session.user()?.uid === uid && this.defaultsVersion === version) this.acceptDefaults(previous);
@@ -383,6 +425,8 @@ export class ChatStore {
       this.defaultsLoading.set(false);
       this.defaultsError.set(false);
       this.invalidate();
+      for (const pins of this.pinScopes.values()) pins.clear();
+      this.pinScopes.clear();
     });
     effect((onCleanup) => {
       this.muteTime();
@@ -553,7 +597,7 @@ export class ChatStore {
         request.again = false;
         const version = versions.get(key);
         try {
-          const receipt = await this.response(this.api.getChatReadReceipt(chatId, threadId ? { threadId } : undefined));
+          const receipt = await this.response(this.api.getReadReceipt({ chatId, ...(threadId ? { threadId } : {}) }));
           if (this.destroyRef.destroyed || this.session.user()?.uid !== uid) return;
           if (versions.get(key) === version)
             reads.update((entries) => new Map(entries).set(key, receipt.lastReadMessageId));
@@ -590,17 +634,21 @@ export class ChatStore {
     const key = threadId ?? chatId;
     let pins = this.pinScopes.get(key);
     if (!pins) {
-      pins = new ChatPins(chatId, threadId, this.pinsApi, this.realtime, this.destroyRef);
+      pins = new ChatPins(chatId, threadId, this.rpc.pins, this.realtime, this.destroyRef, () =>
+        this.isAccessible(chatId, threadId),
+      );
       this.pinScopes.set(key, pins);
     }
     return pins;
   }
   get(id: SnowflakeID): ChatInfo | undefined {
+    if (!this.isAccessible(id)) return undefined;
     const info = this.entries().get(id);
     const speaking = this.speakingStates().get(id)?.value;
     return info && speaking ? { ...info, ...speaking } : info;
   }
   speakingMode(chatId: SnowflakeID) {
+    if (!this.isAccessible(chatId)) return undefined;
     return this.speakingStates().get(chatId)?.value.effectiveSpeakingMode;
   }
   canSpeak(chatId: SnowflakeID, action: SpeakingAction) {
@@ -645,10 +693,10 @@ export class ChatStore {
     const version = this.snapshot();
     this.pendingSpeakingWrites().set(chatId, version);
     try {
-      const state = await this.response(this.groupsApi.putSpeakingMode(chatId, { speakingMode }));
+      const state = await this.response(this.groupsApi.updateSpeakingMode({ chatId, speakingMode }));
       if (uid !== this.session.user()?.uid) return;
       const current = this.speakingStates().get(chatId);
-      // A WS snapshot is authoritative even if this HTTP response arrives later.
+      // A WS snapshot is authoritative even if this RPC response arrives later.
       this.acceptGroupSpeakingMode(
         current && current.groupVersion > version ? { chatId, speakingMode: current.value.speakingMode! } : state,
       );
@@ -659,12 +707,13 @@ export class ChatStore {
   async setMemberSpeakingMode(chatId: SnowflakeID, uid: number, speakingMode: SpeakingMode) {
     const account = this.session.user()?.uid;
     const version = this.snapshot();
-    const state = await this.response(this.membersApi.putMemberSpeakingMode(chatId, uid, { speakingMode }));
+    const state = await this.response(this.membersApi.updateMemberSpeakingMode({ chatId, uid, speakingMode }));
     if (account === this.session.user()?.uid) {
       this.acceptMemberSpeakingMode(state, version);
     }
   }
   remember(chats: readonly (ChatInfo & { id: SnowflakeID; membershipMessagePolicy?: MembershipMessagePolicy })[]) {
+    chats = chats.filter((chat) => this.isAccessible(chat.id));
     if (!chats.length) return;
     for (const chat of chats) this.acceptMembershipPolicy(chat.id, chat.membershipMessagePolicy);
     this.entries.update((entries) => {
@@ -686,10 +735,12 @@ export class ChatStore {
     return this.ensureDetails(id);
   }
   acceptJoinedChat(chat: GroupInfoResponse, version: number) {
+    if (!this.isAccessible(chat.id) || (this.accessVersions().get(chat.id) ?? 0) > version) return;
     this.remember([chat]);
     this.applyDetails(chat, version);
   }
   private applyDetails(chat: GroupInfoResponse, version: number) {
+    if (!this.isAccessible(chat.id) || (this.accessVersions().get(chat.id) ?? 0) > version) return;
     const { id, myRole, description, visibility } = chat;
     this.applySpeakingState(id, chat, version, true);
     this.applyChatStates([[id, chat]], version, true);
@@ -699,6 +750,7 @@ export class ChatStore {
     this.detailsFresh.add(id);
   }
   ensureDetails(id: SnowflakeID): Promise<void> {
+    if (!this.isAccessible(id)) return Promise.resolve();
     if (this.detailsFresh.has(id)) return Promise.resolve();
     const pending = this.requests.get(id);
     if (pending) return pending;
@@ -708,19 +760,23 @@ export class ChatStore {
         const cached = this.entries().get(id);
         const version = this.snapshot();
         const uid = this.session.user()?.uid;
-        const chat = await firstValueFrom(this.groupsApi.getGroup(id).pipe(takeUntilDestroyed(this.destroyRef)));
+        const chat = await firstValueFrom(this.groupsApi.get({ chatId: id }).pipe(takeUntilDestroyed(this.destroyRef)));
+        if (!this.isAccessible(id) || (this.accessVersions().get(id) ?? 0) > version) return;
         if (uid !== this.session.user()?.uid) return;
         if (revision !== this.revision) continue;
         if (this.entries().get(id) === cached) this.remember([chat]);
         if (!this.acceptMembershipPolicy(id, chat.membershipMessagePolicy)) continue;
         this.applyDetails(chat, version);
       }
-    })().finally(() => this.requests.delete(id));
+    })().finally(() => {
+      if (this.requests.get(id) === request) this.requests.delete(id);
+    });
     this.requests.set(id, request);
     return request;
   }
 
   chatState(id: SnowflakeID) {
+    if (!this.isAccessible(id)) return undefined;
     const summary = this.summaries().get(id);
     return summary?.stateVersion ? summary.value : undefined;
   }
@@ -731,7 +787,7 @@ export class ChatStore {
       id,
       membershipMessagePolicy: this.membershipPolicy(id),
       ...this.entries().get(id)!,
-      ...this.summaries().get(id)!.value,
+      ...this.summaries().get(id)?.value,
       ...this.readStates().get(id)!.state,
       peerLastReadMessageId: this.peerReads().get(id),
       isMuted: this.isMuted(id),
@@ -739,6 +795,7 @@ export class ChatStore {
   }
 
   acceptChats(chats: readonly ChatListItem[], version: number, policyGeneration = this.revision) {
+    chats = chats.filter((chat) => this.isAccessible(chat.id) && (this.accessVersions().get(chat.id) ?? 0) <= version);
     if (policyGeneration !== this.revision) return;
     this.rememberMentions(
       chats.flatMap((chat) => (chat.lastMessage ? [chat.lastMessage] : [])),
@@ -797,6 +854,7 @@ export class ChatStore {
   }
 
   private receiveMessage(message: MessageResponse) {
+    if (!this.isAccessible(message.chatId)) return;
     const previous = this.summaries().get(message.chatId)?.value.lastMessage;
     if (previous?.id === message.id) {
       const lastRead = this.readStates().get(message.chatId)?.state.lastReadMessageId;
@@ -819,6 +877,7 @@ export class ChatStore {
   }
 
   private receiveThreadMessage(message: MessageResponse, rootId: SnowflakeID) {
+    if (!this.isAccessible(message.chatId, rootId)) return;
     const current = this.threadSummaries().get(rootId);
     // Membership and unknown threads still come from the list query.
     if (!current || (current.value.lastReply && current.value.lastReply.id >= message.id)) return;
@@ -1108,9 +1167,8 @@ export class ChatStore {
       while (true) {
         const version = operation.version;
         const state = await firstValueFrom(
-          this.api.getChatUnreadCount(chatId).pipe(takeUntilDestroyed(this.destroyRef)),
+          this.api.getUnreadCount({ chatId }).pipe(takeUntilDestroyed(this.destroyRef)),
         );
-        if (this.destroyRef.destroyed) return state;
         // A message or successful read arrived during this request; its count may already be included.
         if (version !== operation.version) {
           const live = this.readStates().get(chatId);
@@ -1144,15 +1202,16 @@ export class ChatStore {
     request.promise = (async () => {
       while (true) {
         await firstValueFrom(timer(1000).pipe(takeUntilDestroyed(this.destroyRef)), { defaultValue: 0 });
-        if (this.destroyRef.destroyed || operation.read !== request) return;
+        if (this.destroyRef.destroyed || operation.read !== request || !this.isAccessible(chatId)) return;
         const target = request.messageId;
         const version = operation.version;
+        const accessVersion = this.version;
         const refreshing = !!operation.refresh;
         request.sent = true;
         let state = await firstValueFrom(
-          this.api.markAsRead(chatId, { messageId: target }).pipe(takeUntilDestroyed(this.destroyRef)),
+          this.api.markAsRead({ chatId, messageId: target }).pipe(takeUntilDestroyed(this.destroyRef)),
         );
-        if (this.destroyRef.destroyed) return;
+        if (!this.isAccessible(chatId) || (this.accessVersions().get(chatId) ?? 0) > accessVersion) return;
         this.changed(ChatChangeKind.Read, chatId, undefined, state.lastReadMessageId ?? target);
         const lastRead = this.readStates().get(chatId)?.state.lastReadMessageId;
         if (!lastRead || (state.lastReadMessageId && state.lastReadMessageId >= lastRead)) {
@@ -1183,8 +1242,10 @@ export class ChatStore {
       if (reading?.sent) await reading.promise.catch(() => undefined);
       if (this.destroyRef.destroyed) return;
       const version = operation.version;
+      const accessVersion = this.version;
       const refreshing = !!operation.refresh;
-      const state = await firstValueFrom(this.api.markAsUnread(chatId).pipe(takeUntilDestroyed(this.destroyRef)));
+      const state = await firstValueFrom(this.api.markAsUnread({ chatId }).pipe(takeUntilDestroyed(this.destroyRef)));
+      if (!this.isAccessible(chatId) || (this.accessVersions().get(chatId) ?? 0) > accessVersion) return;
       if (this.destroyRef.destroyed) return;
       this.applyReadState(chatId, state);
       this.changed(ChatChangeKind.Read, chatId);
@@ -1213,7 +1274,7 @@ export class ChatStore {
     return this.changeChatState(
       chatId,
       { archived },
-      archived ? this.api.archiveChat(chatId) : this.api.unarchiveChat(chatId),
+      archived ? this.api.archive({ chatId }) : this.api.unarchive({ chatId }),
     );
   }
   setMuted(chatId: SnowflakeID, muted: boolean, durationSeconds?: number) {
@@ -1240,7 +1301,7 @@ export class ChatStore {
     this.notificationWriteVersions.set(chatId, this.snapshot());
     const revision = this.remotePreferenceVersions.get(chatId);
     const uid = this.session.user()?.uid;
-    await this.changeChatState(chatId, state, this.groupsApi.putNotificationSetting(chatId, command));
+    await this.changeChatState(chatId, state, this.groupsApi.updateNotificationSetting({ chatId, ...command }));
     const kind = this.get(chatId)?.kind;
     if (kind && uid === this.session.user()?.uid && revision === this.remotePreferenceVersions.get(chatId))
       this.preferenceChanges.next(kind);
@@ -1249,7 +1310,7 @@ export class ChatStore {
     const uid = this.session.user()?.uid;
     const version = this.snapshot();
     const remote = this.remoteClearVersions.get(kind);
-    const result = await this.response(this.usersApi.clearExceptions({ kind }));
+    const result = await this.response(this.usersApi.clearNotificationExceptions({ kind }));
     if (this.destroyRef.destroyed || uid !== this.session.user()?.uid || remote !== this.remoteClearVersions.get(kind))
       return;
     // Reads started during the write can still contain the old preference. Only
@@ -1267,7 +1328,7 @@ export class ChatStore {
     this.preferenceChanges.next(result.kind);
   }
 
-  private async changeChatState(chatId: SnowflakeID, state: ChatState, request: Observable<ChatState | void>) {
+  private async changeChatState(chatId: SnowflakeID, state: ChatState, request: Observable<unknown>) {
     const previous = this.chatState(chatId);
     const uid = this.session.user()?.uid;
     const version = this.snapshot();
@@ -1288,7 +1349,7 @@ export class ChatStore {
       this.applyChatState(chatId, patch);
     };
     try {
-      const confirmed = await this.response(request);
+      const confirmed = (await this.response(request)) as ChatState | null;
       if (this.destroyRef.destroyed || this.session.user()?.uid !== uid) return;
       // Advance the version even for 204 responses to reject reads begun mid-save.
       applyCurrent(confirmed ?? state);
@@ -1310,7 +1371,8 @@ export class ChatStore {
 
   /** Known thread content, independent of whether it belongs in the subscribed list. */
   threadSummary(rootId: SnowflakeID) {
-    return this.threadSummaries().get(rootId)?.value;
+    const summary = this.threadSummaries().get(rootId)?.value;
+    return summary && this.isAccessible(summary.chatId, rootId) ? summary : undefined;
   }
 
   thread(rootId: SnowflakeID): ThreadListItem | undefined {
@@ -1327,6 +1389,13 @@ export class ChatStore {
   }
 
   acceptThreads(threads: readonly ThreadListItem[], version: number, subscriptionVersion: number) {
+    threads = threads.filter((thread) => {
+      const rootId = thread.threadRootMessage.id;
+      return (
+        this.isAccessible(thread.chatId, rootId) &&
+        Math.max(this.accessVersions().get(thread.chatId) ?? 0, this.accessVersions().get(rootId) ?? 0) <= version
+      );
+    });
     this.rememberMentions(
       threads.flatMap((thread) => [thread.threadRootMessage, ...(thread.lastReply ? [thread.lastReply] : [])]),
       version,
@@ -1391,7 +1460,7 @@ export class ChatStore {
       while (true) {
         await this.response(timer(100));
         const version = this.version;
-        const state = await this.response(this.threadsApi.getThreadReadStateInChat(chatId, rootId));
+        const state = await this.response(this.threadsApi.getReadState({ chatId, threadRootId: rootId }));
         const current = this.threadReads().get(rootId);
         if (current && current.version > version) {
           if (!current.dirty) return current.state;
@@ -1453,7 +1522,7 @@ export class ChatStore {
     const request = (async () => {
       while (!this.destroyRef.destroyed) {
         const version = ++this.subscriptionVersion;
-        const status = await this.response(this.threadsApi.getSubscriptionStatus(chatId, rootId));
+        const status = await this.response(this.threadsApi.getSubscriptionStatus({ chatId, threadRootId: rootId }));
         if (this.destroyRef.destroyed) return;
         if (this.subscriptions().get(rootId)!.version <= version) {
           this.setSubscription(chatId, rootId, status, version);
@@ -1473,7 +1542,7 @@ export class ChatStore {
     chatId: SnowflakeID,
     rootId: SnowflakeID,
     change: Partial<ThreadSubscriptionStatusResponse>,
-    request: Observable<void>,
+    request: Observable<unknown>,
   ) {
     const previous = this.cachedSubscription(chatId, rootId);
     if (previous) this.setSubscription(chatId, rootId, { ...previous, ...change });
@@ -1497,7 +1566,9 @@ export class ChatStore {
       chatId,
       rootId,
       { archived },
-      archived ? this.threadsApi.archiveThread(chatId, rootId) : this.threadsApi.unarchiveThread(chatId, rootId),
+      archived
+        ? this.threadsApi.archive({ chatId, threadRootId: rootId })
+        : this.threadsApi.unarchive({ chatId, threadRootId: rootId }),
     );
   }
   subscribeThread(chatId: SnowflakeID, rootId: SnowflakeID) {
@@ -1505,7 +1576,7 @@ export class ChatStore {
       chatId,
       rootId,
       { subscribed: true },
-      this.threadsApi.subscribeThread(chatId, rootId),
+      this.threadsApi.subscribe({ chatId, threadRootId: rootId }),
     );
   }
   unsubscribeThread(chatId: SnowflakeID, rootId: SnowflakeID) {
@@ -1513,7 +1584,7 @@ export class ChatStore {
       chatId,
       rootId,
       { subscribed: false },
-      this.threadsApi.unsubscribeThread(chatId, rootId),
+      this.threadsApi.unsubscribe({ chatId, threadRootId: rootId }),
     );
   }
   markThreadRead(chatId: SnowflakeID, rootId: SnowflakeID, messageId: SnowflakeID): Promise<void> {
@@ -1529,10 +1600,17 @@ export class ChatStore {
     request.promise = (async () => {
       while (!this.destroyRef.destroyed) {
         await this.response(timer(1000));
-        if (this.destroyRef.destroyed) return;
+        if (this.destroyRef.destroyed || !this.isAccessible(chatId, rootId)) return;
         const target = request.messageId;
         const version = this.snapshot();
-        let state = await this.response(this.threadsApi.markThreadReadInChat(chatId, rootId, { messageId: target }));
+        let state = await this.response(
+          this.threadsApi.markAsRead({ chatId, threadRootId: rootId, messageId: target }),
+        );
+        if (
+          !this.isAccessible(chatId, rootId) ||
+          Math.max(this.accessVersions().get(chatId) ?? 0, this.accessVersions().get(rootId) ?? 0) > version
+        )
+          return;
         const current = this.threadReads().get(rootId);
         if (!this.stateWatch.selected({ chatId, threadId: rootId }) && current && current.version > version) {
           state =

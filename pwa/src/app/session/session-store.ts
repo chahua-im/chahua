@@ -1,9 +1,12 @@
-import { HttpErrorResponse } from '@angular/common/http';
-import { inject, isDevMode, Service, signal } from '@angular/core';
-import { firstValueFrom, timeout, type Observable } from 'rxjs';
-import { AuthService } from '../../generated/endpoints/auth/auth.service';
-import { UsersService } from '../../generated/endpoints/users/users.service';
+import { DestroyRef, inject, isDevMode, Service, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { filter, firstValueFrom, timeout, type Observable } from 'rxjs';
+import { RpcApi } from '../../generated/rpc-api';
 import type { ChatSettings, MeResponse, StickerPackOrderItem, User } from '../../generated/models';
+import { Connection } from '../api/connection';
+import { RpcError, RpcErrorCode } from '../api/rpc-error';
+import { RpcConnectionState, RpcTransport } from '../api/rpc-transport';
+import { appVersion } from '../app-version';
 import type { SnowflakeID } from '../api/snowflake-id';
 
 declare const CHAHUA_DEV_TOKEN: string | undefined;
@@ -23,10 +26,32 @@ export class ChatSettingsChanged extends Error {}
 export class SessionStore {
   private urlTokenAdopted = false;
   private chatSettingsWrite = 0;
-  private readonly auth = inject(AuthService);
-  private readonly users = inject(UsersService);
+  private initializationEpoch = 0;
+  private boundIdentity?: { uid: number; gen: number };
+  private readonly destroy = inject(DestroyRef);
+  private readonly api = inject(RpcApi);
+  private readonly transport = inject(RpcTransport);
+  private readonly connection = inject(Connection);
   readonly token = signal<string | undefined>(undefined);
   readonly user = signal<(MeResponse & Pick<User, 'userGroup'>) | undefined>(undefined);
+  constructor() {
+    this.transport.notifications$
+      .pipe(
+        filter((notification) => notification.method === 'session.invalidated'),
+        takeUntilDestroyed(this.destroy),
+      )
+      .subscribe(() => this.logout());
+    this.api.results$
+      .pipe(
+        filter(({ method }) => !method.startsWith('savedMessages.')),
+        takeUntilDestroyed(this.destroy),
+      )
+      .subscribe(({ result }) => this.updateProfile(result));
+    this.connection.events$
+      .pipe(takeUntilDestroyed(this.destroy))
+      .subscribe((event) => this.updateProfile(event.payload));
+  }
+
   restoreToken() {
     const url = new URL(window.location.href);
     const urlToken = url.searchParams.get('token');
@@ -40,44 +65,108 @@ export class SessionStore {
   }
 
   async initialize() {
-    // One deadline for the whole login attempt; timeout unsubscribes the active
-    // HTTP request so a late response cannot overwrite a subsequent retry.
-    const deadline = new Date(Date.now() + 30000);
+    const epoch = ++this.initializationEpoch;
+    const deadline = new Date(Date.now() + 30_000);
     const request = <T>(response: Observable<T>) => firstValueFrom(response.pipe(timeout({ first: deadline })));
+    const current = () => epoch === this.initializationEpoch;
+    const priorToken = this.token();
+
     try {
-      // The per-tab dev UID needs a fresh local session on each page load.
-      // An explicit URL credential suppresses this even when its matching stored
-      // token is retained. A configured development token also suppresses it.
       if (isDevMode() && devBackendEnabled() && !this.urlTokenAdopted && !developmentToken()) {
-        try {
-          const { token } = await request(
-            this.auth.postDevSession({ uid: developmentUid() }, { headers: { 'X-Client-Id': developmentClientId() } }),
-          );
-          this.saveToken(token);
-        } catch (error) {
-          // If the dev-session endpoint is down, continue with a previously
-          // issued token when one exists.
-          if (!this.token()) throw error;
+        const uid = developmentUid();
+        if (!(this.transport.state() === RpcConnectionState.Authenticated && this.user()?.uid === uid)) {
+          this.prepareDevConnection(uid);
+          try {
+            await request(this.transport.open({ appVersion }));
+            if (!current()) return;
+            const issued = await request(this.api.auth.createDevSession({ uid, clientId: developmentClientId() }));
+            if (!current()) return;
+            this.saveToken(issued.token);
+            this.transport.setReconnectToken(issued.token);
+            this.boundIdentity = tokenIdentity(issued.token) ?? { uid, gen: 0 };
+          } catch (error) {
+            if (!current()) return;
+            if (!priorToken) throw error;
+            this.transport.close();
+            await this.bindToken(priorToken, request, current);
+            if (!current()) return;
+          }
         }
+      } else if (priorToken) {
+        await this.bindToken(priorToken, request, current);
+        if (!current()) return;
+      } else {
+        return;
       }
+
       if (!this.token()) return;
-      const refreshed = await request(this.auth.postRefresh());
+      const refreshed = await request(this.api.auth.refresh());
+      if (!current()) return;
       this.saveToken(refreshed.token);
-      const user = await request(this.users.getMe());
+      this.transport.setReconnectToken(refreshed.token);
+      this.boundIdentity = tokenIdentity(refreshed.token) ?? this.boundIdentity;
+
+      const user = await request(this.api.users.getMe());
+      if (!current()) return;
       // /users/me omits the group tag; the existing UID lookup includes it.
-      const profile = await request(this.users.getUserSearch({ q: String(user.uid), limit: 1 })).catch(() => undefined);
-      this.user.set({ ...user, userGroup: profile?.members.find((member) => member.uid === user.uid)?.userGroup });
+      const profile = await request(this.api.users.search({ q: String(user.uid), limit: 1 })).catch(() => undefined);
+      if (!current()) return;
+      const userGroup = profile?.members.find((member) => member.uid === user.uid)?.userGroup;
+      this.user.set({
+        ...user,
+        userGroup: profile === undefined && this.user()?.uid === user.uid ? this.user()?.userGroup : userGroup,
+      });
     } catch (error) {
-      if (error instanceof HttpErrorResponse && error.status === 401) this.logout();
+      if (!current()) return;
+      if (error instanceof RpcError && error.code === RpcErrorCode.Unauthorized) this.logout();
       throw error;
     }
+  }
+
+  private async bindToken(
+    token: string,
+    request: <Result>(response: Observable<Result>) => Promise<Result>,
+    current: () => boolean,
+  ) {
+    if (!current()) return;
+    const identity = tokenIdentity(token);
+    if (
+      this.transport.state() === RpcConnectionState.Authenticated &&
+      this.boundIdentity &&
+      identity &&
+      this.boundIdentity.uid === identity.uid &&
+      this.boundIdentity.gen === identity.gen
+    ) {
+      this.transport.setReconnectToken(token);
+      return;
+    }
+
+    const currentUser = this.user();
+    if (currentUser && (!identity || currentUser.uid !== identity.uid)) this.clearAccountState();
+    else this.transport.close();
+
+    const opened = await request(this.transport.open({ token, appVersion }));
+    if (current() && opened.authenticated) this.boundIdentity = identity ?? { uid: opened.uid, gen: 0 };
+  }
+
+  private prepareDevConnection(uid: number) {
+    if (this.user() && this.user()!.uid !== uid) this.clearAccountState();
+    else this.transport.close();
+  }
+
+  private clearAccountState() {
+    this.chatSettingsWrite++;
+    this.boundIdentity = undefined;
+    this.transport.close();
+    this.connection.reset();
+    this.user.set(undefined);
   }
 
   async setShowMembershipMessages(showMembershipMessages: boolean) {
     const uid = this.user()?.uid;
     if (uid == null) return;
     const write = ++this.chatSettingsWrite;
-    const settings = await firstValueFrom(this.users.putChatSettings({ showMembershipMessages }));
+    const settings = await firstValueFrom(this.api.users.updateChatSettings({ showMembershipMessages }));
     if (write !== this.chatSettingsWrite || this.user()?.uid !== uid) return;
     this.acceptChatSettings(settings, uid);
   }
@@ -153,9 +242,9 @@ export class SessionStore {
   }
 
   logout() {
-    this.chatSettingsWrite++;
+    this.initializationEpoch++;
+    this.clearAccountState();
     this.saveToken(undefined);
-    this.user.set(undefined);
   }
 
   devUid() {
@@ -234,7 +323,8 @@ function tokenIdentity(token: string) {
     const decoded: unknown = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
     if (!decoded || typeof decoded !== 'object' || !('uid' in decoded) || !('gen' in decoded)) return;
     const { uid, gen } = decoded;
-    if (Number.isSafeInteger(uid) && Number.isSafeInteger(gen)) return { uid, gen };
+    if (typeof uid === 'number' && typeof gen === 'number' && Number.isSafeInteger(uid) && Number.isSafeInteger(gen))
+      return { uid, gen };
   } catch {
     // This only chooses a local candidate; refresh verifies the token.
   }

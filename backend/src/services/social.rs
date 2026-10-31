@@ -2,14 +2,16 @@
 //!
 //! Chahua is the authoritative source for friend relationships and blocks.
 //! All functions take a `&mut PgConnection` (borrowed from `DbConn`); the few
-//! that need snowflake IDs are `async` and take `&AppState` for the generator.
+//! that need snowflake IDs are async and receive only their required services.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use chrono::Utc;
 use diesel::prelude::*;
 
 use crate::errors::AppError;
+use crate::metrics::Metrics;
 use crate::models::{
     FriendAddVerificationMode, FriendPresenceOverride, FriendReadReceiptOverride, FriendRequest,
     FriendRequestStatus, GroupJoinReason, GroupKind, GroupRole, GroupVisibility, MessageType,
@@ -17,13 +19,31 @@ use crate::models::{
     PresenceVisibility, ReadReceiptVisibility,
 };
 use crate::schema::{blocks, friend_requests, friendships, group_membership, groups, user_extra};
-use crate::services::messages::{load_username_by_uid, PreparedMessageSend, SendMessageOutcome};
-use crate::services::user;
-use crate::utils::ids;
-use crate::AppState;
+use crate::services::{
+    avatars::AvatarService,
+    media::MediaStore,
+    messages::{
+        load_username_by_uid, PreparedMessageSend, SendMessageOutcome, SendPreparedMessageDeps,
+    },
+    presence::PresenceSnapshotService,
+    push::PushService,
+    user,
+    ws_registry::ConnectionRegistry,
+};
+use crate::utils::ids::{self, IdGen};
 
 const UNRESOLVED_FRIEND_REQUEST_STATUSES: [FriendRequestStatus; 2] =
     [FriendRequestStatus::Pending, FriendRequestStatus::Archived];
+
+pub struct FriendRequestServiceDeps<'a> {
+    pub id_gen: &'a Arc<IdGen>,
+    pub media: &'a MediaStore,
+    pub avatars: &'a Arc<AvatarService>,
+    pub metrics: &'a Arc<Metrics>,
+    pub ws_registry: &'a Arc<ConnectionRegistry>,
+    pub presence_service: &'a Arc<PresenceSnapshotService>,
+    pub push_service: &'a Arc<PushService>,
+}
 
 /// Return the pair as `(min, max)` so each relationship is stored once.
 fn canonical_pair(a: i32, b: i32) -> (i32, i32) {
@@ -432,7 +452,7 @@ fn create_dm_for_friendship(
 /// so acceptance never breaks on announcement failure.
 async fn send_friendship_accepted_message(
     conn: &mut PgConnection,
-    state: &AppState,
+    deps: FriendRequestServiceDeps<'_>,
     sender_uid: i32,
     peer_uid: i32,
     chat_id: i64,
@@ -443,7 +463,12 @@ async fn send_friendship_accepted_message(
     if let Ok(SendMessageOutcome::Created(send_result)) =
         crate::services::messages::send_prepared_message(
             conn,
-            state,
+            SendPreparedMessageDeps {
+                id_gen: deps.id_gen,
+                media: deps.media,
+                avatars: deps.avatars,
+                metrics: deps.metrics,
+            },
             PreparedMessageSend {
                 system_kind: Some(crate::models::SystemMessageKind::FriendRequestAccepted),
                 forwarded_from_message_id: None,
@@ -469,7 +494,9 @@ async fn send_friendship_accepted_message(
         .await
     {
         let send_result = *send_result;
-        send_result.side_effects.fire(state);
+        send_result
+            .side_effects
+            .fire(deps.ws_registry, deps.push_service);
     }
 }
 
@@ -868,7 +895,7 @@ fn normalize_request_message(
 
 pub async fn create_friend_request(
     conn: &mut PgConnection,
-    state: &AppState,
+    deps: FriendRequestServiceDeps<'_>,
     from: i32,
     to: i32,
     message: Option<String>,
@@ -893,7 +920,7 @@ pub async fn create_friend_request(
             return Ok(CreateRequestOutcome::AlreadyPending);
         }
         // Reciprocal pending request (to -> from): auto-accept it.
-        let dm_group_id = ids::next_gid(state.id_gen.as_ref()).await.map_err(|err| {
+        let dm_group_id = ids::next_gid(deps.id_gen.as_ref()).await.map_err(|err| {
             tracing::error!("failed to generate dm group id: {:?}", err);
             AppError::Internal("Failed to generate id")
         })?;
@@ -918,9 +945,9 @@ pub async fn create_friend_request(
                 let dm_chat_id = create_dm_for_friendship(conn, dm_group_id, from, to, now)?;
                 Ok((updated, dm_chat_id))
             })?;
-        state.presence_service.pair_policy_changed(from, to);
+        deps.presence_service.pair_policy_changed(from, to);
         // The auto-accepter (`from`) just reciprocated the pending request.
-        send_friendship_accepted_message(conn, state, from, to, dm_chat_id).await;
+        send_friendship_accepted_message(conn, deps, from, to, dm_chat_id).await;
         return Ok(CreateRequestOutcome::AutoAccepted { request });
     }
 
@@ -928,7 +955,7 @@ pub async fn create_friend_request(
     let (mode, target_question) = get_friend_settings(conn, to)?;
     let (message, question) = normalize_request_message(mode, message, target_question)?;
 
-    let id = ids::next_id(&state.id_gen).await.map_err(|err| {
+    let id = ids::next_id(deps.id_gen).await.map_err(|err| {
         tracing::error!("failed to generate friend request id: {:?}", err);
         AppError::Internal("Failed to generate id")
     })?;
@@ -979,13 +1006,13 @@ impl ResolveOutcome {
 /// Accept or reject a friend request. Only the recipient (`to_uid`) may resolve.
 pub async fn resolve_friend_request(
     conn: &mut PgConnection,
-    state: &AppState,
+    deps: FriendRequestServiceDeps<'_>,
     resolver_uid: i32,
     request_id: i64,
     accept: bool,
 ) -> Result<ResolveOutcome, AppError> {
     let dm_group_id = if accept {
-        Some(ids::next_gid(state.id_gen.as_ref()).await.map_err(|err| {
+        Some(ids::next_gid(deps.id_gen.as_ref()).await.map_err(|err| {
             tracing::error!("failed to generate dm group id: {:?}", err);
             AppError::Internal("Failed to generate id")
         })?)
@@ -1052,12 +1079,11 @@ pub async fn resolve_friend_request(
             Ok((ResolveOutcome::Resolved(request), None))
         })?;
     if let Some(chat_id) = dm_chat_id {
-        state
-            .presence_service
+        deps.presence_service
             .pair_policy_changed(outcome.request().from_uid, outcome.request().to_uid);
         send_friendship_accepted_message(
             conn,
-            state,
+            deps,
             resolver_uid,
             outcome.request().from_uid,
             chat_id,

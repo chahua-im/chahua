@@ -1,7 +1,7 @@
 import { computed, signal, type DestroyRef } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom, type Observable } from 'rxjs';
-import type { PinsService } from '../../generated/endpoints/pins/pins.service';
+import type { RpcApi } from '../../generated/rpc-api';
 import { ServerWsMessageType, type MessageResponse, type PinResponse } from '../../generated/models';
 import type { Connection } from '../api/connection';
 import type { SnowflakeID } from '../api/snowflake-id';
@@ -12,6 +12,7 @@ import { preserveReactionOwnership } from '../messages/reaction-state';
 export class ChatPins {
   private pinsFresh = false;
   private pinRevision = 0;
+  private pinEpoch = 0;
   private readonly pinItems = signal<PinResponse[]>([]);
   private readonly pendingPins = signal<Promise<void> | undefined>(undefined);
   readonly items = this.pinItems.asReadonly();
@@ -19,19 +20,27 @@ export class ChatPins {
   constructor(
     readonly chatId: SnowflakeID,
     readonly threadId: SnowflakeID | undefined,
-    private readonly pinsApi: PinsService,
+    private readonly pinsApi: RpcApi['pins'],
     private readonly realtime: Connection,
     private readonly destroyRef: DestroyRef,
+    private readonly accessible: () => boolean,
   ) {}
 
   invalidate() {
     this.pinsFresh = false;
     this.pinRevision++;
   }
+  clear() {
+    this.invalidate();
+    this.pinEpoch++;
+    this.pendingPins.set(undefined);
+    this.pinItems.set([]);
+  }
   get(messageId: SnowflakeID) {
     return this.items().find((pin) => pin.message.id === messageId);
   }
   ensure(): Promise<void> {
+    if (!this.accessible()) return Promise.resolve();
     if (this.pinsFresh) return Promise.resolve();
     const pendingPins = this.pendingPins();
     if (pendingPins) return pendingPins;
@@ -43,10 +52,15 @@ export class ChatPins {
   }
   private async loadPins() {
     while (!this.destroyRef.destroyed) {
+      if (!this.accessible()) return;
+      const epoch = this.pinEpoch;
       const revision = this.pinRevision;
       const { pins } = await this.response(
-        this.threadId ? this.pinsApi.listThreadPins(this.chatId, this.threadId) : this.pinsApi.listPins(this.chatId),
+        this.threadId
+          ? this.pinsApi.listForThread({ chatId: this.chatId, threadRootId: this.threadId })
+          : this.pinsApi.list({ chatId: this.chatId }),
       );
+      if (epoch !== this.pinEpoch || !this.accessible()) return;
       if (revision !== this.pinRevision) continue;
       this.pinItems.set(pins);
       this.pinsFresh = true;
@@ -54,6 +68,7 @@ export class ChatPins {
     }
   }
   apply(id: SnowflakeID, pin?: PinResponse) {
+    if (!this.accessible()) return;
     this.pinRevision++;
     this.pinItems.update((pins) => {
       const remaining = pins.filter((existing) => existing.id !== id);
@@ -61,6 +76,7 @@ export class ChatPins {
     });
   }
   receiveChange(event: MessageChange) {
+    if (!this.accessible()) return;
     if (event.payload.chatId !== this.chatId) return;
     this.pinRevision++;
     this.pinItems.update((pins) =>
@@ -113,13 +129,14 @@ export class ChatPins {
   }
   async set(message: MessageResponse, pinned: boolean) {
     await this.ensure();
+    if (!this.accessible()) return;
     const existing = this.get(message.id);
     if (pinned === !!existing) return;
     if (existing) {
       await this.response(
         this.threadId
-          ? this.pinsApi.deleteThreadPin(this.chatId, this.threadId, existing.id)
-          : this.pinsApi.deletePin(this.chatId, existing.id),
+          ? this.pinsApi.deleteForThread({ chatId: this.chatId, threadRootId: this.threadId, pinId: existing.id })
+          : this.pinsApi.delete({ chatId: this.chatId, pinId: existing.id }),
       );
       this.realtime.acceptPin({
         type: this.threadId ? ServerWsMessageType.threadPinRemoved : ServerWsMessageType.pinRemoved,
@@ -136,8 +153,8 @@ export class ChatPins {
     const revision = this.pinRevision;
     const pin = await this.response(
       this.threadId
-        ? this.pinsApi.createThreadPin(this.chatId, this.threadId, { messageId: message.id })
-        : this.pinsApi.createPin(this.chatId, { messageId: message.id }),
+        ? this.pinsApi.createForThread({ chatId: this.chatId, threadRootId: this.threadId, messageId: message.id })
+        : this.pinsApi.create({ chatId: this.chatId, messageId: message.id }),
     );
     if (revision === this.pinRevision)
       this.realtime.acceptPin({

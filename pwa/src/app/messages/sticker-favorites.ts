@@ -1,6 +1,6 @@
 import { Service, computed, inject, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
-import { StickersService } from '../../generated/endpoints/stickers/stickers.service';
+import { RpcApi } from '../../generated/rpc-api';
 import type { SnowflakeID } from '../api/snowflake-id';
 
 /**
@@ -10,7 +10,7 @@ import type { SnowflakeID } from '../api/snowflake-id';
  */
 @Service()
 export class StickerFavorites {
-  private readonly stickers = inject(StickersService);
+  private readonly api = inject(RpcApi);
   private readonly ids = signal<ReadonlySet<SnowflakeID> | undefined>(undefined);
   private pending?: Promise<void>;
 
@@ -31,7 +31,9 @@ export class StickerFavorites {
     const previous = this.isFavorite(stickerId);
     this.write(stickerId, favorited);
     try {
-      await firstValueFrom(favorited ? this.stickers.putFavorite(stickerId) : this.stickers.deleteFavorite(stickerId));
+      await firstValueFrom(
+        favorited ? this.api.stickers.favorite({ stickerId }) : this.api.stickers.unfavorite({ stickerId }),
+      );
     } catch (error) {
       this.write(stickerId, previous);
       throw error;
@@ -40,7 +42,7 @@ export class StickerFavorites {
 
   private async load() {
     try {
-      const list = await firstValueFrom(this.stickers.getMyFavorites());
+      const list = await firstValueFrom(this.api.stickers.listFavorites());
       this.ids.set(new Set(list.stickers.map((sticker) => sticker.id)));
     } catch {
       // Favorites are cosmetic; an unreadable list leaves every sticker unfavorited but usable.

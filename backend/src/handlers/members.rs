@@ -3,28 +3,17 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use chrono::{DateTime, Utc};
-use diesel::prelude::*;
-use serde_json::json;
-use std::collections::HashMap;
 use utoipa_axum::router::OpenApiRouter;
 
-use diesel::PgConnection;
-
-use crate::dto::members::{ListMembersResponse, MemberResponse};
+use crate::dto::members::{
+    AddMemberBody, ListMembersQuery, ListMembersResponse, MemberResponse, RemoveMemberQuery,
+    UpdateMemberBody,
+};
 use crate::errors::AppError;
 use crate::extractors::DbConn;
-use crate::handlers::groups::load_requester_group_role;
-use crate::models::{
-    GroupJoinReason, GroupKind, GroupMembership, GroupRole, NewGroupMembership, SpeakingMode,
-};
-use crate::schema::{self, group_membership, groups};
-
-use crate::services::user::{
-    lookup_user_profiles, parse_user_search_query, search_group_member_uids, UserSearchMode,
-};
-use crate::utils::{auth::CurrentUid, pagination::validate_limit};
-use crate::{AppState, MAX_MEMBERS_LIMIT};
+use crate::services::api::members::{self, DeleteRemoveMemberDeps, PostAddMemberDeps};
+use crate::utils::auth::CurrentUid;
+use crate::AppState;
 
 #[derive(serde::Deserialize)]
 pub struct ChatIdPath {
@@ -37,97 +26,6 @@ pub struct MemberPath {
     uid: i32,
 }
 
-#[derive(serde::Deserialize, utoipa::ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AddMemberBody {
-    uid: i32,
-    #[serde(default)]
-    role: Option<GroupRole>,
-}
-
-#[derive(serde::Deserialize, utoipa::ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateMemberBody {
-    role: GroupRole,
-}
-
-#[derive(serde::Deserialize, utoipa::ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct ListMembersQuery {
-    limit: Option<i64>,
-    after: Option<i32>,
-    q: Option<String>,
-    mode: Option<UserSearchMode>,
-}
-
-fn build_member_responses(
-    conn: &mut diesel::PgConnection,
-    state: &AppState,
-    page_rows: Vec<(i32, GroupRole, DateTime<Utc>, SpeakingMode)>,
-) -> Result<Vec<MemberResponse>, AppError> {
-    let uids: Vec<i32> = page_rows.iter().map(|(uid, _, _, _)| *uid).collect();
-    let profiles = lookup_user_profiles(conn, &uids)?;
-    let mut avatars = state.avatars.lookup(&uids);
-
-    Ok(page_rows
-        .into_iter()
-        .map(|(uid, role, joined_at, speaking_mode)| {
-            let profile = profiles.get(&uid);
-            MemberResponse {
-                avatar_url: avatars.remove(&uid).flatten(),
-                uid,
-                role,
-                speaking_mode,
-                joined_at,
-                username: profile.and_then(|profile| profile.username.clone()),
-                gender: profile.map(|profile| profile.gender).unwrap_or(0),
-                user_group: profile.and_then(|profile| profile.user_group.clone()),
-            }
-        })
-        .collect())
-}
-
-/// Check if user is a member of the chat; return 403 if not.
-pub(super) fn check_membership(
-    conn: &mut PgConnection,
-    chat_id: i64,
-    uid: i32,
-) -> Result<(), AppError> {
-    use crate::schema::group_membership::dsl;
-
-    let exists = group_membership::table
-        .filter(dsl::chat_id.eq(chat_id).and(dsl::uid.eq(uid)))
-        .count()
-        .get_result::<i64>(conn)?;
-
-    if exists == 0 {
-        return Err(AppError::Forbidden("Not a member of this chat"));
-    }
-
-    Ok(())
-}
-
-/// Check if user is an admin of the chat; return 403 if not a member or not admin.
-pub(super) fn require_admin_role(
-    conn: &mut PgConnection,
-    chat_id: i64,
-    uid: i32,
-) -> Result<(), AppError> {
-    use crate::schema::group_membership::dsl;
-
-    let role: Option<GroupRole> = group_membership::table
-        .filter(dsl::chat_id.eq(chat_id).and(dsl::uid.eq(uid)))
-        .select(dsl::role)
-        .first(conn)
-        .optional()?;
-
-    match role {
-        Some(GroupRole::Admin) => Ok(()),
-        Some(_) => Err(AppError::Forbidden("Admin role required")),
-        None => Err(AppError::Forbidden("Not a member of this chat")),
-    }
-}
-
 /// GET /group/:chat_id/members — List members of a chat.
 #[utoipa::path(
     get,
@@ -138,7 +36,7 @@ pub(super) fn require_admin_role(
         ("limit" = Option<i64>, Query, description = "Page size limit"),
         ("after" = Option<i32>, Query, description = "Cursor for pagination"),
         ("q" = Option<String>, Query, description = "Search query"),
-        ("mode" = Option<UserSearchMode>, Query, description = "Search mode"),
+        ("mode" = Option<crate::services::user::UserSearchMode>, Query, description = "Search mode"),
     ),
     responses(
         (status = OK, body = ListMembersResponse),
@@ -150,58 +48,9 @@ async fn get_members(
     State(state): State<AppState>,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
     mut conn: DbConn,
-    Query(q): Query<ListMembersQuery>,
+    Query(query): Query<ListMembersQuery>,
 ) -> Result<Json<ListMembersResponse>, AppError> {
-    let conn = &mut *conn;
-
-    // Require membership to see members list
-    check_membership(conn, chat_id, uid)?;
-
-    use crate::schema::group_membership::dsl as gm_dsl;
-
-    let requester_is_admin = matches!(
-        load_requester_group_role(conn, chat_id, uid)?,
-        Some(GroupRole::Admin)
-    );
-
-    let limit = validate_limit(q.limit, MAX_MEMBERS_LIMIT);
-    let search_mode = q.mode.unwrap_or(UserSearchMode::Autocomplete);
-    let search = parse_user_search_query(q.q.as_deref(), search_mode);
-
-    let member_uids = search_group_member_uids(conn, chat_id, q.after, limit + 1, search.as_ref())?;
-
-    let has_more = member_uids.len() as i64 > limit;
-    let page_uids: Vec<i32> = member_uids.into_iter().take(limit as usize).collect();
-    let rows: Vec<GroupMembership> = group_membership::table
-        .filter(
-            gm_dsl::chat_id
-                .eq(chat_id)
-                .and(gm_dsl::uid.eq_any(&page_uids)),
-        )
-        .select(GroupMembership::as_select())
-        .load(conn)?;
-
-    let rows_by_uid: HashMap<i32, GroupMembership> =
-        rows.into_iter().map(|row| (row.uid, row)).collect();
-    let page_rows: Vec<(i32, GroupRole, DateTime<Utc>, SpeakingMode)> = page_uids
-        .into_iter()
-        .filter_map(|member_uid| {
-            rows_by_uid
-                .get(&member_uid)
-                .map(|row| (row.uid, row.role.clone(), row.joined_at, row.speaking_mode))
-        })
-        .collect();
-    let members = build_member_responses(conn, &state, page_rows)?;
-
-    let next_cursor = has_more
-        .then(|| members.last().map(|member| member.uid))
-        .flatten();
-
-    Ok(Json(ListMembersResponse {
-        members,
-        next_cursor,
-        can_manage_members: requester_is_admin,
-    }))
+    members::get_members(uid, chat_id, query, &mut conn, &state.avatars).map(Json)
 }
 
 /// POST /group/:chat_id/members — Add a member to the chat (caller must be admin).
@@ -225,130 +74,22 @@ async fn post_add_member(
     mut conn: DbConn,
     Json(body): Json<AddMemberBody>,
 ) -> Result<(StatusCode, Json<MemberResponse>), AppError> {
-    let conn = &mut *conn;
-
-    // Check if requester is admin
-    require_admin_role(conn, chat_id, uid)?;
-
-    // DMs are strictly 1:1 — even a corrupted admin role must not grow them.
-    let kind: GroupKind = groups::table
-        .find(chat_id)
-        .select(groups::kind)
-        .first(conn)?;
-    if kind == GroupKind::Dm {
-        return Err(AppError::BadRequest(
-            "DM chats cannot have additional members",
-        ));
-    }
-
-    let profiles = lookup_user_profiles(conn, &[body.uid])?;
-    let profile = profiles.get(&body.uid);
-
-    if profile.is_none() {
-        return Err(AppError::BadRequest("User not found"));
-    }
-
-    // Check if already a member
-    let already_member = {
-        use crate::schema::group_membership::dsl as gm_dsl;
-        schema::group_membership::table
-            .filter(gm_dsl::chat_id.eq(chat_id).and(gm_dsl::uid.eq(body.uid)))
-            .count()
-            .get_result::<i64>(conn)?
-    };
-
-    if already_member > 0 {
-        return Err(AppError::Conflict("User is already a member"));
-    }
-
-    let role = body.role.unwrap_or(GroupRole::Member);
-
-    let last_message_id: Option<i64> = crate::schema::groups::table
-        .filter(crate::schema::groups::id.eq(chat_id))
-        .select(crate::schema::groups::last_message_id)
-        .first(conn)
-        .optional()?
-        .flatten();
-    let now = Utc::now();
-    let new_membership = NewGroupMembership {
+    let response = members::post_add_member(
+        uid,
         chat_id,
-        uid: body.uid,
-        role: role.clone(),
-        joined_at: now,
-        join_reason: GroupJoinReason::DirectInvite,
-        join_reason_extra: Some(json!({ "inviter_uid": uid })),
-        last_read_message_id: last_message_id,
-    };
-
-    diesel::insert_into(group_membership::table)
-        .values(&new_membership)
-        .execute(conn)?;
-
-    let target_username = profile
-        .and_then(|p| p.username.clone())
-        .unwrap_or_else(|| "Someone".to_string());
-
-    if let Ok(crate::services::messages::SendMessageOutcome::Created(send_result)) =
-        crate::services::messages::send_prepared_message(
-            conn,
-            &state,
-            crate::services::messages::PreparedMessageSend {
-                system_kind: Some(crate::models::SystemMessageKind::MemberAdded),
-                forwarded_from_message_id: None,
-                chat_id,
-                sender_uid: uid,
-                message: Some(crate::services::system_messages::with_user(
-                    format!("added {}", target_username),
-                    body.uid,
-                )),
-                message_type: crate::models::MessageType::System,
-                sticker_id: None,
-                reply_to_id: None,
-                reply_root_id: None,
-                client_generated_id: uuid::Uuid::new_v4().to_string(),
-                attachment_ids: vec![],
-                publish_immediately: true,
-                forwarded_bundle_id: None,
-                forwarded_preview_total: None,
-                forwarded_preview_contains_forwarded_messages: None,
-                forwarded_preview_items: None,
-            },
-        )
-        .await
-    {
-        let send_result = *send_result;
-        send_result.side_effects.fire(&state);
-    }
-
-    crate::services::chat::publish_membership_changed(&state.ws_registry, body.uid, chat_id);
-
-    let avatar_url = state
-        .avatars
-        .lookup(&[body.uid])
-        .remove(&body.uid)
-        .flatten();
-
-    Ok((
-        StatusCode::CREATED,
-        Json(MemberResponse {
-            uid: body.uid,
-            role,
-            speaking_mode: SpeakingMode::Unrestricted,
-            joined_at: now,
-            username: profile.and_then(|profile| profile.username.clone()),
-            avatar_url,
-            gender: profile.map(|profile| profile.gender).unwrap_or(0),
-            user_group: profile.and_then(|profile| profile.user_group.clone()),
-        }),
-    ))
-}
-
-/// Query parameters for the remove-member endpoint.
-#[derive(serde::Deserialize, utoipa::IntoParams)]
-#[serde(rename_all = "camelCase")]
-struct RemoveMemberQuery {
-    /// Optional: "last24h" to delete messages from last 24 hours, "all" to delete all messages.
-    delete_messages: Option<String>,
+        body,
+        &mut conn,
+        PostAddMemberDeps {
+            id_gen: &state.id_gen,
+            media: &state.media,
+            avatars: &state.avatars,
+            metrics: &state.metrics,
+            ws_registry: &state.ws_registry,
+            push_service: &state.push_service,
+        },
+    )
+    .await?;
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 /// DELETE /group/:chat_id/members/:uid — Remove a member from the chat (caller must be admin).
@@ -377,140 +118,23 @@ async fn delete_remove_member(
     State(state): State<AppState>,
     mut conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    let conn = &mut *conn;
-
-    // Allow if requester is admin OR removing themselves
-    let is_admin_removing_other = uid != target_uid;
-    let target_username = conn.transaction::<_, AppError, _>(|conn| {
-        crate::services::speaking::lock_chat(conn, chat_id, true)?;
-        if is_admin_removing_other {
-            require_admin_role(conn, chat_id, uid)?;
-        } else {
-            check_membership(conn, chat_id, uid)?;
-        }
-
-        // DMs have no admin and no join path, so a removed member could never rejoin.
-        let kind: GroupKind = groups::table
-            .find(chat_id)
-            .select(groups::kind)
-            .first(conn)?;
-        if kind == GroupKind::Dm {
-            return Err(AppError::BadRequest("DM chats cannot be left"));
-        }
-
-        // Check if target is a member and whether deleting it would remove the final admin.
-        use crate::schema::group_membership::dsl as gm_dsl;
-        let target_role: Option<GroupRole> = group_membership::table
-            .filter(gm_dsl::chat_id.eq(chat_id).and(gm_dsl::uid.eq(target_uid)))
-            .select(gm_dsl::role)
-            .first(conn)
-            .optional()?;
-
-        let Some(target_role) = target_role else {
-            return Err(AppError::NotFound("Member not found"));
-        };
-
-        let target_username = crate::services::user::lookup_user_profiles(conn, &[target_uid])
-            .ok()
-            .and_then(|mut profiles| profiles.remove(&target_uid))
-            .and_then(|p| p.username)
-            .unwrap_or_else(|| "Someone".to_string());
-
-        if matches!(target_role, GroupRole::Admin) {
-            let admin_count = group_membership::table
-                .filter(
-                    gm_dsl::chat_id
-                        .eq(chat_id)
-                        .and(gm_dsl::role.eq(GroupRole::Admin)),
-                )
-                .count()
-                .get_result::<i64>(conn)?;
-
-            if admin_count <= 1 {
-                return Err(AppError::BadRequest(
-                    "Cannot remove the last admin from the group",
-                ));
-            }
-        }
-
-        diesel::delete(
-            group_membership::table
-                .filter(gm_dsl::chat_id.eq(chat_id).and(gm_dsl::uid.eq(target_uid))),
-        )
-        .execute(conn)?;
-        crate::services::threads::unsubscribe_user_from_chat(conn, chat_id, target_uid)?;
-        Ok(target_username)
-    })?;
-
-    state.ws_registry.invalidate_unread(&[target_uid]);
-
-    let (system_kind, sys_sender_uid, sys_msg) = if is_admin_removing_other {
-        (
-            crate::models::SystemMessageKind::MemberRemoved,
-            uid,
-            crate::services::system_messages::with_user(
-                format!("removed {}", target_username),
-                target_uid,
-            ),
-        )
-    } else {
-        (
-            crate::models::SystemMessageKind::MemberLeft,
-            target_uid,
-            "left the chat".to_string(),
-        )
-    };
-
-    if let Ok(crate::services::messages::SendMessageOutcome::Created(send_result)) =
-        crate::services::messages::send_prepared_message(
-            conn,
-            &state,
-            crate::services::messages::PreparedMessageSend {
-                system_kind: Some(system_kind),
-                forwarded_from_message_id: None,
-                chat_id,
-                sender_uid: sys_sender_uid,
-                message: Some(sys_msg),
-                message_type: crate::models::MessageType::System,
-                sticker_id: None,
-                reply_to_id: None,
-                reply_root_id: None,
-                client_generated_id: uuid::Uuid::new_v4().to_string(),
-                attachment_ids: vec![],
-                publish_immediately: true,
-                forwarded_bundle_id: None,
-                forwarded_preview_total: None,
-                forwarded_preview_contains_forwarded_messages: None,
-                forwarded_preview_items: None,
-            },
-        )
-        .await
-    {
-        let send_result = *send_result;
-        send_result.side_effects.fire(&state);
-    }
-
-    // Enqueue bulk message deletion if requested (only when admin removes someone else)
-    if is_admin_removing_other {
-        if let Some(ref scope_str) = query.delete_messages {
-            use crate::services::background::{BackgroundJob, DeleteScope};
-            let scope = match scope_str.as_str() {
-                "last24h" => Some(DeleteScope::Last24Hours),
-                "all" => Some(DeleteScope::All),
-                _ => None,
-            };
-            if let Some(scope) = scope {
-                state
-                    .background_service
-                    .enqueue(BackgroundJob::BulkDeleteMessages {
-                        chat_id,
-                        target_uid,
-                        scope,
-                    });
-            }
-        }
-    }
-
+    members::delete_remove_member(
+        uid,
+        chat_id,
+        target_uid,
+        query,
+        &mut conn,
+        DeleteRemoveMemberDeps {
+            id_gen: &state.id_gen,
+            media: &state.media,
+            avatars: &state.avatars,
+            metrics: &state.metrics,
+            ws_registry: &state.ws_registry,
+            push_service: &state.push_service,
+            background_service: &state.background_service,
+        },
+    )
+    .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -539,43 +163,16 @@ async fn patch_member(
     mut conn: DbConn,
     Json(body): Json<UpdateMemberBody>,
 ) -> Result<Json<MemberResponse>, AppError> {
-    let conn = &mut *conn;
-
-    let member = crate::services::speaking::update_member_role(
-        conn,
-        chat_id,
+    members::patch_member(
         requester_uid,
-        target_uid,
-        body.role,
-    )?;
-    crate::services::speaking::broadcast_member_mode(
-        conn,
-        &state.ws_registry,
         chat_id,
         target_uid,
-    )?;
-
-    crate::services::system_messages::broadcast_policy(conn, &state.ws_registry, chat_id)?;
-
-    let profiles = lookup_user_profiles(conn, &[target_uid])?;
-    let profile = profiles.get(&target_uid);
-
-    let avatar_url = state
-        .avatars
-        .lookup(&[target_uid])
-        .remove(&target_uid)
-        .flatten();
-
-    Ok(Json(MemberResponse {
-        uid: target_uid,
-        role: member.role,
-        speaking_mode: member.speaking_mode,
-        joined_at: member.joined_at,
-        username: profile.and_then(|profile| profile.username.clone()),
-        avatar_url,
-        gender: profile.map(|profile| profile.gender).unwrap_or(0),
-        user_group: profile.and_then(|profile| profile.user_group.clone()),
-    }))
+        body,
+        &mut conn,
+        &state.avatars,
+        &state.ws_registry,
+    )
+    .map(Json)
 }
 
 #[utoipa::path(
@@ -605,20 +202,15 @@ async fn put_member_speaking_mode(
     mut conn: DbConn,
     Json(body): Json<crate::dto::speaking::UpdateSpeakingModeRequest>,
 ) -> Result<Json<crate::dto::speaking::MemberSpeakingModeResponse>, AppError> {
-    let updated = crate::services::speaking::update_member_mode(
-        &mut conn,
-        chat_id,
+    members::put_member_speaking_mode(
         uid,
+        chat_id,
         target_uid,
-        body.speaking_mode,
-    )?;
-    crate::services::speaking::broadcast_member_mode(
+        body,
         &mut conn,
         &state.ws_registry,
-        chat_id,
-        target_uid,
-    )?;
-    Ok(Json(updated))
+    )
+    .map(Json)
 }
 
 pub fn router() -> OpenApiRouter<crate::AppState> {

@@ -457,7 +457,7 @@ async fn process_message(state: AppState, message_id: i64) -> Result<(), AppErro
         true,
     )?;
     let member_uids = side_effects.broadcast_uids.clone();
-    side_effects.fire(&state);
+    side_effects.fire(&state.ws_registry, &state.push_service);
 
     if let Some(thread_root_id) = response.reply_root_id {
         if let Some(root_msg) = messages::table

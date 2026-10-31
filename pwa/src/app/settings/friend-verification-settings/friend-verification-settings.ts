@@ -21,7 +21,7 @@ import {
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { banOutline, chatbubbleOutline, chevronBackOutline, helpCircleOutline, personAddOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
-import { FriendsService } from '../../../generated/endpoints/friends/friends.service';
+import { RpcApi } from '../../../generated/rpc-api';
 import { FriendAddVerificationMode } from '../../../generated/models';
 import { PanelNavigation } from '../../navigation/panel-navigation';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
@@ -55,7 +55,7 @@ import { LoadError } from '../../ui/load-error/load-error';
   host: { class: 'ion-page' },
 })
 export class FriendVerificationSettings {
-  private readonly friends = inject(FriendsService);
+  private readonly friends = inject(RpcApi);
   private readonly alerts = inject(AlertController);
   private readonly transloco = inject(TranslocoService);
   protected readonly panels = inject(PanelNavigation);
@@ -128,7 +128,7 @@ export class FriendVerificationSettings {
     this.loading.set(true);
     this.loadError.set(false);
     try {
-      const settings = await firstValueFrom(this.friends.getMyFriendSettings());
+      const settings = await firstValueFrom(this.friends.friends.getSettings());
       this.verification.set({ mode: settings.mode, question: settings.question ?? '' });
       this.applied.set(this.verification());
     } catch {
@@ -154,7 +154,7 @@ export class FriendVerificationSettings {
     const { mode, question } = this.verification();
     try {
       const settings = await firstValueFrom(
-        this.friends.updateMyFriendSettings({
+        this.friends.friends.updateSettings({
           mode,
           ...(mode === FriendAddVerificationMode.question ? { question: question.trim() } : {}),
         }),

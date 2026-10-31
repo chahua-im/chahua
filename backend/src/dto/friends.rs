@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 use crate::{
     dto::users::MemberSummary,
@@ -22,7 +22,7 @@ pub struct FriendRelationshipResponse {
     pub is_friend: bool,
     /// The canonical DM group ID, when one exists for this relationship.
     #[serde(with = "crate::serde_i64_string::opt")]
-    #[schema(value_type = Option<String>)]
+    #[schema(schema_with = crate::serde_i64_string::schema_opt)]
     pub dm_chat_id: Option<i64>,
     /// The current user has blocked `peerUid`.
     pub blocking: bool,
@@ -40,11 +40,27 @@ pub struct ListFriendsResponse {
     pub friends: Vec<FriendResponse>,
 }
 
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateFriendRequestBody {
+    pub to_uid: i32,
+    /// Verification message (mode 1) or the answer to the target's question (mode 3).
+    /// Ignored for `direct` mode; required for `need_message` / `question` modes.
+    #[serde(default)]
+    #[schema(max_length = 200)]
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct ListFriendRequestsQuery {
+    pub archived: Option<bool>,
+}
+
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FriendRequestResponse {
     #[serde(with = "crate::serde_i64_string")]
-    #[schema(value_type = String)]
+    #[schema(schema_with = crate::serde_i64_string::schema)]
     pub id: i64,
     pub from: MemberSummary,
     pub to: MemberSummary,
@@ -193,4 +209,10 @@ pub struct FriendAddInfoResponse {
     pub mode: FriendAddVerificationMode,
     /// Present only when mode is `question`.
     pub question: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, IntoParams, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PrivacyExceptionsQuery {
+    pub kind: PrivacyExceptionKind,
 }

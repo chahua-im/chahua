@@ -1,19 +1,20 @@
-import { HttpTestingController } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
+import { provideRpcTesting, RpcTestPeer } from '../../api/rpc-testing';
 import { testChat, testMessage, wireChat, wireMessage } from '../../api/testing';
 import { ReactionDetails } from './reaction-details';
 describe('ReactionDetails', () => {
   it('shows all reactors and filters locally without issuing another request', async () => {
     HTMLElement.prototype.scrollTo = vi.fn();
-    TestBed.configureTestingModule({ providers: [provideChahuaBaseUrl('/_api')] });
+    TestBed.configureTestingModule({ providers: [provideChahuaBaseUrl('/_api'), provideRpcTesting()] });
+    const peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
     const fixture = TestBed.createComponent(ReactionDetails);
     fixture.componentRef.setInput('chatId', testChat.id);
     fixture.componentRef.setInput('messageId', testMessage.id);
     fixture.detectChanges();
-    const http = TestBed.inject(HttpTestingController);
-    http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}/reactions`).flush({
+    peer.expect('reactions.list', { chatId: wireChat.id, messageId: wireMessage.id }).flush({
       reactions: [
         { emoji: '👍', reactors: Array.from({ length: 8 }, (_, uid) => ({ uid, name: `用户${uid}`, sortIndex: uid })) },
         { emoji: '❤️', reactors: [{ uid: 9, name: '朋友', sortIndex: 8 }] },
@@ -26,19 +27,19 @@ describe('ReactionDetails', () => {
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelectorAll('ion-item')).toHaveLength(1);
     expect(fixture.nativeElement.textContent).toContain('朋友');
-    http.verify();
+    peer.verify();
     fixture.destroy();
   });
 
   it('groups by user in chronological order and uses the earliest remaining reaction after removal', async () => {
     HTMLElement.prototype.scrollTo = vi.fn();
-    TestBed.configureTestingModule({ providers: [provideChahuaBaseUrl('/_api')] });
+    TestBed.configureTestingModule({ providers: [provideChahuaBaseUrl('/_api'), provideRpcTesting()] });
+    const peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
     const fixture = TestBed.createComponent(ReactionDetails);
     fixture.componentRef.setInput('chatId', testChat.id);
     fixture.componentRef.setInput('messageId', testMessage.id);
     fixture.detectChanges();
-    const http = TestBed.inject(HttpTestingController);
-    const url = `/_api/chats/${wireChat.id}/messages/${wireMessage.id}/reactions`;
     const reactions = [
       {
         emoji: '👍',
@@ -63,7 +64,7 @@ describe('ReactionDetails', () => {
         ],
       },
     ];
-    http.expectOne(url).flush({ reactions });
+    peer.expect('reactions.list', { chatId: wireChat.id, messageId: wireMessage.id }).flush({ reactions });
     await fixture.whenStable();
     fixture.detectChanges();
     // Read the DOM text directly; Ionic's slot shim hides label text in jsdom.
@@ -93,10 +94,10 @@ describe('ReactionDetails', () => {
     fixture.componentInstance['emoji'].set('');
     fixture.detectChanges();
     expect(rows()).toEqual(expected);
-    http.expectNone(url);
+    peer.expectNone('reactions.list');
 
     const reload = fixture.componentInstance['load']();
-    http.expectOne(url).flush({
+    peer.expect('reactions.list', { chatId: wireChat.id, messageId: wireMessage.id }).flush({
       reactions: reactions.map((group) => ({
         ...group,
         reactors: group.reactors.filter((user) => group.emoji !== '👍' || user.uid !== 1),
@@ -110,7 +111,7 @@ describe('ReactionDetails', () => {
       ['A', '❤️'],
       ['C', '👍'],
     ]);
-    http.verify();
+    peer.verify();
     fixture.destroy();
   });
 });

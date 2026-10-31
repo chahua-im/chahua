@@ -3,11 +3,11 @@ import { ChatSettingsChanged, SessionStore } from '../session/session-store';
 import { computed, DestroyRef, inject, Injectable, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom, map, Subject, takeUntil } from 'rxjs';
-import { ChatsService } from '../../generated/endpoints/chats/chats.service';
+import { RpcApi } from '../../generated/rpc-api';
+import type { MessagesListParams } from '../../generated/rpc-models';
 import {
   ServerWsMessageType,
   GroupKind,
-  type GetMessagesParams,
   type ListMessagesResponse,
   type MessagePreview,
   type MessageResponse,
@@ -36,9 +36,10 @@ type MessageRange = Pick<
 >;
 type MessageUpdate = (message: MessageResponse) => MessageResponse;
 type ConversationContext = Readonly<{ chatId: SnowflakeID; threadId?: SnowflakeID }>;
+type MessagePageParams = Omit<MessagesListParams, 'chatId' | 'max' | 'threadId'>;
 @Injectable()
 export class ConversationStore {
-  private readonly api = inject(ChatsService);
+  private readonly api = inject(RpcApi);
   private readonly session = inject(SessionStore);
   private readonly destroyRef = inject(DestroyRef);
   private version = 0;
@@ -69,9 +70,14 @@ export class ConversationStore {
 
   constructor() {
     this.destroyRef.onDestroy(() => this.reset());
-    this.chatInfo.changes$.pipe(takeUntilDestroyed()).subscribe(({ kind, chatId }) => {
-      if (kind !== ChatChangeKind.MembershipMessagePolicy || chatId !== this.context?.chatId || this.context.threadId)
+    this.chatInfo.changes$.pipe(takeUntilDestroyed()).subscribe(({ kind, chatId, threadId }) => {
+      if (chatId !== this.context?.chatId) return;
+      if (kind === ChatChangeKind.Removed && (threadId == null || threadId === this.context.threadId)) {
+        this.reset(chatId, this.context.threadId);
+        this.currentError.set(ConversationError.Open);
         return;
+      }
+      if (kind !== ChatChangeKind.MembershipMessagePolicy || this.context.threadId) return;
       if (this.chatInfo.membershipPolicy(chatId)?.canView === false) {
         this.currentPage.update(
           (page) => page && { ...page, messages: page.messages.filter((message) => !isMembershipMessage(message)) },
@@ -425,16 +431,19 @@ export class ConversationStore {
     );
   }
 
-  private getMessages(params: GetMessagesParams, user = this.session.user()) {
+  private getMessages(params: MessagePageParams, user = this.session.user()) {
     const policyGeneration = this.chatInfo.membershipPolicyRequestGeneration();
-    return this.api
-      .getMessages(this.context!.chatId, {
+    return this.api.messages
+      .list({
+        chatId: this.context!.chatId,
         max: 50,
         ...params,
         threadId: this.context?.threadId,
       })
       .pipe(
         map(({ chatSettings, messages, olderCursor, newerCursor, membershipMessagePolicy }): MessageRange => {
+          if (!this.chatInfo.isAccessible(this.context!.chatId, this.context!.threadId))
+            throw new Error('Inaccessible');
           // A group restriction already hides these messages regardless of the account preference.
           this.session.requireChatSettings(
             chatSettings,

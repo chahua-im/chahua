@@ -5,8 +5,7 @@ import { TranslocoPipe } from '@jsverse/transloco';
 import { Router } from '@angular/router';
 import { IonButton, IonItem, IonLabel, IonList, IonListHeader, IonSpinner } from '@ionic/angular';
 import { firstValueFrom } from 'rxjs';
-import { GroupsService } from '../../../generated/endpoints/groups/groups.service';
-import { UsersService } from '../../../generated/endpoints/users/users.service';
+import { RpcApi } from '../../../generated/rpc-api';
 import {
   GroupSearchMode,
   GroupSelectorScope,
@@ -26,8 +25,7 @@ export class DirectorySearch {
   readonly usersOnly = input(false);
   readonly selecting = input(false);
   readonly selected = output<MemberSummary>();
-  private readonly api = inject(GroupsService);
-  private readonly users = inject(UsersService);
+  private readonly api = inject(RpcApi);
   private readonly router = inject(Router);
   private readonly destroy = inject(DestroyRef);
   protected readonly groups = signal<GroupSelectorItem[]>([]);
@@ -59,8 +57,8 @@ export class DirectorySearch {
         this.usersOnly()
           ? undefined
           : firstValueFrom(
-              this.api
-                .getGroups({
+              this.api.groups
+                .list({
                   q,
                   mode: GroupSearchMode.submitted,
                   scope: GroupSelectorScope.joined,
@@ -71,7 +69,7 @@ export class DirectorySearch {
             ),
         more
           ? undefined
-          : firstValueFrom(this.users.getUserSearch({ q, limit: 40 }).pipe(takeUntilDestroyed(this.destroy))),
+          : firstValueFrom(this.api.users.search({ q, limit: 40 }).pipe(takeUntilDestroyed(this.destroy))),
       ]);
       if (version !== this.version) return;
       if (groups) {

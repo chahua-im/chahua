@@ -1,19 +1,17 @@
-import { provideHttpClient, withInterceptors } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { createEnvironmentInjector, EnvironmentInjector } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
-import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
-import type { PinResponse, ServerWsMessage } from '../../generated/models';
-import { ServerWsMessageType } from '../../generated/models';
+import { vi } from 'vitest';
+import { ServerWsMessageType, type PinResponse, type ServerWsMessage } from '../../generated/models';
 import { Connection, ResyncReason } from '../api/connection';
-import { jsonInterceptor } from '../api/json.interceptor';
+import { RpcErrorCode } from '../api/rpc-error';
+import { RpcTestPeer, provideRpcTesting } from '../api/rpc-testing';
 import { decodeId, encodeId } from '../api/snowflake-id';
+import { SessionStore } from '../session/session-store';
 import { mockRealtime, testChat, testMessage, testUser, wireMessage } from '../api/testing';
 import type { ChatPins } from './chat-pins';
 import { ChatStore } from './chat-store';
 
-const chatUrl = `/_api/chats/${decodeId(testChat.id)}`;
 const threadId = encodeId('9007199254741005');
 const otherChatId = encodeId('9007199254741020');
 const pin: PinResponse = {
@@ -31,34 +29,39 @@ async function settle() {
 
 describe('ChatStore pins', () => {
   let conversation: ChatPins;
-
-  let http: HttpTestingController;
-
+  let peer: RpcTestPeer;
   let scope: EnvironmentInjector;
-
   let events: Subject<ServerWsMessage>;
-
   let resync: Subject<ResyncReason | void>;
+  const watch = vi.fn<Connection['watchConversationStates']>();
 
   beforeEach(() => {
+    watch.mockReset();
     events = new Subject();
     resync = new Subject();
     TestBed.configureTestingModule({
       providers: [
-        provideHttpClient(withInterceptors([jsonInterceptor])),
-        provideHttpClientTesting(),
-        provideChahuaBaseUrl('/_api'),
-        { provide: Connection, useValue: mockRealtime({ events$: events, resync$: resync }) },
+        ...provideRpcTesting(),
+        {
+          provide: Connection,
+          useValue: { ...mockRealtime({ events$: events, resync$: resync }), watchConversationStates: watch },
+        },
       ],
     });
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
+    TestBed.inject(SessionStore).user.set(testUser);
     scope = createEnvironmentInjector([ChatStore], TestBed.inject(EnvironmentInjector));
-    http = TestBed.inject(HttpTestingController);
     conversation = scope.get(ChatStore).pins(testChat.id);
   });
 
   afterEach(() => {
-    scope.destroy();
-    http.verify();
+    try {
+      scope.destroy();
+      peer.verify();
+    } finally {
+      TestBed.resetTestingModule();
+    }
   });
 
   function added() {
@@ -77,7 +80,7 @@ describe('ChatStore pins', () => {
 
   async function loadPins(pins: (typeof wirePin)[] = []) {
     const loading = conversation.ensure();
-    http.expectOne(`${chatUrl}/pins`).flush({ pins: structuredClone(pins) });
+    peer.expect('pins.list', { chatId: decodeId(testChat.id) }).flush({ pins: structuredClone(pins) });
     await loading;
   }
 
@@ -85,20 +88,16 @@ describe('ChatStore pins', () => {
     await loadPins();
     const creating = conversation.set(testMessage, true);
     await settle();
-    const request = http.expectOne(`${chatUrl}/pins`);
-    expect(request.request.method).toBe('POST');
-    expect(request.request.body).toEqual({ messageId: decodeId(testMessage.id) });
+    const request = peer.expect('pins.create', { chatId: decodeId(testChat.id), messageId: decodeId(testMessage.id) });
     added();
     request.flush(structuredClone(wirePin));
     await creating;
     expect(conversation.items()).toEqual([pin]);
-    http.expectNone(() => true);
+    peer.expectNone('pins.list');
 
     const deleting = conversation.set(testMessage, false);
     await settle();
-    const deletion = http.expectOne(`${chatUrl}/pins/${decodeId(pin.id)}`);
-    expect(deletion.request.method).toBe('DELETE');
-    deletion.flush(null);
+    peer.expect('pins.delete', { chatId: decodeId(testChat.id), pinId: decodeId(pin.id) }).flush(null);
     await deleting;
     removed();
     expect(conversation.items()).toEqual([]);
@@ -109,53 +108,48 @@ describe('ChatStore pins', () => {
     removed();
     await conversation.set(testMessage, false);
     expect(conversation.items()).toEqual([]);
-    http.expectNone(() => true);
+    peer.expectNone('pins.delete');
 
     added();
     await conversation.set(testMessage, true);
     expect(conversation.items()).toEqual([pin]);
-    http.expectNone(() => true);
+    peer.expectNone('pins.create');
   });
 
   it('does not restore a pin removed while its create response was still in flight', async () => {
     await loadPins();
     const creating = conversation.set(testMessage, true);
     await settle();
-    const request = http.expectOne(`${chatUrl}/pins`);
+    const request = peer.expect('pins.create', { chatId: decodeId(testChat.id), messageId: decodeId(testMessage.id) });
     added();
     removed();
     request.flush(structuredClone(wirePin));
     await settle();
     expect(conversation.items()).toEqual([]);
-    http.expectOne(`${chatUrl}/pins`).flush({ pins: [] });
+    peer.expect('pins.list', { chatId: decodeId(testChat.id) }).flush({ pins: [] });
     await creating;
     expect(conversation.items()).toEqual([]);
   });
 
   it('keeps chat and thread pin scopes separate and applies all thread pin mutations', async () => {
     conversation = scope.get(ChatStore).pins(testChat.id, threadId);
-    const threadUrl = `${chatUrl}/threads/${decodeId(threadId)}/pins`;
+    const threadParams = { chatId: decodeId(testChat.id), threadRootId: decodeId(threadId) };
     const loading = conversation.ensure();
-    http.expectOne(threadUrl).flush({ pins: [] });
+    peer.expect('pins.listForThread', threadParams).flush({ pins: [] });
     await loading;
     added();
     events.next({
       type: ServerWsMessageType.threadPinAdded,
-      payload: {
-        chatId: otherChatId,
-        threadRootId: threadId,
-        messageId: testMessage.id,
-        pinId: pin.id,
-        pin,
-      },
+      payload: { chatId: otherChatId, threadRootId: threadId, messageId: testMessage.id, pinId: pin.id, pin },
     });
     expect(conversation.items()).toEqual([]);
 
     const creating = conversation.set(testMessage, true);
     await settle();
-    const created = http.expectOne(threadUrl);
-    expect(created.request.method).toBe('POST');
-    created.flush({ ...structuredClone(wirePin), threadRootId: decodeId(threadId) });
+    peer.expect('pins.createForThread', { ...threadParams, messageId: decodeId(testMessage.id) }).flush({
+      ...structuredClone(wirePin),
+      threadRootId: decodeId(threadId),
+    });
     await creating;
     expect(conversation.get(testMessage.id)?.threadRootId).toBe(threadId);
     const threadPin = { ...pin, threadRootId: threadId };
@@ -173,9 +167,7 @@ describe('ChatStore pins', () => {
 
     const deleting = conversation.set(testMessage, false);
     await settle();
-    const deleted = http.expectOne(`${threadUrl}/${decodeId(pin.id)}`);
-    expect(deleted.request.method).toBe('DELETE');
-    deleted.flush(null);
+    peer.expect('pins.deleteForThread', { ...threadParams, pinId: decodeId(pin.id) }).flush(null);
     await deleting;
     events.next({
       type: ServerWsMessageType.threadPinRemoved,
@@ -188,31 +180,32 @@ describe('ChatStore pins', () => {
     await loadPins();
     const creating = conversation.set(testMessage, true);
     await settle();
-    const request = http.expectOne(`${chatUrl}/pins`);
+    const request = peer.expect('pins.create', { chatId: decodeId(testChat.id), messageId: decodeId(testMessage.id) });
     conversation = scope.get(ChatStore).pins(otherChatId);
     request.flush(structuredClone(wirePin));
     await creating;
     expect(conversation.items()).toEqual([]);
-    http.expectNone(() => true);
+    peer.expectNone('pins.list');
   });
 
   it('shares the pin lookup and refreshes after reconnect without dropping the displayed pins', async () => {
     const pending = conversation.ensure();
     expect(conversation.ensure()).toBe(pending);
     expect(conversation.loading()).toBe(true);
-    http.expectOne(`${chatUrl}/pins`).flush({ pins: [structuredClone(wirePin)] });
+    peer.expect('pins.list', { chatId: decodeId(testChat.id) }).flush({ pins: [structuredClone(wirePin)] });
     await pending;
     expect(conversation.loading()).toBe(false);
     expect(conversation.get(testMessage.id)).toEqual(pin);
     await conversation.ensure();
-    http.expectNone(() => true);
+    peer.expectNone('pins.list');
 
     resync.next(ResyncReason.Foreground);
     await conversation.ensure();
-    http.expectNone(() => true);
+    peer.expectNone('pins.list');
     expect(conversation.items()).toEqual([pin]);
 
     resync.next(ResyncReason.Connected);
+    peer.expect('users.getNotificationSettings').flush(testUser);
     expect(conversation.items()).toEqual([pin]);
     await loadPins();
     expect(conversation.items()).toEqual([]);
@@ -220,23 +213,22 @@ describe('ChatStore pins', () => {
 
   it('revalidates a pin list when a WebSocket event arrives during its request', async () => {
     const pending = conversation.ensure();
-    const stale = http.expectOne(`${chatUrl}/pins`);
+    const stale = peer.expect('pins.list', { chatId: decodeId(testChat.id) });
     added();
     stale.flush({ pins: [] });
     await settle();
     expect(conversation.items()).toEqual([pin]);
-    http.expectOne(`${chatUrl}/pins`).flush({ pins: [structuredClone(wirePin)] });
+    peer.expect('pins.list', { chatId: decodeId(testChat.id) }).flush({ pins: [structuredClone(wirePin)] });
     await pending;
     expect(conversation.items()).toEqual([pin]);
   });
 
-  it('does not let an earlier context request replace or clear the new context loading state', async () => {
+  it('does not let an earlier context reply replace or clear the new context loading state', async () => {
     const previous = conversation.ensure();
-    const stale = http.expectOne(`${chatUrl}/pins`);
+    const stale = peer.expect('pins.list', { chatId: decodeId(testChat.id) });
     conversation = scope.get(ChatStore).pins(otherChatId);
     const current = conversation.ensure();
-    const next = http.expectOne(`/_api/chats/${decodeId(otherChatId)}/pins`);
-    expect(stale.cancelled).toBe(false);
+    const next = peer.expect('pins.list', { chatId: decodeId(otherChatId) });
     stale.flush({ pins: [structuredClone(wirePin)] });
     await previous;
     expect(conversation.loading()).toBe(true);
@@ -252,22 +244,80 @@ describe('ChatStore pins', () => {
     await loadPins([wirePin]);
     await shared.ensure();
     expect(shared.items()).toEqual([pin]);
-    http.expectNone(() => true);
+    peer.expectNone('pins.list');
   });
 
-  it('recovers from pin lookup failure and cancels a pending retry when destroyed', async () => {
+  it('recovers from pin lookup failure and ignores a real late retry reply after destruction', async () => {
     const pending = conversation.ensure();
     const failure = expect(pending).rejects.toBeDefined();
-    http.expectOne(`${chatUrl}/pins`).flush('', { status: 503, statusText: 'Unavailable' });
+    peer.expect('pins.list', { chatId: decodeId(testChat.id) }).error(RpcErrorCode.Unavailable);
     await failure;
     expect(conversation.loading()).toBe(false);
     const retry = conversation.ensure();
     const cancelled = expect(retry).rejects.toBeDefined();
-    const request = http.expectOne(`${chatUrl}/pins`);
+    const request = peer.expect('pins.list', { chatId: decodeId(testChat.id) });
     scope.destroy();
-    expect(request.cancelled).toBe(true);
+    request.flush({ pins: [structuredClone(wirePin)] });
     await cancelled;
     scope = createEnvironmentInjector([], TestBed.inject(EnvironmentInjector));
+  });
+  it('clears revoked pin scopes and fences held replies and events without affecting other scopes', async () => {
+    const store = scope.get(ChatStore);
+    const thread = store.pins(testChat.id, threadId);
+    const other = store.pins(otherChatId);
+    store.watchReadStates([{ chatId: testChat.id }, { chatId: testChat.id, threadId }]);
+    TestBed.tick();
+    const publish = (accessible: boolean, scopeThreadId?: typeof threadId, full = false) =>
+      events.next({
+        type: ServerWsMessageType.conversationStates,
+        payload: {
+          requestId: watch.mock.calls.at(-1)![0],
+          full,
+          states: [
+            {
+              chatId: testChat.id,
+              threadId: scopeThreadId,
+              accessible,
+              unreadCount: 0,
+              unreadMentions: 0,
+              unreadReactions: 0,
+            },
+          ],
+        },
+      });
+    publish(true, threadId, true);
+    await loadPins([wirePin]);
+    const threadLoading = thread.ensure();
+    const held = peer.expect('pins.listForThread', { chatId: decodeId(testChat.id), threadRootId: decodeId(threadId) });
+    const otherLoading = other.ensure();
+    peer.expect('pins.list', { chatId: decodeId(otherChatId) }).flush({ pins: [structuredClone(wirePin)] });
+    await otherLoading;
+    publish(false, threadId);
+    held.flush({ pins: [structuredClone(wirePin)] });
+    await threadLoading;
+    events.next({
+      type: ServerWsMessageType.threadPinAdded,
+      payload: { chatId: testChat.id, threadRootId: threadId, messageId: testMessage.id, pinId: pin.id, pin },
+    });
+    expect(thread.items()).toEqual([]);
+    expect(conversation.items()).toEqual([pin]);
+    expect(other.items()).toEqual([pin]);
+    conversation.invalidate();
+    const oldLoading = conversation.ensure();
+    const oldPins = peer.expect('pins.list', { chatId: decodeId(testChat.id) });
+    publish(false);
+    expect(conversation.items()).toEqual([]);
+    expect(other.items()).toEqual([pin]);
+    added();
+    expect(conversation.items()).toEqual([]);
+    publish(true);
+    oldPins.flush({ pins: [structuredClone(wirePin)] });
+    await oldLoading;
+    expect(conversation.items()).toEqual([]);
+    const refreshed = conversation.ensure();
+    peer.expect('pins.list', { chatId: decodeId(testChat.id) }).flush({ pins: [structuredClone(wirePin)] });
+    await refreshed;
+    expect(conversation.items()).toEqual([pin]);
   });
 
   it('applies remote changes to pinned messages while retaining personal reaction state', async () => {

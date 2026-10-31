@@ -16,9 +16,9 @@ use crate::errors::AppError;
 use crate::extractors::DbConn;
 use crate::models::{Group, GroupMembership};
 use crate::schema::{group_membership, groups};
+use crate::services::authentication::Principal;
 use crate::services::authz::Action as AuthzAction;
 use crate::services::invites as invite_service;
-use crate::utils::auth::Principal;
 use crate::AppState;
 
 #[utoipa::path(
@@ -39,7 +39,7 @@ async fn post_external_invite(
     Json(body): Json<ExternalCreateInviteRequest>,
 ) -> Result<(StatusCode, Json<ExternalCreateInviteResponse>), AppError> {
     let conn = &mut *conn;
-    principal.require_service_action(conn, &state, AuthzAction::InviteCreate)?;
+    principal.require_service_action(conn, &state.authz_service, AuthzAction::InviteCreate)?;
 
     let now = Utc::now();
     validate_request(&body, now)?;

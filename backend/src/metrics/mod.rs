@@ -1,4 +1,6 @@
 mod http;
+mod rpc;
+pub use rpc::RpcMetrics;
 
 use axum::extract::State;
 use axum::http::{header, HeaderValue, StatusCode};
@@ -23,6 +25,7 @@ use http::HttpMetrics;
 pub struct Metrics {
     registry: Registry,
     pub http: Arc<HttpMetrics>,
+    pub rpc: Arc<RpcMetrics>,
     pub chat: Arc<ChatMetrics>,
     pub ws: Arc<WsMetrics>,
     pub presence: Arc<PresenceMetrics>,
@@ -39,6 +42,7 @@ impl Metrics {
         let registry = Registry::new();
         Self {
             http: Arc::new(HttpMetrics::new(&registry)),
+            rpc: Arc::new(RpcMetrics::new(&registry)),
             chat: Arc::new(ChatMetrics::new(&registry)),
             ws: Arc::new(WsMetrics::new(&registry)),
             presence: Arc::new(PresenceMetrics::new(&registry)),

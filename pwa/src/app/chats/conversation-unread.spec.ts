@@ -1,10 +1,7 @@
-import { provideHttpClient, withInterceptors } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
-import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
 import {
   ServerWsMessageType,
   type ConversationUnreadPayload,
@@ -12,7 +9,6 @@ import {
   type ServerWsMessage,
 } from '../../generated/models';
 import { Connection, ResyncReason } from '../api/connection';
-import { jsonInterceptor } from '../api/json.interceptor';
 import { mockRealtime, testUser } from '../api/testing';
 import { SessionStore } from '../session/session-store';
 import { conversationView } from './conversation-views';
@@ -34,7 +30,6 @@ describe('conversation unread WebSocket subscription', () => {
   const user = signal<MeResponse | undefined>(testUser);
   const connected = signal(true);
   let store: ChatListStore;
-  let http: HttpTestingController;
   let events: Subject<ServerWsMessage>;
   let resync: Subject<ResyncReason>;
   let release: () => void;
@@ -60,9 +55,6 @@ describe('conversation unread WebSocket subscription', () => {
     resync = new Subject();
     TestBed.configureTestingModule({
       providers: [
-        provideHttpClient(withInterceptors([jsonInterceptor])),
-        provideHttpClientTesting(),
-        provideChahuaBaseUrl('/_api'),
         {
           provide: Connection,
           useValue: {
@@ -74,7 +66,6 @@ describe('conversation unread WebSocket subscription', () => {
       ],
     });
     store = TestBed.inject(ChatListStore);
-    http = TestBed.inject(HttpTestingController);
     release = store.viewUnread.activate();
     TestBed.tick();
     expect(watch).toHaveBeenCalledOnce();
@@ -86,7 +77,6 @@ describe('conversation unread WebSocket subscription', () => {
   afterEach(() => {
     release();
     TestBed.resetTestingModule();
-    http.verify();
   });
 
   it('shares one subscription across tabs, archive entries and the app icon', () => {
@@ -101,7 +91,6 @@ describe('conversation unread WebSocket subscription', () => {
     TestBed.tick();
     expect(watch).toHaveBeenCalledOnce();
     releaseBadge();
-    http.expectNone(() => true);
   });
 
   it('replaces changed collections, preserves others and accepts zero badge counts', () => {
@@ -112,7 +101,6 @@ describe('conversation unread WebSocket subscription', () => {
     expect(store.unread.value()?.unreadCount).toBe(0);
     publish({ full: false, summaries: [counts('threads', 0)], appBadgeCount: undefined });
     expect(store.unread.value()?.unreadCount).toBe(0);
-    http.expectNone(() => true);
   });
 
   it('refreshes via WS, retaining old counts and rejecting late or premature partial replies', () => {
@@ -127,14 +115,13 @@ describe('conversation unread WebSocket subscription', () => {
     expect(store.viewUnread.value()).toHaveLength(1);
   });
 
-  it('retains counts on failure and recovers from the server retry without an HTTP fallback', () => {
+  it('retains counts on failure and recovers from the server retry without an RPC list fallback', () => {
     events.next({ type: ServerWsMessageType.conversationUnreadError, payload: { requestId: requestId() } });
     expect(store.viewUnread.error()).toBe(true);
     expect(summary()?.unreadMessageCount).toBe(12);
     publish({ summaries: [counts('friends', 8)] });
     expect(store.viewUnread.error()).toBe(false);
     expect(summary()?.unreadMessageCount).toBe(8);
-    http.expectNone(() => true);
   });
 
   it('does not resubscribe on healthy foreground resync, but does after reconnection', () => {
@@ -198,6 +185,5 @@ describe('conversation unread WebSocket subscription', () => {
     publish({ full: false, summaries: [counts('threads', 28, 2)], appBadgeCount: undefined });
     expect(summary()?.unreadUnmutedAttentionCount).toBe(2);
     expect(watch).toHaveBeenCalledOnce();
-    http.expectNone(() => true);
   });
 });

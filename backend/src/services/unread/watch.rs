@@ -21,8 +21,39 @@ const COALESCE: Duration = Duration::from_millis(150);
 #[derive(Clone)]
 pub struct UnreadWatch {
     pub request_id: u32,
+    /// Assigned by the owning transport when it installs the watch. Legacy
+    /// sockets retain generation zero; transports that can replace watches
+    /// use it to reject events already queued by an older scope.
+    pub generation: u64,
     pub views: Vec<ConversationView>,
     pub app_badge: bool,
+}
+
+/// A watch result retains the installation generation until the owning
+/// transport makes its final publication decision.
+pub struct UnreadWatchEvent {
+    pub generation: u64,
+    pub message: ServerWsMessage,
+}
+
+enum WatchOutput {
+    Legacy(mpsc::Sender<ServerWsMessage>),
+    Tagged(mpsc::Sender<UnreadWatchEvent>),
+}
+
+impl WatchOutput {
+    async fn send(&self, generation: u64, message: ServerWsMessage) -> bool {
+        match self {
+            Self::Legacy(output) => output.send(message).await.is_ok(),
+            Self::Tagged(output) => output
+                .send(UnreadWatchEvent {
+                    generation,
+                    message,
+                })
+                .await
+                .is_ok(),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -75,9 +106,34 @@ pub async fn run(
     subscription: watch::Receiver<Option<UnreadWatch>>,
     output: mpsc::Sender<ServerWsMessage>,
 ) {
-    run_with(uid, changed, subscription, output, |watch| {
-        load_snapshot(db.clone(), service.clone(), uid, watch)
-    })
+    run_with(
+        uid,
+        changed,
+        subscription,
+        WatchOutput::Legacy(output),
+        |watch| load_snapshot(db.clone(), service.clone(), uid, watch),
+    )
+    .await;
+}
+
+/// Runs a watch while retaining the installation generation on queued output.
+/// The RPC adapter uses this at its final publication boundary; legacy sockets
+/// keep the original `run` contract above.
+pub async fn run_tagged(
+    db: DbPool,
+    service: Arc<UnreadService>,
+    uid: i32,
+    changed: Arc<Notify>,
+    subscription: watch::Receiver<Option<UnreadWatch>>,
+    output: mpsc::Sender<UnreadWatchEvent>,
+) {
+    run_with(
+        uid,
+        changed,
+        subscription,
+        WatchOutput::Tagged(output),
+        |watch| load_snapshot(db.clone(), service.clone(), uid, watch),
+    )
     .await;
 }
 
@@ -91,7 +147,7 @@ async fn run_with<F, Fut>(
     uid: i32,
     changed: Arc<Notify>,
     mut subscription: watch::Receiver<Option<UnreadWatch>>,
-    output: mpsc::Sender<ServerWsMessage>,
+    output: WatchOutput,
     mut load: F,
 ) where
     F: FnMut(UnreadWatch) -> Fut,
@@ -113,6 +169,8 @@ async fn run_with<F, Fut>(
             }
             _ = wait_until(deadline) => {
                 let Some(watch) = current.clone() else { continue; };
+                let request_id = watch.request_id;
+                let generation = watch.generation;
                 let result = load(watch).await;
                 // Never publish an old scope/account after a replacement or disconnect.
                 match subscription.has_changed() {
@@ -123,9 +181,16 @@ async fn run_with<F, Fut>(
                 match result {
                     Ok((summaries, badge, expiry)) => {
                         retry = Duration::from_secs(1);
-                        deadline = expiry.map(|at| Instant::now() + (at - Utc::now()).to_std().unwrap_or_default());
-                        if let Some(payload) = published.update(current.as_ref().unwrap().request_id, summaries, badge) {
-                            if output.send(ServerWsMessage::ConversationUnread(payload)).await.is_err() { break; }
+                        deadline = expiry.map(|at| {
+                            Instant::now() + (at - Utc::now()).to_std().unwrap_or_default()
+                        });
+                        if let Some(payload) = published.update(request_id, summaries, badge) {
+                            if !output
+                                .send(generation, ServerWsMessage::ConversationUnread(payload))
+                                .await
+                            {
+                                break;
+                            }
                         }
                     }
                     error => {
@@ -133,9 +198,17 @@ async fn run_with<F, Fut>(
                         published.full = false;
                         deadline = Some(Instant::now() + retry);
                         retry = (retry * 2).min(Duration::from_secs(30));
-                        if output.send(ServerWsMessage::ConversationUnreadError(ConversationUnreadErrorPayload {
-                            request_id: current.as_ref().unwrap().request_id,
-                        })).await.is_err() { break; }
+                        if !output
+                            .send(
+                                generation,
+                                ServerWsMessage::ConversationUnreadError(
+                                    ConversationUnreadErrorPayload { request_id },
+                                ),
+                            )
+                            .await
+                        {
+                            break;
+                        }
                     }
                 }
             }
@@ -200,6 +273,7 @@ mod tests {
     fn subscription(request_id: u32) -> Option<UnreadWatch> {
         Some(UnreadWatch {
             request_id,
+            generation: 0,
             views: vec![],
             app_badge: true,
         })
@@ -227,11 +301,17 @@ mod tests {
         let (output, mut messages) = mpsc::channel(1);
         let (loads, mut requests) =
             mpsc::unbounded_channel::<(u32, oneshot::Sender<Result<Snapshot, String>>)>();
-        let task = tokio::spawn(run_with(1, dirty.clone(), receiver, output, move |watch| {
-            let (reply, response) = oneshot::channel();
-            loads.send((watch.request_id, reply)).unwrap();
-            async move { response.await.unwrap() }
-        }));
+        let task = tokio::spawn(run_with(
+            1,
+            dirty.clone(),
+            receiver,
+            WatchOutput::Legacy(output),
+            move |watch| {
+                let (reply, response) = oneshot::channel();
+                loads.send((watch.request_id, reply)).unwrap();
+                async move { response.await.unwrap() }
+            },
+        ));
         config.send_replace(subscription(1));
         let (id, old) = requests.recv().await.unwrap();
         assert_eq!(id, 1);
@@ -275,11 +355,17 @@ mod tests {
         let (output, mut messages) = mpsc::channel(1);
         let (loads, mut requests) =
             mpsc::unbounded_channel::<oneshot::Sender<Result<Snapshot, String>>>();
-        let task = tokio::spawn(run_with(1, dirty, receiver, output, move |_| {
-            let (reply, response) = oneshot::channel();
-            loads.send(reply).unwrap();
-            async move { response.await.unwrap() }
-        }));
+        let task = tokio::spawn(run_with(
+            1,
+            dirty,
+            receiver,
+            WatchOutput::Legacy(output),
+            move |_| {
+                let (reply, response) = oneshot::channel();
+                loads.send(reply).unwrap();
+                async move { response.await.unwrap() }
+            },
+        ));
         config.send_replace(subscription(1));
         requests
             .recv()

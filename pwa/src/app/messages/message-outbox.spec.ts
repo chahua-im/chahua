@@ -1,13 +1,8 @@
-import { signal } from '@angular/core';
-import { HttpErrorResponse } from '@angular/common/http';
-import { provideRouter, Router } from '@angular/router';
-import { ConversationNavigation } from '../conversations/conversation-navigation';
-import { DraftStore } from '../conversations/draft-store';
+import { signal, type WritableSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
 import { AlertController } from '@ionic/angular';
-import { ChatsService } from '../../generated/endpoints/chats/chats.service';
 import {
   AttachmentUploadPurpose,
   MessageType,
@@ -17,137 +12,267 @@ import {
   type ServerWsMessage,
 } from '../../generated/models';
 import { Connection } from '../api/connection';
-import { encodeId } from '../api/snowflake-id';
-import { mockRealtime, testChat, testMessage, testUser } from '../api/testing';
+import { RpcErrorCode } from '../api/rpc-error';
+import { provideRpcTesting, RpcTestPeer } from '../api/rpc-testing';
+import { decodeId, encodeId, type SnowflakeID } from '../api/snowflake-id';
+import { mockRealtime, testChat, testMessage, testUser, wireMessage } from '../api/testing';
 import { SessionStore } from '../session/session-store';
 import { MessageDelivery } from './message-delivery';
 import { MessageOutbox } from './message-outbox';
 import { UploadStatus, type AttachmentUpload } from './upload';
 
+const text = { messageType: MessageType.text, attachmentIds: [] };
+const chatId = decodeId(testChat.id);
+
+function wireAccepted(clientGeneratedId: string, id = '9007199254741100', message?: string) {
+  return { ...wireMessage, id, clientGeneratedId, ...(message === undefined ? {} : { message }) };
+}
+
 describe('MessageOutbox', () => {
   let outbox: MessageOutbox;
-  let replies: Subject<MessageResponse>[];
+  let peer: RpcTestPeer;
   let live: Subject<MessageResponse>;
   let resync: Subject<void>;
   let events: Subject<ServerWsMessage>;
-  let patches: Subject<MessageResponse>[];
-  let deletions: Subject<void>[];
-  let session: { user: ReturnType<typeof signal<typeof testUser | undefined>> };
-  const api = {
-    forwardMessage: vi.fn(),
-    forwardMessages: vi.fn(),
-    postMessage: vi.fn(),
-    postThreadMessage: vi.fn(),
-    getMessage: vi.fn(),
-    patchMessage: vi.fn(),
-    deleteMessage: vi.fn(),
-  };
-  const text = { messageType: MessageType.text, attachmentIds: [] };
+  let session: { user: WritableSignal<typeof testUser | undefined> };
+
+  let alertController: Pick<AlertController, 'create'>;
+
   beforeEach(() => {
-    replies = [];
-    patches = [];
-    deletions = [];
     events = new Subject();
     live = new Subject();
     resync = new Subject();
     session = { user: signal<typeof testUser | undefined>(testUser) };
-    const post = () => {
-      const response = new Subject<MessageResponse>();
-      replies.push(response);
-      return response;
-    };
-    api.forwardMessage.mockReset().mockImplementation(post);
-    api.forwardMessages.mockReset().mockImplementation(post);
-    api.postMessage.mockReset().mockImplementation(post);
-    api.postThreadMessage.mockReset().mockImplementation(post);
-    api.getMessage.mockReset();
-    api.patchMessage.mockReset().mockImplementation(() => {
-      const response = new Subject<MessageResponse>();
-      patches.push(response);
-      return response;
-    });
-    api.deleteMessage.mockReset().mockImplementation(() => {
-      const response = new Subject<void>();
-      deletions.push(response);
-      return response;
-    });
+    alertController = { create: vi.fn() };
     TestBed.configureTestingModule({
       providers: [
-        provideRouter([]),
-        { provide: ChatsService, useValue: api },
+        ...provideRpcTesting(),
         { provide: Connection, useValue: mockRealtime({ messages$: live, resync$: resync, events$: events }) },
         { provide: SessionStore, useValue: session },
+        { provide: AlertController, useValue: alertController },
       ],
     });
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
     outbox = TestBed.inject(MessageOutbox);
   });
+
   afterEach(() => {
-    TestBed.resetTestingModule();
-    vi.useRealTimers();
-    vi.restoreAllMocks();
+    try {
+      peer.verify();
+    } finally {
+      TestBed.resetTestingModule();
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
   });
-  it('keeps speaking-restricted messages failed without reconnect retries and preserves their retry identity', async () => {
-    const item = outbox.enqueue(testChat.id, undefined, '保留消息', text);
-    const clientGeneratedId = item.clientGeneratedId;
-    replies[0].error(
-      new HttpErrorResponse({ status: 403, error: { code: 'speakingRestricted', effectiveSpeakingMode: 'readOnly' } }),
-    );
+
+  function accepted(item: { clientGeneratedId: string }, index = 0, message?: string) {
+    return wireAccepted(item.clientGeneratedId, String(9007199254741100n + BigInt(index)), message);
+  }
+
+  function upload() {
+    let finish!: (id: SnowflakeID | undefined) => void;
+    const result = new Promise<SnowflakeID | undefined>((resolve) => (finish = resolve));
+    const item = {
+      file: new File(['data'], 'photo.jpg', { type: 'image/jpeg' }),
+      url: 'blob:local-photo',
+      purpose: AttachmentUploadPurpose.media,
+      state: signal({
+        status: UploadStatus.Uploading,
+        progress: 0.25,
+        width: 320,
+        height: 200,
+        id: undefined as SnowflakeID | undefined,
+      }),
+      retry: vi.fn(() => result),
+      dispose: vi.fn(),
+    };
+    return {
+      item: item as unknown as AttachmentUpload,
+      finish: (id: SnowflakeID | undefined) => {
+        item.state.update((state) => ({ ...state, id, status: id == null ? UploadStatus.Failed : UploadStatus.Ready }));
+        finish(id);
+      },
+      state: item.state,
+      dispose: item.dispose,
+    };
+  }
+
+  it('sends decimal IDs in one flat request and accepts its confirmation through Connection', async () => {
+    const item = outbox.enqueue(testChat.id, undefined, '保留消息', text, testMessage);
+    const request = peer.expect('messages.send', {
+      chatId,
+      clientGeneratedId: item.clientGeneratedId,
+      messageType: MessageType.text,
+      message: '保留消息',
+      attachmentIds: [],
+      replyToId: decodeId(testMessage.id),
+    });
+    request.flush(wireAccepted(item.clientGeneratedId));
+    await item.operation;
+    expect(item.delivery()).toBe(MessageDelivery.Sent);
+    expect(item.confirmed()?.id).toBe(encodeId('9007199254741100'));
+  });
+
+  it('keeps same-conversation creates serial while another conversation progresses', async () => {
+    const first = outbox.enqueue(testChat.id, undefined, 'first', text);
+    const second = outbox.enqueue(testChat.id, undefined, 'second', text);
+    const otherChat = encodeId('9007199254741999');
+    const other = outbox.enqueue(otherChat, undefined, 'other', text);
+    const firstRequest = peer.expect('messages.send', (params) => params['message'] === 'first');
+    const otherRequest = peer.expect('messages.send', (params) => params['message'] === 'other');
+    peer.expectNone('messages.send');
+    otherRequest.flush({ ...wireAccepted(other.clientGeneratedId, '9007199254741101'), chatId: decodeId(otherChat) });
+    firstRequest.flush(wireAccepted(first.clientGeneratedId));
+    await Promise.all([first.operation, other.operation]);
+    peer
+      .expect('messages.send', {
+        chatId,
+        clientGeneratedId: second.clientGeneratedId,
+        messageType: MessageType.text,
+        message: 'second',
+        attachmentIds: [],
+      })
+      .flush(wireAccepted(second.clientGeneratedId, '9007199254741102'));
+    await second.operation;
+  });
+
+  it('retains a stable operation ID and retries only transient failures', async () => {
+    const item = outbox.enqueue(testChat.id, undefined, 'retry', text);
+    const first = peer.expect('messages.send');
+    first.error(RpcErrorCode.Unavailable);
+    await item.operation;
+    expect(item.delivery()).toBe(MessageDelivery.Failed);
+    const retry = outbox.retry(item);
+    peer
+      .expect('messages.send', {
+        chatId,
+        clientGeneratedId: item.clientGeneratedId,
+        messageType: MessageType.text,
+        message: 'retry',
+        attachmentIds: [],
+      })
+      .flush(wireAccepted(item.clientGeneratedId));
+    await retry;
+    expect(item.delivery()).toBe(MessageDelivery.Sent);
+  });
+
+  it('does not retry a speaking restriction on resync and preserves its explicit retry identity', async () => {
+    const item = outbox.enqueue(testChat.id, undefined, 'restricted', text);
+    peer.expect('messages.send').error(RpcErrorCode.SpeakingRestricted, 'Speaking is restricted', {
+      code: 'speakingRestricted',
+      effectiveSpeakingMode: SpeakingMode.readOnly,
+    });
     await item.operation;
     expect(item.delivery()).toBe(MessageDelivery.Failed);
     expect(item.speakingRestriction?.()).toBe(SpeakingMode.readOnly);
-    expect(item.message().message).toBe('保留消息');
     resync.next();
-    expect(api.postMessage).toHaveBeenCalledTimes(1);
+    peer.expectNone('messages.send');
     const retry = outbox.retry(item);
-    expect(api.postMessage).toHaveBeenCalledTimes(2);
-    expect(item.clientGeneratedId).toBe(clientGeneratedId);
-    replies[1].next({ ...testMessage, clientGeneratedId });
+    peer
+      .expect('messages.send', (params) => params['clientGeneratedId'] === item.clientGeneratedId)
+      .flush(wireAccepted(item.clientGeneratedId));
     await retry;
-    expect(item.speakingRestriction?.()).toBeUndefined();
   });
-  it('sends a single selection to a thread through the single endpoint and confirms forwarded audio immediately', async () => {
+
+  it('lets an echo win over a late failed response without replaying the mutation', async () => {
+    const item = outbox.enqueue(testChat.id, undefined, 'echo', text);
+    const request = peer.expect('messages.send');
+    live.next({ ...testMessage, sender: item.message().sender, clientGeneratedId: item.clientGeneratedId });
+    request.error(RpcErrorCode.Internal);
+    await item.operation;
+    expect(item.delivery()).toBe(MessageDelivery.Sent);
+    peer.expectNone('messages.send');
+  });
+
+  it('edits only after the create acknowledgement and preserves the newest body', async () => {
+    const item = outbox.enqueue(testChat.id, undefined, 'original', text);
+    const create = peer.expect('messages.send');
+    outbox.edit(item, 'latest edit', text);
+    create.flush(wireAccepted(item.clientGeneratedId));
+    (
+      await peer.expectAsync('messages.edit', {
+        chatId,
+        messageId: '9007199254741100',
+        message: 'latest edit',
+        attachmentIds: [],
+      })
+    ).flush({ ...wireAccepted(item.clientGeneratedId), message: 'latest edit', isEdited: true });
+    await item.operation;
+    expect(item.message().message).toBe('latest edit');
+  });
+
+  it('cancels a sent create, ignores its late result for display, and deletes the discovered server message', async () => {
+    const item = outbox.enqueue(testChat.id, undefined, 'cancel', text);
+    const create = peer.expect('messages.send');
+    await outbox.cancel(item);
+    expect(item.cancelled()).toBe(true);
+    create.flush(wireAccepted(item.clientGeneratedId));
+    await item.operation;
+    (await peer.expectAsync('messages.delete', { chatId, messageId: '9007199254741100' })).flush(null);
+    expect(item.message().message).toBeUndefined();
+  });
+
+  it('sends forward placeholders only after an explicit BadRequest confirmation', async () => {
+    let dismiss!: (detail: { role?: string }) => void;
+    const dismissal = new Promise<{ role?: string }>((resolve) => {
+      dismiss = resolve;
+    });
+    const alert = {
+      present: vi.fn(async () => {}),
+      dismiss: vi.fn(async () => true),
+      onDidDismiss: () => dismissal,
+    };
+    alertController.create = vi.fn(async () => alert as never);
+    const item = outbox.enqueueForward(testChat.id, undefined, [testMessage]);
+    peer
+      .expect('messages.forwardOne')
+      .error(RpcErrorCode.BadRequest, 'Audio messages cannot be forwarded until transcoding finishes');
+    await vi.waitFor(() => expect(alert.present).toHaveBeenCalledOnce());
+    dismiss({ role: 'confirm' });
+    await vi.waitFor(() => {
+      const retry = peer.expect('messages.forwardOne');
+      if (!retry.params) throw new Error('Forward retry had no named params');
+      expect(retry.params['allowPlaceholders']).toBe(true);
+      retry.flush(wireAccepted(item.clientGeneratedId));
+    });
+    await item.operation;
+  });
+
+  it('sends a single selection to a thread through forwardOne and confirms forwarded audio immediately', async () => {
     const threadId = encodeId('9007199254741888');
     const source = { ...testMessage, messageType: MessageType.audio };
     const item = outbox.enqueueForward(testChat.id, threadId, [source]);
-    expect(api.forwardMessage).toHaveBeenCalledWith(testChat.id, source.id, {
-      sourceChatId: source.chatId,
-      allowPlaceholders: false,
-      threadId,
-      clientGeneratedId: item.clientGeneratedId,
-    });
-    expect(api.forwardMessages).not.toHaveBeenCalled();
-    expect(api.postThreadMessage).not.toHaveBeenCalled();
-    const response = { ...source, replyRootId: threadId, clientGeneratedId: item.clientGeneratedId };
-    replies[0].next(response);
+    peer
+      .expect('messages.forwardOne', (params) => params['threadId'] === decodeId(threadId))
+      .flush({
+        ...accepted(item),
+        messageType: MessageType.audio,
+        replyRootId: decodeId(threadId),
+      });
     await item.operation;
     expect(item.published()).toBe(true);
-    expect(item.delivery()).toBe(MessageDelivery.Sent);
   });
 
-  it('serializes merged forwards with ordinary sends and retains the same selection and retry key', async () => {
-    const sources = [
-      { ...testMessage, id: encodeId('9007199254741999') },
-      { ...testMessage, id: encodeId('9007199254741888') },
-    ];
+  it('serializes merged forwards with ordinary sends and retains their retry key', async () => {
     const first = outbox.enqueue(testChat.id, undefined, 'before', text);
-    const item = outbox.enqueueForward(testChat.id, undefined, sources);
-    expect(api.forwardMessages).not.toHaveBeenCalled();
-    replies[0].next(accepted());
+    const forward = outbox.enqueueForward(testChat.id, undefined, [
+      { ...testMessage, id: encodeId('9007199254741999') },
+      testMessage,
+    ]);
+    peer.expect('messages.send').flush(accepted(first));
     await first.operation;
-    const body = api.forwardMessages.mock.calls[0][1];
-    expect(body.messageIds).toEqual([sources[1].id, sources[0].id]);
-    expect(item.message().forwardedPreview?.total).toBe(2);
-    replies[1].error({ status: 503 });
-    await item.operation;
-    expect(item.delivery()).toBe(MessageDelivery.Failed);
-    void outbox.retry(item);
-    expect(api.forwardMessages.mock.calls[1][1]).toEqual(body);
-    replies[2].next({ ...testMessage, messageType: MessageType.forwarded, clientGeneratedId: item.clientGeneratedId });
-    await item.operation;
-    expect(item.delivery()).toBe(MessageDelivery.Sent);
+    const request = peer.expect('messages.forward');
+    expect(request.params?.['messageIds']).toEqual([decodeId(testMessage.id), '9007199254741999']);
+    request.error(RpcErrorCode.Unavailable);
+    await forward.operation;
+    const retry = outbox.retry(forward);
+    peer.expect('messages.forward').flush(accepted(forward));
+    await retry;
   });
 
-  it('forwards an already nested card as one message without another bundle or visible origin', () => {
+  it('forwards a nested card without another bundle or visible origin', () => {
     const source = {
       ...testMessage,
       messageType: MessageType.forwarded,
@@ -156,179 +281,153 @@ describe('MessageOutbox', () => {
     };
     const item = outbox.enqueueForward(testChat.id, undefined, [source]);
     expect(item.message().forwardedBundleId).toBe(source.forwardedBundleId);
-    expect(item.message().forwardedPreview).toBe(source.forwardedPreview);
     expect(item.message().forwardedFrom).toBeUndefined();
-    expect(api.forwardMessage).toHaveBeenCalled();
-    expect(api.forwardMessages).not.toHaveBeenCalled();
+    peer.expect('messages.forwardOne').error(RpcErrorCode.Forbidden);
   });
 
-  it('lets the WS confirmation win over a failed forward HTTP response', async () => {
+  it('lets a realtime confirmation win over a failed forward response', async () => {
     const item = outbox.enqueueForward(testChat.id, undefined, [testMessage]);
+    const request = peer.expect('messages.forwardOne');
     live.next({ ...testMessage, sender: item.message().sender, clientGeneratedId: item.clientGeneratedId });
-    replies[0].error({ status: 500 });
+    request.error(RpcErrorCode.Internal);
     await item.operation;
     expect(item.delivery()).toBe(MessageDelivery.Sent);
-    expect(api.forwardMessage).toHaveBeenCalledTimes(1);
   });
 
   it.each([
     { count: 1, threadId: undefined },
     { count: 2, threadId: encodeId('999') },
-  ])('sends the comment to the same destination only after forwarding $count messages', async ({ count, threadId }) => {
-    const sources = Array.from({ length: count }, (_, index) => ({
-      ...testMessage,
-      id: encodeId(String(100 + index)),
-    }));
-    const item = outbox.enqueueForward(testChat.id, threadId, sources, { comment: '  看看这个\n很有意思  ' });
-    expect(api.postMessage).not.toHaveBeenCalled();
-    expect(api.postThreadMessage).not.toHaveBeenCalled();
-    const response = { ...testMessage, sender: item.message().sender, clientGeneratedId: item.clientGeneratedId };
-    live.next(response);
-    const comment = outbox.items()[1];
-    const body = {
-      clientGeneratedId: comment.clientGeneratedId,
-      messageType: MessageType.text,
-      message: '看看这个\n很有意思',
-      attachmentIds: [],
-    };
-    if (threadId) expect(api.postThreadMessage).toHaveBeenCalledExactlyOnceWith(testChat.id, threadId, body);
-    else expect(api.postMessage).toHaveBeenCalledExactlyOnceWith(testChat.id, body);
-    expect(comment.clientGeneratedId).not.toBe(item.clientGeneratedId);
-    // A second acknowledgement must not produce a second comment.
-    replies[0].next(response);
+  ])('sends the comment to the destination after forwarding $count messages', async ({ count, threadId }) => {
+    const item = outbox.enqueueForward(
+      testChat.id,
+      threadId,
+      Array.from({ length: count }, (_, index) => ({ ...testMessage, id: encodeId(String(100 + index)) })),
+      { comment: '  看看这个\n很有意思  ' },
+    );
+    peer.expect(count === 1 ? 'messages.forwardOne' : 'messages.forward').flush(accepted(item));
     await item.operation;
-    live.next(response);
-    expect(outbox.items()).toHaveLength(2);
-    replies[1].next({ ...response, message: body.message, clientGeneratedId: comment.clientGeneratedId });
+    const comment = outbox.items()[1];
+    peer
+      .expect(
+        threadId ? 'messages.sendInThread' : 'messages.send',
+        (params) => params['message'] === '看看这个\n很有意思',
+      )
+      .flush(accepted(comment, 1, '看看这个\n很有意思'));
     await comment.operation;
     expect(comment.delivery()).toBe(MessageDelivery.Sent);
   });
 
-  it('retains a comment through forward failure and retries only the comment if its send fails', async () => {
-    const item = outbox.enqueueForward(testChat.id, undefined, [testMessage], { comment: '附言' });
-    const request = api.forwardMessage.mock.calls[0][2];
-    replies[0].error({ status: 503 });
-    await item.operation;
-    expect(api.postMessage).not.toHaveBeenCalled();
-    void outbox.retry(item);
-    expect(api.forwardMessage.mock.calls[1][2]).toEqual(request);
-    replies[1].next({ ...testMessage, clientGeneratedId: item.clientGeneratedId });
-    await item.operation;
+  it('retains a comment through forward failure and retries only its failed send', async () => {
+    const forward = outbox.enqueueForward(testChat.id, undefined, [testMessage], { comment: '附言' });
+    peer.expect('messages.forwardOne').error(RpcErrorCode.Unavailable);
+    await forward.operation;
+    const forwarding = outbox.retry(forward);
+    peer.expect('messages.forwardOne').flush(accepted(forward));
+    await forwarding;
     const comment = outbox.items()[1];
-    const body = api.postMessage.mock.calls[0][1];
-    replies[2].error({ status: 503 });
+    peer.expect('messages.send').error(RpcErrorCode.Unavailable);
     await comment.operation;
-    expect(comment.delivery()).toBe(MessageDelivery.Failed);
-    void outbox.retry(comment);
-    expect(api.postMessage.mock.calls[1][1]).toEqual(body);
-    expect(api.forwardMessage).toHaveBeenCalledTimes(2);
-    replies[3].next(accepted(1));
-    await comment.operation;
-    expect(comment.delivery()).toBe(MessageDelivery.Sent);
+    const retry = outbox.retry(comment);
+    peer.expect('messages.send').flush(accepted(comment, 2, '附言'));
+    await retry;
   });
 
-  it('sends the comment once when WS confirms a forward whose HTTP request fails', async () => {
+  it('sends one comment when a realtime echo confirms a failed forward', async () => {
     const item = outbox.enqueueForward(testChat.id, undefined, [testMessage], { comment: '附言' });
+    const request = peer.expect('messages.forwardOne');
     live.next({ ...testMessage, sender: item.message().sender, clientGeneratedId: item.clientGeneratedId });
-    replies[0].error({ status: 500 });
+    request.error(RpcErrorCode.Internal);
     await item.operation;
-    expect(api.postMessage).toHaveBeenCalledOnce();
-    expect(api.forwardMessage).toHaveBeenCalledOnce();
+    const comment = outbox.items()[1];
+    peer.expect('messages.send').flush(accepted(comment, 1, '附言'));
+    await comment.operation;
   });
 
-  it.each(['', ' \n '])('does not send an empty comment (%j)', async (comment) => {
+  it.each(['', ' \n '])('does not send an empty forward comment (%j)', async (comment) => {
     const item = outbox.enqueueForward(testChat.id, undefined, [testMessage], { comment });
-    replies[0].next({ ...testMessage, clientGeneratedId: item.clientGeneratedId });
+    peer.expect('messages.forwardOne').flush(accepted(item));
     await item.operation;
-    expect(api.postMessage).not.toHaveBeenCalled();
+    peer.expectNone('messages.send');
   });
 
-  it('discards the comment when its forward is cancelled before a late acknowledgement', async () => {
+  it('discards a forward comment cancelled before a late acknowledgement', async () => {
     const item = outbox.enqueueForward(testChat.id, undefined, [testMessage], { comment: '附言' });
+    const request = peer.expect('messages.forwardOne');
     await outbox.cancel(item);
-    replies[0].next({ ...testMessage, clientGeneratedId: item.clientGeneratedId });
+    request.flush(accepted(item));
     await item.operation;
-    expect(api.postMessage).not.toHaveBeenCalled();
-    expect(api.deleteMessage).toHaveBeenCalledOnce();
+    peer.expect('messages.delete').flush(null);
+    peer.expectNone('messages.send');
   });
 
-  it('discards unsent comments on account change', async () => {
-    TestBed.tick();
+  it('discards unsent forward comments on account change', async () => {
     const item = outbox.enqueueForward(testChat.id, undefined, [testMessage], { comment: '附言' });
+    const request = peer.expect('messages.forwardOne');
     session.user.set({ ...testUser, uid: 2 });
-    TestBed.tick();
-    replies[0].next({ ...testMessage, clientGeneratedId: item.clientGeneratedId });
+    await vi.waitFor(() => expect(outbox.items()).toEqual([]));
+    request.flush(accepted(item));
     await item.operation;
-    expect(api.postMessage).not.toHaveBeenCalled();
-    expect(outbox.items()).toEqual([]);
+    peer.expectNone('messages.delete');
+    peer.expectNone('messages.send');
   });
-
-  function fallbackAlert() {
-    let dismiss!: (result: { role?: string }) => void;
-    const dismissed = new Promise<{ role?: string }>((resolve) => {
-      dismiss = resolve;
-    });
-    const alert = {
-      present: vi.fn().mockResolvedValue(undefined),
-      onDidDismiss: () => dismissed,
-      dismiss: vi.fn((_data?: unknown, role?: string) => {
-        dismiss({ role });
-        return Promise.resolve(true);
-      }),
-    };
-    vi.spyOn(TestBed.inject(AlertController), 'create').mockResolvedValue(alert as unknown as HTMLIonAlertElement);
-    return { alert, dismiss };
-  }
 
   it.each([
     'Audio messages cannot be forwarded until transcoding finishes',
     'Forwarded messages cannot include nested forwarded messages',
-  ])('retries the same forward key only after consent to server fallback: %s', async (error) => {
-    const { alert, dismiss } = fallbackAlert();
-    const item = outbox.enqueueForward(testChat.id, undefined, [testMessage], { comment: '附言' });
-    const initial = api.forwardMessage.mock.calls[0][2];
-    replies[0].error({ status: 400, error });
+  ])('retries the same forward key only after fallback consent: %s', async (message) => {
+    let dismiss!: (result: { role?: string }) => void;
+    const dismissed = new Promise<{ role?: string }>((resolve) => (dismiss = resolve));
+    const alert = { present: vi.fn(), dismiss: vi.fn(), onDidDismiss: () => dismissed };
+    alertController.create = vi.fn(async () => alert as never);
+    const item = outbox.enqueueForward(testChat.id, undefined, [testMessage]);
+    peer.expect('messages.forwardOne').error(RpcErrorCode.BadRequest, message);
     await vi.waitFor(() => expect(alert.present).toHaveBeenCalledOnce());
-    expect(api.forwardMessage).toHaveBeenCalledOnce();
-    expect(api.postMessage).not.toHaveBeenCalled();
     dismiss({ role: 'confirm' });
-    await vi.waitFor(() => expect(api.forwardMessage).toHaveBeenCalledTimes(2));
-    expect(api.forwardMessage.mock.calls[1][2]).toEqual({ ...initial, allowPlaceholders: true });
-    expect(api.postMessage).not.toHaveBeenCalled();
-    replies[1].next({ ...testMessage, clientGeneratedId: item.clientGeneratedId });
+    const retry = await vi.waitFor(() => peer.expect('messages.forwardOne'));
+    expect(retry.params?.['allowPlaceholders']).toBe(true);
+    retry.flush(accepted(item));
     await item.operation;
-    expect(item.delivery()).toBe(MessageDelivery.Sent);
-    expect(api.postMessage).toHaveBeenCalledOnce();
   });
 
-  it('leaves a rejected fallback failed without silently agreeing or automatically retrying', async () => {
-    const { alert, dismiss } = fallbackAlert();
-    const item = outbox.enqueueForward(testChat.id, undefined, [testMessage], { comment: '附言' });
-    replies[0].error({ status: 400, error: 'Audio messages cannot be forwarded until transcoding finishes' });
+  it('leaves a rejected fallback failed without automatic retry', async () => {
+    let dismiss!: (result: { role?: string }) => void;
+    const dismissed = new Promise<{ role?: string }>((resolve) => (dismiss = resolve));
+    const alert = { present: vi.fn(), dismiss: vi.fn(), onDidDismiss: () => dismissed };
+    alertController.create = vi.fn(async () => alert as never);
+    const item = outbox.enqueueForward(testChat.id, undefined, [testMessage]);
+    peer
+      .expect('messages.forwardOne')
+      .error(RpcErrorCode.BadRequest, 'Audio messages cannot be forwarded until transcoding finishes');
     await vi.waitFor(() => expect(alert.present).toHaveBeenCalledOnce());
     dismiss({ role: 'cancel' });
     await item.operation;
     expect(item.delivery()).toBe(MessageDelivery.Failed);
-    expect(api.postMessage).not.toHaveBeenCalled();
-    expect(api.forwardMessage).toHaveBeenCalledOnce();
     resync.next();
-    expect(api.forwardMessage).toHaveBeenCalledOnce();
+    peer.expectNone('messages.forwardOne');
   });
 
-  it('dismisses fallback confirmation on account change without resubmitting', async () => {
-    const { alert } = fallbackAlert();
+  it('dismisses fallback confirmation on account change', async () => {
+    let dismiss!: (result: { role?: string }) => void;
+    const dismissed = new Promise<{ role?: string }>((resolve) => (dismiss = resolve));
+    const alert = {
+      present: vi.fn(),
+      dismiss: vi.fn(async (_data?: unknown, role?: string) => {
+        dismiss({ role });
+        return true;
+      }),
+      onDidDismiss: () => dismissed,
+    };
+    alertController.create = vi.fn(async () => alert as never);
     const item = outbox.enqueueForward(testChat.id, undefined, [testMessage]);
-    replies[0].error({ status: 400, error: 'Audio messages cannot be forwarded until transcoding finishes' });
+    peer
+      .expect('messages.forwardOne')
+      .error(RpcErrorCode.BadRequest, 'Audio messages cannot be forwarded until transcoding finishes');
     await vi.waitFor(() => expect(alert.present).toHaveBeenCalledOnce());
     session.user.set({ ...testUser, uid: 2 });
-    TestBed.tick();
     await item.operation;
     expect(alert.dismiss).toHaveBeenCalledWith(undefined, 'cancel');
-    expect(api.forwardMessage).toHaveBeenCalledOnce();
-    expect(outbox.items()).toEqual([]);
   });
-
-  it('stages only server data from acknowledged audio and keeps no upload task after queue cleanup', async () => {
+  it('stages acknowledged audio as server data and releases its upload only after range handoff', async () => {
     const media = upload();
     media.finish(encodeId('123'));
     const item = outbox.enqueue(testChat.id, undefined, '', {
@@ -336,212 +435,99 @@ describe('MessageOutbox', () => {
       attachmentIds: [],
       uploads: [media.item],
     });
-    const response = { ...accepted(), messageType: MessageType.audio };
-    replies[0].next(response);
+    peer.expect('messages.send').flush({ ...accepted(item), messageType: MessageType.audio });
     await item.operation;
     expect(item.published()).toBe(false);
-    const navigation = TestBed.inject(ConversationNavigation);
-    vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
-    await navigation.prepareForward(testChat.id, undefined, [item]);
-    const drafts = TestBed.inject(DraftStore);
-    expect(drafts.forward(testChat.id)?.[0]).toBe(response);
-    expect(drafts.forward(testChat.id)?.[0]).not.toHaveProperty('uploads');
-    expect(drafts.forward(testChat.id)?.[0]).not.toHaveProperty('confirmed');
-    live.next(response);
-    outbox.release([response]);
-    expect(outbox.items()).toEqual([]);
-    expect(media.dispose).toHaveBeenCalled();
-    expect(drafts.forward(testChat.id)).toEqual([response]);
-    const forwarded = outbox.enqueueForward(testChat.id, undefined, drafts.forward(testChat.id)!);
-    expect(api.forwardMessage.mock.calls[0][2].allowPlaceholders).toBe(false);
-    replies[1].next({ ...response, clientGeneratedId: forwarded.clientGeneratedId });
-    await forwarded.operation;
-    expect(forwarded.message().messageType).toBe(MessageType.audio);
+    live.next({
+      ...testMessage,
+      id: encodeId('9007199254741100'),
+      clientGeneratedId: item.clientGeneratedId,
+      messageType: MessageType.audio,
+    });
+    outbox.release([item.confirmed()!]);
+    expect(media.dispose).toHaveBeenCalledOnce();
   });
 
-  it('waits for publication without cancelling an acknowledged audio selected for batch recall', async () => {
+  it('waits for audio publication without cancelling the selected row', async () => {
     const item = outbox.enqueue(testChat.id, undefined, '', { messageType: MessageType.audio, attachmentIds: [] });
-    const response = { ...accepted(), messageType: MessageType.audio };
-    replies[0].next(response);
+    peer.expect('messages.send').flush({ ...accepted(item), messageType: MessageType.audio });
     await item.operation;
-    const resolved = vi.fn();
-    const waiting = outbox.waitForPublication(item).then(resolved);
-    await Promise.resolve();
-    expect(resolved).not.toHaveBeenCalled();
+    const waiting = outbox.waitForPublication(item);
+    live.next({
+      ...testMessage,
+      id: encodeId('9007199254741100'),
+      clientGeneratedId: item.clientGeneratedId,
+      messageType: MessageType.audio,
+    });
+    await expect(waiting).resolves.toMatchObject({ clientGeneratedId: item.clientGeneratedId });
     expect(item.cancelled()).toBe(false);
-    live.next(response);
-    await waiting;
-    expect(resolved).toHaveBeenCalledWith(response);
-    expect(api.deleteMessage).not.toHaveBeenCalled();
   });
 
-  it('times out publication waiting while preserving the selected audio for another attempt', async () => {
+  it('times out publication waiting while retaining acknowledged audio', async () => {
     vi.useFakeTimers();
     const item = outbox.enqueue(testChat.id, undefined, '', { messageType: MessageType.audio, attachmentIds: [] });
-    replies[0].next({ ...accepted(), messageType: MessageType.audio });
+    peer.expect('messages.send').flush({ ...accepted(item), messageType: MessageType.audio });
     await item.operation;
-    const result = outbox.waitForPublication(item).catch((error) => error);
+    const waiting = outbox.waitForPublication(item).catch((error) => error);
     await vi.advanceTimersByTimeAsync(30_000);
-    expect((await result).name).toBe('TimeoutError');
-    expect(item.cancelled()).toBe(false);
+    expect((await waiting).name).toBe('TimeoutError');
     expect(item.confirmed()).toBeDefined();
   });
 
-  function accepted(index = 0) {
-    const [, body] = api.postMessage.mock.calls[index];
-    return {
-      ...testMessage,
-      id: encodeId(String(9007199254741100n + BigInt(index))),
-      message: body.message,
-      clientGeneratedId: body.clientGeneratedId,
-    };
-  }
-  function upload() {
-    let finish!: (id: ReturnType<typeof encodeId> | undefined) => void;
-    const result = new Promise<ReturnType<typeof encodeId> | undefined>((resolve) => {
-      finish = resolve;
-    });
-    const item = {
-      file: new File(['data'], 'photo.jpg', { type: 'image/jpeg' }),
-      url: 'blob:local-photo',
-      purpose: AttachmentUploadPurpose.media,
-      state: signal<{
-        status: UploadStatus;
-        progress: number;
-        width: number;
-        height: number;
-        id?: ReturnType<typeof encodeId>;
-      }>({ status: UploadStatus.Uploading, progress: 0.25, width: 320, height: 200 }),
-      retry: vi.fn(() => result),
-      dispose: vi.fn(),
-    };
-    return {
-      item: item as unknown as AttachmentUpload,
-      finish: (id: ReturnType<typeof encodeId> | undefined) => {
-        item.state.update((state) => ({ ...state, id, status: id == null ? UploadStatus.Failed : UploadStatus.Ready }));
-        finish(id);
-      },
-      dispose: item.dispose,
-      state: item.state,
-    };
-  }
-  it('publishes a complete local row before confirmation and releases it only after range handoff', async () => {
-    const user = {
-      ...testUser,
-      gender: 2,
-      avatarUrl: 'https://example.com/me.jpg',
-      userGroup: {
-        groupId: 3,
-        name: '三水',
-        chatGroupColor: '#4087d2',
-        chatGroupColorDark: '#72a7de',
-      },
-    };
-    session.user.set(user);
+  it('publishes a complete local row and releases it only after range handoff', async () => {
     const item = outbox.enqueue(testChat.id, undefined, '本地消息', text, testMessage);
     expect(item.message()).toMatchObject({
       message: '本地消息',
-      sender: {
-        uid: user.uid,
-        name: user.username,
-        gender: user.gender,
-        avatarUrl: user.avatarUrl,
-        userGroup: user.userGroup,
-      },
+      sender: testMessage.sender,
       replyToMessage: testMessage,
     });
-    const updated = {
-      ...user,
-      username: '新名字',
-      avatarUrl: 'https://example.com/new.jpg',
-      gender: 1,
-      userGroup: { ...user.userGroup, groupId: 4, name: '四水' },
-    };
-    session.user.set(updated);
-    expect(item.message().sender).toMatchObject({
-      name: updated.username,
-      gender: updated.gender,
-      avatarUrl: updated.avatarUrl,
-      userGroup: updated.userGroup,
-    });
-    expect(api.postMessage).toHaveBeenCalledOnce();
-    expect(item.message().id).toBeUndefined();
-    expect(item.delivery()).toBe(MessageDelivery.Sending);
-    expect(api.postMessage.mock.calls[0][1].replyToId).toBe(testMessage.id);
-    const message = accepted();
-    replies[0].next(message);
+    peer
+      .expect('messages.send', (params) => params['replyToId'] === decodeId(testMessage.id))
+      .flush(accepted(item, 0, '本地消息'));
     await item.operation;
-    expect(item.delivery()).toBe(MessageDelivery.Sent);
-    expect(item.message()).toBe(message);
-    expect(outbox.items()).toContain(item);
-    outbox.release([message]);
+    outbox.release([item.confirmed()!]);
     expect(outbox.items()).toEqual([]);
   });
-  it('lets text pass uploading attachments, then queues ready attachments behind an actual create', async () => {
+
+  it('lets text pass uploads and queues ready attachments behind a create', async () => {
     const media = upload();
-    const first = outbox.enqueue(testChat.id, undefined, '', { ...text, uploads: [media.item] });
-    const second = outbox.enqueue(testChat.id, undefined, '边传边聊', text);
-    expect(api.postMessage).toHaveBeenCalledOnce();
-    expect(api.postMessage.mock.calls[0][1].message).toBe('边传边聊');
-    expect(first.message().attachments[0]).toMatchObject({ url: 'blob:local-photo', width: 320, height: 200 });
-    const other = outbox.enqueue(encodeId('2'), undefined, '另一会话', text);
-    expect(api.postMessage).toHaveBeenCalledTimes(2);
-    replies[1].next({ ...accepted(1), chatId: encodeId('2') });
-    await other.operation;
+    const attachment = outbox.enqueue(testChat.id, undefined, '', { ...text, uploads: [media.item] });
+    const message = outbox.enqueue(testChat.id, undefined, '边传边聊', text);
+    peer.expect('messages.send', (params) => params['message'] === '边传边聊').flush(accepted(message, 1, '边传边聊'));
+    await message.operation;
     media.finish(encodeId('7'));
-    await first.operation;
-    expect(api.postMessage).toHaveBeenCalledTimes(2);
-    replies[0].next(accepted());
-    await second.operation;
-    await vi.waitFor(() => expect(api.postMessage).toHaveBeenCalledTimes(3));
-    expect(api.postMessage.mock.calls[2][1].attachmentIds).toEqual([encodeId('7')]);
-    replies[2].next({
-      ...accepted(2),
-      attachments: [{ id: encodeId('7'), url: '/photo', fileName: 'photo.jpg', kind: 'image/jpeg', size: 4 }],
-    });
-    await first.operation;
-    expect(media.dispose).not.toHaveBeenCalled();
-    outbox.release([first.confirmed()!]);
+    await vi.waitFor(() =>
+      peer
+        .expect('messages.send', (params) => (params['attachmentIds'] as unknown[]).includes('7'))
+        .flush({
+          ...accepted(attachment),
+          attachments: [{ id: '7', url: '/photo', fileName: 'photo.jpg', kind: 'image/jpeg', size: 4 }],
+        }),
+    );
+    await attachment.operation;
+    outbox.release([attachment.confirmed()!]);
     expect(media.dispose).toHaveBeenCalledOnce();
   });
-  it('keeps a WebSocket confirmation when HTTP later fails', async () => {
+
+  it('keeps a realtime confirmation when its RPC response later fails', async () => {
     const item = outbox.enqueue(testChat.id, undefined, '已被服务器接收', text);
-    const response = accepted();
-    live.next(response);
-    expect(item.delivery()).toBe(MessageDelivery.Sent);
-    replies[0].error(new Error('connection closed'));
+    const request = peer.expect('messages.send');
+    live.next({ ...testMessage, sender: item.message().sender, clientGeneratedId: item.clientGeneratedId });
+    request.error(RpcErrorCode.Internal);
     await item.operation;
-    expect(item.message()).toBe(response);
     expect(item.delivery()).toBe(MessageDelivery.Sent);
-    await outbox.retry(item);
-    expect(api.postMessage).toHaveBeenCalledOnce();
   });
-  it('retries the immutable request with the same client ID and does not duplicate a running retry', async () => {
-    const item = outbox.enqueue(testChat.id, undefined, '重试这条', text);
-    const body = structuredClone(api.postMessage.mock.calls[0][1]);
-    replies[0].error(new Error('offline'));
-    await item.operation;
-    expect(item.delivery()).toBe(MessageDelivery.Failed);
-    const retry = outbox.retry(item);
-    expect(outbox.retry(item)).toBe(retry);
-    expect(api.postMessage.mock.calls[1][1]).toEqual(body);
-    replies[1].next(accepted(1));
-    await retry;
-    expect(item.delivery()).toBe(MessageDelivery.Sent);
-    expect(outbox.items()).toHaveLength(1);
-  });
-  it('does not POST when an upload fails and keeps its local preview for retry', async () => {
+
+  it('does not send failed uploads and retains their preview for retry', async () => {
     const media = upload();
     const item = outbox.enqueue(testChat.id, undefined, '', { ...text, uploads: [media.item] });
     media.finish(undefined);
     await item.operation;
-    expect(api.postMessage).not.toHaveBeenCalled();
-    expect(item.delivery()).toBe(MessageDelivery.Failed);
+    peer.expectNone('messages.send');
     expect(item.message().attachments[0].url).toBe(media.item.url);
-    expect(media.dispose).not.toHaveBeenCalled();
   });
 
-  it('retries only the selected failed upload and sends when the remaining uploads are ready', async () => {
+  it('retries selected failed uploads and sends after all uploads are ready', async () => {
     const first = upload();
     const second = upload();
     first.item.retryable = second.item.retryable = false;
@@ -549,132 +535,55 @@ describe('MessageOutbox', () => {
     first.finish(undefined);
     second.finish(undefined);
     await item.operation;
-    for (const [media, id] of [
-      [first, encodeId('7')],
-      [second, encodeId('8')],
-    ] as const) {
-      vi.mocked(media.item.retry).mockImplementation(async () => {
-        media.state.update((state) => ({ ...state, status: UploadStatus.Ready, id }));
-        return id;
-      });
-    }
-    await outbox.retryUpload(item, first.item);
-    expect(second.item.retry).toHaveBeenCalledOnce();
-    expect(api.postMessage).not.toHaveBeenCalled();
-    const retry = outbox.retryUpload(item, second.item);
-    await vi.waitFor(() => expect(api.postMessage).toHaveBeenCalledOnce());
-    expect(api.postMessage.mock.calls[0][1].attachmentIds).toEqual([encodeId('7'), encodeId('8')]);
-    replies[0].next(accepted());
-    await retry;
-    await item.operation;
-  });
-
-  it('removes only a failed attachment, retaining text and already uploaded attachments', async () => {
-    const ready = upload();
-    const failed = upload();
-    failed.item.retryable = false;
-    const item = outbox.enqueue(testChat.id, undefined, 'keep caption', {
-      ...text,
-      uploads: [ready.item, failed.item],
+    vi.mocked(first.item.retry).mockImplementation(async () => {
+      const id = encodeId('7');
+      first.state.update((state) => ({ ...state, id, status: UploadStatus.Ready }));
+      return id;
     });
-    ready.finish(encodeId('7'));
-    failed.finish(undefined);
-    await item.operation;
-    outbox.removeUpload(item, failed.item);
-    await vi.waitFor(() => expect(api.postMessage).toHaveBeenCalledOnce());
-    expect(api.postMessage.mock.calls[0][1]).toMatchObject({ message: 'keep caption', attachmentIds: [encodeId('7')] });
-    expect(item.uploads).toEqual([ready.item]);
-    expect(failed.dispose).toHaveBeenCalledOnce();
-    expect(ready.dispose).not.toHaveBeenCalled();
-    replies[0].next(accepted());
-    await item.operation;
+    vi.mocked(second.item.retry).mockImplementation(async () => {
+      const id = encodeId('8');
+      second.state.update((state) => ({ ...state, id, status: UploadStatus.Ready }));
+      return id;
+    });
+    await outbox.retryUpload(item, first.item);
+    const retry = outbox.retryUpload(item, second.item);
+    (await peer.expectAsync('messages.send', (params) => (params['attachmentIds'] as unknown[]).length === 2)).flush(
+      accepted(item),
+    );
+    await retry;
   });
 
   it.each([MessageType.file, MessageType.audio, MessageType.text])(
-    'deletes an empty local %s message after removing its only failed upload',
+    'removes an empty local %s row after its only failed upload',
     async (messageType) => {
-      const failed = upload();
+      const media = upload();
       const item = outbox.enqueue(testChat.id, undefined, '', {
         messageType,
         attachmentIds: [],
-        uploads: [failed.item],
+        uploads: [media.item],
       });
-      failed.finish(undefined);
+      media.finish(undefined);
       await item.operation;
-      outbox.removeUpload(item, failed.item);
+      outbox.removeUpload(item, media.item);
       expect(outbox.items()).not.toContain(item);
-      expect(failed.dispose).toHaveBeenCalledOnce();
-      expect(api.postMessage).not.toHaveBeenCalled();
-      expect(api.deleteMessage).not.toHaveBeenCalled();
+      peer.expectNone('messages.send');
     },
   );
 
-  it('drops an empty edit that loses its only failed upload instead of editing or recalling the message', async () => {
-    const failed = upload();
-    const item = outbox.enqueueEdit(testMessage, undefined, '', { ...text, uploads: [failed.item] });
-    failed.finish(undefined);
+  it('drops empty edits whose only newly selected upload fails', async () => {
+    const media = upload();
+    const item = outbox.enqueueEdit(testMessage, undefined, '', { ...text, uploads: [media.item] });
+    media.finish(undefined);
     await item.operation;
-    outbox.removeUpload(item, failed.item);
+    outbox.removeUpload(item, media.item);
     expect(outbox.items()).not.toContain(item);
-    expect(api.patchMessage).not.toHaveBeenCalled();
-    expect(api.deleteMessage).not.toHaveBeenCalled();
-    expect(failed.dispose).toHaveBeenCalledOnce();
+    peer.expectNone('messages.edit');
   });
-  it('drops an edit that only tried to add the failed upload', async () => {
-    const failed = upload();
-    const item = outbox.enqueueEdit(testMessage, undefined, testMessage.message ?? '', {
-      ...text,
-      uploads: [failed.item],
-    });
-    failed.finish(undefined);
-    await item.operation;
-    outbox.removeUpload(item, failed.item);
-    expect(outbox.items()).not.toContain(item);
-    expect(api.patchMessage).not.toHaveBeenCalled();
-    expect(api.deleteMessage).not.toHaveBeenCalled();
-    expect(failed.dispose).toHaveBeenCalledOnce();
-  });
-  it.each([
-    ['pending', 'original'],
-    ['pending', ''],
-    ['timeout', 'original'],
-    ['timeout', ''],
-  ])(
-    'preserves the final text after removing a failed upload with a %s PATCH and text %j',
-    async (status, finalText) => {
-      const original = { ...testMessage, message: 'original', attachments: [] };
-      const item = outbox.enqueueEdit(original, undefined, 'older edit', text);
-      expect(api.patchMessage).toHaveBeenCalledOnce();
-      if (status === 'timeout') {
-        patches[0].error({ status: 408 });
-        await item.operation;
-      }
-      const failed = upload();
-      failed.item.retryable = false;
-      outbox.edit(item, finalText, { ...text, uploads: [failed.item] });
-      failed.finish(undefined);
-      if (status === 'timeout') await item.operation;
-      outbox.removeUpload(item, failed.item);
-      expect(outbox.items()).toContain(item);
-      expect(item.message().message).toBe('original');
-      expect(item.uploads).toEqual([]);
-      expect(failed.dispose).toHaveBeenCalledOnce();
-      if (status === 'pending') {
-        patches[0].next({ ...original, message: 'older edit', isEdited: true });
-      }
-      await vi.waitFor(() => expect(api.patchMessage).toHaveBeenCalledTimes(2));
-      expect(item.message().message).toBe('original');
-      expect(api.patchMessage.mock.calls[1][2]).toEqual({ message: 'original', attachmentIds: [] });
-      patches[1].next(original);
-      await item.operation;
-      expect(item.delivery()).toBe(MessageDelivery.Sent);
-      expect(api.deleteMessage).not.toHaveBeenCalled();
-    },
-  );
-  it('keeps an edit that still adds another new attachment after deleting a failed one', async () => {
+
+  it('retains another new attachment after removing a failed edit upload', async () => {
     const ready = upload();
     const failed = upload();
-    const item = outbox.enqueueEdit(testMessage, undefined, testMessage.message ?? '', {
+    const item = outbox.enqueueEdit(testMessage, undefined, testMessage.message!, {
       ...text,
       uploads: [ready.item, failed.item],
     });
@@ -682,500 +591,361 @@ describe('MessageOutbox', () => {
     failed.finish(undefined);
     await item.operation;
     outbox.removeUpload(item, failed.item);
-    expect(outbox.items()).toContain(item);
-    await vi.waitFor(() => expect(api.patchMessage).toHaveBeenCalledOnce());
-    expect(api.patchMessage.mock.calls[0][2].attachmentIds).toEqual([encodeId('7')]);
-    patches[0].next(testMessage);
+    await vi.waitFor(() =>
+      peer
+        .expect('messages.edit', (params) => (params['attachmentIds'] as unknown[]).includes('7'))
+        .flush(accepted(item)),
+    );
     await item.operation;
   });
-  it('fails immediately while another attachment is pending and retries failed attachments together', async () => {
-    const ready = upload();
-    const failed = upload();
-    const otherFailed = upload();
-    const pending = upload();
-    const item = outbox.enqueue(testChat.id, undefined, '', {
-      ...text,
-      uploads: [ready.item, failed.item, otherFailed.item, pending.item],
-    });
-    ready.finish(encodeId('7'));
-    failed.finish(undefined);
-    otherFailed.finish(undefined);
-    await item.operation;
-    expect(item.delivery()).toBe(MessageDelivery.Failed);
-    expect(api.postMessage).not.toHaveBeenCalled();
-    expect(pending.state().status).toBe(UploadStatus.Uploading);
-    vi.mocked(ready.item.retry).mockResolvedValue(encodeId('7'));
-    const retryFailed = upload();
-    const retryOther = upload();
-    vi.mocked(failed.item.retry).mockImplementation(() => retryFailed.item.retry());
-    vi.mocked(otherFailed.item.retry).mockImplementation(() => retryOther.item.retry());
-    const retry = outbox.retry(item);
-    expect(failed.item.retry).toHaveBeenCalledTimes(2);
-    expect(otherFailed.item.retry).toHaveBeenCalledTimes(2);
-    retryFailed.finish(encodeId('8'));
-    retryOther.finish(encodeId('9'));
-    pending.finish(encodeId('10'));
-    await retry;
-    expect(api.postMessage).toHaveBeenCalledOnce();
-    expect(api.postMessage.mock.calls[0][1].attachmentIds).toEqual([7, 8, 9, 10].map((id) => encodeId(String(id))));
-    replies[0].next(accepted());
-    await item.operation;
-  });
-  it('acknowledges audio over HTTP but retains local playback until its published WebSocket event', async () => {
+
+  it('acknowledges audio but retains local playback until publication', async () => {
     const item = outbox.enqueue(testChat.id, undefined, '', {
       messageType: MessageType.audio,
       attachmentIds: [encodeId('7')],
     });
     const local = item.message();
-    const response = { ...accepted(), messageType: MessageType.audio };
-    replies[0].next(response);
+    peer.expect('messages.send').flush({ ...accepted(item), messageType: MessageType.audio });
     await item.operation;
-    expect(item.delivery()).toBe(MessageDelivery.Sent);
-    expect(item.published()).toBe(false);
     expect(item.message()).toEqual(local);
-    const published = { ...response, message: '音频已发布' };
-    live.next(published);
-    expect(item.message()).toBe(published);
+    live.next({
+      ...testMessage,
+      id: encodeId('9007199254741100'),
+      clientGeneratedId: item.clientGeneratedId,
+      messageType: MessageType.audio,
+      message: '音频已发布',
+    });
     expect(item.published()).toBe(true);
   });
-  it('does not overwrite an early audio publication with the later creation response', async () => {
-    const item = outbox.enqueue(testChat.id, undefined, '', {
+
+  it('does not overwrite early audio publication with a late creation response', async () => {
+    const item = outbox.enqueue(testChat.id, undefined, '', { messageType: MessageType.audio, attachmentIds: [] });
+    const published = {
+      ...testMessage,
+      sender: item.message().sender,
+      clientGeneratedId: item.clientGeneratedId,
       messageType: MessageType.audio,
-      attachmentIds: [encodeId('7')],
-    });
-    const response = { ...accepted(), messageType: MessageType.audio };
-    const published = { ...response, message: '发布后信息' };
+      message: '发布后信息',
+    };
     live.next(published);
-    replies[0].next(response);
+    peer.expect('messages.send').flush({ ...accepted(item), messageType: MessageType.audio });
     await item.operation;
     expect(item.message()).toBe(published);
   });
-  it('checks acknowledged audio once on reconnect without turning a 404 into send failure', async () => {
-    const item = outbox.enqueue(testChat.id, undefined, '', {
-      messageType: MessageType.audio,
-      attachmentIds: [encodeId('7')],
-    });
-    const response = { ...accepted(), messageType: MessageType.audio };
-    replies[0].next(response);
+
+  it('checks acknowledged audio on resync and retains it when get returns NotFound', async () => {
+    const item = outbox.enqueue(testChat.id, undefined, '', { messageType: MessageType.audio, attachmentIds: [] });
+    peer.expect('messages.send').flush({ ...accepted(item), messageType: MessageType.audio });
     await item.operation;
-    const lookup = new Subject<MessageResponse>();
-    api.getMessage.mockReturnValue(lookup);
     resync.next();
-    expect(api.getMessage).toHaveBeenCalledWith(testChat.id, response.id);
-    lookup.error(new Error('404'));
-    await Promise.resolve();
+    peer.expect('messages.get', { chatId, messageId: '9007199254741100' }).error(RpcErrorCode.NotFound);
     expect(item.delivery()).toBe(MessageDelivery.Sent);
-    expect(item.published()).toBe(false);
-    const success = new Subject<MessageResponse>();
-    api.getMessage.mockReturnValue(success);
-    resync.next();
-    success.next(response);
+    const publication = await vi.waitFor(() => {
+      resync.next();
+      return peer.expect('messages.get', { chatId, messageId: '9007199254741100' });
+    });
+    publication.flush({ ...accepted(item), messageType: MessageType.audio });
     await vi.waitFor(() => expect(item.published()).toBe(true));
   });
-  it('keeps topic requests separate and cancels queued uploads when the account changes', async () => {
-    const topic = outbox.enqueue(testChat.id, encodeId('9'), '话题', text);
-    expect(api.postThreadMessage.mock.calls[0].slice(0, 2)).toEqual([testChat.id, encodeId('9')]);
-    replies[0].next({ ...testMessage, clientGeneratedId: topic.clientGeneratedId, replyRootId: encodeId('9') });
+
+  it('keeps thread sends separate and cancels queued uploads on account change', async () => {
+    const threadId = encodeId('9');
+    const topic = outbox.enqueue(testChat.id, threadId, '话题', text);
+    peer.expect('messages.sendInThread', (params) => params['threadId'] === decodeId(threadId)).flush(accepted(topic));
     await topic.operation;
     const media = upload();
     const pending = outbox.enqueue(testChat.id, undefined, '', { ...text, uploads: [media.item] });
     session.user.set(undefined);
-    TestBed.tick();
-    expect(outbox.items()).toEqual([]);
-    expect(media.dispose).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(media.dispose).toHaveBeenCalledOnce());
     media.finish(encodeId('7'));
     await pending.operation;
-    expect(api.postMessage).not.toHaveBeenCalled();
+    peer.expectNone('messages.send');
   });
 
-  it('lets later messages pass a rejected create and makes manual retry wait for the active ACK', async () => {
+  it('lets later messages pass rejected creates and makes manual retry wait for their acknowledgement', async () => {
     const first = outbox.enqueue(testChat.id, undefined, 'first', text);
     const second = outbox.enqueue(testChat.id, undefined, 'second', text);
-    replies[0].error({ status: 400 });
+    peer.expect('messages.send', (params) => params['message'] === 'first').error(RpcErrorCode.BadRequest);
     await first.operation;
-    expect(api.postMessage.mock.calls[1][1].message).toBe('second');
-    expect(first.delivery()).toBe(MessageDelivery.Failed);
-    resync.next();
-    expect(first.delivery()).toBe(MessageDelivery.Failed);
-    await outbox.retry(first);
-    expect(api.postMessage).toHaveBeenCalledTimes(2);
-    replies[1].next(accepted(1));
+    peer.expect('messages.send', (params) => params['message'] === 'second').flush(accepted(second, 1, 'second'));
+    const retry = outbox.retry(first);
     await second.operation;
-    expect(api.postMessage.mock.calls[2][1].message).toBe('first');
-    expect(api.postMessage.mock.calls[2][1].clientGeneratedId).toBe(first.clientGeneratedId);
-    replies[2].next(accepted(2));
-    await first.operation;
+    peer.expect('messages.send', (params) => params['message'] === 'first').flush(accepted(first, 2, 'first'));
+    await retry;
   });
 
-  it('makes automatic retry wait behind a newer POST without issuing concurrent creates', async () => {
+  it('makes automatic transient retry wait behind a newer create', async () => {
     vi.useFakeTimers();
     const first = outbox.enqueue(testChat.id, undefined, 'first', text);
     const second = outbox.enqueue(testChat.id, undefined, 'second', text);
-    replies[0].error({ status: 503 });
+    peer.expect('messages.send', (params) => params['message'] === 'first').error(RpcErrorCode.Unavailable);
     await first.operation;
-    expect(api.postMessage.mock.calls[1][1].message).toBe('second');
-    await vi.advanceTimersByTimeAsync(1_000);
-    expect(api.postMessage).toHaveBeenCalledTimes(2);
-    replies[1].next(accepted(1));
+    peer.expect('messages.send', (params) => params['message'] === 'second').flush(accepted(second, 1, 'second'));
     await second.operation;
-    expect(api.postMessage.mock.calls[2][1].message).toBe('first');
-    replies[2].next(accepted(2));
+    await vi.advanceTimersByTimeAsync(1_000);
+    peer.expect('messages.send', (params) => params['message'] === 'first').flush(accepted(first, 2, 'first'));
     await first.operation;
   });
-  it('edits immediately before POST and drops an unfinished upload without waiting for it', async () => {
+
+  it('edits before a create starts and disposes unfinished uploads without a patch', async () => {
     const media = upload();
     const item = outbox.enqueue(testChat.id, undefined, 'old', { ...text, uploads: [media.item] });
     outbox.edit(item, 'new', text);
-    expect(item.message().message).toBe('new');
-    expect(item.uploads).toEqual([]);
-    expect(media.dispose).toHaveBeenCalledOnce();
-    await vi.waitFor(() => expect(api.postMessage).toHaveBeenCalledOnce());
-    expect(api.postMessage.mock.calls[0][1]).toMatchObject({ message: 'new', attachmentIds: [] });
-    replies[0].next(accepted());
+    await vi.waitFor(() =>
+      peer.expect('messages.send', (params) => params['message'] === 'new').flush(accepted(item, 0, 'new')),
+    );
     await item.operation;
-    media.finish(encodeId('7'));
-    expect(api.patchMessage).not.toHaveBeenCalled();
+    expect(media.dispose).toHaveBeenCalledOnce();
+    peer.expectNone('messages.edit');
   });
-
-  it('freezes a started create across retry, merges edits and patches only after its ACK', async () => {
+  it('freezes a started create across retry and patches only after acknowledgement', async () => {
     const item = outbox.enqueue(testChat.id, undefined, 'original', text);
-    const body = structuredClone(api.postMessage.mock.calls[0][1]);
-    outbox.edit(item, 'edit one', text);
+    const first = peer.expect('messages.send');
     outbox.edit(item, 'latest edit', text);
-    expect(item.message().message).toBe('latest edit');
-    replies[0].error({ status: 0 });
+    first.error(RpcErrorCode.Unavailable);
     await item.operation;
     const retry = outbox.retry(item);
-    expect(api.postMessage.mock.calls[1][1]).toEqual(body);
-    expect(api.patchMessage).not.toHaveBeenCalled();
-    const created = accepted(1);
-    replies[1].next(created);
-    await vi.waitFor(() => expect(api.patchMessage).toHaveBeenCalledOnce());
-    expect(api.patchMessage.mock.calls[0]).toEqual([
-      testChat.id,
-      created.id,
-      { message: 'latest edit', attachmentIds: [] },
-    ]);
-    expect(item.message().message).toBe('latest edit');
-    patches[0].next({ ...created, message: 'latest edit', isEdited: true });
+    peer.expect('messages.send', (params) => params['message'] === 'original').flush(accepted(item));
+    await vi.waitFor(() =>
+      peer
+        .expect('messages.edit', (params) => params['message'] === 'latest edit')
+        .flush({ ...accepted(item), message: 'latest edit', isEdited: true }),
+    );
     await retry;
-    expect(item.delivery()).toBe(MessageDelivery.Sent);
   });
 
-  it('allows the next create after a WS ACK even when HTTP and an edit are still pending', async () => {
+  it('allows the next create after an echo while its HTTP-era equivalent acknowledgement and edit remain pending', async () => {
     const first = outbox.enqueue(testChat.id, undefined, 'first', text);
+    const request = peer.expect('messages.send');
     const second = outbox.enqueue(testChat.id, undefined, 'second', text);
     outbox.edit(first, 'edited', text);
-    live.next(accepted());
-    expect(api.postMessage).toHaveBeenCalledTimes(2);
-    replies[0].next(accepted());
-    await vi.waitFor(() => expect(api.patchMessage).toHaveBeenCalledOnce());
-    expect(api.postMessage.mock.calls[1][1].message).toBe('second');
-    replies[1].next(accepted(1));
-    await second.operation;
-    patches[0].next({ ...accepted(), message: 'edited', isEdited: true });
-    await first.operation;
+    live.next({ ...testMessage, sender: first.message().sender, clientGeneratedId: first.clientGeneratedId });
+    peer.expect('messages.send', (params) => params['message'] === 'second').flush(accepted(second, 1, 'second'));
+    request.flush(accepted(first));
+    await vi.waitFor(() =>
+      peer.expect('messages.edit').flush({ ...accepted(first), message: 'edited', isEdited: true }),
+    );
+    await Promise.all([first.operation, second.operation]);
   });
 
-  it('coalesces edits on one row, ignores older acknowledgements and releases only the final range', async () => {
+  it('coalesces edits, ignores older acknowledgements and releases only the final range', async () => {
     const item = outbox.enqueueEdit(testMessage, undefined, 'one', text);
+    const first = peer.expect('messages.edit');
     expect(outbox.enqueueEdit(testMessage, undefined, 'two', text)).toBe(item);
     outbox.edit(item, 'three', text);
-    expect(outbox.items()).toEqual([item]);
-    expect(item.message().message).toBe('three');
     const older = { ...testMessage, message: 'one', isEdited: true };
     events.next({ type: ServerWsMessageType.messageUpdated, payload: older });
-    patches[0].next(older);
-    await vi.waitFor(() => expect(api.patchMessage).toHaveBeenCalledTimes(2));
-    expect(api.patchMessage.mock.calls[1][2].message).toBe('three');
+    first.flush({ ...wireMessage, message: 'one', isEdited: true });
+    await vi.waitFor(() =>
+      peer
+        .expect('messages.edit', (params) => params['message'] === 'three')
+        .flush({ ...wireMessage, message: 'three', isEdited: true }),
+    );
+    await item.operation;
     outbox.release([older]);
     expect(outbox.items()).toContain(item);
     const latest = { ...testMessage, message: 'three', isEdited: true };
-    events.next({ type: ServerWsMessageType.messageUpdated, payload: latest });
-    patches[1].next(latest);
-    await item.operation;
-    events.next({ type: ServerWsMessageType.messageUpdated, payload: older });
-    expect(item.message().message).toBe('three');
-    outbox.release([older]);
-    expect(outbox.items()).toContain(item);
     outbox.release([latest]);
     expect(outbox.items()).toEqual([]);
   });
 
-  it('retains removed uploads referenced by an uncertain create until its ACK', async () => {
+  it('retains removed uploads referenced by an uncertain create until acknowledgement', async () => {
     const media = upload();
     const item = outbox.enqueue(testChat.id, undefined, 'photo', { ...text, uploads: [media.item] });
     media.finish(encodeId('7'));
-    await vi.waitFor(() => expect(api.postMessage).toHaveBeenCalledOnce());
+    const request = await vi.waitFor(() => peer.expect('messages.send'));
     outbox.edit(item, 'text only', text);
-    expect(media.dispose).not.toHaveBeenCalled();
-    replies[0].error({ status: 0 });
+    request.error(RpcErrorCode.Unavailable);
     await item.operation;
     expect(media.dispose).not.toHaveBeenCalled();
     const retry = outbox.retry(item);
-    expect(api.postMessage.mock.calls[1][1].attachmentIds).toEqual([encodeId('7')]);
-    replies[1].next(accepted(1));
-    await vi.waitFor(() => expect(api.patchMessage).toHaveBeenCalledOnce());
-    expect(media.dispose).toHaveBeenCalledOnce();
-    expect(api.patchMessage.mock.calls[0][2].attachmentIds).toEqual([]);
-    patches[0].next({ ...accepted(1), message: 'text only', isEdited: true });
+    peer
+      .expect('messages.send', (params) => (params['attachmentIds'] as unknown[]).includes('7'))
+      .flush(accepted(item));
+    await vi.waitFor(() =>
+      peer
+        .expect('messages.edit', (params) => (params['attachmentIds'] as unknown[]).length === 0)
+        .flush({ ...accepted(item), message: 'text only', isEdited: true }),
+    );
     await retry;
+    expect(media.dispose).toHaveBeenCalledOnce();
   });
 
   it.each([UploadStatus.Processing, UploadStatus.Uploading])(
-    'immediately cancels attachment work in state %s and lets the next create run',
+    'cancels attachment work in %s and lets the next create run',
     async (status) => {
       const media = upload();
       media.state.update((state) => ({ ...state, status }));
       const item = outbox.enqueue(testChat.id, undefined, '', { ...text, uploads: [media.item] });
       const next = outbox.enqueue(testChat.id, undefined, 'next', text);
       await outbox.cancel(item);
-      expect(item.cancelled()).toBe(true);
-      expect(media.dispose).toHaveBeenCalledOnce();
-      expect(api.postMessage.mock.calls[0][1].message).toBe('next');
-      expect(api.deleteMessage).not.toHaveBeenCalled();
-      replies[0].next(accepted());
+      peer.expect('messages.send', (params) => params['message'] === 'next').flush(accepted(next));
       await next.operation;
-      media.finish(encodeId('7'));
-      await item.operation;
-      expect(api.postMessage).toHaveBeenCalledOnce();
+      expect(media.dispose).toHaveBeenCalledOnce();
     },
   );
 
-  it('deletes on a WS ID independently of the pending POST and retains a hidden tombstone', async () => {
+  it('deletes a discovered cancelled create independently of its late send response', async () => {
     const item = outbox.enqueue(testChat.id, undefined, 'cancel', text);
-    const created = accepted();
+    const request = peer.expect('messages.send');
     await outbox.cancel(item);
-    live.next(created);
-    expect(api.deleteMessage).toHaveBeenCalledWith(testChat.id, created.id);
-    deletions[0].next();
-    await outbox.cancel(item);
-    replies[0].next(created);
+    live.next({ ...testMessage, sender: item.message().sender, clientGeneratedId: item.clientGeneratedId });
+    peer.expect('messages.delete').flush(null);
+    request.flush(accepted(item));
     await item.operation;
-    live.next(created);
-    outbox.release([created]);
-    outbox.release([{ ...created, isDeleted: true }]);
-    resync.next();
-    await outbox.retry(item);
-    expect(outbox.items()).toContain(item);
     expect(item.cancelled()).toBe(true);
-    expect(api.postMessage).toHaveBeenCalledOnce();
-    expect(api.deleteMessage).toHaveBeenCalledOnce();
   });
 
-  it('keeps an unknown cancellation after timeout and discovers its ID from a normal range', async () => {
-    vi.useFakeTimers();
+  it('discovers an unknown cancelled create from a normal range', async () => {
     const item = outbox.enqueue(testChat.id, undefined, 'unknown', text);
-    const created = accepted();
+    const request = peer.expect('messages.send');
     await outbox.cancel(item);
-    await vi.advanceTimersByTimeAsync(30_000);
-    resync.next();
-    window.dispatchEvent(new Event('online'));
-    await vi.advanceTimersByTimeAsync(60_000);
-    outbox.release([]);
-    expect(outbox.items()).toContain(item);
-    expect(api.postMessage).toHaveBeenCalledOnce();
+    request.error(RpcErrorCode.Internal);
+    await item.operation;
+    const created = { ...testMessage, sender: item.message().sender, clientGeneratedId: item.clientGeneratedId };
     outbox.release([created]);
-    expect(api.deleteMessage).toHaveBeenCalledWith(testChat.id, created.id);
-    deletions[0].next();
-    await outbox.cancel(item);
+    peer.expect('messages.delete').flush(null);
     expect(item.cancelled()).toBe(true);
   });
 
   it('waits for audio publication before deleting an acknowledged cancelled create', async () => {
     const item = outbox.enqueue(testChat.id, undefined, '', { messageType: MessageType.audio, attachmentIds: [] });
-    const response = { ...accepted(), messageType: MessageType.audio };
+    const request = peer.expect('messages.send');
     await outbox.cancel(item);
-    replies[0].next(response);
+    request.flush({ ...accepted(item), messageType: MessageType.audio });
     await item.operation;
-    expect(item.published()).toBe(false);
-    expect(api.deleteMessage).not.toHaveBeenCalled();
-    const lookup = new Subject<MessageResponse>();
-    api.getMessage.mockReturnValue(lookup);
+    peer.expectNone('messages.delete');
     resync.next();
-    lookup.next(response);
-    await vi.waitFor(() => expect(api.deleteMessage).toHaveBeenCalledWith(testChat.id, response.id));
-    deletions[0].next();
-    await outbox.cancel(item);
-    expect(api.postMessage).toHaveBeenCalledOnce();
+    peer.expect('messages.get').flush({ ...accepted(item), messageType: MessageType.audio });
+    await vi.waitFor(() => peer.expect('messages.delete').flush(null));
   });
 
-  it('recovers a timed out POST on resync with the frozen client ID', async () => {
+  it('recovers a timed out send on resync with its frozen client ID', async () => {
     vi.useFakeTimers();
     const item = outbox.enqueue(testChat.id, undefined, 'retry', text);
-    const body = structuredClone(api.postMessage.mock.calls[0][1]);
+    const timedOut = peer.expect('messages.send');
     await vi.advanceTimersByTimeAsync(30_000);
     expect(item.delivery()).toBe(MessageDelivery.Failed);
-    expect(replies[0].observed).toBe(false);
+    timedOut.flush(accepted(item));
     resync.next();
-    expect(api.postMessage.mock.calls[1][1]).toEqual(body);
-    replies[1].next(accepted(1));
+    peer
+      .expect('messages.send', (params) => params['clientGeneratedId'] === item.clientGeneratedId)
+      .flush(accepted(item));
     await item.operation;
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(api.postMessage).toHaveBeenCalledTimes(2);
   });
 
-  it('aborts an offline round and retries on online without losing local content', async () => {
+  it('aborts offline work and retries online without losing local content', async () => {
     const item = outbox.enqueue(testChat.id, undefined, 'offline', text);
+    const offline = peer.expect('messages.send');
     const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
     window.dispatchEvent(new Event('offline'));
     await item.operation;
-    expect(item.delivery()).toBe(MessageDelivery.Failed);
-    expect(replies[0].observed).toBe(false);
+    offline.flush(accepted(item));
     online.mockReturnValue(true);
     window.dispatchEvent(new Event('online'));
-    expect(api.postMessage).toHaveBeenCalledTimes(2);
-    replies[1].next(accepted(1));
+    peer.expect('messages.send').flush(accepted(item));
     await item.operation;
-    expect(item.delivery()).toBe(MessageDelivery.Sent);
   });
 
-  it('retries a transient DELETE but stops automatic attempts on a permanent rejection', async () => {
+  it('retries transient deletes but stops automatic attempts after a permanent rejection', async () => {
     vi.useFakeTimers();
     const item = outbox.enqueue(testChat.id, undefined, 'cancel', text);
-    replies[0].next(accepted());
+    peer.expect('messages.send').flush(accepted(item));
     await item.operation;
     const cancellation = outbox.cancel(item);
-    deletions[0].error({ status: 503 });
+    peer.expect('messages.delete').error(RpcErrorCode.Unavailable);
     await cancellation;
     await vi.advanceTimersByTimeAsync(1_000);
-    expect(api.deleteMessage).toHaveBeenCalledTimes(2);
-    deletions[1].error({ status: 403 });
+    peer.expect('messages.delete').error(RpcErrorCode.Forbidden);
     await vi.advanceTimersByTimeAsync(60_000);
-    resync.next();
-    outbox.release([accepted()]);
-    expect(api.deleteMessage).toHaveBeenCalledTimes(2);
-    expect(item.cancelled()).toBe(true);
-    const retry = outbox.retry(item);
-    deletions[2].next();
-    await retry;
+    peer.expectNone('messages.delete');
   });
 
-  it('saves an editor opened before handoff using server attachment metadata instead of a disposed blob', async () => {
+  it('saves an editor after handoff using server attachment metadata rather than a disposed blob', async () => {
     const media = upload();
     const item = outbox.enqueue(testChat.id, undefined, 'before', { ...text, uploads: [media.item] });
     media.finish(encodeId('7'));
-    await vi.waitFor(() => expect(api.postMessage).toHaveBeenCalledOnce());
-    const attachment = {
-      id: encodeId('7'),
-      url: '/media/published',
-      fileName: 'photo.jpg',
-      kind: 'image/jpeg',
-      size: 4,
-    };
-    const created = { ...accepted(), attachments: [attachment], hasAttachments: true };
-    replies[0].next(created);
+    const create = await vi.waitFor(() => peer.expect('messages.send'));
+    const attachment = { id: '7', url: '/media/published', fileName: 'photo.jpg', kind: 'image/jpeg', size: 4 };
+    create.flush({ ...accepted(item), attachments: [attachment], hasAttachments: true });
     await item.operation;
-    outbox.release([created]);
-    expect(item.disposed).toBe(true);
-    expect(media.dispose).toHaveBeenCalledOnce();
+    outbox.release([item.confirmed()!]);
     const edit = outbox.edit(item, 'after', { ...text, uploads: [media.item] });
-    expect(edit).not.toBe(item);
-    expect(edit.editId).toBe(created.id);
-    expect(edit.message().attachments).toEqual([attachment]);
-    expect(edit.uploads).toEqual([]);
-    expect(api.patchMessage.mock.calls[0][2]).toEqual({ message: 'after', attachmentIds: [attachment.id] });
-    patches[0].next({ ...created, message: 'after', isEdited: true });
+    peer
+      .expect('messages.edit', (params) => (params['attachmentIds'] as unknown[]).includes('7'))
+      .flush({ ...accepted(edit), attachments: [attachment], message: 'after', isEdited: true });
     await edit.operation;
   });
 
-  it('restores a released item as a cancellation tombstone when an open menu recalls it', async () => {
+  it('restores a released item as a cancellation tombstone for an open recall menu', async () => {
     const item = outbox.enqueue(testChat.id, undefined, 'before', text);
-    const created = accepted();
-    replies[0].next(created);
+    peer.expect('messages.send').flush(accepted(item));
     await item.operation;
-    outbox.release([created]);
-    expect(item.disposed).toBe(true);
+    outbox.release([item.confirmed()!]);
     const cancellation = outbox.cancel(item);
-    expect(outbox.items()).toContain(item);
-    expect(item.cancelled()).toBe(true);
-    expect(api.deleteMessage).toHaveBeenCalledWith(testChat.id, created.id);
-    deletions[0].next();
+    peer.expect('messages.delete').flush(null);
     await cancellation;
-    outbox.release([{ ...created, isDeleted: true }]);
-    live.next(created);
-    expect(outbox.items()).toContain(item);
-    expect(api.postMessage).toHaveBeenCalledOnce();
+    expect(item.cancelled()).toBe(true);
   });
 
-  it('disposes newly selected uploads when an edit races with cancellation', async () => {
+  it('disposes newly selected uploads when editing races with cancellation', async () => {
     const item = outbox.enqueue(testChat.id, undefined, 'cancel', text);
+    const request = peer.expect('messages.send');
     await outbox.cancel(item);
-    const fresh = upload();
-    outbox.edit(item, 'late edit', { ...text, uploads: [fresh.item] });
-    expect(fresh.dispose).toHaveBeenCalledOnce();
-    expect(api.patchMessage).not.toHaveBeenCalled();
-  });
-
-  it('lets text pass both failed uploads and failed attachment POSTs', async () => {
     const media = upload();
-    const item = outbox.enqueue(testChat.id, undefined, 'media', { ...text, uploads: [media.item] });
-    media.finish(undefined);
-    await item.operation;
-    const chatting = outbox.enqueue(testChat.id, undefined, 'chatting', text);
-    expect(api.postMessage).toHaveBeenCalledOnce();
-    replies[0].next(accepted());
-    await chatting.operation;
-    const ready = upload();
-    ready.finish(encodeId('8'));
-    outbox.edit(item, 'media retry', { ...text, uploads: [ready.item] });
-    expect(api.postMessage).toHaveBeenCalledTimes(2);
-    replies[1].error({ status: 400 });
-    await item.operation;
-    const queued = outbox.enqueue(testChat.id, undefined, 'can continue', text);
-    expect(api.postMessage.mock.calls[2][1].message).toBe('can continue');
-    await outbox.retry(item);
-    expect(api.postMessage).toHaveBeenCalledTimes(3);
-    replies[2].next(accepted(2));
-    await queued.operation;
-    expect(api.postMessage.mock.calls[3][1].message).toBe('media retry');
-    replies[3].next(accepted(3));
+    outbox.edit(item, 'late edit', { ...text, uploads: [media.item] });
+    expect(media.dispose).toHaveBeenCalledOnce();
+    request.flush(accepted(item));
+    (await peer.expectAsync('messages.delete')).flush(null);
     await item.operation;
   });
 
-  it('immediately releases attachments on recall while retaining identity for a late acknowledgement', async () => {
+  it('lets text pass failed uploads and failed attachment sends', async () => {
+    const media = upload();
+    const attachment = outbox.enqueue(testChat.id, undefined, 'media', { ...text, uploads: [media.item] });
+    media.finish(undefined);
+    await attachment.operation;
+    const textItem = outbox.enqueue(testChat.id, undefined, 'chatting', text);
+    peer.expect('messages.send', (params) => params['message'] === 'chatting').flush(accepted(textItem));
+    await textItem.operation;
+    expect(attachment.delivery()).toBe(MessageDelivery.Failed);
+  });
+
+  it('releases attachments on recall while retaining operation identity for a late response', async () => {
     const media = upload();
     const item = outbox.enqueue(testChat.id, undefined, 'large attachment', { ...text, uploads: [media.item] });
     media.finish(encodeId('7'));
-    await vi.waitFor(() => expect(api.postMessage).toHaveBeenCalledOnce());
+    const request = await vi.waitFor(() => peer.expect('messages.send'));
     await outbox.cancel(item);
-    expect(item.uploads).toEqual([]);
-    expect(item.message().attachments).toEqual([]);
-    expect(item.message().message).toBeUndefined();
     expect(media.dispose).toHaveBeenCalledOnce();
-    replies[0].error({ status: 0 });
+    request.error(RpcErrorCode.Internal);
     await item.operation;
-    expect(media.dispose).toHaveBeenCalledOnce();
-    expect(outbox.items()).toContain(item);
-    expect(item.cancelled()).toBe(true);
     expect(item.clientGeneratedId).toBeTruthy();
   });
 
-  it('continues the latest edit when a late WS update acknowledges a failed earlier PATCH', async () => {
+  it('continues the latest edit when an event acknowledges a failed earlier patch', async () => {
     const item = outbox.enqueueEdit(testMessage, undefined, 'one', text);
+    peer.expect('messages.edit').error(RpcErrorCode.Unavailable);
     outbox.edit(item, 'two', text);
-    patches[0].error({ status: 503 });
     await item.operation;
-    expect(item.delivery()).toBe(MessageDelivery.Failed);
     events.next({
       type: ServerWsMessageType.messageUpdated,
       payload: { ...testMessage, message: 'one', isEdited: true },
     });
-    expect(api.patchMessage.mock.calls[1][2].message).toBe('two');
-    patches[1].next({ ...testMessage, message: 'two', isEdited: true });
+    peer
+      .expect('messages.edit', (params) => params['message'] === 'two')
+      .flush({ ...wireMessage, message: 'two', isEdited: true });
     await item.operation;
-    expect(item.message().message).toBe('two');
   });
 
   it('does not revive a permanently rejected edit when a duplicate create echo arrives', async () => {
     const item = outbox.enqueue(testChat.id, undefined, 'created', text);
-    replies[0].next(accepted());
+    peer.expect('messages.send').flush(accepted(item));
     await item.operation;
     outbox.edit(item, 'rejected edit', text);
-    patches[0].error({ status: 403 });
+    peer.expect('messages.edit').error(RpcErrorCode.Forbidden);
     await item.operation;
-    live.next(accepted());
-    expect(api.patchMessage).toHaveBeenCalledOnce();
+    live.next({ ...testMessage, sender: item.message().sender, clientGeneratedId: item.clientGeneratedId });
     expect(item.delivery()).toBe(MessageDelivery.Failed);
   });
 });

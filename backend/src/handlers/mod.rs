@@ -5,6 +5,7 @@ pub mod chats;
 pub mod external;
 pub mod friends;
 pub mod groups;
+mod http_error;
 pub mod invites;
 pub mod members;
 mod notification_preferences;

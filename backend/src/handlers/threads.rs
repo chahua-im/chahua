@@ -3,43 +3,21 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use chrono::{DateTime, Utc};
-use diesel::prelude::*;
 use utoipa_axum::router::OpenApiRouter;
 
 use crate::{
     dto::threads::{
-        ListChatThreadsResponse, ListThreadParticipantsResponse, ListThreadsResponse,
+        ListChatThreadsQuery, ListChatThreadsResponse, ListThreadParticipantsQuery,
+        ListThreadParticipantsResponse, ListThreadsQuery, ListThreadsResponse, MarkThreadReadBody,
         MarkThreadReadResponse, ThreadOrder, ThreadReadStateResponse,
         ThreadSubscriptionStatusResponse, UnreadThreadCountResponse,
     },
     errors::AppError,
     extractors::DbConn,
-    handlers::members::check_membership,
-    models::Message,
-    schema::messages,
-    services::threads as thread_svc,
-    services::unread::UnreadService,
-    utils::{auth::CurrentUid, pagination::validate_limit},
+    services::api::threads,
+    utils::auth::CurrentUid,
     AppState,
 };
-
-#[derive(serde::Deserialize, utoipa::ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ListThreadsQuery {
-    #[serde(
-        default,
-        deserialize_with = "crate::serde_i64_string::opt::deserialize"
-    )]
-    #[schema(value_type = Option<String>)]
-    root_id: Option<i64>,
-    #[serde(default)]
-    limit: Option<i64>,
-    #[serde(default)]
-    before: Option<DateTime<Utc>>,
-    #[serde(default)]
-    archived: Option<bool>,
-}
 
 /// GET /threads — List threads the user is subscribed to.
 #[utoipa::path(
@@ -63,58 +41,13 @@ async fn get_threads(
     mut conn: DbConn,
     Query(query): Query<ListThreadsQuery>,
 ) -> Result<Json<ListThreadsResponse>, AppError> {
-    let conn = &mut *conn;
-
-    let limit = validate_limit(query.limit.or(Some(20)), 50);
-    let archived = query.archived.unwrap_or(false);
-    let rows =
-        thread_svc::get_user_threads(conn, uid, limit + 1, query.before, archived, query.root_id)?;
-
-    let has_more = rows.len() as i64 > limit;
-    let rows: Vec<_> = rows.into_iter().take(limit as usize).collect();
-
-    let root_ids: Vec<i64> = rows.iter().map(|r| r.thread_root_id).collect();
-
-    if root_ids.is_empty() {
-        return Ok(Json(ListThreadsResponse {
-            threads: vec![],
-            next_cursor: None,
-        }));
-    }
-
-    // Load raw root messages (no heavy attach_metadata — enrich_thread_list builds lightweight previews)
-    let root_messages: Vec<Message> = messages::table
-        .filter(messages::id.eq_any(&root_ids))
-        .filter(messages::reply_root_id.is_null())
-        .filter(messages::has_thread.eq(true))
-        .filter(messages::is_published.eq(true))
-        .select(Message::as_select())
-        .load(conn)?;
-
-    let response = thread_svc::enrich_thread_list(
-        conn,
-        rows,
-        has_more,
-        root_messages,
+    Ok(Json(threads::get_threads(
         uid,
+        query,
+        &mut conn,
         &state.media,
         &state.avatars,
-    )?;
-
-    Ok(Json(response))
-}
-
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct ListChatThreadsQuery {
-    limit: Option<i64>,
-    #[serde(
-        default,
-        deserialize_with = "crate::serde_i64_string::opt::deserialize"
-    )]
-    cursor: Option<i64>,
-    #[serde(default)]
-    order: ThreadOrder,
+    )?))
 }
 
 #[derive(serde::Deserialize)]
@@ -146,31 +79,10 @@ pub(super) async fn get_chat_threads(
     mut conn: DbConn,
     Query(query): Query<ListChatThreadsQuery>,
 ) -> Result<Json<ListChatThreadsResponse>, AppError> {
-    check_membership(&mut conn, chat_id, uid)?;
-    let limit = validate_limit(query.limit.or(Some(20)), 100);
-    let mut roots =
-        thread_svc::get_chat_threads(&mut conn, chat_id, query.cursor, query.order, limit + 1)?;
-    let has_more = roots.len() as i64 > limit;
-    roots.truncate(limit as usize);
-    let next_cursor = has_more.then(|| roots.last().unwrap().id.to_string());
-    let threads = crate::services::messages::attach_metadata(
-        &mut conn,
-        roots,
-        &state.media,
-        &state.avatars,
-        uid,
-    )
-    .await;
-    Ok(Json(ListChatThreadsResponse {
-        threads,
-        next_cursor,
-    }))
-}
-
-#[derive(serde::Deserialize)]
-struct ListThreadParticipantsQuery {
-    limit: Option<i64>,
-    cursor: Option<i32>,
+    Ok(Json(
+        threads::get_chat_threads(uid, chat_id, query, &mut conn, &state.media, &state.avatars)
+            .await?,
+    ))
 }
 
 /// List root/reply authors in ascending UID order, not thread subscribers.
@@ -201,200 +113,20 @@ async fn get_thread_participants(
     mut conn: DbConn,
     Query(query): Query<ListThreadParticipantsQuery>,
 ) -> Result<Json<ListThreadParticipantsResponse>, AppError> {
-    authorize_thread_in_chat(&mut conn, chat_id, thread_root_id, uid)?;
-    let exists = diesel::select(diesel::dsl::exists(
-        messages::table
-            .filter(messages::id.eq(thread_root_id))
-            .filter(messages::has_thread.eq(true))
-            .filter(messages::is_published.eq(true)),
-    ))
-    .get_result::<bool>(&mut *conn)?;
-    if !exists {
-        return Err(AppError::NotFound("Thread root message not found"));
-    }
-    let limit = validate_limit(query.limit, 100);
-    let mut uids = thread_svc::get_thread_participant_uids(
-        &mut conn,
+    Ok(Json(threads::get_thread_participants(
+        uid,
+        chat_id,
         thread_root_id,
-        query.cursor,
-        limit + 1,
-    )?;
-    let has_more = uids.len() as i64 > limit;
-    uids.truncate(limit as usize);
-    let next_cursor = has_more.then(|| *uids.last().unwrap());
-    let profiles = crate::services::user::lookup_user_profiles(&mut conn, &uids)?;
-    let avatars = state.avatars.lookup(&uids);
-    let participants = uids
-        .into_iter()
-        .map(|uid| crate::services::messages::build_sender(uid, &avatars, &profiles))
-        .collect();
-    Ok(Json(ListThreadParticipantsResponse {
-        participants,
-        next_cursor,
-    }))
-}
-
-#[derive(serde::Deserialize, utoipa::ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct MarkThreadReadBody {
-    #[serde(deserialize_with = "crate::serde_i64_string::deserialize")]
-    #[schema(value_type = String)]
-    message_id: i64,
+        query,
+        &mut conn,
+        &state.avatars,
+    )?))
 }
 
 #[derive(serde::Deserialize)]
 pub struct ThreadRootIdPath {
     #[serde(deserialize_with = "crate::serde_i64_string::deserialize")]
     thread_root_id: i64,
-}
-
-/// Resolve `chat_id` from a thread root message ID, or return 404.
-///
-/// This only locates the thread's chat; it performs no authorization. Callers
-/// MUST pass the resolved `chat_id` to `check_membership` before reading or
-/// writing any thread state.
-fn resolve_chat_id_for_thread(
-    conn: &mut PgConnection,
-    thread_root_id: i64,
-) -> Result<i64, AppError> {
-    messages::table
-        .filter(messages::id.eq(thread_root_id))
-        .select(messages::chat_id)
-        .first(conn)
-        .optional()?
-        .ok_or(AppError::NotFound("Thread root message not found"))
-}
-
-/// Authorize `uid` for `thread_root_id` **within an explicitly supplied
-/// `chat_id`**, rejecting a mismatch or a reply ID with 404.
-///
-/// Membership is verified before the thread lookup on purpose: a non-member
-/// then receives 403 for every thread root alike, so the mismatch 404 cannot
-/// be used to probe which chat a thread belongs to. Reversing the order would
-/// let an outsider distinguish "root lives in this chat" (403) from "root
-/// lives elsewhere" (404).
-pub(crate) fn authorize_thread_in_chat(
-    conn: &mut PgConnection,
-    chat_id: i64,
-    thread_root_id: i64,
-    uid: i32,
-) -> Result<(), AppError> {
-    check_membership(conn, chat_id, uid)?;
-
-    // Never trust the caller's chat_id: the thread root itself decides which
-    // chat the thread belongs to.
-    let belongs_to_chat: bool = diesel::select(diesel::dsl::exists(
-        messages::table.filter(
-            messages::id
-                .eq(thread_root_id)
-                .and(messages::chat_id.eq(chat_id))
-                .and(messages::reply_root_id.is_null()),
-        ),
-    ))
-    .get_result(conn)?;
-
-    if !belongs_to_chat {
-        return Err(AppError::NotFound("Thread root message not found"));
-    }
-
-    Ok(())
-}
-
-struct AppliedThreadRead {
-    response: MarkThreadReadResponse,
-    receipt_advanced: bool,
-}
-
-/// Read-only counterpart of the mark-read response; authorization belongs to the caller.
-fn load_thread_read_state(
-    conn: &mut PgConnection,
-    unread_service: &UnreadService,
-    chat_id: i64,
-    thread_root_id: i64,
-    uid: i32,
-) -> Result<ThreadReadStateResponse, AppError> {
-    let last_read_message_id =
-        thread_svc::get_thread_last_read_message_id(conn, chat_id, thread_root_id, uid)?;
-    Ok(ThreadReadStateResponse {
-        last_read_message_id,
-        unread_count: thread_svc::get_thread_unread_count(
-            conn,
-            thread_root_id,
-            uid,
-            last_read_message_id,
-        )?,
-        unread_mentions: unread_service.count_chat_unread_mentions(
-            conn,
-            uid,
-            chat_id,
-            last_read_message_id,
-            Some(thread_root_id),
-        )?,
-        unread_reactions: unread_service.count_chat_unread_reactions(
-            conn,
-            uid,
-            chat_id,
-            Some(thread_root_id),
-        )?,
-    })
-}
-
-/// Shared body of the chat-scoped and legacy "mark thread read" routes.
-/// Callers MUST have authorized `uid` for `chat_id` first.
-fn apply_thread_read(
-    conn: &mut PgConnection,
-    unread_service: &UnreadService,
-    chat_id: i64,
-    thread_root_id: i64,
-    uid: i32,
-    message_id: i64,
-) -> Result<AppliedThreadRead, AppError> {
-    if message_id == thread_root_id {
-        crate::services::read_receipts::validate_thread_root_read_target(
-            conn,
-            chat_id,
-            thread_root_id,
-        )?;
-        let unread_reactions =
-            unread_service.count_chat_unread_reactions(conn, uid, chat_id, Some(thread_root_id))?;
-        return Ok(AppliedThreadRead {
-            response: MarkThreadReadResponse {
-                last_read_message_id: None,
-                unread_count: 0,
-                unread_mentions: 0,
-                unread_reactions,
-            },
-            receipt_advanced: false,
-        });
-    }
-
-    crate::services::read_receipts::validate_thread_read_target(
-        conn,
-        chat_id,
-        thread_root_id,
-        message_id,
-    )?;
-    let _ = thread_svc::ensure_thread_user_state(conn, chat_id, thread_root_id, uid, false)?;
-    let read_state = thread_svc::mark_thread_read(conn, chat_id, thread_root_id, uid, message_id)?;
-    let unread_mentions = unread_service.count_chat_unread_mentions(
-        conn,
-        uid,
-        chat_id,
-        read_state.last_read_message_id,
-        Some(thread_root_id),
-    )?;
-    let unread_reactions =
-        unread_service.count_chat_unread_reactions(conn, uid, chat_id, Some(thread_root_id))?;
-
-    Ok(AppliedThreadRead {
-        response: MarkThreadReadResponse {
-            last_read_message_id: read_state.last_read_message_id,
-            unread_count: read_state.unread_count,
-            unread_mentions,
-            unread_reactions,
-        },
-        receipt_advanced: read_state.receipt_advanced,
-    })
 }
 
 /// POST /threads/:thread_root_id/read — Mark a thread as read.
@@ -421,31 +153,14 @@ async fn mark_thread_read(
     mut conn: DbConn,
     Json(body): Json<MarkThreadReadBody>,
 ) -> Result<Json<MarkThreadReadResponse>, AppError> {
-    let conn = &mut *conn;
-
-    let chat_id = resolve_chat_id_for_thread(conn, thread_root_id)?;
-    check_membership(conn, chat_id, uid)?;
-
-    let applied = apply_thread_read(
-        conn,
-        &state.unread_service,
-        chat_id,
-        thread_root_id,
+    Ok(Json(threads::mark_thread_read(
         uid,
-        body.message_id,
-    )?;
-    if applied.receipt_advanced {
-        crate::services::read_receipts::broadcast_read_receipt_changed_if_dm(
-            conn,
-            &state.ws_registry,
-            chat_id,
-            false,
-            Some(uid),
-            Some(thread_root_id),
-        )?;
-    }
-    state.ws_registry.invalidate_unread(&[uid]);
-    Ok(Json(applied.response))
+        thread_root_id,
+        body,
+        &mut conn,
+        &state.unread_service,
+        &state.ws_registry,
+    )?))
 }
 
 /// GET /threads/:thread_root_id/read-state — Get the user's read position for a thread.
@@ -470,17 +185,11 @@ async fn get_thread_read_state(
     Path(ThreadRootIdPath { thread_root_id }): Path<ThreadRootIdPath>,
     mut conn: DbConn,
 ) -> Result<Json<ThreadReadStateResponse>, AppError> {
-    let conn = &mut *conn;
-
-    let chat_id = resolve_chat_id_for_thread(conn, thread_root_id)?;
-    check_membership(conn, chat_id, uid)?;
-
-    Ok(Json(load_thread_read_state(
-        conn,
-        &state.unread_service,
-        chat_id,
-        thread_root_id,
+    Ok(Json(threads::get_thread_read_state(
         uid,
+        thread_root_id,
+        &mut conn,
+        &state.unread_service,
     )?))
 }
 
@@ -498,16 +207,7 @@ async fn get_unread_thread_count(
     CurrentUid(uid): CurrentUid,
     mut conn: DbConn,
 ) -> Result<Json<UnreadThreadCountResponse>, AppError> {
-    let conn = &mut *conn;
-
-    let counts = thread_svc::get_unread_summary_counts(conn, uid)?;
-
-    Ok(Json(UnreadThreadCountResponse {
-        unread_thread_count: counts.unread_thread_count,
-        archived_unread_thread_count: counts.archived_unread_thread_count,
-        unread_message_count: counts.unread_message_count,
-        archived_unread_message_count: counts.archived_unread_message_count,
-    }))
+    Ok(Json(threads::get_unread_thread_count(uid, &mut conn)?))
 }
 
 #[derive(serde::Deserialize)]
@@ -542,30 +242,15 @@ async fn mark_thread_read_in_chat(
     mut conn: DbConn,
     Json(body): Json<MarkThreadReadBody>,
 ) -> Result<Json<MarkThreadReadResponse>, AppError> {
-    let conn = &mut *conn;
-
-    authorize_thread_in_chat(conn, chat_id, thread_root_id, uid)?;
-
-    let applied = apply_thread_read(
-        conn,
-        &state.unread_service,
+    Ok(Json(threads::mark_thread_read_in_chat(
+        uid,
         chat_id,
         thread_root_id,
-        uid,
-        body.message_id,
-    )?;
-    if applied.receipt_advanced {
-        crate::services::read_receipts::broadcast_read_receipt_changed_if_dm(
-            conn,
-            &state.ws_registry,
-            chat_id,
-            false,
-            Some(uid),
-            Some(thread_root_id),
-        )?;
-    }
-    state.ws_registry.invalidate_unread(&[uid]);
-    Ok(Json(applied.response))
+        body,
+        &mut conn,
+        &state.unread_service,
+        &state.ws_registry,
+    )?))
 }
 
 /// GET /chats/:chat_id/threads/:thread_root_id/read-state — Read position in a thread.
@@ -591,16 +276,12 @@ async fn get_thread_read_state_in_chat(
     }): Path<ThreadSubscribePath>,
     mut conn: DbConn,
 ) -> Result<Json<ThreadReadStateResponse>, AppError> {
-    let conn = &mut *conn;
-
-    authorize_thread_in_chat(conn, chat_id, thread_root_id, uid)?;
-
-    Ok(Json(load_thread_read_state(
-        conn,
-        &state.unread_service,
+    Ok(Json(threads::get_thread_read_state_in_chat(
+        uid,
         chat_id,
         thread_root_id,
-        uid,
+        &mut conn,
+        &state.unread_service,
     )?))
 }
 
@@ -627,44 +308,7 @@ async fn subscribe_thread(
     }): Path<ThreadSubscribePath>,
     mut conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    let conn = &mut *conn;
-
-    check_membership(conn, chat_id, uid)?;
-
-    // Verify the thread root message exists
-    let exists: bool = diesel::select(diesel::dsl::exists(
-        messages::table.filter(
-            messages::id
-                .eq(thread_root_id)
-                .and(messages::chat_id.eq(chat_id))
-                .and(messages::deleted_at.is_null())
-                .and(messages::is_published.eq(true)),
-        ),
-    ))
-    .get_result(conn)?;
-
-    if !exists {
-        return Err(AppError::NotFound("Thread root message not found"));
-    }
-
-    let inserted = thread_svc::ensure_thread_subscription(conn, chat_id, thread_root_id, uid)?;
-    if inserted {
-        thread_svc::broadcast_thread_membership_changed_to_user(
-            conn,
-            &state.ws_registry,
-            uid,
-            chat_id,
-            thread_root_id,
-        )?;
-        thread_svc::broadcast_thread_update_to_uids(
-            conn,
-            &state.ws_registry,
-            &[uid],
-            chat_id,
-            thread_root_id,
-        )?;
-    }
-
+    threads::subscribe_thread(uid, chat_id, thread_root_id, &mut conn, &state.ws_registry)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -691,21 +335,7 @@ async fn unsubscribe_thread(
     }): Path<ThreadSubscribePath>,
     mut conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    let conn = &mut *conn;
-
-    check_membership(conn, chat_id, uid)?;
-
-    let removed = thread_svc::unsubscribe_from_thread(conn, chat_id, thread_root_id, uid)?;
-    if removed {
-        thread_svc::broadcast_thread_membership_changed_to_user(
-            conn,
-            &state.ws_registry,
-            uid,
-            chat_id,
-            thread_root_id,
-        )?;
-    }
-
+    threads::unsubscribe_thread(uid, chat_id, thread_root_id, &mut conn, &state.ws_registry)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -738,20 +368,12 @@ async fn get_subscription_status(
     }): Path<ThreadSubscriptionStatusPath>,
     mut conn: DbConn,
 ) -> Result<Json<ThreadSubscriptionStatusResponse>, AppError> {
-    let conn = &mut *conn;
-
-    check_membership(conn, chat_id, uid)?;
-
-    let state = thread_svc::get_subscription_state(conn, chat_id, thread_root_id, uid)?;
-    let (subscribed, archived) = match state {
-        Some((archived, subscribed)) => (subscribed, archived),
-        None => (false, false),
-    };
-
-    Ok(Json(ThreadSubscriptionStatusResponse {
-        subscribed,
-        archived,
-    }))
+    Ok(Json(threads::get_subscription_status(
+        uid,
+        chat_id,
+        thread_root_id,
+        &mut conn,
+    )?))
 }
 
 /// PUT /chats/:chat_id/threads/:thread_root_id/archive — Archive a thread subscription.
@@ -777,21 +399,7 @@ async fn archive_thread(
     }): Path<ThreadSubscribePath>,
     mut conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    let conn = &mut *conn;
-
-    check_membership(conn, chat_id, uid)?;
-
-    let updated = thread_svc::archive_thread(conn, chat_id, thread_root_id, uid)?;
-    if updated {
-        thread_svc::broadcast_thread_membership_changed_to_user(
-            conn,
-            &state.ws_registry,
-            uid,
-            chat_id,
-            thread_root_id,
-        )?;
-    }
-
+    threads::archive_thread(uid, chat_id, thread_root_id, &mut conn, &state.ws_registry)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -818,21 +426,7 @@ async fn unarchive_thread(
     }): Path<ThreadSubscribePath>,
     mut conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    let conn = &mut *conn;
-
-    check_membership(conn, chat_id, uid)?;
-
-    let updated = thread_svc::unarchive_thread(conn, chat_id, thread_root_id, uid)?;
-    if updated {
-        thread_svc::broadcast_thread_membership_changed_to_user(
-            conn,
-            &state.ws_registry,
-            uid,
-            chat_id,
-            thread_root_id,
-        )?;
-    }
-
+    threads::unarchive_thread(uid, chat_id, thread_root_id, &mut conn, &state.ws_registry)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -876,67 +470,4 @@ pub fn thread_router() -> OpenApiRouter<crate::AppState> {
             OpenApiRouter::new().routes(utoipa_axum::routes!(get_thread_read_state_in_chat)),
         )
         .nest("/pins", super::pins::thread_router())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use diesel::connection::SimpleConnection;
-
-    #[test]
-    fn thread_read_state_serializes_counters_without_losing_the_cursor() {
-        let response = ThreadReadStateResponse {
-            last_read_message_id: Some(9_007_199_254_740_993),
-            unread_count: 3,
-            unread_mentions: 1,
-            unread_reactions: 0,
-        };
-        assert_eq!(
-            serde_json::to_value(response).unwrap(),
-            serde_json::json!({
-                "lastReadMessageId": "9007199254740993", "unreadCount": 3,
-                "unreadMentions": 1, "unreadReactions": 0,
-            })
-        );
-    }
-
-    #[test]
-    fn thread_authorization_rejects_replies_and_checks_membership_first() {
-        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
-            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
-            return;
-        };
-        let mut conn = PgConnection::establish(&url).unwrap();
-        let result = conn.transaction::<(), diesel::result::Error, _>(|conn| {
-            conn.batch_execute(
-                "INSERT INTO groups (id, name) VALUES (9876720000, 'thread-auth-test'), (9876720003, 'other-chat');
-                 INSERT INTO group_membership (chat_id, uid) VALUES (9876720000, 4307), (9876720003, 4307);
-                 INSERT INTO messages (id, message_type, client_generated_id, sender_uid, chat_id, created_at)
-                     VALUES (9876720001, 'text', 'thread-auth-root', 4307, 9876720000, NOW());
-                 INSERT INTO messages (id, message_type, client_generated_id, sender_uid, chat_id, created_at, reply_root_id)
-                     VALUES (9876720002, 'text', 'thread-auth-reply', 4307, 9876720000, NOW(), 9876720001);"
-            )?;
-            assert!(authorize_thread_in_chat(conn, 9876720000, 9876720001, 4307).is_ok());
-            assert!(matches!(authorize_thread_in_chat(conn, 9876720000, 9876720002, 4307), Err(AppError::NotFound(_))));
-            assert!(matches!(authorize_thread_in_chat(conn, 9876720003, 9876720001, 4307), Err(AppError::NotFound(_))));
-            for id in [9876720001, 9876720002, 9876720099] {
-                assert!(matches!(authorize_thread_in_chat(conn, 9876720000, id, 4308), Err(AppError::Forbidden(_))));
-            }
-            conn.batch_execute(
-                "INSERT INTO thread_user_states (chat_id, thread_root_id, uid, last_read_message_id)
-                    VALUES (9876720000, 9876720001, 4307, 9876720001);
-                 INSERT INTO message_mentions (message_id, mentioned_uid, chat_id, thread_root_id, created_at)
-                    VALUES (9876720002, 4307, 9876720000, 9876720001, NOW());"
-            )?;
-            let state = load_thread_read_state(conn, &UnreadService::new(), 9876720000, 9876720001, 4307).unwrap();
-            assert_eq!((state.unread_count, state.unread_mentions, state.unread_reactions), (1, 1, 0));
-            assert_eq!(state.last_read_message_id, Some(9876720001));
-            assert_eq!(thread_svc::get_thread_last_read_message_id(conn, 9876720000, 9876720001, 4307)?, Some(9876720001));
-            Err(diesel::result::Error::RollbackTransaction)
-        });
-        assert!(matches!(
-            result,
-            Err(diesel::result::Error::RollbackTransaction)
-        ));
-    }
 }

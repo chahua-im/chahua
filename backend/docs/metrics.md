@@ -48,6 +48,16 @@ not part of this endpoint unless source code registers them later.
 | `http_request_duration_seconds` | Histogram; `method`, `route`, `status` | End-to-end non-multipart API request latency around the next handler, in seconds. | `H1`; same bounded labels as `http_requests_total`. |
 | `http_multipart_duration_seconds` | Histogram; `method`, `route`, `status` | End-to-end requests whose `Content-Type` starts with `multipart/form-data`, in seconds. | `H1`; same bounded labels as `http_requests_total`. |
 
+## JSON-RPC API
+
+| Family | Type / labels | Meaning and recording boundary | Buckets / cardinality |
+| --- | --- | --- | --- |
+| `rpc_requests_total` | Counter; `method`, `outcome` | Completed RPC dispatches, including notifications, and protocol/admission rejections. `outcome` is `success` or a fixed `RpcErrorCode` name. | `method` is a registered RPC method literal or `unknown`; neither peer-supplied unknown names nor IDs, tokens, bodies or error text become labels. |
+| `rpc_request_duration_seconds` | Histogram; `method` | RPC dispatch latency in seconds, including blocking-worker scheduling and serial control-lane wait. Protocol/admission rejection observations contain only their rejection-processing duration. | `H1`; the same bounded method labels as the RPC counter. |
+
+RPC operations do not increment HTTP request counters. HTTP upgrade, schema,
+resource and upload requests retain their HTTP metrics.
+
 ## Chat messages
 
 | Family | Type / labels | Meaning and recording boundary | Buckets / cardinality |
@@ -122,20 +132,24 @@ of the backend README](../README.md#scoped-websocket-presence).
 
 ## Client tracking and daily activity
 
-Tracked authenticated HTTP requests, active WebSocket pings, and explicit active state reports
-record last-seen activity in memory immediately, independently of client bookkeeping success.
+Tracked authenticated HTTP/RPC operations, active WebSocket pings, and explicit
+active state reports record last-seen activity in memory immediately,
+independently of client bookkeeping success.
 Inactive WebSocket reports update connection liveness only; they do not buffer last seen or
 schedule bookkeeping. A shared 15-second batch flush persists user timestamps and daily
 active-user increments transactionally; pending UTC days are handled separately, and only the
 current day's rollup updates today's gauges.
 Client bookkeeping keeps its five-minute per-client throttle, bypassed on account,
 application-version, or UTC-day changes. It records client activity, rebinding, and
-new-user/client rollups without producing another last-seen observation. WebSocket reports
-do not change the recorded HTTP application version.
-Client bookkeeping follows the [direct user-session eligibility rules](../README.md#scoped-websocket-presence):
-service-token requests and requests carrying `X-On-Behalf-Of` schedule no client writes,
-including after a WebSocket upgrade. They therefore do not increment client-write,
-client-write-throttling, client-rebind, or client-bookkeeping rollup metrics.
+new-user/client rollups without producing another last-seen observation.
+Legacy active reports preserve the recorded application version; RPC carries
+its version once during session binding and later activity preserves it.
+HTTP bookkeeping follows the [direct user-session eligibility rules](../README.md#scoped-websocket-presence):
+service-token requests and requests carrying `X-On-Behalf-Of` schedule no client
+writes, including subsequent legacy WebSocket reports. RPC ignores upgrade
+headers and uses only the first-frame verified user/client. Excluded HTTP and
+legacy reports do not increment client-write, client-write-throttling,
+client-rebind or client-bookkeeping rollup metrics.
 
 | Family | Type / labels | Meaning and recording boundary | Buckets / cardinality |
 | --- | --- | --- | --- |

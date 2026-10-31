@@ -1,4 +1,3 @@
-import { HttpErrorResponse } from '@angular/common/http';
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
@@ -6,6 +5,7 @@ import { Navigation, Router, provideRouter } from '@angular/router';
 import { getPlatforms, IonRouterOutlet } from '@ionic/angular';
 import { afterAll, vi } from 'vitest';
 import { testUser } from '../api/testing';
+import { RpcError, RpcErrorCode, RpcTransportError } from '../api/rpc-error';
 import { ListTab } from '../chats/list-tabs';
 import { PushNotifications } from '../pwa/push-notifications';
 import { AppUpdates } from '../pwa/app-updates';
@@ -351,7 +351,7 @@ describe('App', () => {
   });
 
   it('owns startup loading and clears a transient error when retrying', async () => {
-    session.initialize.mockRejectedValueOnce(new HttpErrorResponse({ status: 503 }));
+    session.initialize.mockRejectedValueOnce(new RpcError(RpcErrorCode.Unavailable, 'Unavailable'));
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
     expect(fixture.nativeElement.textContent).toContain('茶话暂时不可用');
@@ -371,10 +371,26 @@ describe('App', () => {
     expect(fixture.nativeElement.querySelector('ion-spinner')).toBeNull();
   });
 
+  it('ignores a stale initialization rejection after a newer attempt succeeds', async () => {
+    let rejectStale!: (reason?: unknown) => void;
+    const stale = new Promise<void>((_, reject) => (rejectStale = reject));
+    session.initialize.mockImplementationOnce(() => stale).mockResolvedValueOnce();
+    TestBed.overrideComponent(App, { set: { template: '' } });
+    const fixture = TestBed.createComponent(App);
+    fixture.componentInstance['loading'].set(false);
+    const current = fixture.componentInstance['initialize']();
+    await current;
+    rejectStale(new RpcError(RpcErrorCode.Unavailable, 'Unavailable'));
+    await Promise.resolve();
+
+    expect(fixture.componentInstance['error']()).toBeUndefined();
+    expect(fixture.componentInstance['loading']()).toBe(false);
+  });
+
   it('explains rejected authorization separately from missing credentials', async () => {
     session.initialize.mockImplementationOnce(async () => {
       session.token.set(undefined);
-      throw new HttpErrorResponse({ status: 401 });
+      throw new RpcError(RpcErrorCode.Unauthorized, 'Unauthorized');
     });
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
@@ -386,11 +402,12 @@ describe('App', () => {
   });
 
   it.each([
-    [0, '暂时无法连接茶话'],
-    [403, '暂时无法进入茶话'],
-    [500, '茶话暂时不可用'],
-  ])('explains initialization failures (%s) and preserves the token', async (status, title) => {
-    session.initialize.mockRejectedValueOnce(new HttpErrorResponse({ status }));
+    [new RpcTransportError('disconnected'), '暂时无法连接茶话'],
+    [new RpcError(RpcErrorCode.Forbidden, 'Forbidden'), '暂时无法进入茶话'],
+    [new RpcError(RpcErrorCode.Unavailable, 'Unavailable'), '茶话暂时不可用'],
+    [new RpcError(RpcErrorCode.Internal, 'Internal'), '茶话暂时不可用'],
+  ])('explains initialization failures and preserves the token', async (error, title) => {
+    session.initialize.mockRejectedValueOnce(error);
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
     expect(fixture.nativeElement.textContent).toContain(title);

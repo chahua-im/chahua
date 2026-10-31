@@ -1,3 +1,5 @@
+import { RpcError, RpcErrorCode, RpcTransportError } from '../api/rpc-error';
+
 export enum UploadStage {
   Config = 'config',
   Processing = 'processing',
@@ -42,11 +44,48 @@ export class UploadError extends Error {
 
 export function uploadFailure(error: unknown, stage: UploadStage, maximumSize?: number): UploadFailure {
   const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : undefined;
-  const detail = error && typeof error === 'object' && 'error' in error ? error.error : undefined;
+  const detail =
+    error instanceof RpcError
+      ? error.message
+      : error && typeof error === 'object' && 'error' in error
+        ? error.error
+        : undefined;
   let code: UploadErrorCode;
   if (error instanceof UploadError) code = error.code;
   else if (navigator.onLine === false) code = UploadErrorCode.Offline;
-  else if (error instanceof DOMException && (error.name === 'NotReadableError' || error.name === 'NotFoundError'))
+  else if (error instanceof RpcTransportError) {
+    code =
+      error.kind === 'timeout'
+        ? UploadErrorCode.Timeout
+        : error.kind === 'overloaded'
+          ? UploadErrorCode.RateLimited
+          : error.kind === 'disconnected'
+            ? UploadErrorCode.Network
+            : UploadErrorCode.Unknown;
+  } else if (error instanceof RpcError) {
+    code =
+      error.code === RpcErrorCode.PayloadTooLarge
+        ? UploadErrorCode.TooLarge
+        : error.code === RpcErrorCode.Unauthorized
+          ? UploadErrorCode.Authentication
+          : error.code === RpcErrorCode.Forbidden
+            ? UploadErrorCode.Forbidden
+            : error.code === RpcErrorCode.Overloaded
+              ? UploadErrorCode.RateLimited
+              : error.code === RpcErrorCode.Unavailable || error.code === RpcErrorCode.Internal
+                ? UploadErrorCode.Server
+                : error.code === RpcErrorCode.BadRequest && detail === 'Attachment size must be positive'
+                  ? UploadErrorCode.Empty
+                  : error.code === RpcErrorCode.BadRequest &&
+                      (detail === 'Attachment filename is required' || detail === 'Attachment filename is too long')
+                    ? UploadErrorCode.Filename
+                    : error.code === RpcErrorCode.BadRequest && detail === 'Media uploads must be images or videos'
+                      ? UploadErrorCode.UnsupportedMedia
+                      : error.code === RpcErrorCode.BadRequest &&
+                          (detail === 'Attachment content type is invalid' || detail === 'Voice uploads must be audio')
+                        ? UploadErrorCode.InvalidType
+                        : UploadErrorCode.Rejected;
+  } else if (error instanceof DOMException && (error.name === 'NotReadableError' || error.name === 'NotFoundError'))
     code = UploadErrorCode.Unreadable;
   else if (stage === UploadStage.Processing) code = UploadErrorCode.ProcessingFailed;
   else if (status === 413) code = UploadErrorCode.TooLarge;

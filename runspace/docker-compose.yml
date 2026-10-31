@@ -42,7 +42,7 @@ services:
     volumes:
       - rustfs_data:/data
   storage-init:
-    image: minio/mc:latest
+    image: public.ecr.aws/aws-cli/aws-cli:latest
     profiles: ["init"]
     environment:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
@@ -52,13 +52,18 @@ services:
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
-        mc alias set local http://rustfs:9000 "$$AWS_ACCESS_KEY_ID" "$$AWS_SECRET_ACCESS_KEY"
-        mc mb --ignore-existing --region "$$AWS_DEFAULT_REGION" "local/$$S3_BUCKET_NAME"
-        mc anonymous set download "local/$$S3_BUCKET_NAME"
-        cat > /tmp/cors.xml <<'XML'
-        <CORSConfiguration><CORSRule><AllowedOrigin>*</AllowedOrigin><AllowedMethod>GET</AllowedMethod><AllowedMethod>PUT</AllowedMethod><AllowedMethod>HEAD</AllowedMethod><AllowedHeader>*</AllowedHeader><ExposeHeader>ETag</ExposeHeader></CORSRule></CORSConfiguration>
-        XML
-        mc cors set "local/$$S3_BUCKET_NAME" /tmp/cors.xml
+        aws() { command aws --endpoint-url http://rustfs:9000 "$$@"; }
+        if ! aws s3api head-bucket --bucket "$$S3_BUCKET_NAME"; then
+          aws s3 mb "s3://$$S3_BUCKET_NAME"
+        fi
+        cat > /tmp/policy.json <<JSON
+        {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":["s3:GetBucketLocation","s3:ListBucket"],"Resource":"arn:aws:s3:::$$S3_BUCKET_NAME"},{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::$$S3_BUCKET_NAME/*"}]}
+        JSON
+        aws s3api put-bucket-policy --bucket "$$S3_BUCKET_NAME" --policy file:///tmp/policy.json
+        cat > /tmp/cors.json <<'JSON'
+        {"CORSRules":[{"AllowedOrigins":["*"],"AllowedMethods":["GET","PUT","HEAD"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag"]}]}
+        JSON
+        aws s3api put-bucket-cors --bucket "$$S3_BUCKET_NAME" --cors-configuration file:///tmp/cors.json
 
 volumes:
   postgres_data:

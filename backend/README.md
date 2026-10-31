@@ -1,5 +1,128 @@
 # Backend
 
+## Application boundaries
+
+`errors::AppError` defines shared semantic failures. HTTP status codes, plain-text
+error bodies and the structured speaking-restriction response are mapped in
+`handlers::http_error`; application services do not format HTTP responses.
+
+Verified identity and principal authorization live in `services::authentication`,
+with bearer/header parsing and Axum extractors in `utils::auth`. Application
+operations live in `services::api`, mirroring the HTTP handler hierarchy. Handlers
+retain routes, extraction, documentation, response mapping and their blocking
+database worker boundaries. Operations receive explicit borrowed dependencies,
+not `AppState`, and own transactions together with their post-commit publication.
+Legacy HTTP thread read operations retain their original authorization behavior.
+Multipart adapters parse files and metadata before invoking sticker operations;
+resource delivery and binary transfers remain HTTP.
+
+Service-token IDs are allocated by the shared Snowflake generator and serialized
+as decimal strings, including in service-token responses and route parameters.
+
+## API schemas
+
+`GET /api-docs/openapi.json` describes HTTP operations.
+`GET /api-docs/openrpc.json` publishes OpenRPC 1.4.0 with flat named parameters,
+exact result DTOs, typed notification descriptors in `x-events`, error-code
+metadata in `x-error-codes`, and `x-snowflake-id` codec markers. Both schemas use
+the same builders as `--export-api-schemas <directory>`, which creates the
+directory and writes only `openapi.json` and `openrpc.json` before loading server
+configuration or connecting to a database.
+
+## JSON-RPC sessions
+
+`/ws` selects its protocol from the first text frame, within five seconds.
+An object containing `jsonrpc` selects JSON-RPC 2.0 permanently; existing
+`{"type":"auth","ticket":"..."}` clients retain the legacy protocol. Malformed
+non-RPC negotiation closes silently, without trying another protocol.
+
+The first RPC request is a single `session.open` with a non-null string or
+numeric ID and named params `{protocolVersion: 1, token, appVersion?}`. It
+returns `{protocolVersion: 1, authenticated: true, uid, clientId}`. User JWTs are
+verified once, then discarded in favor of retained verified identity.
+`auth.refresh` checks that identity's generation and signs a new token without
+verification, reconnection or another registry entry. Application authorization
+still runs on each operation; retained identity does not retain membership or
+speaking permission.
+
+An omitted token opens an anonymous session for development bootstrap only.
+`auth.createDevSession({uid, clientId})` binds the issued identity directly when
+debug auth is enabled; other anonymous operations are unauthorized. Anonymous
+sessions close after 30 seconds. Repeated open or development bootstrap after
+authentication returns Conflict; changing accounts requires a new connection.
+Service credentials and `/external/*` execution remain HTTP-only. User-session
+service-token management is available over RPC. Multipart bytes, resources,
+S3 transfers and third-party traffic remain HTTP.
+
+Methods, flat named parameters, exact results and safe errors are defined by
+[OpenRPC](#api-schemas). Snowflakes use decimal strings, ordinary UIDs/counts
+remain numbers, and unit success is `null`. Notifications use `events.<type>`
+with the original event payload directly in `params`, never a legacy envelope.
+Batches contain 1–32 items and return one response array excluding notifications;
+responses can complete out of order. IDs remain outstanding until their whole
+batch response is queued, even when an individual member has already finished.
+Duplicate outstanding IDs close the connection after InvalidRequest with
+`id: null`, without executing the duplicate.
+
+Current generation is checked before operations and every five seconds, using
+the existing 30-second lookup cache. Revocation sends `session.invalidated` with
+`reason: "revoked"` and closes. Lookup failure sends `session.unavailable` with
+`reason: "authLookupUnavailable"` and closes; this is not credential revocation.
+Ordinary application unavailability, such as disabled search, does not invalidate
+the session. Authenticated registrations start inactive and use the existing
+presence, unread and conversation-state watch services.
+
+Ordinary work admits at most 16 operations per connection and 128 process-wide;
+controls have a separate serial lane with eight queued commands. The pending
+control bound also covers parameter failures before command dispatch. Unknown
+methods are rejected directly without spawning operation workers. Input and
+result queues have 16 entries. Serialized input, batch assembly and outbound
+buffers share a 64 MiB lease budget, including a frame being written. Frames
+are limited to 50 MiB. Enqueueing has one ten-second deadline covering the pair
+lock and both frame/lease reservations; actual socket writes also time out after
+ten seconds.
+Oversized aggregate batch results close without a partial array. Admitted
+mutations remain supervised through transaction and post-commit publication
+after disconnection, retaining admission permits. The server never replays them.
+
+RPC upgrade Authorization and `X-On-Behalf-Of` headers are ignored for identity
+and tracking; only the first-frame verified user/client is recorded. Legacy
+header eligibility and activity still run before ticket verification and
+registration, but after protocol selection. A legacy header-activity failure
+therefore closes the upgraded socket without an application frame or registry
+entry instead of returning a pre-upgrade HTTP error. Non-upgrade HTTP tracking
+and legacy successful contracts are unchanged.
+
+## Isolated RPC regression runner
+
+With current Rust dependencies, Node.js 24+ and existing local runspace
+PostgreSQL, run `node runspace/rpc-smoke.mjs` from the repository root. It builds
+the backend, creates and normally migrates its own `chahua_rpc_test_<pid>`
+database, applies only `bootstrap_sql()` identity/permission fixtures, runs the
+DB-backed Rust suite, then exercises actual HTTP, legacy WS and RPC operations.
+Search is deliberately disabled; no media bytes or push subscriptions are sent.
+Only loopback endpoints and the existing compose PostgreSQL service are used.
+The runner does not repair shared migrations/indexes or recreate infrastructure.
+
+`--keep` prints API/metrics URLs, database name, runner PID and the PWA proxy
+command, then remains in the foreground until SIGINT/SIGTERM. Its cleanup waits
+for its backend to exit and drops only the database whose creation it owns.
+
+Deploy RPC-capable backend servers before the RPC PWA. The new PWA has no
+legacy/HTTP operation fallback. Rolling back the PWA remains safe while those
+servers stay deployed; keep RPC support while RPC PWA versions are in use.
+
+## Group avatar updates
+
+`PATCH /group/{chat_id}` accepts an explicit `avatarImageId: null` to clear the
+avatar; omitting that field preserves it.
+
+## Invite expiry
+
+`PATCH /invites/invite/{invite_id}` accepts `expiresAt` as a timestamp to replace
+the expiry or explicit `null` to clear it. Omitting the field returns 400
+`expires_at is required`; clearing expiry is not the same as omitting the update.
+
 ## Startup and maintenance
 
 The API waits for database pool initialization, embedded migrations, and required
@@ -363,8 +486,8 @@ only affects the PWA title and list badges, never push eligibility.
 
 ## Client WebSocket controls
 
-Client commands are decoded by the serde-tagged `ClientWsMessage` enum in
-`src/dto/ws.rs`, alongside `ServerWsMessage`. The wire format remains flat:
+Legacy-mode client commands are decoded by the serde-tagged `ClientWsMessage`
+enum in `src/dto/ws.rs`, alongside `ServerWsMessage`. The wire format remains flat:
 `{"type":"ping","state":"active"}`, not a `payload` envelope.
 
 | Type | Fields | Behavior |
@@ -383,8 +506,9 @@ An additional `auth` command cannot switch the authenticated session.
 
 ## Scoped WebSocket presence
 
-Authenticated WebSocket clients may replace that socket's watched presence scope with
-`{"type":"watchPresence","userIds":[2],"chatIds":[]}`. A scope is
+Both protocols share the same authorized presence scopes. Legacy clients replace
+their socket's scope with `{"type":"watchPresence","userIds":[2],"chatIds":[]}`;
+RPC clients call `presence.watch` with the same named fields. A scope is
 limited to 100 users and four chats. Non-empty replacements receive an immediate absolute
 `presenceSnapshot` and refresh on a 15-second interval; an empty scope stops publication.
 Omitted users and groups are not authorized or no longer exist in the
@@ -411,10 +535,11 @@ fresh active and inactive connections, counting each user once, even after perso
 Push suppression still requires a fresh active connection. Watched snapshots publish expiry
 on the existing 15-second refresh schedule, so observers can see it up to one interval later.
 
-`user_extra.last_seen_at` records tracked authenticated HTTP requests, active WebSocket pings,
-and explicit active state reports. Inactive pings and state reports do not advance last seen
-or schedule client bookkeeping. HTTP activity advances last seen without changing foreground
-state or restarting the away grace; an offline user can therefore have recent HTTP activity.
+`user_extra.last_seen_at` records tracked authenticated HTTP/RPC operations,
+active WebSocket pings, and explicit active state reports. Inactive pings and
+state reports do not advance last seen or schedule client bookkeeping. Ordinary
+API activity does not change foreground state or restart the away grace; an
+offline user can therefore have recent API activity.
 Every qualifying observation immediately advances a process-wide in-memory buffer before
 client bookkeeping, coalesced by user and UTC day. Presence reads the newer of pending activity
 and the persisted timestamp,
@@ -431,20 +556,22 @@ activity, versions, rebinding, and client/new-user rollups without advancing exi
 last-seen timestamps. WebSocket handlers record active observations before replying or
 coalescing metadata work; each socket has at most one outstanding bookkeeping task, and
 heartbeats do not await that task. Delayed bookkeeping does not create another last-seen
-observation. Missing app-version headers preserve the last HTTP-reported version. Tracking
-failures are logged without closing the socket, and already buffered activity is retained.
+observation. Missing app-version headers preserve the last recorded version;
+RPC carries its version once in `session.open`. Active-report tracking failures
+are logged without closing the socket, and already buffered activity is retained.
 Last-seen is qualifying server-observed activity, not an exact human interaction, disconnect,
 or foreground time. Snapshot publication follows the presence refresh schedule above.
 
-Client bookkeeping is limited to direct user-session clients. Requests with a service-token
-bearer credential or an `X-On-Behalf-Of` header do not insert or update `clients`, rebind client
-push subscriptions, or contribute client-bookkeeping rollups. WebSockets retain this exclusion
-from their upgrade request for subsequent active state reports and pings; their auth frame
-still requires a valid user-session ticket. Excluded sockets can still report presence and
-advance user last seen through active session reports, independently of client bookkeeping.
-The existing HTTP activity exclusion for delegated requests is unchanged. This does not
-remove existing client records. App-version request counters still count HTTP requests, but
-excluded requests do not contribute a resolved client ID to unique-client version gauges.
+HTTP client bookkeeping is limited to direct user-session clients. Requests with
+a service-token bearer credential or an `X-On-Behalf-Of` header do not insert or
+update `clients`, rebind client push subscriptions, or contribute bookkeeping
+rollups. Legacy WebSockets retain this exclusion from their upgrade request for
+subsequent active reports; their auth frame still requires a valid user ticket.
+Excluded legacy sockets can still report presence and advance user last seen.
+RPC ignores upgrade headers and records its first-frame verified user/client.
+Existing client records are not removed. App-version request counters count HTTP
+requests only; excluded HTTP requests contribute no resolved client ID to
+unique-client version gauges.
 
 User discoverability is limited to self, friends, or current shared regular-group membership.
 An existing DM without friendship or a shared regular group does not grant presence access.

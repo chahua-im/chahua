@@ -1,5 +1,7 @@
+pub mod api;
 pub mod audio_transcode;
 pub mod auth_token;
+pub mod authentication;
 pub mod authz;
 pub mod avatars;
 pub mod background;

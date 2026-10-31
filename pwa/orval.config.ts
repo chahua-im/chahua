@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { parseEnv } from 'node:util';
 import { defineConfig, type OpenApiSchemaObject } from 'orval';
-import { finishApiGeneration, transformApiSchema } from './scripts/api-codegen';
+import { captureOpenApiWireDocument, finishApiGeneration, transformApiSchema } from './scripts/api-codegen';
 
 function openApiTarget() {
   if (process.env['OPENAPI_URL']) return process.env['OPENAPI_URL'];
@@ -17,12 +17,15 @@ function openApiTarget() {
   return `http://127.0.0.1:${port}/api-docs/openapi.json`;
 }
 
+const apiTarget = openApiTarget();
+
 export default defineConfig({
   chahua: {
     input: {
-      target: openApiTarget(),
+      target: apiTarget,
       override: {
         transformer(spec) {
+          captureOpenApiWireDocument(spec, apiTarget);
           transformApiSchema(spec);
           const schemas = spec.components!.schemas!;
           const events = (schemas['ServerWsMessage'] as OpenApiSchemaObject).oneOf as OpenApiSchemaObject[];

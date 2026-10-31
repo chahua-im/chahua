@@ -6,9 +6,8 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::dto::auth::{AuthTokenResponse, DevSessionRequest};
 use crate::errors::AppError;
-use crate::utils::auth::{is_valid_client_id, BearerSession, X_CLIENT_ID};
+use crate::utils::auth::{BearerSession, X_CLIENT_ID};
 use crate::AppState;
-use uuid::Uuid;
 
 #[utoipa::path(
     post,
@@ -24,13 +23,7 @@ async fn post_refresh(
     BearerSession(session): BearerSession,
     State(state): State<AppState>,
 ) -> Result<Json<AuthTokenResponse>, AppError> {
-    let token = state.auth_token_service.issue_session(
-        session.uid,
-        &session.client_id,
-        session.generation,
-    )?;
-
-    Ok(Json(AuthTokenResponse { token }))
+    crate::services::api::auth::post_refresh(&session, &state.auth_token_service).map(Json)
 }
 
 #[utoipa::path(
@@ -49,36 +42,20 @@ async fn post_dev_session(
     headers: HeaderMap,
     Json(request): Json<DevSessionRequest>,
 ) -> Result<Json<AuthTokenResponse>, AppError> {
-    if !state.config.auth.debug_auth_enabled {
-        return Err(AppError::NotFound("Not found"));
-    }
-    if request.uid <= 0 {
-        return Err(AppError::BadRequest("UID must be a positive i32"));
-    }
-
-    let client_id = dev_session_client_id(&headers)?;
-    let generation = state
-        .token_generation
-        .required_for(&state.db, request.uid)?;
-    let token = state
-        .auth_token_service
-        .issue_session(request.uid, &client_id, generation)?;
-
-    Ok(Json(AuthTokenResponse { token }))
-}
-
-fn dev_session_client_id(headers: &HeaderMap) -> Result<String, AppError> {
-    let value = headers
+    let client_id = headers
         .get(X_CLIENT_ID)
-        .ok_or(AppError::BadRequest("Missing X-Client-Id header"))?
-        .to_str()
-        .ok()
-        .map(str::trim)
-        .filter(|value| is_valid_client_id(value));
-
-    Ok(value
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| Uuid::new_v4().to_string()))
+        .map(|value| value.to_str().unwrap_or("").to_owned());
+    let issued = crate::services::api::auth::post_dev_session(
+        request,
+        client_id,
+        crate::services::api::auth::PostDevSessionDeps {
+            config: &state.config,
+            auth_token_service: &state.auth_token_service,
+            token_generation: &state.token_generation,
+            db: &state.db,
+        },
+    )?;
+    Ok(Json(issued.response))
 }
 
 pub fn router() -> OpenApiRouter<AppState> {
@@ -89,9 +66,7 @@ pub fn router() -> OpenApiRouter<AppState> {
 
 #[cfg(test)]
 mod tests {
-    use super::{dev_session_client_id, router};
-    use crate::utils::auth::{is_valid_client_id, X_CLIENT_ID};
-    use axum::http::{HeaderMap, HeaderValue};
+    use super::router;
     #[test]
     fn development_session_is_in_openapi() {
         assert!(router()
@@ -99,15 +74,5 @@ mod tests {
             .paths
             .paths
             .contains_key("/dev-session"));
-    }
-
-    #[test]
-    fn development_session_generates_client_id_when_header_is_invalid() {
-        let mut headers = HeaderMap::new();
-        headers.insert(X_CLIENT_ID, HeaderValue::from_static("invalid client id"));
-
-        let client_id = dev_session_client_id(&headers).expect("invalid IDs are replaced");
-
-        assert!(is_valid_client_id(&client_id));
     }
 }

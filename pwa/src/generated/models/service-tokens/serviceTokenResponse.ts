@@ -5,11 +5,12 @@
  * Real-time chat application backend API supporting groups, messaging, threads, stickers, invites, and push notifications.
  * OpenAPI spec version: 0.1.0
  */
+import type { SnowflakeID } from '../snowflakeID';
 
 export interface ServiceTokenResponse {
   createdAt: string;
   createdByUid: number;
-  id: number;
+  id: SnowflakeID;
   lastUsedAt?: string;
   name: string;
   policyIds: string[];

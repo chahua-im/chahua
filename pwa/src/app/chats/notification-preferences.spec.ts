@@ -1,12 +1,10 @@
-import { provideHttpClient, withInterceptors } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
-import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
 import { GroupKind, NotificationSettingMode, ServerWsMessageType, type ServerWsMessage } from '../../generated/models';
 import { Connection, ResyncReason } from '../api/connection';
-import { jsonInterceptor } from '../api/json.interceptor';
+import { RpcErrorCode } from '../api/rpc-error';
+import { RpcTestPeer, provideRpcTesting } from '../api/rpc-testing';
 import { mockRealtime, testChat, testMessage, testUser, wireChat } from '../api/testing';
 import { encodeId } from '../api/snowflake-id';
 import { shouldNotify } from '../pwa/notification-policy';
@@ -16,11 +14,10 @@ import { ChatStore } from './chat-store';
 describe('notification preferences', () => {
   let store: ChatStore;
   let session: SessionStore;
-  let http: HttpTestingController;
+  let peer: RpcTestPeer;
   let events: Subject<ServerWsMessage>;
   let resync: Subject<ResyncReason>;
-  const endpoint = `/_api/group/${wireChat.id}/notification-setting`;
-  const defaultsUrl = '/_api/users/me/notification-settings';
+  const endpoint = 'groups.updateNotificationSetting';
   const snapshot = (muteOverride?: boolean) => ({
     chatId: testChat.id,
     kind: GroupKind.group,
@@ -34,21 +31,20 @@ describe('notification preferences', () => {
     resync = new Subject();
     TestBed.configureTestingModule({
       providers: [
-        provideHttpClient(withInterceptors([jsonInterceptor])),
-        provideHttpClientTesting(),
-        provideChahuaBaseUrl('/_api'),
+        ...provideRpcTesting(),
         { provide: Connection, useValue: mockRealtime({ events$: events, resync$: resync }) },
       ],
     });
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
     session = TestBed.inject(SessionStore);
     session.user.set(testUser);
     store = TestBed.inject(ChatStore);
-    http = TestBed.inject(HttpTestingController);
     TestBed.tick();
     store.acceptChats([{ ...testChat, muteOverride: undefined }], store.snapshot());
   });
   afterEach(() => {
-    http.verify();
+    peer.verify();
     vi.useRealTimers();
   });
 
@@ -60,13 +56,14 @@ describe('notification preferences', () => {
     }
   });
 
-  it('uses group/DM defaults and changes loaded chats without per-chat HTTP requests', async () => {
+  it('uses group/DM defaults and changes loaded chats without per-chat requests', async () => {
     expect(store.isMuted(testChat.id)).toBe(true);
     const save = store.setNotificationDefault(GroupKind.group, false);
     expect(store.isMuted(testChat.id)).toBe(false);
-    const req = http.expectOne(defaultsUrl);
-    expect(req.request.body).toEqual({ muteGroupChatsByDefault: false });
-    req.flush({ muteGroupChatsByDefault: false, muteDirectChatsByDefault: false });
+    peer.expect('users.updateNotificationSettings', { muteGroupChatsByDefault: false }).flush({
+      muteGroupChatsByDefault: false,
+      muteDirectChatsByDefault: false,
+    });
     await save;
     expect(store.notificationDefaults()?.muteDirectChatsByDefault).toBe(false);
     events.next({
@@ -85,7 +82,7 @@ describe('notification preferences', () => {
       type: ServerWsMessageType.notificationSettingsChanged,
       payload: { muteGroupChatsByDefault: false, muteDirectChatsByDefault: true },
     });
-    http.expectOne(defaultsUrl).flush('failed', { status: 500, statusText: 'Failed' });
+    peer.expect('users.updateNotificationSettings', { muteGroupChatsByDefault: false }).error(RpcErrorCode.Internal);
     await rejected;
     expect(store.notificationDefaults()).toEqual({ muteGroupChatsByDefault: false, muteDirectChatsByDefault: true });
   });
@@ -93,14 +90,14 @@ describe('notification preferences', () => {
   it('rolls a failed default save back and preserves the other category', async () => {
     const save = store.setNotificationDefault(GroupKind.dm, true);
     const rejected = expect(save).rejects.toBeDefined();
-    http.expectOne(defaultsUrl).flush('failed', { status: 500, statusText: 'Failed' });
+    peer.expect('users.updateNotificationSettings', { muteDirectChatsByDefault: true }).error(RpcErrorCode.Internal);
     await rejected;
     expect(store.notificationDefaults()).toEqual({ muteGroupChatsByDefault: true, muteDirectChatsByDefault: false });
   });
 
   it('ignores stale reconnect defaults after a WS update and retains known values while loading', async () => {
     resync.next(ResyncReason.Connected);
-    const read = http.expectOne(defaultsUrl);
+    const read = peer.expect('users.getNotificationSettings', {});
     expect(store.notificationDefaults()?.muteGroupChatsByDefault).toBe(true);
     events.next({
       type: ServerWsMessageType.notificationSettingsChanged,
@@ -110,30 +107,34 @@ describe('notification preferences', () => {
     await Promise.resolve();
     expect(store.notificationDefaults()?.muteGroupChatsByDefault).toBe(false);
     resync.next(ResyncReason.Foreground);
-    http.expectNone(defaultsUrl);
+    peer.expectNone('users.getNotificationSettings');
   });
 
   it('defers reconnect calibration until a pending default write settles', async () => {
     const save = store.setNotificationDefault(GroupKind.group, false);
-    const write = http.expectOne(defaultsUrl);
+    const write = peer.expect('users.updateNotificationSettings', { muteGroupChatsByDefault: false });
     resync.next(ResyncReason.Connected);
-    http.expectNone(defaultsUrl);
+    peer.expectNone('users.getNotificationSettings');
     expect(store.isMuted(testChat.id)).toBe(false);
     write.flush({ muteGroupChatsByDefault: false, muteDirectChatsByDefault: false });
     await save;
-    http.expectOne(defaultsUrl).flush({ muteGroupChatsByDefault: false, muteDirectChatsByDefault: false });
+    peer
+      .expect('users.getNotificationSettings', {})
+      .flush({ muteGroupChatsByDefault: false, muteDirectChatsByDefault: false });
     await Promise.resolve();
     expect(store.isMuted(testChat.id)).toBe(false);
   });
 
   it('reruns a reconnect read if another reconnect occurs while it is pending', async () => {
     resync.next(ResyncReason.Connected);
-    const first = http.expectOne(defaultsUrl);
+    const first = peer.expect('users.getNotificationSettings', {});
     resync.next(ResyncReason.Connected);
     first.flush({ muteGroupChatsByDefault: false, muteDirectChatsByDefault: false });
     await Promise.resolve();
     expect(store.notificationDefaults()?.muteGroupChatsByDefault).toBe(true);
-    http.expectOne(defaultsUrl).flush({ muteGroupChatsByDefault: true, muteDirectChatsByDefault: true });
+    peer
+      .expect('users.getNotificationSettings', {})
+      .flush({ muteGroupChatsByDefault: true, muteDirectChatsByDefault: true });
     await Promise.resolve();
     expect(store.notificationDefaults()?.muteDirectChatsByDefault).toBe(true);
   });
@@ -156,14 +157,16 @@ describe('notification preferences', () => {
   it('keeps a newer preference through late detail/list responses and a failed older write', async () => {
     const version = store.snapshot();
     const details = store.ensureDetails(testChat.id);
-    const detail = http.expectOne(`/_api/group/${wireChat.id}`);
+    const detail = peer.expect('groups.get', { chatId: wireChat.id });
     const saving = store.setNotificationSetting(testChat.id, { mode: NotificationSettingMode.alwaysMuted });
     const rejected = expect(saving).rejects.toBeDefined();
     events.next({ type: ServerWsMessageType.chatNotificationSettingChanged, payload: snapshot(false) });
     detail.flush({ ...wireChat, muteOverride: true });
     await details;
     store.acceptChats([{ ...testChat, muteOverride: true }], version);
-    http.expectOne(endpoint).flush('failed', { status: 500, statusText: 'Failed' });
+    peer
+      .expect(endpoint, { chatId: wireChat.id, mode: NotificationSettingMode.alwaysMuted })
+      .error(RpcErrorCode.Internal);
     await rejected;
     expect(store.isMuted(testChat.id)).toBe(false);
   });
@@ -172,9 +175,12 @@ describe('notification preferences', () => {
     const archive = store.setArchived(testChat.id, true);
     const rejected = expect(archive).rejects.toBeDefined();
     const mute = store.setNotificationSetting(testChat.id, { mode: NotificationSettingMode.alwaysUnmuted });
-    http.expectOne(endpoint).flush({ ...snapshot(false), chatId: wireChat.id, archived: true });
+    peer.expect(endpoint, { chatId: wireChat.id, mode: NotificationSettingMode.alwaysUnmuted }).flush({
+      ...snapshot(false),
+      chatId: wireChat.id,
+    });
     await mute;
-    http.expectOne(`/_api/chats/${wireChat.id}/archive`).flush('failed', { status: 500, statusText: 'Failed' });
+    peer.expect('chats.archive', { chatId: wireChat.id }).error(RpcErrorCode.Internal);
     await rejected;
     expect(store.chatState(testChat.id)?.archived).toBe(false);
     expect(store.isMuted(testChat.id)).toBe(false);
@@ -189,10 +195,10 @@ describe('notification preferences', () => {
     ])('preserves the write and its rollback ($readFirst, $succeeds)', async ({ readFirst, succeeds }) => {
       const saving = store.setNotificationSetting(testChat.id, { mode: NotificationSettingMode.alwaysUnmuted });
       const completed = succeeds ? saving : expect(saving).rejects.toBeDefined();
-      const write = http.expectOne(endpoint);
+      const write = peer.expect(endpoint, { chatId: wireChat.id, mode: NotificationSettingMode.alwaysUnmuted });
       const version = store.snapshot();
       const details = source === 'details' ? store.ensureDetails(testChat.id) : undefined;
-      const detail = source === 'details' ? http.expectOne(`/_api/group/${wireChat.id}`) : undefined;
+      const detail = source === 'details' ? peer.expect('groups.get', { chatId: wireChat.id }) : undefined;
       const acceptRead = async () => {
         if (detail) {
           detail.flush({ ...wireChat, muteOverride: null, mutedUntil: null });
@@ -208,40 +214,39 @@ describe('notification preferences', () => {
         expect(store.isMuted(testChat.id)).toBe(false);
       }
       if (succeeds) write.flush({ ...snapshot(false), chatId: wireChat.id });
-      else write.flush('failed', { status: 500, statusText: 'Failed' });
+      else write.error(RpcErrorCode.Internal);
       await completed;
       if (!readFirst) await acceptRead();
       expect(store.chatState(testChat.id)?.muteOverride).toBe(succeeds ? false : undefined);
       expect(store.isMuted(testChat.id)).toBe(!succeeds);
-      // Once the write settles, genuinely newer reads are accepted again.
       store.acceptChats([{ ...testChat, muteOverride: true }], store.snapshot());
       expect(store.isMuted(testChat.id)).toBe(true);
     });
   });
 
-  it.each([true, false])(
-    'protects an archive 204 confirmation from mid-save reads (readFirst=%s)',
-    async (readFirst) => {
-      const saving = store.setArchived(testChat.id, true);
-      const version = store.snapshot();
-      const acceptRead = () => store.acceptChats([{ ...testChat, archived: false }], version);
-      if (readFirst) {
-        acceptRead();
-        expect(store.chatState(testChat.id)?.archived).toBe(true);
-      }
-      http.expectOne(`/_api/chats/${wireChat.id}/archive`).flush(null);
-      await saving;
-      if (!readFirst) acceptRead();
+  it.each([true, false])('protects an archive confirmation from mid-save reads (readFirst=%s)', async (readFirst) => {
+    const saving = store.setArchived(testChat.id, true);
+    const version = store.snapshot();
+    const acceptRead = () => store.acceptChats([{ ...testChat, archived: false }], version);
+    if (readFirst) {
+      acceptRead();
       expect(store.chatState(testChat.id)?.archived).toBe(true);
-    },
-  );
+    }
+    peer.expect('chats.archive', { chatId: wireChat.id }).flush(null);
+    await saving;
+    if (!readFirst) acceptRead();
+    expect(store.chatState(testChat.id)?.archived).toBe(true);
+  });
 
   it('keeps a newer remote preference while an older local save and read finish', async () => {
     const saving = store.setNotificationSetting(testChat.id, { mode: NotificationSettingMode.alwaysUnmuted });
     const version = store.snapshot();
     events.next({ type: ServerWsMessageType.chatNotificationSettingChanged, payload: snapshot(true) });
     store.acceptChats([{ ...testChat, muteOverride: undefined }], version);
-    http.expectOne(endpoint).flush({ ...snapshot(false), chatId: wireChat.id });
+    peer.expect(endpoint, { chatId: wireChat.id, mode: NotificationSettingMode.alwaysUnmuted }).flush({
+      ...snapshot(false),
+      chatId: wireChat.id,
+    });
     await saving;
     expect(store.chatState(testChat.id)?.muteOverride).toBe(true);
   });
@@ -249,7 +254,7 @@ describe('notification preferences', () => {
   it('loads archive state with details before deciding notifications for a chat outside loaded lists', async () => {
     const chatId = encodeId('9007199254741999');
     const load = store.ensureDetails(chatId);
-    http.expectOne('/_api/group/9007199254741999').flush({
+    peer.expect('groups.get', { chatId: '9007199254741999' }).flush({
       ...wireChat,
       id: '9007199254741999',
       kind: GroupKind.dm,
@@ -272,7 +277,7 @@ describe('notification preferences', () => {
     expect(store.isMuted(chatId)).toBe(false);
     expect(notify()).toBe(false);
     const unarchive = store.setArchived(chatId, false);
-    http.expectOne('/_api/chats/9007199254741999/archive').flush(null);
+    peer.expect('chats.unarchive', { chatId: '9007199254741999' }).flush(null);
     await unarchive;
     expect(notify()).toBe(true);
   });
@@ -311,7 +316,13 @@ describe('notification preferences', () => {
       durationSeconds: 1,
     });
     expect(store.isMuted(testChat.id)).toBe(true);
-    http.expectOne(endpoint).flush({ ...snapshot(false), chatId: wireChat.id, mutedUntil: '2026-10-23T00:00:01Z' });
+    peer
+      .expect(endpoint, { chatId: wireChat.id, mode: NotificationSettingMode.temporarilyMuted, durationSeconds: 1 })
+      .flush({
+        ...snapshot(false),
+        chatId: wireChat.id,
+        mutedUntil: '2026-10-23T00:00:01Z',
+      });
     await save;
     TestBed.tick();
     await vi.advanceTimersByTimeAsync(1001);
@@ -326,13 +337,19 @@ describe('notification preferences', () => {
       store.snapshot(),
     );
     const unmute = store.setMuted(testChat.id, false);
-    http.expectOne(endpoint).flush({ ...snapshot(false), chatId: wireChat.id, archived: true });
+    peer
+      .expect(endpoint, { chatId: wireChat.id, mode: NotificationSettingMode.alwaysUnmuted })
+      .flush({ ...snapshot(false), chatId: wireChat.id, archived: true });
     await unmute;
     expect(store.chatState(testChat.id)?.archived).toBe(true);
     const reset = store.setNotificationSetting(testChat.id, { mode: NotificationSettingMode.inherit });
-    http
-      .expectOne(endpoint)
-      .flush({ ...snapshot(), chatId: wireChat.id, archived: true, mutedUntil: null, muteOverride: null });
+    peer.expect(endpoint, { chatId: wireChat.id, mode: NotificationSettingMode.inherit }).flush({
+      ...snapshot(),
+      chatId: wireChat.id,
+      archived: true,
+      mutedUntil: null,
+      muteOverride: null,
+    });
     await reset;
     expect(store.isMuted(testChat.id)).toBe(true);
     expect(store.chatState(testChat.id)?.muteOverride).toBeNull();
@@ -344,18 +361,21 @@ describe('notification preferences', () => {
     session.user.set({ ...testUser, uid: 2 });
     TestBed.tick();
     expect(store.chatState(testChat.id)).toBeUndefined();
-    http.expectOne(defaultsUrl).flush({ muteGroupChatsByDefault: false, muteDirectChatsByDefault: true });
+    peer
+      .expect('users.updateNotificationSettings', { muteDirectChatsByDefault: true })
+      .flush({ muteGroupChatsByDefault: false, muteDirectChatsByDefault: true });
     await save;
     expect(store.notificationDefaults()?.muteDirectChatsByDefault).toBe(false);
   });
+
   it('clears a category with one request, preserves archive and ignores older list snapshots', async () => {
     store.acceptChats([{ ...testChat, archived: true, muteOverride: false }], store.snapshot());
     const old = store.snapshot();
     const clear = store.clearNotificationExceptions(GroupKind.group);
-    store.acceptChats([{ ...testChat, archived: true, muteOverride: false }], store.snapshot()); // in-flight old read
-    const req = http.expectOne('/_api/users/me/notification-exceptions?kind=group');
-    expect(req.request.method).toBe('DELETE');
-    req.flush({ kind: 'group', chatIds: [wireChat.id] });
+    store.acceptChats([{ ...testChat, archived: true, muteOverride: false }], store.snapshot());
+    peer
+      .expect('users.clearNotificationExceptions', { kind: GroupKind.group })
+      .flush({ kind: GroupKind.group, chatIds: [wireChat.id] });
     await clear;
     expect(store.chatState(testChat.id)?.archived).toBe(true);
     expect(store.isMuted(testChat.id)).toBe(true);
@@ -363,7 +383,7 @@ describe('notification preferences', () => {
     expect(store.isMuted(testChat.id)).toBe(true);
   });
 
-  it('applies a bulk WS result once and keeps a newer exception when HTTP finishes later', async () => {
+  it('applies a bulk WS result once and keeps a newer exception when an RPC response finishes later', async () => {
     const changes = vi.fn();
     store.preferenceChanges$.subscribe(changes);
     const clear = store.clearNotificationExceptions(GroupKind.group);
@@ -372,9 +392,9 @@ describe('notification preferences', () => {
       payload: { kind: GroupKind.group, chatIds: [testChat.id] },
     });
     events.next({ type: ServerWsMessageType.chatNotificationSettingChanged, payload: snapshot(false) });
-    http
-      .expectOne('/_api/users/me/notification-exceptions?kind=group')
-      .flush({ kind: 'group', chatIds: [wireChat.id] });
+    peer
+      .expect('users.clearNotificationExceptions', { kind: GroupKind.group })
+      .flush({ kind: GroupKind.group, chatIds: [wireChat.id] });
     await clear;
     expect(store.isMuted(testChat.id)).toBe(false);
     expect(changes).toHaveBeenCalledTimes(2);
@@ -384,18 +404,16 @@ describe('notification preferences', () => {
     store.acceptChats([{ ...testChat, muteOverride: false }], store.snapshot());
     const failed = store.clearNotificationExceptions(GroupKind.group);
     const rejected = expect(failed).rejects.toBeDefined();
-    http
-      .expectOne('/_api/users/me/notification-exceptions?kind=group')
-      .flush('failed', { status: 500, statusText: 'Failed' });
+    peer.expect('users.clearNotificationExceptions', { kind: GroupKind.group }).error(RpcErrorCode.Internal);
     await rejected;
     expect(store.isMuted(testChat.id)).toBe(false);
     const clear = store.clearNotificationExceptions(GroupKind.group);
     session.user.set({ ...testUser, uid: 2 });
     TestBed.tick();
     store.acceptChats([{ ...testChat, muteOverride: false }], store.snapshot());
-    http
-      .expectOne('/_api/users/me/notification-exceptions?kind=group')
-      .flush({ kind: 'group', chatIds: [wireChat.id] });
+    peer
+      .expect('users.clearNotificationExceptions', { kind: GroupKind.group })
+      .flush({ kind: GroupKind.group, chatIds: [wireChat.id] });
     await clear;
     expect(store.isMuted(testChat.id)).toBe(false);
   });

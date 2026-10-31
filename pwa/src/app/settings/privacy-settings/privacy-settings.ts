@@ -1,4 +1,5 @@
 import { Component, inject } from '@angular/core';
+import { rxResource } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 import {
   IonButton,
@@ -16,16 +17,10 @@ import {
 } from '@ionic/angular';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { chevronBackOutline } from 'ionicons/icons';
-import { getBlocksResource } from '../../../generated/endpoints/blocks/blocks.resource';
+import { RpcApi } from '../../../generated/rpc-api';
+import { FriendAddVerificationMode, PresenceVisibility, ReadReceiptVisibility } from '../../../generated/models';
 import { PanelNavigation } from '../../navigation/panel-navigation';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
-
-import {
-  getMyFriendSettingsResource,
-  getMyPresenceSettingsResource,
-  getMyReadReceiptSettingsResource,
-} from '../../../generated/endpoints/friends/friends.resource';
-import { FriendAddVerificationMode, PresenceVisibility, ReadReceiptVisibility } from '../../../generated/models';
 
 @Component({
   selector: 'app-privacy-settings',
@@ -53,10 +48,11 @@ import { FriendAddVerificationMode, PresenceVisibility, ReadReceiptVisibility } 
 export class PrivacySettings {
   protected readonly panels = inject(PanelNavigation);
   protected readonly backIcon = chevronBackOutline;
-  protected readonly blocks = getBlocksResource();
-  protected readonly verification = getMyFriendSettingsResource();
-  protected readonly presence = getMyPresenceSettingsResource();
-  protected readonly readReceipts = getMyReadReceiptSettingsResource();
+  private readonly api = inject(RpcApi);
+  protected readonly blocks = rxResource({ stream: () => this.api.blocks.list() });
+  protected readonly verification = rxResource({ stream: () => this.api.friends.getSettings() });
+  protected readonly presence = rxResource({ stream: () => this.api.privacy.getPresenceSettings() });
+  protected readonly readReceipts = rxResource({ stream: () => this.api.privacy.getReadReceiptSettings() });
   protected readonly ReceiptVisibility = ReadReceiptVisibility;
   protected readonly Mode = FriendAddVerificationMode;
   protected readonly Visibility = PresenceVisibility;

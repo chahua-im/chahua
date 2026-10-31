@@ -13,11 +13,14 @@ import type { Observable } from 'rxjs';
 import type {
   CreateStickerPackBody,
   FavoriteStickerListResponse,
+  GetPacksParams,
   PostStickerMultipart,
   SnowflakeID,
   StickerDetailResponse,
   StickerPackDetailResponse,
+  StickerPackDiscoveryResponse,
   StickerPackListResponse,
+  StickerPackSummary,
   StickerSummary,
   UpdateStickerPackBody,
 } from '../../models';
@@ -57,6 +60,73 @@ type HttpClientResponseOptions = HttpClientOptions & {
 type HttpClientObserveOptions = HttpClientOptions & {
   readonly observe?: 'body' | 'events' | 'response';
 };
+type AngularHttpParamValue = string | number | boolean | Array<string | number | boolean>;
+type AngularHttpParamValueWithNullable = AngularHttpParamValue | null;
+function filterParams(
+  params: Record<string, unknown>,
+  requiredNullableKeys?: ReadonlySet<string>,
+  preserveRequiredNullables?: false,
+  passthroughKeys?: undefined,
+): Record<string, AngularHttpParamValue>;
+function filterParams(
+  params: Record<string, unknown>,
+  requiredNullableKeys: ReadonlySet<string> | undefined,
+  preserveRequiredNullables: true,
+  passthroughKeys?: undefined,
+): Record<string, AngularHttpParamValueWithNullable>;
+function filterParams(
+  params: Record<string, unknown>,
+  requiredNullableKeys: ReadonlySet<string> | undefined,
+  preserveRequiredNullables: boolean | undefined,
+  passthroughKeys: ReadonlySet<string>,
+): Record<string, unknown>;
+function filterParams(
+  params: Record<string, unknown>,
+  requiredNullableKeys: ReadonlySet<string> = new Set(),
+  preserveRequiredNullables = false,
+  passthroughKeys: ReadonlySet<string> = new Set(),
+): Record<string, unknown> {
+  const filteredParams: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (passthroughKeys.has(key)) {
+      if (value !== undefined) {
+        filteredParams[key] = value;
+      }
+      continue;
+    }
+    if (Array.isArray(value)) {
+      const filtered = value
+        .filter(
+          (item) =>
+            item != null &&
+            (typeof item === 'string' ||
+              typeof item === 'number' ||
+              typeof item === 'boolean' ||
+              (item instanceof Date && !Number.isNaN(item.getTime()))),
+        )
+        .map((item) => (item instanceof Date ? item.toISOString() : item)) as Array<string | number | boolean>;
+      if (filtered.length) {
+        filteredParams[key] = filtered;
+      }
+    } else if (value === null && requiredNullableKeys.has(key)) {
+      // With a paramsSerializer (preserveRequiredNullables) the literal null
+      // is passed through for it to consume; without one, emit an empty
+      // string so the required key still reaches the wire as `?key=`
+      // instead of being silently dropped. See #3712.
+      filteredParams[key] = preserveRequiredNullables ? null : '';
+    } else if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      // useDates produces Date query params; serialize to ISO so they reach
+      // the wire instead of being dropped by the primitive check below. See #3856.
+      filteredParams[key] = value.toISOString();
+    } else if (
+      value != null &&
+      (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')
+    ) {
+      filteredParams[key] = value;
+    }
+  }
+  return filteredParams;
+}
 @Injectable({ providedIn: 'root' })
 export class StickersService {
   private readonly http = inject(HttpClient);
@@ -86,19 +156,56 @@ export class StickersService {
       observe: 'body',
     });
   }
-  postPack<TData = StickerPackDetailResponse>(
+  getPacks<TData = StickerPackDiscoveryResponse>(
+    params?: GetPacksParams,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  getPacks<TData = StickerPackDiscoveryResponse>(
+    params?: GetPacksParams,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  getPacks<TData = StickerPackDiscoveryResponse>(
+    params?: GetPacksParams,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  getPacks<TData = StickerPackDiscoveryResponse>(
+    params?: GetPacksParams,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    const filteredParams = filterParams({ ...params, ...options?.params }, new Set<string>([]));
+    if (options?.observe === 'events') {
+      return this.http.get<TData>(`${this.baseUrl}/stickers/packs`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+        params: filteredParams,
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.get<TData>(`${this.baseUrl}/stickers/packs`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+        params: filteredParams,
+      });
+    }
+    return this.http.get<TData>(`${this.baseUrl}/stickers/packs`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+      params: filteredParams,
+    });
+  }
+  postPack<TData = StickerPackSummary>(
     createStickerPackBody: CreateStickerPackBody,
     options?: HttpClientBodyOptions,
   ): Observable<TData>;
-  postPack<TData = StickerPackDetailResponse>(
+  postPack<TData = StickerPackSummary>(
     createStickerPackBody: CreateStickerPackBody,
     options?: HttpClientEventOptions,
   ): Observable<HttpEvent<TData>>;
-  postPack<TData = StickerPackDetailResponse>(
+  postPack<TData = StickerPackSummary>(
     createStickerPackBody: CreateStickerPackBody,
     options?: HttpClientResponseOptions,
   ): Observable<AngularHttpResponse<TData>>;
-  postPack<TData = StickerPackDetailResponse>(
+  postPack<TData = StickerPackSummary>(
     createStickerPackBody: CreateStickerPackBody,
     options?: HttpClientObserveOptions,
   ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
@@ -169,33 +276,6 @@ export class StickersService {
       observe: 'body',
     });
   }
-  deletePack<TData = void>(packId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
-  deletePack<TData = void>(packId: SnowflakeID, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
-  deletePack<TData = void>(
-    packId: SnowflakeID,
-    options?: HttpClientResponseOptions,
-  ): Observable<AngularHttpResponse<TData>>;
-  deletePack<TData = void>(
-    packId: SnowflakeID,
-    options?: HttpClientObserveOptions,
-  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
-    if (options?.observe === 'events') {
-      return this.http.delete<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}`, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'events',
-      });
-    }
-    if (options?.observe === 'response') {
-      return this.http.delete<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}`, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'response',
-      });
-    }
-    return this.http.delete<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}`, {
-      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-      observe: 'body',
-    });
-  }
   getPack<TData = StickerPackDetailResponse>(packId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
   getPack<TData = StickerPackDetailResponse>(
     packId: SnowflakeID,
@@ -226,22 +306,49 @@ export class StickersService {
       observe: 'body',
     });
   }
-  patchPack<TData = StickerPackDetailResponse>(
+  deletePack<TData = void>(packId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
+  deletePack<TData = void>(packId: SnowflakeID, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
+  deletePack<TData = void>(
+    packId: SnowflakeID,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  deletePack<TData = void>(
+    packId: SnowflakeID,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.delete<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.delete<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+      });
+    }
+    return this.http.delete<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
+  patchPack<TData = StickerPackSummary>(
     packId: SnowflakeID,
     updateStickerPackBody: UpdateStickerPackBody,
     options?: HttpClientBodyOptions,
   ): Observable<TData>;
-  patchPack<TData = StickerPackDetailResponse>(
+  patchPack<TData = StickerPackSummary>(
     packId: SnowflakeID,
     updateStickerPackBody: UpdateStickerPackBody,
     options?: HttpClientEventOptions,
   ): Observable<HttpEvent<TData>>;
-  patchPack<TData = StickerPackDetailResponse>(
+  patchPack<TData = StickerPackSummary>(
     packId: SnowflakeID,
     updateStickerPackBody: UpdateStickerPackBody,
     options?: HttpClientResponseOptions,
   ): Observable<AngularHttpResponse<TData>>;
-  patchPack<TData = StickerPackDetailResponse>(
+  patchPack<TData = StickerPackSummary>(
     packId: SnowflakeID,
     updateStickerPackBody: UpdateStickerPackBody,
     options?: HttpClientObserveOptions,
@@ -309,52 +416,6 @@ export class StickersService {
       observe: 'body',
     });
   }
-  deletePackSticker<TData = void>(
-    packId: SnowflakeID,
-    stickerId: SnowflakeID,
-    options?: HttpClientBodyOptions,
-  ): Observable<TData>;
-  deletePackSticker<TData = void>(
-    packId: SnowflakeID,
-    stickerId: SnowflakeID,
-    options?: HttpClientEventOptions,
-  ): Observable<HttpEvent<TData>>;
-  deletePackSticker<TData = void>(
-    packId: SnowflakeID,
-    stickerId: SnowflakeID,
-    options?: HttpClientResponseOptions,
-  ): Observable<AngularHttpResponse<TData>>;
-  deletePackSticker<TData = void>(
-    packId: SnowflakeID,
-    stickerId: SnowflakeID,
-    options?: HttpClientObserveOptions,
-  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
-    if (options?.observe === 'events') {
-      return this.http.delete<TData>(
-        `${this.baseUrl}/stickers/packs/${decodeId(packId)}/stickers/${decodeId(stickerId)}`,
-        {
-          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-          observe: 'events',
-        },
-      );
-    }
-    if (options?.observe === 'response') {
-      return this.http.delete<TData>(
-        `${this.baseUrl}/stickers/packs/${decodeId(packId)}/stickers/${decodeId(stickerId)}`,
-        {
-          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-          observe: 'response',
-        },
-      );
-    }
-    return this.http.delete<TData>(
-      `${this.baseUrl}/stickers/packs/${decodeId(packId)}/stickers/${decodeId(stickerId)}`,
-      {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'body',
-      },
-    );
-  }
   putPackSticker<TData = void>(
     packId: SnowflakeID,
     stickerId: SnowflakeID,
@@ -404,32 +465,51 @@ export class StickersService {
       },
     );
   }
-  deleteSubscription<TData = void>(packId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
-  deleteSubscription<TData = void>(packId: SnowflakeID, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
-  deleteSubscription<TData = void>(
+  deletePackSticker<TData = void>(
     packId: SnowflakeID,
+    stickerId: SnowflakeID,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  deletePackSticker<TData = void>(
+    packId: SnowflakeID,
+    stickerId: SnowflakeID,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  deletePackSticker<TData = void>(
+    packId: SnowflakeID,
+    stickerId: SnowflakeID,
     options?: HttpClientResponseOptions,
   ): Observable<AngularHttpResponse<TData>>;
-  deleteSubscription<TData = void>(
+  deletePackSticker<TData = void>(
     packId: SnowflakeID,
+    stickerId: SnowflakeID,
     options?: HttpClientObserveOptions,
   ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
     if (options?.observe === 'events') {
-      return this.http.delete<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}/subscription`, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'events',
-      });
+      return this.http.delete<TData>(
+        `${this.baseUrl}/stickers/packs/${decodeId(packId)}/stickers/${decodeId(stickerId)}`,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'events',
+        },
+      );
     }
     if (options?.observe === 'response') {
-      return this.http.delete<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}/subscription`, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'response',
-      });
+      return this.http.delete<TData>(
+        `${this.baseUrl}/stickers/packs/${decodeId(packId)}/stickers/${decodeId(stickerId)}`,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'response',
+        },
+      );
     }
-    return this.http.delete<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}/subscription`, {
-      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-      observe: 'body',
-    });
+    return this.http.delete<TData>(
+      `${this.baseUrl}/stickers/packs/${decodeId(packId)}/stickers/${decodeId(stickerId)}`,
+      {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'body',
+      },
+    );
   }
   putSubscription<TData = void>(packId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
   putSubscription<TData = void>(packId: SnowflakeID, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
@@ -454,6 +534,33 @@ export class StickersService {
       });
     }
     return this.http.put<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}/subscription`, undefined, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
+  deleteSubscription<TData = void>(packId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
+  deleteSubscription<TData = void>(packId: SnowflakeID, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
+  deleteSubscription<TData = void>(
+    packId: SnowflakeID,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  deleteSubscription<TData = void>(
+    packId: SnowflakeID,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.delete<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}/subscription`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.delete<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}/subscription`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+      });
+    }
+    return this.http.delete<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}/subscription`, {
       ...(options as Omit<NonNullable<typeof options>, 'observe'>),
       observe: 'body',
     });
@@ -488,33 +595,6 @@ export class StickersService {
       observe: 'body',
     });
   }
-  deleteFavorite<TData = void>(stickerId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
-  deleteFavorite<TData = void>(stickerId: SnowflakeID, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
-  deleteFavorite<TData = void>(
-    stickerId: SnowflakeID,
-    options?: HttpClientResponseOptions,
-  ): Observable<AngularHttpResponse<TData>>;
-  deleteFavorite<TData = void>(
-    stickerId: SnowflakeID,
-    options?: HttpClientObserveOptions,
-  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
-    if (options?.observe === 'events') {
-      return this.http.delete<TData>(`${this.baseUrl}/stickers/${decodeId(stickerId)}/favorite`, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'events',
-      });
-    }
-    if (options?.observe === 'response') {
-      return this.http.delete<TData>(`${this.baseUrl}/stickers/${decodeId(stickerId)}/favorite`, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'response',
-      });
-    }
-    return this.http.delete<TData>(`${this.baseUrl}/stickers/${decodeId(stickerId)}/favorite`, {
-      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-      observe: 'body',
-    });
-  }
   putFavorite<TData = void>(stickerId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
   putFavorite<TData = void>(stickerId: SnowflakeID, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
   putFavorite<TData = void>(
@@ -538,6 +618,33 @@ export class StickersService {
       });
     }
     return this.http.put<TData>(`${this.baseUrl}/stickers/${decodeId(stickerId)}/favorite`, undefined, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
+  deleteFavorite<TData = void>(stickerId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
+  deleteFavorite<TData = void>(stickerId: SnowflakeID, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
+  deleteFavorite<TData = void>(
+    stickerId: SnowflakeID,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  deleteFavorite<TData = void>(
+    stickerId: SnowflakeID,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.delete<TData>(`${this.baseUrl}/stickers/${decodeId(stickerId)}/favorite`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.delete<TData>(`${this.baseUrl}/stickers/${decodeId(stickerId)}/favorite`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+      });
+    }
+    return this.http.delete<TData>(`${this.baseUrl}/stickers/${decodeId(stickerId)}/favorite`, {
       ...(options as Omit<NonNullable<typeof options>, 'observe'>),
       observe: 'body',
     });

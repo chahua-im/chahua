@@ -42,28 +42,29 @@ npm run test:pwa
 
 Apache 部署需一并上传构建目录中的 `.htaccess`，启用 `mod_rewrite`，并为站点目录允许 `AllowOverride FileInfo Indexes`。规则将不存在的 GET/HEAD 页面路径回退到 `index.html`；已有文件、目录、`/_api`、静态资源目录和带扩展名的文件路径不参与回退，避免把缺失的 JS/CSS、Worker 或 `ngsw.json` 返回为 HTML。nginx 不读取 `.htaccess`，需在站点配置中提供等效规则。
 
-构建版本使用 Angular `define` 注入的 `CHAHUA_APP_VERSION`，设置页和 API 请求头 `X-App-Version` 共用 `app-version.ts` 中的值；未注入时回退为 `PWA2-dev`。Jenkins 通过 `npm run build -- --define "CHAHUA_APP_VERSION='PWA2-${BUILD_NUMBER}'"` 注入 CI 构建号，跨域构建使用 `npm run build:prod -- --define "CHAHUA_APP_VERSION='PWA2-${BUILD_NUMBER}'"`，不修改 `package.json`。修改构建常量后需要重启开发服务。
+构建版本使用 Angular `define` 注入的 `CHAHUA_APP_VERSION`，设置页、RPC `session.open` 的 `appVersion` 与保留 HTTP 上传的 `X-App-Version` 共用 `app-version.ts` 中的值；未注入时回退为 `PWA2-dev`。Jenkins 通过 `npm run build -- --define "CHAHUA_APP_VERSION='PWA2-${BUILD_NUMBER}'"` 注入 CI 构建号，跨域构建使用 `npm run build:prod -- --define "CHAHUA_APP_VERSION='PWA2-${BUILD_NUMBER}'"`，不修改 `package.json`。修改构建常量后需要重启开发服务。
 
-登录 token 的优先级是 URL 的 `token` 参数、localStorage、开发预设。
-开发构建在没有 token 时请求 `POST /auth/dev-session`，使用 sessionStorage 的 `uid`（默认 1）获取身份，不需要填写 JWT；切换用户可在控制台执行 `sessionStorage.setItem('uid', '7')` 后刷新。该接口要求后端启用 `debug_auth_enabled`，否则返回 404。
+凭据选择、同身份 URL token、Cookie 与 30 秒初始化规则见[身份、协议与入口](docs/data-flow.md#身份协议与入口)。开发构建通过匿名 RPC 握手和 `auth.createDevSession` 绑定 sessionStorage 的 `uid`（默认 1），不需要填写 JWT；切换用户可在控制台执行 `sessionStorage.setItem('uid', '7')` 后刷新。后端必须启用 `debug_auth_enabled`。
 开发预设放在 Git 忽略的 `.env.local`，格式见 `.env.example`；存在预设时优先于自动开发会话。`npm start`、`npm run dev` 和 `npm run dev:online` 通过编译常量注入 `CHAHUA_DEV_TOKEN`，修改后需要重启开发服务。生产构建不读取该文件。预设会随开发页面下发，能够访问开发服务的浏览器可以使用该身份；真实 token 不应提交到仓库。
 
 ## 测试与行为约定
 
 修改前以[需求与边界](docs/requirements.md)为准；需求记录产品行为，其他文档分别描述尺寸、组件所有权与请求时机，避免同一规则多处维护。回归测试随实现放置，关键覆盖包括分页范围、导航生命周期、滚动锚点、队列顺序/撤回、媒体取消和通知去重。
 
-单元测试使用 `src/test-providers.ts` 的 HTTP 与弹窗替身。测试拦截 HTTP、WebSocket 和上传，禁止生产写入与 S3 测试上传等约定见[代码约定](AGENTS.md)；必须实测写入时，使用 `node runspace/dev.mjs dev` 启动本地前后端。`npm run dev:online` 连接生产，不能用于写入测试。
+单元测试共用 `src/test-providers.ts` 的 HTTP 与弹窗替身；普通业务操作使用 `api/rpc-testing.ts` 的可控 JSON-RPC peer 驱动真实 RpcTransport/RpcApi，不伪造 HTTP 状态或 API 回显。实际 multipart／字节上传继续拦截 HTTP/XHR。禁止生产写入、S3 测试上传与真实推送订阅写入；实际后端验证使用[隔离 RPC runner](../backend/README.md#isolated-rpc-regression-runner)的 `--keep` 模式及其打印的前端代理命令，不使用 online 模式。
+
+`npm run format` 格式化 `pwa/` 下 Git 中已暂存、未暂存及未跟踪的现有文件，跳过已删除文件，并遵循 Prettier 的忽略规则；不会暂存格式化结果。`npm run format:all` 格式化整个 `pwa/` 目录。命令从 `pwa/` 执行，使用项目本地安装的 Prettier。
 
 ## CI 与发布
 
-根目录 `Jenkinsfile` 中的 PWA 检查针对 `pwa/`，执行 Angular 构建、单元测试和独立 Worker/启动更新测试；`npm run test:ci` 使用 Angular 的 CI 配置，一次性运行并同时输出终端结果与 `test_output/unit.xml`（相对于 `pwa/`）。开发时的 `npm test` 保留默认交互行为。后端使用独立的检查阶段。PWA 检查与产物构建均使用 `node:22.22.3-bookworm`。
+根目录 `Jenkinsfile` 中的 PWA 检查针对 `pwa/`，执行 Angular 构建、单元测试和独立 Worker/启动更新测试；`npm run test:ci` 先运行 Node 环境的契约生成校验，再使用 Angular 的 CI 配置运行消费者测试并输出 `test_output/unit.xml`（相对于 `pwa/`）。`npm run test:codegen` 可单独运行生成校验；开发时的 `npm test` 保留 Angular 交互行为。后端使用独立的检查阶段。PWA 检查与产物构建均使用 `node:22.22.3-bookworm`。
 
 `chahua/chahua-pwa-build` 使用 `ci/Jenkinsfile.pwa-build`，按上游传入的 `GIT_COMMIT_SHA` 检出源代码；手动构建未指定时使用 `origin/main`。同一次检出生成两个 ZIP，均使用 `PWA2-构建号`，归档根目录包含 `index.html`、`.htaccess` 和 Worker 文件，不包含外层 `browser/` 目录。
 
-| 归档 | 构建目录 | 用途 |
-| --- | --- | --- |
-| `pwa/chahua-staging.zip` | `pwa/dist/app/browser` | 同源 staging |
-| `pwa/chahua-prod.zip` | `pwa/dist/prod/browser` | 跨域生产 |
+| 归档                     | 构建目录                | 用途         |
+| ------------------------ | ----------------------- | ------------ |
+| `pwa/chahua-staging.zip` | `pwa/dist/app/browser`  | 同源 staging |
+| `pwa/chahua-prod.zip`    | `pwa/dist/prod/browser` | 跨域生产     |
 
 根目录的 `pwa-artifact-metadata.json` 记录检出提交和构建信息。产物构建自动触发 `chahua/deploy/pwa-staging-deploy`；生产部署保持手动选择 `PWA_BUILD`。两个部署任务的参数项目均为 `chahua/chahua-pwa-build`，`copyArtifacts` 的过滤器分别为：
 
@@ -76,16 +77,23 @@ filter: 'pwa/chahua-prod.zip,pwa-artifact-metadata.json'
 
 生产页面域和资源域共用生产 rsync 部署目录，不发布 PWA 容器镜像。直接向站点目录执行 `rsync --delete` 不是原子发布，且会删除旧构建资源；部署侧应遵守前述完整版本发布与旧资源保留约定。
 
+先部署支持 RPC 的后端，再发布此 PWA；协商失败显示连接／服务器错误，不回退 HTTP 或旧 WS。旧 PWA 与 Apple 客户端仍可使用原 HTTP 与旧 WS。回滚 PWA 时保留后端 RPC，仍有新版 PWA 在使用时不得移除服务端 RPC 支持。
+
 ## API 生成
 
 ```bash
 npm run api:generate
 ```
 
-Orval 默认读取当前 worktree 的 `runspace/.env` 中的 `API_PORT`，访问对应本地后端的 `/api-docs/openapi.json`；请先启动该后端。环境变量 `OPENAPI_URL` 优先级更高，可以指定其他规格 URL 或本地文件，无需本地 runspace 配置。
+Orval 默认读取当前 worktree 的 `runspace/.env` 中的 `API_PORT`，访问对应本地后端的 `/api-docs/openapi.json`，同时读取同一后端的 `/api-docs/openrpc.json`。`OPENAPI_URL` 与 `OPENRPC_URL` 可分别指定 URL 或本地文件；后者默认位于前者同目录。后端可在无配置、无数据库连接时执行 `--export-api-schemas /tmp/chahua-rpc-schemas`，再从本目录运行：
 
-`src/generated/endpoints/` 包含按标签生成的 HttpClient 服务与 resource，`src/generated/models/` 包含模型，共用模型位于 models 根目录。`scripts/api-codegen.ts` 负责契约转换、Snowflake 类型和 JSON 编解码元数据。生成文件随仓库保存，修改来源是 OpenAPI 与生成配置；普通构建无需运行后端。
+```bash
+OPENAPI_URL=/tmp/chahua-rpc-schemas/openapi.json \
+OPENRPC_URL=/tmp/chahua-rpc-schemas/openrpc.json npm run api:generate
+```
 
-应用中的业务 ID 使用 `SnowflakeID` 品牌类型，路由和协议边界负责精确转换；用户 UID、计数和日期游标保留各自类型。数值 ID 编码是性能选择，普通 UID 不参与编码。可选字段在 TypeScript 中声明为 `field?: T`，运行时的 `null` 原样保留，使用可选链、空值合并等自然消费。`UpdateChatBody.avatarImageId` 与 `PatchInviteBody.expiresAt` 显式声明请求 `null`，用于清除字段。
+`src/generated/models/` 保存共享 DTO，`rpc-models/` 保存 RPC 参数与特有模型，`rpc-api.ts` 提供类型化命名空间，`rpc-codecs.ts` 保存方法／事件元数据；应用普通业务操作只调用 RpcApi。`endpoints/` 保留 OpenAPI 的 HTTP 生成件，但不用于普通业务请求或 RPC 回退。`scripts/api-codegen.ts` 在 Orval clean 后生成 RPC 文件，复用 Snowflake 与 JSON walker，并从 OpenRPC 元数据生成错误枚举。共享定义与未转换的 HTTP wire schema 经相同 draft-07 投影后比较，忽略 ID 标记本身，不将字符串 wire ID 与已转换的 number 模型比较；重复方法、无法解析的引用与不兼容定义使生成失败。生成文件随仓库保存，修改来源是后端规格与生成配置；普通构建无需运行后端。
+
+应用中的业务 ID 使用 `SnowflakeID` 品牌类型，包含服务令牌 ID；RPC、HTTP 和路由边界负责精确转换，用户 UID、计数和日期游标保留各自类型。数值 ID 编码是性能选择，普通 UID 不参与编码。可选字段在 TypeScript 中声明为 `field?: T`，运行时的 `null` 原样保留，使用可选链、空值合并等自然消费。`UpdateChatBody.avatarImageId` 与 `PatchInviteBody.expiresAt` 显式声明请求 `null`，用于清除字段；省略邀请有效期仍为 BadRequest。
 
 启动前错误页面可通过 `npm run preview:startup-failures` 在本地逐项模拟，具体步骤见[启动页面手动验证](docs/startup-verification.md)。

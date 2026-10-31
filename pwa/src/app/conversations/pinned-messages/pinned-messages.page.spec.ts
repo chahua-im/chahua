@@ -1,16 +1,12 @@
-import { provideHttpClient, withInterceptors } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
-import { Subject } from 'rxjs';
+import { provideIonicAngular } from '@ionic/angular';
 import { vi } from 'vitest';
-import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
 import { GroupRole, MessageType, ServerWsMessageType, type MessageResponse } from '../../../generated/models';
 import { Connection } from '../../api/connection';
-import { jsonInterceptor } from '../../api/json.interceptor';
+import { RpcTestPeer, provideRpcTesting } from '../../api/rpc-testing';
 import { encodeId } from '../../api/snowflake-id';
-import { mockRealtime, testUser, wireChat, wireMessage } from '../../api/testing';
+import { testUser, wireChat, wireMessage } from '../../api/testing';
 import { MessageAction } from '../../messages/message-menu/message-menu';
 import { MessageNotice } from '../../messages/message-notice';
 import { SessionStore } from '../../session/session-store';
@@ -37,28 +33,28 @@ const savedSnapshot = () => ({
 describe('PinnedMessagesPage', () => {
   let fixture: ComponentFixture<PinnedMessagesPage>;
   let page: PinnedMessagesPage;
-  let http: HttpTestingController;
+  let peer: RpcTestPeer;
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
       imports: [PinnedMessagesPage],
       providers: [
+        provideIonicAngular({ animated: false }),
         provideRouter([]),
-        provideHttpClient(withInterceptors([jsonInterceptor])),
-        provideHttpClientTesting(),
-        provideChahuaBaseUrl('/_api'),
-        { provide: SessionStore, useValue: { user: signal(testUser) } },
-        { provide: Preferences, useValue: { showAllAvatars: () => false } },
-        { provide: Connection, useValue: mockRealtime({ events$: new Subject(), resync$: new Subject() }) },
+        provideRpcTesting(),
+        SessionStore,
+        Preferences,
       ],
     }).compileComponents();
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
+    TestBed.inject(SessionStore).user.set(testUser);
     fixture = TestBed.createComponent(PinnedMessagesPage);
     page = fixture.componentInstance;
-    http = TestBed.inject(HttpTestingController);
   });
 
   afterEach(() => {
-    http.verify();
+    peer.verify();
     vi.restoreAllMocks();
   });
 
@@ -66,19 +62,24 @@ describe('PinnedMessagesPage', () => {
     fixture.componentRef.setInput('id', wireChat.id);
     if (thread) fixture.componentRef.setInput('threadId', '100');
     fixture.detectChanges();
-    http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...structuredClone(wireChat), myRole: role });
-    http.expectOne(`/_api/chats/${wireChat.id}${thread ? '/threads/100' : ''}/pins`).flush({
-      pins: [
-        {
-          id: '200',
-          chatId: wireChat.id,
-          pinnedAt: '2026-09-07T12:00:00Z',
-          pinnedBy: 1,
-          message: { ...structuredClone(wireMessage), isDeleted: deleted },
-          ...(thread ? { threadRootId: '100' } : {}),
-        },
-      ],
-    });
+    peer.expect('groups.get', { chatId: wireChat.id }).flush({ ...structuredClone(wireChat), myRole: role });
+    peer
+      .expect(
+        thread ? 'pins.listForThread' : 'pins.list',
+        thread ? { chatId: wireChat.id, threadRootId: '100' } : { chatId: wireChat.id },
+      )
+      .flush({
+        pins: [
+          {
+            id: '200',
+            chatId: wireChat.id,
+            pinnedAt: '2026-09-07T12:00:00Z',
+            pinnedBy: 1,
+            message: { ...structuredClone(wireMessage), isDeleted: deleted },
+            ...(thread ? { threadRootId: '100' } : {}),
+          },
+        ],
+      });
     await fixture.whenStable();
     fixture.detectChanges();
     return page['pins']().items()[0];
@@ -95,6 +96,7 @@ describe('PinnedMessagesPage', () => {
 
   async function settle() {
     for (let step = 0; step < 8; step++) await Promise.resolve();
+    fixture.detectChanges();
   }
 
   it('renders scoped pins without a composer or real-conversation read requests', async () => {
@@ -111,7 +113,8 @@ describe('PinnedMessagesPage', () => {
     expect(navigate).toHaveBeenCalledWith(['/chats/chat', wireChat.id, 'thread', '100'], {
       fragment: `msg=${wireMessage.id}`,
     });
-    http.expectNone((request) => request.url.endsWith('/read') || request.url.endsWith('/read-state'));
+    peer.expectNone('chats.getUnreadCount');
+    peer.expectNone('threads.getReadState');
   });
 
   it.each([false, true])(
@@ -124,7 +127,6 @@ describe('PinnedMessagesPage', () => {
           payload: { ...pin.message, isDeleted: true },
         });
       await settle();
-      fixture.detectChanges();
       expect(page['messages']()).toEqual([]);
       expect(fixture.nativeElement.querySelector('app-message, .message-date')).toBeNull();
       expect(fixture.nativeElement.querySelector('.message-list').textContent).toContain('暂无置顶消息');
@@ -134,8 +136,8 @@ describe('PinnedMessagesPage', () => {
   it('keeps a recalled pin while its topic is still reachable', async () => {
     fixture.componentRef.setInput('id', wireChat.id);
     fixture.detectChanges();
-    http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...structuredClone(wireChat), myRole: GroupRole.admin });
-    http.expectOne(`/_api/chats/${wireChat.id}/pins`).flush({
+    peer.expect('groups.get', { chatId: wireChat.id }).flush({ ...structuredClone(wireChat), myRole: GroupRole.admin });
+    peer.expect('pins.list', { chatId: wireChat.id }).flush({
       pins: [
         {
           id: '200',
@@ -157,20 +159,19 @@ describe('PinnedMessagesPage', () => {
   it('requires confirmation before deleting a pin from its own thread scope', async () => {
     const pin = await pins(GroupRole.admin, true);
     const alert = fixture.nativeElement.querySelector('ion-alert') as HTMLIonAlertElement;
-    // This test drives dismissal events itself; don't also start Ionic's asynchronous presentation.
     const openAlert = vi.spyOn(alert, 'isOpen', 'set').mockImplementation(() => {});
     select(pin.message);
     await page['menu']()!['choose'](MessageAction.Pin);
     fixture.detectChanges();
     expect(openAlert).toHaveBeenCalledWith(true);
-    http.expectNone((request) => request.method === 'DELETE');
+    peer.expectNone('pins.deleteForThread');
     await page['menu']()!['confirm'](new CustomEvent('didDismiss', { detail: { role: 'cancel' } }));
     expect(page['pins']().items()).toHaveLength(1);
     select(pin.message);
     await page['menu']()!['choose'](MessageAction.Pin);
     const removing = page['menu']()!['confirm'](new CustomEvent('didDismiss', { detail: { role: 'confirm' } }));
     await Promise.resolve();
-    http.expectOne(`/_api/chats/${wireChat.id}/threads/100/pins/200`).flush(null);
+    peer.expect('pins.deleteForThread', { chatId: wireChat.id, threadRootId: '100', pinId: '200' }).flush(null);
     await removing;
     expect(page['pins']().items()).toEqual([]);
   });
@@ -186,7 +187,7 @@ describe('PinnedMessagesPage', () => {
     await page['menu']()!['choose'](MessageAction.Pin);
     expect(page['menu']()!['confirmation']()).toBeUndefined();
     await page['menu']()!['confirm'](new CustomEvent('didDismiss', { detail: { role: 'confirm' } }));
-    http.expectNone((request) => request.method === 'DELETE');
+    peer.expectNone('pins.delete');
     page['menu']()!['selection'].set(undefined);
   });
 
@@ -195,9 +196,9 @@ describe('PinnedMessagesPage', () => {
     select(pin.message);
     const saving = page['menu']()!['choose'](MessageAction.Save);
     await settle();
-    http.expectOne(`/_api/chats/${wireChat.id}/saved-messages?limit=50`).flush({ savedMessages: [] });
+    peer.expect('savedMessages.listForChat', { chatId: wireChat.id, limit: 50 }).flush({ savedMessages: [] });
     await settle();
-    http.expectOne(`/_api/saved-messages/${wireMessage.id}`).flush(savedSnapshot());
+    peer.expect('savedMessages.save', { messageId: wireMessage.id }).flush(savedSnapshot());
     await saving;
     expect(page['menu']()!['notice']()).toBe(MessageNotice.Saved);
   });
@@ -211,10 +212,9 @@ describe('PinnedMessagesPage', () => {
       queryParams: { reply: wireMessage.id },
     });
     page['locateMessage'](pin.message, encodeId('101'));
-    expect(navigate).toHaveBeenLastCalledWith(['/chats/chat', wireChat.id, 'thread', '100'], {
-      fragment: 'msg=101',
-    });
-    http.expectNone((request) => request.url.endsWith('/read') || request.url.endsWith('/read-state'));
+    expect(navigate).toHaveBeenLastCalledWith(['/chats/chat', wireChat.id, 'thread', '100'], { fragment: 'msg=101' });
+    peer.expectNone('chats.getUnreadCount');
+    peer.expectNone('threads.getReadState');
   });
 
   it('opens a pinned message as a topic from the normal message menu', async () => {

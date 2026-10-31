@@ -5,7 +5,7 @@ import { SwPush } from '@angular/service-worker';
 import { ModalController } from '@ionic/angular';
 import { TranslocoService } from '@jsverse/transloco';
 import { filter, firstValueFrom, map, timeout } from 'rxjs';
-import { PushService } from '../../generated/endpoints/push/push.service';
+import { RpcApi } from '../../generated/rpc-api';
 import {
   ApiPushProvider,
   GroupKind,
@@ -41,7 +41,7 @@ export enum PushNotificationError {
 export class PushNotifications {
   private readonly push = inject(SwPush);
   private readonly transloco = inject(TranslocoService);
-  private readonly api = inject(PushService);
+  private readonly api = inject(RpcApi);
   private readonly permissionState = signal<NotificationPermission>(
     'Notification' in window ? Notification.permission : 'default',
   );
@@ -397,7 +397,7 @@ export class PushNotifications {
   private async subscribe(): Promise<void> {
     let subscription = await this.currentSubscription();
     if (!subscription) {
-      const { publicKey } = await firstValueFrom(this.api.getVapidPublicKey({ timeout: 10000 }));
+      const { publicKey } = await firstValueFrom(this.api.push.getVapidPublicKey());
       subscription = await this.push.requestSubscription({ serverPublicKey: publicKey });
     }
     const keys = subscription.toJSON().keys!;
@@ -407,14 +407,11 @@ export class PushNotifications {
     if (this.registration?.key === key && Date.now() - this.registration.at < REGISTRATION_MAX_AGE_MS) return;
     try {
       await firstValueFrom(
-        this.api.postSubscribe(
-          {
-            provider: ApiPushProvider.webPush,
-            endpoint: subscription.endpoint,
-            keys: { p256dh: keys['p256dh'], auth: keys['auth'] },
-          },
-          { timeout: 10000 },
-        ),
+        this.api.push.subscribe({
+          provider: ApiPushProvider.webPush,
+          endpoint: subscription.endpoint,
+          keys: { p256dh: keys['p256dh'], auth: keys['auth'] },
+        }),
       );
       this.registration = { key, at: Date.now() };
     } catch {
@@ -429,10 +426,7 @@ export class PushNotifications {
     if (!subscription) return;
     try {
       await firstValueFrom(
-        this.api.postUnsubscribe(
-          { provider: ApiPushProvider.webPush, endpoint: subscription.endpoint },
-          { timeout: 10000 },
-        ),
+        this.api.push.unsubscribe({ provider: ApiPushProvider.webPush, endpoint: subscription.endpoint }),
       );
     } finally {
       // Stop browser delivery even if the backend is temporarily unreachable.

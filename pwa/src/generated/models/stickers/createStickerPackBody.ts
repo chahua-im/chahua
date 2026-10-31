@@ -5,8 +5,10 @@
  * Real-time chat application backend API supporting groups, messaging, threads, stickers, invites, and push notifications.
  * OpenAPI spec version: 0.1.0
  */
+import type { StickerPackVisibility } from './stickerPackVisibility';
 
 export interface CreateStickerPackBody {
   description?: string;
   name: string;
+  visibility?: StickerPackVisibility;
 }

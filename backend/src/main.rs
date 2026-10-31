@@ -1,10 +1,11 @@
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use axum::http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, ORIGIN};
 use axum::http::{Method, Request};
 use axum::{middleware, routing::get, Router};
 use diesel::r2d2::ConnectionManager;
 use diesel::PgConnection;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
@@ -16,7 +17,6 @@ use tower_http::ServiceBuilderExt;
 use tracing::{debug_span, info, Level};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use utils::auth::{X_APP_VERSION, X_CLIENT_ID};
-use utoipa::OpenApi;
 
 mod config;
 mod constants;
@@ -28,6 +28,7 @@ mod handlers;
 mod metrics;
 mod models;
 mod openapi;
+mod rpc;
 mod schema;
 mod serde_i64_string;
 mod services;
@@ -75,6 +76,13 @@ async fn main() {
 
     db_tracing::install();
     let command = read_command();
+    if let Some(BackendCommand::ExportApiSchemas(directory)) = command.as_ref() {
+        if let Err(error) = export_api_schemas(directory) {
+            eprintln!("failed to export API schemas: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
 
     let config = Arc::new(AppConfig::from_env());
 
@@ -197,11 +205,24 @@ async fn main() {
     let http_metrics = state.metrics.http.clone();
     let client_tracking_state = state.clone();
 
-    let (api_router, api_openapi) = handlers::api_router().split_for_parts();
-    let mut openapi_doc = openapi::ApiDoc::openapi();
-    openapi_doc.merge(api_openapi);
+    let (api_router, _) = handlers::api_router().split_for_parts();
+    let openapi_doc = openapi::document();
+    let openrpc_document = Bytes::from(
+        serde_json::to_vec(&rpc::schema::openrpc_document())
+            .expect("OpenRPC document is serializable"),
+    );
 
     let app = Router::new()
+        .route(
+            "/api-docs/openrpc.json",
+            get({
+                let openrpc_document = openrpc_document.clone();
+                move || {
+                    let openrpc_document = openrpc_document.clone();
+                    async move { ([(CONTENT_TYPE, "application/json")], openrpc_document) }
+                }
+            }),
+        )
         .merge(api_router)
         // Keep enough headroom for sticker multipart uploads; per-feature logic still
         // enforces tighter file-size checks where needed.
@@ -321,22 +342,50 @@ async fn build_media_store(config: &AppConfig) -> services::media::MediaStore {
     )
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum BackendCommand {
     MessageSearchReindex,
+    ExportApiSchemas(PathBuf),
 }
 
 fn read_command() -> Option<BackendCommand> {
     let mut args = std::env::args().skip(1);
     let command = args.next()?;
-    if args.next().is_some() {
-        panic!("backend commands do not accept extra arguments");
-    }
 
     match command.as_str() {
-        MESSAGE_SEARCH_REINDEX_COMMAND => Some(BackendCommand::MessageSearchReindex),
+        MESSAGE_SEARCH_REINDEX_COMMAND => {
+            if args.next().is_some() {
+                panic!("backend commands do not accept extra arguments");
+            }
+            Some(BackendCommand::MessageSearchReindex)
+        }
+        "--export-api-schemas" => {
+            let directory = args
+                .next()
+                .map(PathBuf::from)
+                .expect("--export-api-schemas requires exactly one directory argument");
+            if args.next().is_some() {
+                panic!("--export-api-schemas requires exactly one directory argument");
+            }
+            Some(BackendCommand::ExportApiSchemas(directory))
+        }
         _ => panic!("unknown backend command: {command}"),
     }
+}
+
+fn export_api_schemas(directory: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(directory)?;
+    write_schema_file(&directory.join("openapi.json"), &openapi::document())?;
+    write_schema_file(
+        &directory.join("openrpc.json"),
+        &rpc::schema::openrpc_document(),
+    )?;
+    Ok(())
+}
+
+fn write_schema_file<T: serde::Serialize>(path: &Path, document: &T) -> std::io::Result<()> {
+    let content = serde_json::to_vec_pretty(document).map_err(std::io::Error::other)?;
+    std::fs::write(path, content)
 }
 
 fn build_message_search_service(

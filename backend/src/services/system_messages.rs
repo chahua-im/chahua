@@ -341,8 +341,14 @@ mod tests {
         };
         let mut conn = diesel::PgConnection::establish(&url).unwrap();
         conn.test_transaction::<_, diesel::result::Error, _>(|conn| {
-            // Return to the pre-feature schema, then exercise backfill and index creation.
-            conn.batch_execute(include_str!("../../migrations/2026-10-24-163403-0000_classify_system_messages/down.sql"))?;
+            // Isolate migration DDL from public tables and concurrent tests' temporary
+            // tables, which may still reference public.system_message_kind.
+            conn.batch_execute(
+                "CREATE SCHEMA system_kind_migration_test;
+                 SET LOCAL search_path TO system_kind_migration_test, public;
+                 CREATE TABLE messages (LIKE public.messages INCLUDING ALL);
+                 ALTER TABLE messages DROP COLUMN system_kind;",
+            )?;
             let chat_id = 9_876_660_000_i64;
             diesel::sql_query("INSERT INTO groups (id, name) VALUES ($1, 'system-kind-migration-test')")
                 .bind::<BigInt, _>(chat_id).execute(conn)?;

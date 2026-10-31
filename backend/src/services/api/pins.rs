@@ -1,0 +1,573 @@
+use std::sync::Arc;
+
+use chrono::Utc;
+use diesel::pg::Pg;
+use diesel::prelude::*;
+use diesel::sql_types::{Bool, Nullable};
+use uuid::Uuid;
+
+use crate::dto::{
+    messages::MessageResponse,
+    pins::{CreatePinBody, ListPinsResponse, PinResponse},
+    ws::{PinUpdatePayload, ServerWsMessage},
+};
+use crate::errors::AppError;
+use crate::metrics::Metrics;
+use crate::models::{
+    GroupKind, Message, MessageType, NewPinnedMessage, PinnedMessage, SystemMessageKind,
+};
+use crate::schema::{group_membership, groups, messages, pinned_messages};
+use crate::services::api::members::{check_membership, require_admin_role};
+use crate::services::avatars::AvatarService;
+use crate::services::media::MediaStore;
+use crate::services::messages::{
+    attach_metadata, PreparedMessageSend, SendMessageOutcome, SendPreparedMessageDeps,
+};
+use crate::services::push::PushService;
+use crate::services::ws_registry::ConnectionRegistry;
+use crate::utils::ids::{self, IdGen};
+
+const MAX_PINS_PER_SCOPE: i64 = 50;
+
+pub struct CreatePinDeps<'a> {
+    pub id_gen: &'a Arc<IdGen>,
+    pub media: &'a MediaStore,
+    pub avatars: &'a Arc<AvatarService>,
+    pub metrics: &'a Arc<Metrics>,
+    pub ws_registry: &'a Arc<ConnectionRegistry>,
+    pub push_service: &'a Arc<PushService>,
+}
+
+pub struct DeletePinDeps<'a> {
+    pub id_gen: &'a Arc<IdGen>,
+    pub media: &'a MediaStore,
+    pub avatars: &'a Arc<AvatarService>,
+    pub metrics: &'a Arc<Metrics>,
+    pub ws_registry: &'a Arc<ConnectionRegistry>,
+    pub push_service: &'a Arc<PushService>,
+}
+
+/// Which pin list a request addresses. Chat-level pins and the pins of each
+/// thread are independent lists sharing the `pinned_messages` table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PinScope {
+    Chat,
+    Thread { thread_root_id: i64 },
+}
+
+impl PinScope {
+    fn thread_root_id(self) -> Option<i64> {
+        match self {
+            PinScope::Chat => None,
+            PinScope::Thread { thread_root_id } => Some(thread_root_id),
+        }
+    }
+}
+
+type ScopeFilter = Box<dyn BoxableExpression<pinned_messages::table, Pg, SqlType = Nullable<Bool>>>;
+
+/// Restrict a `pinned_messages` query to a single pin list. Chat pins are the
+/// rows with a NULL `thread_root_id`.
+fn scope_filter(scope: PinScope) -> ScopeFilter {
+    match scope.thread_root_id() {
+        None => Box::new(pinned_messages::thread_root_id.is_null().nullable()),
+        Some(thread_root_id) => Box::new(pinned_messages::thread_root_id.eq(thread_root_id)),
+    }
+}
+
+/// Threads are root-based: replies carry `reply_root_id == thread_root_id`, and
+/// the root message itself has no `reply_root_id`.
+fn message_belongs_to_thread(
+    message_id: i64,
+    reply_root_id: Option<i64>,
+    thread_root_id: i64,
+) -> bool {
+    message_id == thread_root_id || reply_root_id == Some(thread_root_id)
+}
+
+pub async fn list_pins(
+    uid: i32,
+    chat_id: i64,
+    conn: &mut PgConnection,
+    media: &MediaStore,
+    avatars: &AvatarService,
+) -> Result<ListPinsResponse, AppError> {
+    list_pins_in_scope(uid, chat_id, PinScope::Chat, conn, media, avatars).await
+}
+
+pub async fn create_pin(
+    uid: i32,
+    chat_id: i64,
+    body: CreatePinBody,
+    conn: &mut PgConnection,
+    deps: CreatePinDeps<'_>,
+) -> Result<PinResponse, AppError> {
+    create_pin_in_scope(uid, chat_id, PinScope::Chat, body.message_id, conn, deps).await
+}
+
+pub async fn delete_pin(
+    uid: i32,
+    chat_id: i64,
+    pin_id: i64,
+    conn: &mut PgConnection,
+    deps: DeletePinDeps<'_>,
+) -> Result<(), AppError> {
+    delete_pin_in_scope(uid, chat_id, PinScope::Chat, pin_id, conn, deps).await
+}
+
+pub async fn list_thread_pins(
+    uid: i32,
+    chat_id: i64,
+    thread_root_id: i64,
+    conn: &mut PgConnection,
+    media: &MediaStore,
+    avatars: &AvatarService,
+) -> Result<ListPinsResponse, AppError> {
+    list_pins_in_scope(
+        uid,
+        chat_id,
+        PinScope::Thread { thread_root_id },
+        conn,
+        media,
+        avatars,
+    )
+    .await
+}
+
+pub async fn create_thread_pin(
+    uid: i32,
+    chat_id: i64,
+    thread_root_id: i64,
+    body: CreatePinBody,
+    conn: &mut PgConnection,
+    deps: CreatePinDeps<'_>,
+) -> Result<PinResponse, AppError> {
+    create_pin_in_scope(
+        uid,
+        chat_id,
+        PinScope::Thread { thread_root_id },
+        body.message_id,
+        conn,
+        deps,
+    )
+    .await
+}
+
+pub async fn delete_thread_pin(
+    uid: i32,
+    chat_id: i64,
+    thread_root_id: i64,
+    pin_id: i64,
+    conn: &mut PgConnection,
+    deps: DeletePinDeps<'_>,
+) -> Result<(), AppError> {
+    delete_pin_in_scope(
+        uid,
+        chat_id,
+        PinScope::Thread { thread_root_id },
+        pin_id,
+        conn,
+        deps,
+    )
+    .await
+}
+
+async fn list_pins_in_scope(
+    uid: i32,
+    chat_id: i64,
+    scope: PinScope,
+    conn: &mut PgConnection,
+    media: &MediaStore,
+    avatars: &AvatarService,
+) -> Result<ListPinsResponse, AppError> {
+    check_membership(conn, chat_id, uid)?;
+
+    let now = Utc::now();
+    let pins: Vec<PinnedMessage> = pinned_messages::table
+        .filter(pinned_messages::chat_id.eq(chat_id))
+        .filter(scope_filter(scope))
+        .filter(
+            pinned_messages::expires_at
+                .is_null()
+                .or(pinned_messages::expires_at.gt(now)),
+        )
+        .order(pinned_messages::pinned_at.desc())
+        .load(conn)?;
+
+    if pins.is_empty() {
+        return Ok(ListPinsResponse { pins: vec![] });
+    }
+
+    let message_ids: Vec<i64> = pins.iter().map(|p| p.message_id).collect();
+    let msgs: Vec<Message> = messages::table
+        .filter(messages::id.eq_any(&message_ids))
+        .filter(diesel::dsl::sql::<diesel::sql_types::Bool>(
+            crate::services::system_messages::NON_MEMBERSHIP_PREDICATE,
+        ))
+        .filter(messages::deleted_at.is_null())
+        .filter(messages::is_published.eq(true))
+        .load(conn)?;
+
+    let enriched = attach_metadata(conn, msgs, media, avatars, uid).await;
+
+    let mut msg_map: std::collections::HashMap<i64, MessageResponse> =
+        enriched.into_iter().map(|m| (m.id, m)).collect();
+
+    let pin_responses: Vec<PinResponse> = pins
+        .into_iter()
+        .filter_map(|p| {
+            msg_map.remove(&p.message_id).map(|msg| PinResponse {
+                id: p.id,
+                chat_id: p.chat_id,
+                thread_root_id: p.thread_root_id,
+                message: msg,
+                pinned_by: p.pinned_by,
+                pinned_at: p.pinned_at,
+                expires_at: p.expires_at,
+            })
+        })
+        .collect();
+
+    Ok(ListPinsResponse {
+        pins: pin_responses,
+    })
+}
+
+/// Who may pin/unpin: DM participants may manage shared pins themselves;
+/// group chats stay admin-only. DM members are all `Member` (no admin exists),
+/// so this replaces the previous unconditional admin requirement.
+fn require_pin_permission(conn: &mut PgConnection, chat_id: i64, uid: i32) -> Result<(), AppError> {
+    let kind: GroupKind = groups::table
+        .find(chat_id)
+        .select(groups::kind)
+        .first(conn)?;
+    if kind == GroupKind::Dm {
+        check_membership(conn, chat_id, uid)?;
+        crate::services::social::require_chat_writable(conn, chat_id, uid)
+    } else {
+        require_admin_role(conn, chat_id, uid)
+    }
+}
+
+async fn create_pin_in_scope(
+    uid: i32,
+    chat_id: i64,
+    scope: PinScope,
+    message_id: i64,
+    conn: &mut PgConnection,
+    deps: CreatePinDeps<'_>,
+) -> Result<PinResponse, AppError> {
+    require_pin_permission(conn, chat_id, uid)?;
+
+    // Verify message exists in this chat and is not deleted
+    let msg: Message = messages::table
+        .filter(
+            messages::id
+                .eq(message_id)
+                .and(messages::chat_id.eq(chat_id))
+                .and(messages::deleted_at.is_null())
+                .and(messages::is_published.eq(true)),
+        )
+        .first(conn)
+        .optional()?
+        .ok_or(AppError::NotFound("Message not found"))?;
+
+    if msg.system_kind.is_some_and(|kind| kind.is_membership()) {
+        return Err(AppError::BadRequest("Cannot pin membership messages"));
+    }
+    if let PinScope::Thread { thread_root_id } = scope {
+        messages::table
+            .filter(messages::id.eq(thread_root_id))
+            .filter(messages::chat_id.eq(chat_id))
+            .filter(messages::deleted_at.is_null())
+            .select(messages::id)
+            .first::<i64>(conn)
+            .optional()?
+            .ok_or(AppError::NotFound("Thread not found"))?;
+
+        if !message_belongs_to_thread(msg.id, msg.reply_root_id, thread_root_id) {
+            return Err(AppError::BadRequest("Message is not part of this thread"));
+        }
+    }
+
+    // Check pin count for this scope
+    let now = Utc::now();
+    let pin_count: i64 = pinned_messages::table
+        .filter(pinned_messages::chat_id.eq(chat_id))
+        .filter(scope_filter(scope))
+        .filter(
+            pinned_messages::expires_at
+                .is_null()
+                .or(pinned_messages::expires_at.gt(now)),
+        )
+        .count()
+        .get_result(conn)?;
+
+    if pin_count >= MAX_PINS_PER_SCOPE {
+        return Err(AppError::Conflict("Maximum number of pins reached"));
+    }
+
+    let pin_id = ids::next_message_id(deps.id_gen.as_ref())
+        .await
+        .map_err(|e| {
+            tracing::error!("ferroid pin id: {:?}", e);
+            AppError::Internal("ID generation failed")
+        })?;
+
+    let new_pin = NewPinnedMessage {
+        id: pin_id,
+        chat_id,
+        message_id,
+        pinned_by: uid,
+        pinned_at: now,
+        expires_at: None,
+        thread_root_id: scope.thread_root_id(),
+    };
+
+    let pin: PinnedMessage = diesel::insert_into(pinned_messages::table)
+        .values(&new_pin)
+        .returning(PinnedMessage::as_returning())
+        .get_result(conn)
+        .map_err(|e| {
+            if e.to_string().contains("unique") || e.to_string().contains("duplicate") {
+                return AppError::Conflict("Message is already pinned");
+            }
+            tracing::error!("insert pin: {:?}", e);
+            AppError::Internal("Database error")
+        })?;
+
+    let enriched = attach_metadata(conn, vec![msg], deps.media, deps.avatars, uid).await;
+    let msg_response = enriched
+        .into_iter()
+        .next()
+        .ok_or(AppError::Internal("Failed to build message response"))?;
+
+    let pin_response = PinResponse {
+        id: pin.id,
+        chat_id: pin.chat_id,
+        thread_root_id: pin.thread_root_id,
+        message: msg_response,
+        pinned_by: pin.pinned_by,
+        pinned_at: pin.pinned_at,
+        expires_at: pin.expires_at,
+    };
+
+    send_pin_system_message(
+        uid,
+        chat_id,
+        scope,
+        PinAction::Pinned,
+        message_id,
+        conn,
+        SendPreparedMessageDeps {
+            id_gen: deps.id_gen,
+            media: deps.media,
+            avatars: deps.avatars,
+            metrics: deps.metrics,
+        },
+        deps.ws_registry,
+        deps.push_service,
+    )
+    .await;
+
+    // Broadcast pin event to all chat members
+    let member_uids: Vec<i32> = group_membership::table
+        .filter(group_membership::chat_id.eq(chat_id))
+        .select(group_membership::uid)
+        .load(conn)?;
+
+    let event = match scope {
+        PinScope::Chat => ServerWsMessage::PinAdded(PinUpdatePayload {
+            chat_id,
+            pin_id: pin_response.id,
+            message_id: pin_response.message.id,
+            thread_root_id: None,
+            pin: Some(pin_response.clone()),
+        }),
+        PinScope::Thread { thread_root_id } => ServerWsMessage::ThreadPinAdded(PinUpdatePayload {
+            chat_id,
+            pin_id: pin_response.id,
+            message_id: pin_response.message.id,
+            thread_root_id: Some(thread_root_id),
+            pin: Some(pin_response.clone()),
+        }),
+    };
+    let ws_msg = Arc::new(event);
+    deps.ws_registry.broadcast_to_uids(&member_uids, ws_msg);
+
+    Ok(pin_response)
+}
+
+async fn delete_pin_in_scope(
+    uid: i32,
+    chat_id: i64,
+    scope: PinScope,
+    pin_id: i64,
+    conn: &mut PgConnection,
+    deps: DeletePinDeps<'_>,
+) -> Result<(), AppError> {
+    require_pin_permission(conn, chat_id, uid)?;
+
+    let pin: PinnedMessage = pinned_messages::table
+        .filter(
+            pinned_messages::id
+                .eq(pin_id)
+                .and(pinned_messages::chat_id.eq(chat_id)),
+        )
+        .filter(scope_filter(scope))
+        .first(conn)
+        .optional()?
+        .ok_or(AppError::NotFound("Pin not found"))?;
+
+    diesel::delete(pinned_messages::table.filter(pinned_messages::id.eq(pin_id))).execute(conn)?;
+
+    send_pin_system_message(
+        uid,
+        chat_id,
+        scope,
+        PinAction::Unpinned,
+        pin.message_id,
+        conn,
+        SendPreparedMessageDeps {
+            id_gen: deps.id_gen,
+            media: deps.media,
+            avatars: deps.avatars,
+            metrics: deps.metrics,
+        },
+        deps.ws_registry,
+        deps.push_service,
+    )
+    .await;
+
+    // Broadcast pin removal
+    let member_uids: Vec<i32> = group_membership::table
+        .filter(group_membership::chat_id.eq(chat_id))
+        .select(group_membership::uid)
+        .load(conn)?;
+
+    let event = match scope {
+        PinScope::Chat => ServerWsMessage::PinRemoved(PinUpdatePayload {
+            chat_id,
+            pin_id: pin.id,
+            message_id: pin.message_id,
+            thread_root_id: None,
+            pin: None,
+        }),
+        PinScope::Thread { thread_root_id } => {
+            ServerWsMessage::ThreadPinRemoved(PinUpdatePayload {
+                chat_id,
+                pin_id: pin.id,
+                message_id: pin.message_id,
+                thread_root_id: Some(thread_root_id),
+                pin: None,
+            })
+        }
+    };
+    let ws_msg = Arc::new(event);
+    deps.ws_registry.broadcast_to_uids(&member_uids, ws_msg);
+
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PinAction {
+    Pinned,
+    Unpinned,
+}
+
+/// Best-effort system message announcing the pin change. Thread pins announce
+/// inside the thread so the change is visible in the thread transcript.
+async fn send_pin_system_message(
+    uid: i32,
+    chat_id: i64,
+    scope: PinScope,
+    action: PinAction,
+    message_id: i64,
+    conn: &mut PgConnection,
+    send_message_deps: SendPreparedMessageDeps<'_>,
+    ws_registry: &Arc<ConnectionRegistry>,
+    push_service: &Arc<PushService>,
+) {
+    let (system_kind, text) = match (scope, action) {
+        (PinScope::Chat, PinAction::Pinned) => {
+            (SystemMessageKind::MessagePinned, "pinned a message")
+        }
+        (PinScope::Chat, PinAction::Unpinned) => {
+            (SystemMessageKind::MessageUnpinned, "unpinned a message")
+        }
+        (PinScope::Thread { .. }, PinAction::Pinned) => (
+            SystemMessageKind::ThreadMessagePinned,
+            "pinned a message in this thread",
+        ),
+        (PinScope::Thread { .. }, PinAction::Unpinned) => (
+            SystemMessageKind::ThreadMessageUnpinned,
+            "unpinned a message in this thread",
+        ),
+    };
+    let thread_root_id = scope.thread_root_id();
+
+    if let Ok(SendMessageOutcome::Created(send_result)) =
+        crate::services::messages::send_prepared_message(
+            conn,
+            send_message_deps,
+            PreparedMessageSend {
+                system_kind: Some(system_kind),
+                forwarded_from_message_id: None,
+                chat_id,
+                sender_uid: uid,
+                message: Some(crate::services::system_messages::with_message(
+                    text, message_id,
+                )),
+                message_type: MessageType::System,
+                sticker_id: None,
+                reply_to_id: thread_root_id,
+                reply_root_id: thread_root_id,
+                client_generated_id: Uuid::new_v4().to_string(),
+                attachment_ids: vec![],
+                publish_immediately: true,
+                forwarded_bundle_id: None,
+                forwarded_preview_total: None,
+                forwarded_preview_contains_forwarded_messages: None,
+                forwarded_preview_items: None,
+            },
+        )
+        .await
+    {
+        let send_result = *send_result;
+        send_result.side_effects.fire(ws_registry, push_service);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{message_belongs_to_thread, PinScope};
+
+    #[test]
+    fn chat_scope_has_no_thread_root() {
+        assert_eq!(PinScope::Chat.thread_root_id(), None);
+        assert_eq!(
+            PinScope::Thread { thread_root_id: 7 }.thread_root_id(),
+            Some(7)
+        );
+    }
+
+    #[test]
+    fn thread_root_itself_belongs_to_its_thread() {
+        assert!(message_belongs_to_thread(7, None, 7));
+    }
+
+    #[test]
+    fn thread_reply_belongs_to_its_thread() {
+        assert!(message_belongs_to_thread(9, Some(7), 7));
+    }
+
+    #[test]
+    fn reply_in_another_thread_does_not_belong() {
+        assert!(!message_belongs_to_thread(9, Some(8), 7));
+    }
+
+    #[test]
+    fn unrelated_top_level_message_does_not_belong() {
+        assert!(!message_belongs_to_thread(9, None, 7));
+    }
+}

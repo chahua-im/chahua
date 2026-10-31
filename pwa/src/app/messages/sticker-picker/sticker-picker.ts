@@ -25,7 +25,7 @@ import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { addOutline, cloudUploadOutline, cubeOutline, heart } from 'ionicons/icons';
 import { firstValueFrom, type Observable } from 'rxjs';
 import { CHAHUA_BASE_URL } from '../../../generated/endpoints/chahua.base-url';
-import { StickersService } from '../../../generated/endpoints/stickers/stickers.service';
+import { RpcApi } from '../../../generated/rpc-api';
 import type {
   SnowflakeID,
   StickerPackDetailResponse,
@@ -93,7 +93,7 @@ export class StickerPicker {
   protected readonly modals = inject(ModalController);
   protected readonly panels = inject(PanelNavigation);
   private readonly router = inject(Router);
-  private readonly api = inject(StickersService);
+  private readonly api = inject(RpcApi);
   protected readonly packs = signal<StickerPackSummary[]>([]);
   private readonly content = signal<StickerContent>({ stickers: [] });
   protected readonly pack = computed(() => {
@@ -106,6 +106,7 @@ export class StickerPicker {
     () => this.stickers().find((sticker) => sticker.id === this.chosenId()) ?? this.stickers().at(0),
   );
   protected readonly busy = signal(false);
+  private retryPackId?: SnowflakeID;
   protected readonly error = signal(false);
   constructor() {
     inject(DestroyRef).onDestroy(() => this.cancelHold());
@@ -133,8 +134,8 @@ export class StickerPicker {
     this.busy.set(true);
     this.error.set(false);
     try {
-      const pack = await firstValueFrom(this.api.postPack({ name }));
-      this.content.set(pack);
+      const pack = await firstValueFrom(this.api.stickers.createPack({ name }));
+      this.content.set({ ...pack, stickers: [] });
       this.packs.update((packs) => [...packs, pack]);
       this.preferences.upsertPackOrderItem({ stickerPackId: pack.id, lastUsedOn: Date.now() });
     } catch {
@@ -198,9 +199,9 @@ export class StickerPicker {
     this.error.set(false);
     try {
       const [favorites, subscribed, owned] = await Promise.all([
-        firstValueFrom(this.api.getMyFavorites()),
-        firstValueFrom(this.api.getMySubscribedPacks()),
-        firstValueFrom(this.api.getMyOwnedPacks()),
+        firstValueFrom(this.api.stickers.listFavorites()),
+        firstValueFrom(this.api.stickers.listSubscribedPacks()),
+        firstValueFrom(this.api.stickers.listOwnedPacks()),
       ]);
       const merged = [...new Map([...subscribed.packs, ...owned.packs].map((pack) => [pack.id, pack])).values()];
       this.content.set({
@@ -220,10 +221,11 @@ export class StickerPicker {
   }
 
   private async openPack(id: SnowflakeID) {
+    this.retryPackId = id;
     this.busy.set(true);
     this.error.set(false);
     try {
-      const pack = await firstValueFrom(this.api.getPack(id));
+      const pack = await firstValueFrom(this.api.stickers.getPack({ packId: id }));
       this.content.set(pack);
     } catch {
       this.error.set(true);
@@ -232,12 +234,16 @@ export class StickerPicker {
     }
   }
   private async openSticker(id: SnowflakeID) {
+    this.retryPackId = undefined;
     this.busy.set(true);
     this.error.set(false);
     try {
-      const sticker = await firstValueFrom(this.api.getSticker(id));
+      const sticker = await firstValueFrom(this.api.stickers.get({ stickerId: id }));
       const pack = sticker.packs[0];
-      this.content.set(pack ? await firstValueFrom(this.api.getPack(pack.id)) : { stickers: [sticker] });
+      this.retryPackId = pack?.id;
+      this.content.set(
+        pack ? await firstValueFrom(this.api.stickers.getPack({ packId: pack.id })) : { stickers: [sticker] },
+      );
       this.packs.set(sticker.packs);
     } catch {
       this.error.set(true);
@@ -246,7 +252,7 @@ export class StickerPicker {
     }
   }
   protected retry() {
-    const pack = this.pack()?.id ?? this.packId();
+    const pack = this.pack()?.id ?? this.packId() ?? this.retryPackId;
     const sticker = this.stickerId();
     return pack ? this.openPack(pack) : sticker ? this.openSticker(sticker) : this.load();
   }
@@ -258,7 +264,9 @@ export class StickerPicker {
           item.id === sticker.id ? { ...item, isFavorited: !sticker.isFavorited } : item,
         ),
       },
-      sticker.isFavorited ? this.api.deleteFavorite(sticker.id) : this.api.putFavorite(sticker.id),
+      sticker.isFavorited
+        ? this.api.stickers.unfavorite({ stickerId: sticker.id })
+        : this.api.stickers.favorite({ stickerId: sticker.id }),
     );
   }
   protected subscribe() {
@@ -266,10 +274,12 @@ export class StickerPicker {
     if (!pack) return;
     return this.updateContent(
       { ...pack, isSubscribed: !pack.isSubscribed },
-      pack.isSubscribed ? this.api.deleteSubscription(pack.id) : this.api.putSubscription(pack.id),
+      pack.isSubscribed
+        ? this.api.stickers.unsubscribeFromPack({ packId: pack.id })
+        : this.api.stickers.subscribeToPack({ packId: pack.id }),
     );
   }
-  private async updateContent(optimistic: StickerContent, request: Observable<void>) {
+  private async updateContent(optimistic: StickerContent, request: Observable<unknown>) {
     if (this.busy()) return;
     this.busy.set(true);
     this.error.set(false);

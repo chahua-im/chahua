@@ -68,7 +68,6 @@ export const jsonSchemas: Record<string, JsonCodec> = {
   },
   CreateInviteBody: {
     chatId: 1,
-    requiredChatId: 1,
   },
   CreateMessageBody: {
     attachmentIds: [1],
@@ -77,6 +76,9 @@ export const jsonSchemas: Record<string, JsonCodec> = {
   },
   CreatePinBody: {
     messageId: 1,
+  },
+  CreateServiceTokenResponse: {
+    serviceToken: 'ServiceTokenResponse',
   },
   ExternalCreateInviteRequest: {
     chatId: 1,
@@ -129,9 +131,6 @@ export const jsonSchemas: Record<string, JsonCodec> = {
     originalMessageId: 1,
     preview: 'ForwardedMessagePreviewResponse',
   },
-  FriendRelationshipResponse: {
-    dmChatId: 1,
-  },
   FriendRequestHistoryEntry: {
     id: 1,
   },
@@ -142,7 +141,6 @@ export const jsonSchemas: Record<string, JsonCodec> = {
     id: 1,
   },
   GroupInfoResponse: {
-    avatarImageId: 1,
     id: 1,
   },
   GroupPresenceResponse: {
@@ -161,7 +159,6 @@ export const jsonSchemas: Record<string, JsonCodec> = {
   InviteResponse: {
     chatId: 1,
     id: 1,
-    requiredChatId: 1,
   },
   ListChatAttachmentsResponse: {
     attachments: ['ChatAttachmentResponse'],
@@ -200,13 +197,13 @@ export const jsonSchemas: Record<string, JsonCodec> = {
     nextCursor: 1,
     savedMessages: ['SavedMessageResponse'],
   },
+  ListServiceTokensResponse: {
+    serviceTokens: ['ServiceTokenResponse'],
+  },
   ListThreadsResponse: {
     threads: ['ThreadListItem'],
   },
   MarkAsReadBody: {
-    messageId: 1,
-  },
-  MarkAsUnreadBody: {
     messageId: 1,
   },
   MarkChatReadStateResponse: {
@@ -305,6 +302,9 @@ export const jsonSchemas: Record<string, JsonCodec> = {
     dmChatId: 1,
     pendingRequest: 'RelationshipPendingRequest',
   },
+  RotateServiceTokenResponse: {
+    serviceToken: 'ServiceTokenResponse',
+  },
   SavedAttachmentSnapshot: {
     id: 1,
   },
@@ -330,12 +330,14 @@ export const jsonSchemas: Record<string, JsonCodec> = {
   },
   SendInviteMessageBody: {
     destinationChatId: 1,
-    inviteId: 1,
     sourceChatId: 1,
   },
   SendInviteMessageResponse: {
     invite: 'InviteResponse',
     message: 'MessageResponse',
+  },
+  ServiceTokenResponse: {
+    id: 1,
   },
   StickerDetailResponse: {
     id: 1,
@@ -346,6 +348,14 @@ export const jsonSchemas: Record<string, JsonCodec> = {
     id: 1,
     previewSticker: 'StickerPackPreviewSticker',
     stickers: ['StickerSummary'],
+  },
+  StickerPackDiscoveryItem: {
+    id: 1,
+    previewSticker: 'StickerPackPreviewSticker',
+    previewStickers: ['StickerPackPreviewSticker'],
+  },
+  StickerPackDiscoveryResponse: {
+    packs: ['StickerPackDiscoveryItem'],
   },
   StickerPackListResponse: {
     packs: ['StickerPackSummary'],
@@ -398,9 +408,6 @@ export const jsonSchemas: Record<string, JsonCodec> = {
   UnreadReactionIdsResponse: {
     messageIds: [1],
   },
-  UpdateChatBody: {
-    avatarImageId: 1,
-  },
   UpdateMessageBody: {
     attachmentIds: [1],
   },
@@ -416,9 +423,36 @@ export const jsonSchemas: Record<string, JsonCodec> = {
 };
 export const jsonOperations: JsonOperationCodec[] = [
   {
+    method: 'GET',
+    path: '/attachments/config',
+    response: 'AttachmentConfigResponse',
+  },
+  {
     method: 'POST',
     path: '/attachments/upload-url',
+    body: 'UploadUrlRequest',
     response: 'UploadUrlResponse',
+  },
+  {
+    method: 'POST',
+    path: '/auth/dev-session',
+    body: 'DevSessionRequest',
+    response: 'AuthTokenResponse',
+  },
+  {
+    method: 'POST',
+    path: '/auth/refresh',
+    response: 'AuthTokenResponse',
+  },
+  {
+    method: 'GET',
+    path: '/blocks',
+    response: 'ListBlocksResponse',
+  },
+  {
+    method: 'POST',
+    path: '/blocks',
+    body: 'BlockRequestBody',
   },
   {
     method: 'GET',
@@ -428,6 +462,11 @@ export const jsonOperations: JsonOperationCodec[] = [
       chatId: 1,
       after: 1,
     },
+  },
+  {
+    method: 'GET',
+    path: '/chats/unread',
+    response: 'UnreadCountResponse',
   },
   {
     method: 'GET',
@@ -509,6 +548,11 @@ export const jsonOperations: JsonOperationCodec[] = [
   },
   {
     method: 'GET',
+    path: '/chats/{chat_id}/messages/{message_id}/reactions',
+    response: 'ReactionDetailResponse',
+  },
+  {
+    method: 'GET',
     path: '/chats/{chat_id}/pins',
     response: 'ListPinsResponse',
   },
@@ -530,6 +574,7 @@ export const jsonOperations: JsonOperationCodec[] = [
     method: 'POST',
     path: '/chats/{chat_id}/reactions/read',
     body: 'AcknowledgeReactionsBody',
+    response: 'UnreadReactionsAckResponse',
   },
   {
     method: 'POST',
@@ -569,6 +614,11 @@ export const jsonOperations: JsonOperationCodec[] = [
   },
   {
     method: 'GET',
+    path: '/chats/{chat_id}/threads/{thread_root_id}/participants',
+    response: 'ListThreadParticipantsResponse',
+  },
+  {
+    method: 'GET',
     path: '/chats/{chat_id}/threads/{thread_root_id}/pins',
     response: 'ListPinsResponse',
   },
@@ -591,6 +641,11 @@ export const jsonOperations: JsonOperationCodec[] = [
   },
   {
     method: 'GET',
+    path: '/chats/{chat_id}/threads/{thread_root_id}/subscribe',
+    response: 'ThreadSubscriptionStatusResponse',
+  },
+  {
+    method: 'GET',
     path: '/chats/{chat_id}/unread',
     response: 'MarkChatReadStateResponse',
   },
@@ -607,9 +662,41 @@ export const jsonOperations: JsonOperationCodec[] = [
     response: 'ExternalCreateInviteResponse',
   },
   {
+    method: 'GET',
+    path: '/external/sessions/{uid}',
+    response: 'SessionGenerationResponse',
+  },
+  {
+    method: 'POST',
+    path: '/external/sessions/{uid}/revoke',
+    response: 'SessionGenerationResponse',
+  },
+  {
     method: 'POST',
     path: '/external/social/relationships',
+    body: 'RelationshipQueryRequest',
     response: 'RelationshipQueryResponse',
+  },
+  {
+    method: 'GET',
+    path: '/friends',
+    response: 'ListFriendsResponse',
+  },
+  {
+    method: 'GET',
+    path: '/friends/add-info/{uid}',
+    response: 'FriendAddInfoResponse',
+  },
+  {
+    method: 'GET',
+    path: '/friends/me/settings',
+    response: 'FriendSettingsResponse',
+  },
+  {
+    method: 'PUT',
+    path: '/friends/me/settings',
+    body: 'UpdateFriendSettingsBody',
+    response: 'FriendSettingsResponse',
   },
   {
     method: 'GET',
@@ -619,7 +706,13 @@ export const jsonOperations: JsonOperationCodec[] = [
   {
     method: 'POST',
     path: '/friends/requests',
+    body: 'CreateFriendRequestBody',
     response: 'FriendRequestResponse',
+  },
+  {
+    method: 'GET',
+    path: '/friends/requests/pending/count',
+    response: 'PendingFriendRequestCountResponse',
   },
   {
     method: 'POST',
@@ -638,6 +731,28 @@ export const jsonOperations: JsonOperationCodec[] = [
   },
   {
     method: 'GET',
+    path: '/friends/{uid}/presence-settings',
+    response: 'FriendPresenceSettingsResponse',
+  },
+  {
+    method: 'PUT',
+    path: '/friends/{uid}/presence-settings',
+    body: 'UpdateFriendPresenceSettingsBody',
+    response: 'FriendPresenceSettingsResponse',
+  },
+  {
+    method: 'GET',
+    path: '/friends/{uid}/read-receipt-settings',
+    response: 'FriendReadReceiptSettingsResponse',
+  },
+  {
+    method: 'PUT',
+    path: '/friends/{uid}/read-receipt-settings',
+    body: 'UpdateFriendReadReceiptSettingsBody',
+    response: 'FriendReadReceiptSettingsResponse',
+  },
+  {
+    method: 'GET',
     path: '/group',
     response: 'ListGroupsResponse',
     query: {
@@ -647,6 +762,7 @@ export const jsonOperations: JsonOperationCodec[] = [
   {
     method: 'POST',
     path: '/group',
+    body: 'CreateChatBody',
     response: 'CreateChatResponse',
   },
   {
@@ -663,21 +779,48 @@ export const jsonOperations: JsonOperationCodec[] = [
   {
     method: 'POST',
     path: '/group/{chat_id}/avatar/upload-url',
+    body: 'AvatarUploadUrlRequest',
     response: 'AvatarUploadUrlResponse',
+  },
+  {
+    method: 'GET',
+    path: '/group/{chat_id}/members',
+    response: 'ListMembersResponse',
+  },
+  {
+    method: 'POST',
+    path: '/group/{chat_id}/members',
+    body: 'AddMemberBody',
+    response: 'MemberResponse',
+  },
+  {
+    method: 'PATCH',
+    path: '/group/{chat_id}/members/{uid}',
+    body: 'UpdateMemberBody',
+    response: 'MemberResponse',
   },
   {
     method: 'PUT',
     path: '/group/{chat_id}/members/{uid}/speaking-mode',
+    body: 'UpdateSpeakingModeRequest',
     response: 'MemberSpeakingModeResponse',
   },
   {
     method: 'PUT',
+    path: '/group/{chat_id}/mute',
+    body: 'MuteBody',
+    response: 'MuteResponse',
+  },
+  {
+    method: 'PUT',
     path: '/group/{chat_id}/notification-setting',
+    body: 'UpdateNotificationSettingRequest',
     response: 'ChatNotificationSettingResponse',
   },
   {
     method: 'PUT',
     path: '/group/{chat_id}/speaking-mode',
+    body: 'UpdateSpeakingModeRequest',
     response: 'GroupSpeakingModeResponse',
   },
   {
@@ -707,11 +850,13 @@ export const jsonOperations: JsonOperationCodec[] = [
   {
     method: 'PATCH',
     path: '/invites/invite/{invite_id}',
+    body: 'PatchInviteBody',
     response: 'InviteResponse',
   },
   {
     method: 'POST',
     path: '/invites/redeem',
+    body: 'RedeemInviteBody',
     response: 'RedeemInviteResponse',
   },
   {
@@ -719,6 +864,53 @@ export const jsonOperations: JsonOperationCodec[] = [
     path: '/invites/send',
     body: 'SendInviteMessageBody',
     response: 'SendInviteMessageResponse',
+  },
+  {
+    method: 'GET',
+    path: '/me/presence-settings',
+    response: 'PresenceSettingsResponse',
+  },
+  {
+    method: 'PUT',
+    path: '/me/presence-settings',
+    body: 'UpdatePresenceSettingsBody',
+    response: 'PresenceSettingsResponse',
+  },
+  {
+    method: 'GET',
+    path: '/me/privacy-exceptions',
+    response: 'PrivacyExceptionsResponse',
+  },
+  {
+    method: 'GET',
+    path: '/me/read-receipt-settings',
+    response: 'ReadReceiptSettingsResponse',
+  },
+  {
+    method: 'PUT',
+    path: '/me/read-receipt-settings',
+    body: 'UpdateReadReceiptSettingsBody',
+    response: 'ReadReceiptSettingsResponse',
+  },
+  {
+    method: 'POST',
+    path: '/push/subscribe',
+    body: 'SubscribeBody',
+  },
+  {
+    method: 'GET',
+    path: '/push/subscription-status',
+    response: 'SubscriptionStatusResponse',
+  },
+  {
+    method: 'POST',
+    path: '/push/unsubscribe',
+    body: 'UnsubscribeBody',
+  },
+  {
+    method: 'GET',
+    path: '/push/vapid-public-key',
+    response: 'VapidPublicKeyResponse',
   },
   {
     method: 'GET',
@@ -745,13 +937,35 @@ export const jsonOperations: JsonOperationCodec[] = [
   },
   {
     method: 'GET',
+    path: '/service-tokens',
+    response: 'ListServiceTokensResponse',
+  },
+  {
+    method: 'POST',
+    path: '/service-tokens',
+    body: 'CreateServiceTokenRequest',
+    response: 'CreateServiceTokenResponse',
+  },
+  {
+    method: 'POST',
+    path: '/service-tokens/{id}/rotate',
+    response: 'RotateServiceTokenResponse',
+  },
+  {
+    method: 'GET',
     path: '/stickers/mine/favorites',
     response: 'FavoriteStickerListResponse',
   },
   {
+    method: 'GET',
+    path: '/stickers/packs',
+    response: 'StickerPackDiscoveryResponse',
+  },
+  {
     method: 'POST',
     path: '/stickers/packs',
-    response: 'StickerPackDetailResponse',
+    body: 'CreateStickerPackBody',
+    response: 'StickerPackSummary',
   },
   {
     method: 'GET',
@@ -771,7 +985,8 @@ export const jsonOperations: JsonOperationCodec[] = [
   {
     method: 'PATCH',
     path: '/stickers/packs/{pack_id}',
-    response: 'StickerPackDetailResponse',
+    body: 'UpdateStickerPackBody',
+    response: 'StickerPackSummary',
   },
   {
     method: 'POST',
@@ -792,6 +1007,11 @@ export const jsonOperations: JsonOperationCodec[] = [
     },
   },
   {
+    method: 'GET',
+    path: '/threads/unread',
+    response: 'UnreadThreadCountResponse',
+  },
+  {
     method: 'POST',
     path: '/threads/{thread_root_id}/read',
     body: 'MarkThreadReadBody',
@@ -804,8 +1024,19 @@ export const jsonOperations: JsonOperationCodec[] = [
   },
   {
     method: 'GET',
+    path: '/users/auth-token',
+    response: 'AuthTokenResponse',
+  },
+  {
+    method: 'GET',
     path: '/users/me',
     response: 'MeResponse',
+  },
+  {
+    method: 'PUT',
+    path: '/users/me/chat-settings',
+    body: 'UpdateChatSettings',
+    response: 'ChatSettings',
   },
   {
     method: 'GET',
@@ -821,6 +1052,17 @@ export const jsonOperations: JsonOperationCodec[] = [
     response: 'NotificationExceptionsCleared',
   },
   {
+    method: 'GET',
+    path: '/users/me/notification-settings',
+    response: 'NotificationSettingsResponse',
+  },
+  {
+    method: 'PATCH',
+    path: '/users/me/notification-settings',
+    body: 'UpdateNotificationSettingsRequest',
+    response: 'NotificationSettingsResponse',
+  },
+  {
     method: 'PUT',
     path: '/users/me/stickerpack-order',
     body: 'UpdateStickerPackOrderRequest',
@@ -828,9 +1070,20 @@ export const jsonOperations: JsonOperationCodec[] = [
   {
     method: 'GET',
     path: '/users/search',
+    response: 'SearchUsersResponse',
     query: {
       excludeMemberOf: 1,
     },
+  },
+  {
+    method: 'GET',
+    path: '/ws/clients',
+    response: ['OnlineClientConnectionResponse'],
+  },
+  {
+    method: 'GET',
+    path: '/ws/ticket',
+    response: 'TicketResponse',
   },
 ];
 export const wsPayloadCodecs: Record<string, JsonCodec> = {
@@ -841,17 +1094,17 @@ export const wsPayloadCodecs: Record<string, JsonCodec> = {
   messageDeleted: 'MessageResponse',
   messagesBulkDeleted: 'BulkDeletedPayload',
   reactionUpdated: 'ReactionUpdatePayload',
-  presenceUpdate: 0,
+  presenceUpdate: 'PresenceUpdatePayload',
   presenceSnapshot: 'PresenceSnapshotPayload',
-  conversationUnread: 0,
+  conversationUnread: 'ConversationUnreadPayload',
   conversationStates: 'ConversationStatesPayload',
-  conversationStatesError: 0,
-  conversationUnreadError: 0,
+  conversationStatesError: 'ConversationUnreadErrorPayload',
+  conversationUnreadError: 'ConversationUnreadErrorPayload',
   threadUpdate: 'ThreadUpdatePayload',
   threadMembershipChanged: 'ThreadMembershipChangedPayload',
   chatArchiveStateChanged: 'ChatArchiveStateChangedPayload',
   notificationExceptionsCleared: 'NotificationExceptionsCleared',
-  notificationSettingsChanged: 0,
+  notificationSettingsChanged: 'NotificationSettingsResponse',
   chatNotificationSettingChanged: 'ChatNotificationSettingResponse',
   groupSpeakingModeChanged: 'GroupSpeakingModeResponse',
   memberSpeakingModeChanged: 'MemberSpeakingModeResponse',
@@ -861,8 +1114,8 @@ export const wsPayloadCodecs: Record<string, JsonCodec> = {
   pinRemoved: 'PinUpdatePayload',
   threadPinRemoved: 'PinUpdatePayload',
   stickerPackOrderUpdated: 'StickerPackOrderUpdatePayload',
-  friendRequestReceived: 0,
+  friendRequestReceived: 'FriendRequestReceivedPayload',
   friendRequestResolved: 'FriendRequestResolvedPayload',
-  friendshipRemoved: 0,
+  friendshipRemoved: 'FriendshipRemovedPayload',
   notification: 'NotificationPayload',
 };

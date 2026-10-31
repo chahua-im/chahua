@@ -10,7 +10,10 @@ use std::time::{Duration, Instant};
 
 use axum::{
     extract::State,
-    http::{HeaderMap, Request, StatusCode},
+    http::{
+        header::{CONNECTION, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_VERSION, UPGRADE},
+        HeaderMap, Method, Request,
+    },
     middleware::Next,
     response::{IntoResponse, Response},
 };
@@ -21,6 +24,7 @@ use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::PgConnection;
 use tracing::{error, info, warn};
 
+use crate::errors::AppError;
 use crate::models::{
     ActivityDailyMetric, ClientRecord, NewActivityDailyMetric, NewClientRecord, NewUserExtra,
 };
@@ -34,7 +38,6 @@ const PURGE_RESTART_DELAY: Duration = Duration::from_secs(1);
 const PURGE_BATCH_SIZE: i64 = 500;
 const STALE_CLIENT_RETENTION_DAYS: u64 = 45;
 const WS_UPGRADE_PATHS: [&str; 2] = ["/ws", "/ws/"];
-
 #[derive(Clone)]
 struct CachedActivity {
     last_written_at: Instant,
@@ -140,12 +143,16 @@ impl ClientTrackingService {
         service
     }
 
+    /// Records semantic client activity for an already authenticated identity.
+    ///
+    /// HTTP adapters retain their response mapping; non-HTTP transports map the same
+    /// error through their own protocol without inheriting HTTP status tuples.
     pub fn record_activity(
         &self,
         uid: i32,
         client_id: &str,
         app_version: Option<&str>,
-    ) -> Result<(), (StatusCode, &'static str)> {
+    ) -> Result<(), AppError> {
         self.last_seen.record(uid, Utc::now().naive_utc());
         self.record_client_activity(uid, client_id, app_version)
     }
@@ -155,7 +162,7 @@ impl ClientTrackingService {
         uid: i32,
         client_id: &str,
         app_version: Option<&str>,
-    ) -> Result<(), (StatusCode, &'static str)> {
+    ) -> Result<(), AppError> {
         let now = Utc::now().naive_utc();
         let today = now.date();
         if let Some(entry) = self.recent_writes.get(client_id) {
@@ -174,10 +181,7 @@ impl ClientTrackingService {
         let conn = &mut self.db.get().map_err(|e| {
             error!("client tracking: failed to get DB connection: {:?}", e);
             self.metrics.record_activity_write("error");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Database connection failed",
-            )
+            AppError::Internal("Database connection failed")
         })?;
 
         let (recorded_app_version, today_metrics, recorded_rebind) = conn
@@ -280,10 +284,7 @@ impl ClientTrackingService {
                 error!("client tracking: failed to record activity: {:?}", e);
                 self.metrics.record_activity_write("error");
                 self.metrics.record_daily_rollup_update("error");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to record client activity",
-                )
+                AppError::Internal("Failed to record client activity")
             })?;
 
         self.metrics.record_activity_write("success");
@@ -311,17 +312,14 @@ impl ClientTrackingService {
     pub fn last_app_versions(
         &self,
         client_ids: &[String],
-    ) -> Result<HashMap<String, Option<String>>, (StatusCode, &'static str)> {
+    ) -> Result<HashMap<String, Option<String>>, crate::errors::AppError> {
         if client_ids.is_empty() {
             return Ok(HashMap::new());
         }
 
         let conn = &mut self.db.get().map_err(|e| {
             error!("client tracking: failed to get DB connection: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Database connection failed",
-            )
+            crate::errors::AppError::Internal("Database connection failed")
         })?;
 
         clients::table
@@ -334,10 +332,7 @@ impl ClientTrackingService {
                     "client tracking: failed to load client app versions: {:?}",
                     e
                 );
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to load client app versions",
-                )
+                crate::errors::AppError::Internal("Failed to load client app versions")
             })
     }
 
@@ -587,6 +582,28 @@ pub async fn run_last_seen_worker(
     }
 }
 
+/// Preserves the legacy best-effort header behavior: absent or malformed
+/// credentials do not reject an HTTP request or a just-upgraded legacy socket.
+/// A persistence failure remains observable to the adapter because it was
+/// previously an HTTP response failure before the middleware was deferred.
+pub(crate) fn record_header_activity(
+    state: &crate::AppState,
+    headers: &HeaderMap,
+) -> Result<(), AppError> {
+    if !should_record_client_activity(headers) {
+        return Ok(());
+    }
+
+    let Ok(auth) = extract_auth_context(headers, state) else {
+        return Ok(());
+    };
+    state.client_tracking.record_activity(
+        auth.uid,
+        &auth.client_id,
+        app_version_from_headers(headers).as_deref(),
+    )
+}
+
 pub async fn track_client_activity(
     State(state): State<crate::AppState>,
     request: Request<axum::body::Body>,
@@ -596,17 +613,18 @@ pub async fn track_client_activity(
     let app_version = app_version_from_headers(request.headers());
 
     let mut resolved_client_id: Option<String> = None;
-
-    if should_record_client_activity(request.headers()) {
+    if !is_websocket_upgrade_request(request.method(), request.uri().path(), request.headers())
+        && should_record_client_activity(request.headers())
+    {
         if let Ok(auth) = extract_auth_context(request.headers(), &state) {
             let client_id = auth.client_id;
             resolved_client_id = Some(client_id.clone());
-            if let Err((status, message)) =
+            if let Err(error) =
                 state
                     .client_tracking
                     .record_activity(auth.uid, &client_id, app_version.as_deref())
             {
-                return (status, message).into_response();
+                return error.into_response();
             }
         }
     }
@@ -627,6 +645,32 @@ pub(crate) fn should_record_client_activity(headers: &HeaderMap) -> bool {
         && bearer_token(headers).is_ok_and(|token| {
             !token.is_some_and(|token| token.starts_with(service_tokens::TOKEN_PREFIX))
         })
+}
+
+/// Matches the WebSocket extractor's HTTP-upgrade shape so ordinary `/ws`
+/// requests, including ticket and client endpoints, retain middleware auth.
+pub(crate) fn is_websocket_upgrade_request(
+    method: &Method,
+    path: &str,
+    headers: &HeaderMap,
+) -> bool {
+    method == Method::GET
+        && WS_UPGRADE_PATHS.contains(&path)
+        && headers
+            .get(UPGRADE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.eq_ignore_ascii_case("websocket"))
+        && headers
+            .get_all(CONNECTION)
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .any(|value| {
+                value
+                    .split(',')
+                    .any(|item| item.trim().eq_ignore_ascii_case("upgrade"))
+            })
+        && headers.contains_key(SEC_WEBSOCKET_KEY)
+        && headers.contains_key(SEC_WEBSOCKET_VERSION)
 }
 
 fn app_version_from_headers(headers: &HeaderMap) -> Option<String> {
@@ -731,7 +775,8 @@ mod tests {
         use axum::http::{header::AUTHORIZATION, HeaderValue};
 
         let mut headers = HeaderMap::new();
-        // WebSockets authenticate their session in the first frame, not the upgrade headers.
+        // Header eligibility remains shared by HTTP and the deferred legacy
+        // WebSocket path; RPC never uses it after first-frame selection.
         assert!(should_record_client_activity(&headers));
         headers.insert(
             AUTHORIZATION,
@@ -750,6 +795,37 @@ mod tests {
             HeaderValue::from_static("Bearer user-session"),
         );
         assert!(!should_record_client_activity(&headers));
+    }
+
+    #[test]
+    fn only_real_websocket_upgrades_defer_header_authentication_and_activity() {
+        use axum::http::{HeaderValue, Method};
+
+        let mut headers = HeaderMap::new();
+        assert!(!is_websocket_upgrade_request(&Method::GET, "/ws", &headers));
+        headers.insert(UPGRADE, HeaderValue::from_static("websocket"));
+        headers.insert(CONNECTION, HeaderValue::from_static("keep-alive, Upgrade"));
+        assert!(!is_websocket_upgrade_request(&Method::GET, "/ws", &headers));
+        headers.insert(SEC_WEBSOCKET_KEY, HeaderValue::from_static("test-key"));
+        headers.insert(SEC_WEBSOCKET_VERSION, HeaderValue::from_static("13"));
+
+        assert!(is_websocket_upgrade_request(&Method::GET, "/ws", &headers));
+        assert!(is_websocket_upgrade_request(&Method::GET, "/ws/", &headers));
+        assert!(!is_websocket_upgrade_request(
+            &Method::POST,
+            "/ws",
+            &headers
+        ));
+        assert!(!is_websocket_upgrade_request(
+            &Method::GET,
+            "/ws/ticket",
+            &headers
+        ));
+        assert!(!is_websocket_upgrade_request(
+            &Method::GET,
+            "/ws/clients",
+            &headers
+        ));
     }
 
     #[test]

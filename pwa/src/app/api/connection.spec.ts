@@ -1,78 +1,48 @@
-import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
-import { SessionStore } from '../session/session-store';
-import { Connection } from './connection';
-import { encodeId } from './snowflake-id';
-import { testChat, testMessage, testUser, wireChat, wireMessage } from './testing';
-
-class TestSocket {
-  static readonly OPEN = 1;
-  static instances: TestSocket[] = [];
-  readyState = 0;
-  onopen: (() => void) | null = null;
-  onclose: (() => void) | null = null;
-  onmessage: ((event: MessageEvent<string>) => void) | null = null;
-  send = vi.fn();
-  close = vi.fn(() => {
-    this.readyState = 3;
-    this.onclose?.();
-  });
-  constructor(readonly url: URL) {
-    TestSocket.instances.push(this);
-  }
-  open() {
-    this.readyState = 1;
-    this.onopen?.();
-  }
-  receive(message: unknown) {
-    this.onmessage?.({ data: JSON.stringify(message) } as MessageEvent<string>);
-  }
-}
+import { ServerWsMessageType } from '../../generated/models';
+import { RpcTestPeer, provideRpcTesting } from './rpc-testing';
+import { Connection, ResyncReason } from './connection';
+import { testChat, testMessage, wireChat, wireMessage } from './testing';
 
 describe('Connection', () => {
+  let peer: RpcTestPeer;
+  let connection: Connection;
+
   beforeEach(() => {
-    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
-  });
-  afterEach(() => {
-    TestBed.resetTestingModule();
-    vi.useRealTimers();
-    vi.restoreAllMocks();
-    vi.unstubAllGlobals();
+    TestBed.configureTestingModule({
+      providers: [provideChahuaBaseUrl('/_api'), provideRpcTesting()],
+    });
+    peer = TestBed.inject(RpcTestPeer);
+    connection = TestBed.inject(Connection);
   });
 
-  it('authenticates, sends heartbeats, reconnects, and closes on logout', () => {
-    vi.useFakeTimers();
-    vi.stubGlobal('WebSocket', TestSocket);
-    TestSocket.instances = [];
-    const user = signal<typeof testUser | undefined>(testUser);
-    TestBed.configureTestingModule({
-      providers: [
-        provideChahuaBaseUrl('/_api'),
-        { provide: SessionStore, useValue: { token: signal('test-jwt'), user, updateProfile: vi.fn() } },
-      ],
-    });
-    const realtime = TestBed.inject(Connection);
-    const message = vi.fn();
+  afterEach(() => {
+    try {
+      peer.verify();
+    } finally {
+      TestBed.resetTestingModule();
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('translates decoded RPC notifications and acknowledges typed watch scopes', () => {
+    const messages = vi.fn();
     const events = vi.fn();
     const resync = vi.fn();
-    realtime.messages$.subscribe(message);
-    realtime.events$.subscribe(events);
-    realtime.resync$.subscribe(resync);
-    TestBed.tick();
-    const socket = TestSocket.instances[0];
-    expect(socket.url.pathname).toBe('/_api/ws');
-    expect(realtime.connected()).toBe(false);
-    socket.open();
-    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'auth', ticket: 'test-jwt' }));
-    socket.receive({ type: 'presenceUpdate', payload: { activeConnections: 1 } });
-    expect(realtime.connected()).toBe(true);
-    realtime.watchPresence(7, [2], [testChat.id]);
-    expect(socket.send).toHaveBeenLastCalledWith(
-      JSON.stringify({ type: 'watchPresence', requestId: 7, userIds: [2], chatIds: [wireChat.id] }),
-    );
-    realtime.watchConversationUnread(
+    connection.messages$.subscribe(messages);
+    connection.events$.subscribe(events);
+    connection.resync$.subscribe(resync);
+
+    peer.authenticate();
+    expect(connection.connected()).toBe(true);
+    expect(resync).toHaveBeenCalledWith(ResyncReason.Connected);
+
+    connection.watchPresence(7, [2], [testChat.id]);
+    peer.expect('presence.watch', { requestId: 7, userIds: [2], chatIds: [wireChat.id] }).flush(null);
+    connection.watchConversationUnread(
       8,
       [
         {
@@ -85,223 +55,167 @@ describe('Connection', () => {
       ],
       true,
     );
-    expect(JSON.parse(socket.send.mock.calls.at(-1)![0])).toEqual({
-      type: 'watchConversationUnread',
-      requestId: 8,
-      appBadge: true,
-      views: [
-        {
-          key: 'custom',
-          selector: {
-            include: [{ chatId: wireChat.id, threadId: wireMessage.id }],
-            exclude: [{ chatId: wireChat.id }],
+    peer
+      .expect('conversations.watchUnread', {
+        requestId: 8,
+        appBadge: true,
+        views: [
+          {
+            key: 'custom',
+            selector: {
+              include: [{ chatId: wireChat.id, threadId: wireMessage.id }],
+              exclude: [{ chatId: wireChat.id }],
+            },
           },
+        ],
+      })
+      .flush(null);
+    connection.watchConversationStates(9, [{ chatId: testChat.id, threadId: testMessage.id }]);
+    peer
+      .expect('conversations.watchStates', {
+        requestId: 9,
+        conversations: [{ chatId: wireChat.id, threadId: wireMessage.id }],
+      })
+      .flush(null);
+
+    peer.notify('events.conversationStates', {
+      requestId: 9,
+      full: true,
+      states: [
+        {
+          chatId: wireChat.id,
+          threadId: wireMessage.id,
+          lastReadMessageId: wireMessage.id,
+          accessible: true,
+          unreadCount: 0,
+          unreadMentions: 0,
+          unreadReactions: 0,
         },
       ],
     });
-    realtime.watchConversationStates(9, [{ chatId: testChat.id, threadId: testMessage.id }]);
-    expect(JSON.parse(socket.send.mock.calls.at(-1)![0])).toEqual({
-      type: 'watchConversationStates',
-      requestId: 9,
-      conversations: [{ chatId: wireChat.id, threadId: wireMessage.id }],
-    });
-    const states = vi.fn();
-    realtime.events$.subscribe((event) => {
-      if (event.type === 'conversationStates') states(event.payload);
-    });
-    socket.receive({
-      type: 'conversationStates',
-      payload: {
-        requestId: 9,
-        full: true,
+    peer.notify('events.message', wireMessage);
+    peer.notify('events.messagesBulkDeleted', { chatId: wireChat.id, messageIds: [wireMessage.id] });
+    peer.notify('events.chatMembershipChanged', { chatId: wireChat.id });
+    peer.notify('events.chatArchiveStateChanged', { chatId: wireChat.id, archived: false, mutedUntil: null });
+    peer.notify('events.unknown', { ignored: true });
+
+    expect(events).toHaveBeenNthCalledWith(1, {
+      type: ServerWsMessageType.conversationStates,
+      payload: expect.objectContaining({
         states: [
-          {
-            chatId: wireChat.id,
-            threadId: wireMessage.id,
-            lastReadMessageId: wireMessage.id,
-            accessible: true,
-            unreadCount: 0,
-            unreadMentions: 0,
-            unreadReactions: 0,
-          },
+          expect.objectContaining({
+            chatId: testChat.id,
+            threadId: testMessage.id,
+            lastReadMessageId: testMessage.id,
+          }),
         ],
-      },
+      }),
     });
-    expect(states.mock.calls[0][0].states[0]).toMatchObject({
-      chatId: testChat.id,
-      threadId: testMessage.id,
-      lastReadMessageId: testMessage.id,
-    });
-    realtime.accept(testMessage);
-    socket.receive({ type: 'message', payload: wireMessage });
-    socket.receive({
-      type: 'message',
-      payload: { ...wireMessage, id: '9007199254741004', replyRootId: wireMessage.id, sticker: null },
-    });
-    expect(message).toHaveBeenCalledTimes(2);
-    expect(message).toHaveBeenNthCalledWith(1, testMessage);
-    expect(message).toHaveBeenNthCalledWith(2, {
-      ...testMessage,
-      id: encodeId('9007199254741004'),
-      replyRootId: testMessage.id,
-      sticker: null,
-    });
-    expect(Object.hasOwn(message.mock.calls[1][0], 'sticker')).toBe(true);
-    socket.receive({ type: 'messagesBulkDeleted', payload: { chatId: wireChat.id, messageIds: [wireMessage.id] } });
-    expect(events).toHaveBeenLastCalledWith({
-      type: 'messagesBulkDeleted',
+    expect(messages).toHaveBeenCalledWith(testMessage);
+    expect(events).toHaveBeenNthCalledWith(3, {
+      type: ServerWsMessageType.messagesBulkDeleted,
       payload: { chatId: testChat.id, messageIds: [testMessage.id] },
     });
-    socket.receive({ type: 'chatMembershipChanged', payload: { chatId: wireChat.id } });
-    expect(events).toHaveBeenLastCalledWith({
-      type: 'chatMembershipChanged',
+    expect(events).toHaveBeenNthCalledWith(4, {
+      type: ServerWsMessageType.chatMembershipChanged,
       payload: { chatId: testChat.id },
     });
-    expect(message).toHaveBeenCalledTimes(2);
-    socket.receive({
-      type: 'chatArchiveStateChanged',
-      payload: { chatId: wireChat.id, archived: false, mutedUntil: null },
-    });
     expect(events).toHaveBeenLastCalledWith({
-      type: 'chatArchiveStateChanged',
+      type: ServerWsMessageType.chatArchiveStateChanged,
       payload: { chatId: testChat.id, archived: false, mutedUntil: null },
     });
-    expect(resync).toHaveBeenCalledOnce();
-    expect(TestBed.inject(SessionStore).updateProfile).toHaveBeenCalledWith(testMessage);
-    user.set({ ...testUser, username: '新名字' });
-    TestBed.tick();
-    expect(TestSocket.instances).toHaveLength(1);
-    expect(socket.close).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(10000);
-    expect(socket.send.mock.calls.at(-1)?.[0]).toContain('"type":"ping"');
-    socket.close();
-    vi.advanceTimersByTime(1200);
-    expect(TestSocket.instances).toHaveLength(2);
-    const replacement = TestSocket.instances[1];
-    replacement.open();
-    replacement.receive({ type: 'presenceUpdate', payload: { activeConnections: 1 } });
-    expect(resync).toHaveBeenCalledTimes(2);
-    user.set(undefined);
-    TestBed.tick();
-    expect(replacement.close).toHaveBeenCalledOnce();
-    vi.advanceTimersByTime(30000);
-    expect(TestSocket.instances).toHaveLength(2);
   });
 
-  it('notifies foreground resync only on an authenticated socket and stops listening after logout', () => {
-    vi.useFakeTimers();
-    vi.stubGlobal('WebSocket', TestSocket);
-    TestSocket.instances = [];
-    let hidden = true;
-    vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden);
-    const user = signal<typeof testUser | undefined>(testUser);
-    TestBed.configureTestingModule({
-      providers: [
-        provideChahuaBaseUrl('/_api'),
-        { provide: SessionStore, useValue: { token: signal('test-jwt'), user, updateProfile: vi.fn() } },
-      ],
-    });
-    const resync = vi.fn();
-    TestBed.inject(Connection).resync$.subscribe(resync);
-    TestBed.tick();
-    const socket = TestSocket.instances[0];
-    hidden = false;
-    document.dispatchEvent(new Event('visibilitychange'));
-    expect(resync).not.toHaveBeenCalled();
-    socket.open();
-    socket.receive({ type: 'presenceUpdate', payload: { activeConnections: 1 } });
-    resync.mockClear();
-    hidden = true;
-    document.dispatchEvent(new Event('visibilitychange'));
-    hidden = false;
-    document.dispatchEvent(new Event('visibilitychange'));
-    expect(resync).toHaveBeenCalledOnce();
-    window.dispatchEvent(new Event('focus'));
-    document.dispatchEvent(new Event('visibilitychange'));
-    expect(resync).toHaveBeenCalledOnce();
-    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'appState', state: 'active' }));
-    socket.close();
-    resync.mockClear();
-    hidden = true;
-    document.dispatchEvent(new Event('visibilitychange'));
-    hidden = false;
-    document.dispatchEvent(new Event('visibilitychange'));
-    expect(resync).not.toHaveBeenCalled();
-    user.set(undefined);
-    TestBed.tick();
-    resync.mockClear();
-    document.dispatchEvent(new Event('visibilitychange'));
-    expect(resync).not.toHaveBeenCalled();
-  });
-
-  it('reports window focus loss immediately and keeps heartbeats inactive until visible and focused', () => {
-    vi.useFakeTimers();
-    vi.stubGlobal('WebSocket', TestSocket);
-    TestSocket.instances = [];
-    let focused = false;
-    let hidden = false;
-    vi.mocked(document.hasFocus).mockImplementation(() => focused);
-    vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden);
-    const user = signal<typeof testUser | undefined>(testUser);
-    TestBed.configureTestingModule({
-      providers: [
-        provideChahuaBaseUrl('/_api'),
-        { provide: SessionStore, useValue: { token: signal('test-jwt'), user, updateProfile: vi.fn() } },
-      ],
-    });
-    const resync = vi.fn();
-    TestBed.inject(Connection).resync$.subscribe(resync);
-    TestBed.tick();
-    const socket = TestSocket.instances[0];
-    socket.open();
-    socket.receive({ type: 'presenceUpdate', payload: { activeConnections: 1 } });
-    resync.mockClear();
-    expect(socket.send).toHaveBeenLastCalledWith(JSON.stringify({ type: 'appState', state: 'inactive' }));
-    focused = true;
-    window.dispatchEvent(new Event('focus'));
-    expect(socket.send).toHaveBeenLastCalledWith(JSON.stringify({ type: 'appState', state: 'active' }));
-    expect(resync).toHaveBeenCalledOnce();
-    focused = false;
-    window.dispatchEvent(new Event('blur'));
-    expect(socket.send).toHaveBeenLastCalledWith(JSON.stringify({ type: 'appState', state: 'inactive' }));
-    vi.advanceTimersByTime(10000);
-    expect(socket.send).toHaveBeenLastCalledWith(JSON.stringify({ type: 'ping', state: 'inactive' }));
-    expect(resync).toHaveBeenCalledOnce();
-    hidden = true;
-    focused = true;
-    window.dispatchEvent(new Event('focus'));
-    expect(socket.send).toHaveBeenLastCalledWith(JSON.stringify({ type: 'appState', state: 'inactive' }));
-    hidden = false;
-    document.dispatchEvent(new Event('visibilitychange'));
-    expect(socket.send).toHaveBeenLastCalledWith(JSON.stringify({ type: 'appState', state: 'active' }));
-    vi.advanceTimersByTime(10000);
-    expect(socket.send).toHaveBeenLastCalledWith(JSON.stringify({ type: 'ping', state: 'active' }));
-    user.set(undefined);
-    TestBed.tick();
-    socket.send.mockClear();
-    resync.mockClear();
-    window.dispatchEvent(new Event('blur'));
-    window.dispatchEvent(new Event('focus'));
-    expect(socket.send).not.toHaveBeenCalled();
-    expect(resync).not.toHaveBeenCalled();
-  });
-  it('publishes accepted edits and withdrawals without deduplicating distinct changes to the same message', () => {
-    TestBed.configureTestingModule({
-      providers: [
-        provideChahuaBaseUrl('/_api'),
-        { provide: SessionStore, useValue: { token: signal(undefined), user: signal(undefined) } },
-      ],
-    });
-    const realtime = TestBed.inject(Connection);
+  it('deduplicates accepted message confirmations but preserves distinct message changes', () => {
     const messages = vi.fn();
     const changes = vi.fn();
-    realtime.messages$.subscribe(messages);
-    realtime.changes$.subscribe(changes);
-    realtime.accept(testMessage);
-    realtime.accept(testMessage);
-    realtime.acceptChange({ type: 'messageUpdated', payload: { ...testMessage, message: 'edited' } });
-    realtime.acceptChange({ type: 'messageDeleted', payload: { ...testMessage, isDeleted: true } });
+    connection.messages$.subscribe(messages);
+    connection.changes$.subscribe(changes);
+
+    connection.accept(testMessage);
+    connection.accept(testMessage);
+    connection.acceptChange({
+      type: ServerWsMessageType.messageUpdated,
+      payload: { ...testMessage, message: 'edited' },
+    });
+    connection.acceptChange({ type: ServerWsMessageType.messageDeleted, payload: { ...testMessage, isDeleted: true } });
+
     expect(messages).toHaveBeenCalledOnce();
     expect(changes).toHaveBeenCalledTimes(2);
+  });
+
+  it('delivers distinct edited and deleted notifications after the original message echo is deduplicated', () => {
+    const messages = vi.fn();
+    const changes = vi.fn();
+    connection.messages$.subscribe(messages);
+    connection.changes$.subscribe(changes);
+
+    peer.authenticate();
+    connection.accept(testMessage);
+    peer.notify('events.message', wireMessage);
+    peer.notify('events.messageUpdated', { ...wireMessage, message: 'edited' });
+    peer.notify('events.messageDeleted', { ...wireMessage, isDeleted: true });
+
+    expect(messages).toHaveBeenCalledOnce();
+    expect(changes).toHaveBeenCalledTimes(2);
+    expect(changes).toHaveBeenNthCalledWith(1, {
+      type: ServerWsMessageType.messageUpdated,
+      payload: { ...testMessage, message: 'edited' },
+    });
+    expect(changes).toHaveBeenNthCalledWith(2, {
+      type: ServerWsMessageType.messageDeleted,
+      payload: { ...testMessage, isDeleted: true },
+    });
+  });
+
+  it('emits Foreground resync only while the transport is authenticated', () => {
+    vi.useFakeTimers();
+    let hidden = true;
+    vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden);
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    document.dispatchEvent(new Event('visibilitychange'));
+    const resync = vi.fn();
+    connection.resync$.subscribe(resync);
+
+    peer.authenticate();
+    resync.mockClear();
+    hidden = false;
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(resync).toHaveBeenCalledWith(ResyncReason.Foreground);
+
+    peer.disconnect();
+    resync.mockClear();
+    hidden = true;
+    document.dispatchEvent(new Event('visibilitychange'));
+    hidden = false;
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(resync).not.toHaveBeenCalled();
+  });
+  it('emits one Connected resync for each authenticated bind and resets message deduplication on account change', () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    const resync = vi.fn();
+    const messages = vi.fn();
+    connection.resync$.subscribe(resync);
+    connection.messages$.subscribe(messages);
+
+    peer.authenticate();
+    connection.reset();
+    connection.accept(testMessage);
+    connection.reset();
+    connection.accept(testMessage);
+    expect(messages).toHaveBeenCalledTimes(2);
+
+    peer.disconnect();
+    vi.advanceTimersByTime(1_000);
+    peer.open();
+    peer.expect('session.open').flush({
+      protocolVersion: 1,
+      authenticated: true,
+      uid: 1,
+      clientId: 'fixture-client',
+    });
+
+    expect(resync).toHaveBeenCalledTimes(2);
   });
 });

@@ -3,6 +3,8 @@
 //! Handlers own HTTP concerns and delegate here, so background services never
 //! need to reach into a handler module for message logic.
 
+use std::sync::Arc;
+
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use diesel::PgConnection;
@@ -24,6 +26,7 @@ use crate::{
         ws::{NotificationPayload, NotificationType, ServerWsMessage},
     },
     errors::AppError,
+    metrics::Metrics,
     models::{
         Attachment, ForwardPlaceholder, ForwardedBundle, GroupKind, GroupRole, Media, MentionKind,
         Message, MessageMention, MessageType, NewMessage, SpeakingMode, Sticker, TranscodeStatus,
@@ -33,13 +36,15 @@ use crate::{
         message_reactions, messages as messages_schema, stickers, user_favorite_stickers,
     },
     services::{
-        push::{PushJob, PushMessagePreview, PushMessagePreviewSticker},
+        avatars::AvatarService,
+        media::MediaStore,
+        push::{PushJob, PushMessagePreview, PushMessagePreviewSticker, PushService},
         social::{self, DmSendAuthorizationError},
         speaking::{self, SpeakingAction},
         user::{lookup_user_profiles, UserProfile},
+        ws_registry::ConnectionRegistry,
     },
-    utils::ids,
-    AppState,
+    utils::ids::{self, IdGen},
 };
 
 // ---------------------------------------------------------------------------
@@ -184,12 +189,10 @@ pub struct PendingSideEffects {
 
 impl PendingSideEffects {
     /// Fire WS broadcast and push notification. Call after transaction commit.
-    pub fn fire(self, state: &AppState) {
-        state
-            .ws_registry
-            .broadcast_to_uids(&self.broadcast_uids, self.ws_msg);
+    pub fn fire(self, ws_registry: &Arc<ConnectionRegistry>, push_service: &Arc<PushService>) {
+        ws_registry.broadcast_to_uids(&self.broadcast_uids, self.ws_msg);
         if let Some(job) = self.push_job {
-            state.push_service.enqueue(job);
+            push_service.enqueue(job);
         }
         // The send path clones one payload Arc for every mentioned member; group
         // adjacent equal payloads so each broadcast goes out in a single registry
@@ -204,9 +207,16 @@ impl PendingSideEffects {
             }
         }
         for (msg, uids) in batched {
-            state.ws_registry.broadcast_to_uids(&uids, msg);
+            ws_registry.broadcast_to_uids(&uids, msg);
         }
     }
+}
+
+pub struct SendPreparedMessageDeps<'a> {
+    pub id_gen: &'a Arc<IdGen>,
+    pub media: &'a MediaStore,
+    pub avatars: &'a Arc<AvatarService>,
+    pub metrics: &'a Arc<Metrics>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1847,7 +1857,7 @@ pub fn authorize_message_send(
 
 pub async fn send_prepared_message(
     conn: &mut PgConnection,
-    state: &AppState,
+    deps: SendPreparedMessageDeps<'_>,
     prepared: PreparedMessageSend,
 ) -> Result<SendMessageOutcome, AppError> {
     if prepared.message_type == MessageType::Placeholder
@@ -1866,7 +1876,7 @@ pub async fn send_prepared_message(
         prepared.sticker_id,
     )?;
 
-    let id = ids::next_message_id(state.id_gen.as_ref())
+    let id = ids::next_message_id(deps.id_gen.as_ref())
         .await
         .map_err(|e| {
             tracing::error!("ferroid next_message_id: {:?}", e);
@@ -1943,8 +1953,8 @@ pub async fn send_prepared_message(
         let mut response = attach_metadata(
             conn,
             vec![existing],
-            &state.media,
-            &state.avatars,
+            deps.media,
+            deps.avatars,
             prepared.sender_uid,
         )
         .await
@@ -1953,7 +1963,7 @@ pub async fn send_prepared_message(
         .ok_or(AppError::Internal("Failed to build message response"))?;
         apply_forwarded_preview_override(
             conn,
-            &state.avatars,
+            deps.avatars,
             &mut response,
             prepared.forwarded_preview_total,
             prepared.forwarded_preview_contains_forwarded_messages,
@@ -2019,8 +2029,8 @@ pub async fn send_prepared_message(
     let mut response = attach_metadata(
         conn,
         vec![inserted_msg.clone()],
-        &state.media,
-        &state.avatars,
+        deps.media,
+        deps.avatars,
         prepared.sender_uid,
     )
     .await
@@ -2029,7 +2039,7 @@ pub async fn send_prepared_message(
     .ok_or(AppError::Internal("Failed to build message response"))?;
     apply_forwarded_preview_override(
         conn,
-        &state.avatars,
+        deps.avatars,
         &mut response,
         prepared.forwarded_preview_total,
         prepared.forwarded_preview_contains_forwarded_messages,
@@ -2062,7 +2072,7 @@ pub async fn send_prepared_message(
     // Counted once here so every sender - chat messages, invites, pins, member
     // system messages - increments the same counter. Duplicate retries return
     // early above and are not counted.
-    state.metrics.chat.record_message(prepared.chat_id);
+    deps.metrics.chat.record_message(prepared.chat_id);
 
     Ok(SendMessageOutcome::Created(Box::new(SendMessageResult {
         inserted_message: inserted_msg,

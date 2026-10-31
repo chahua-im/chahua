@@ -11,13 +11,11 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom, Subject, takeUntil, timer, type Observable } from 'rxjs';
-import { ChatsService } from '../../generated/endpoints/chats/chats.service';
-import { FriendsService } from '../../generated/endpoints/friends/friends.service';
+import { RpcApi } from '../../generated/rpc-api';
 import { ChatSettingsChanged, SessionStore } from '../session/session-store';
 import { conversationUnread } from './conversation-unread';
 import { conversationView } from './conversation-views';
 import { ListTab, type ListSelection } from './list-tabs';
-import { ThreadsService } from '../../generated/endpoints/threads/threads.service';
 import {
   FriendRequestStatus,
   GroupKind,
@@ -115,7 +113,7 @@ function createThreadQuery(archived: boolean) {
 type ThreadQuery = ReturnType<typeof createThreadQuery>;
 @Service()
 export class ChatListStore {
-  private readonly api = inject(ChatsService);
+  private readonly rpc = inject(RpcApi);
   private readonly chatInfo = inject(ChatStore);
   private readonly destroyRef = inject(DestroyRef);
   private readonly realtime = inject(Connection);
@@ -126,8 +124,8 @@ export class ChatListStore {
   private readonly membershipStates = new Map<SnowflakeID, string>();
   private threadRefreshPending?: Promise<void>;
   private readonly threadMessages = new Set<SnowflakeID>();
-  private readonly friendsApi = inject(FriendsService);
-  private readonly threadsApi = inject(ThreadsService);
+  private readonly friendsApi = this.rpc.friends;
+  private readonly threadsApi = this.rpc.threads;
   private readonly activeRequests = this.requestCache(false);
   private readonly historicalRequests = this.requestCache(true);
   private readonly activeThreads = this.threadCache(false);
@@ -364,6 +362,7 @@ export class ChatListStore {
       items: computed(() =>
         state
           .ids()
+          .filter((id) => this.chatInfo.isAccessible(id))
           .map((id) => this.chatInfo.chat(id))
           .filter((chat) => chat.archived === archived)
           .sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? '')),
@@ -517,8 +516,8 @@ export class ChatListStore {
     const policyGeneration = this.chatInfo.membershipPolicyRequestGeneration();
     const user = this.session.user();
     return firstValueFrom(
-      this.api
-        .getChats({
+      this.rpc.chats
+        .list({
           limit: 50,
           ...(query.archived ? { archived: true } : {}),
           ...(cursor ? { after: cursor } : {}),
@@ -728,7 +727,7 @@ export class ChatListStore {
           const visibility = user?.showMembershipMessages ?? true;
           if ('generation' in query) {
             const page = await this.response(
-              this.api.getChats({
+              this.rpc.chats.list({
                 limit: 1,
                 chatId: id,
                 archived: query.archived,
@@ -757,9 +756,7 @@ export class ChatListStore {
               ...new Set([...ids.filter((value) => value !== id), ...page.chats.map((row) => row.id)]),
             ]);
           } else {
-            const page = await this.response(
-              this.threadsApi.getThreads({ limit: 1, rootId: id, archived: query.archived }),
-            );
+            const page = await this.response(this.threadsApi.list({ limit: 1, rootId: id, archived: query.archived }));
             if (
               query.pendingRows.get(id) !== revision ||
               visibility !== (this.session.user()?.showMembershipMessages ?? true)
@@ -894,7 +891,7 @@ export class ChatListStore {
     const { value, ...query } = activeQuery<FriendRequestHistoryEntry[]>(
       this.destroyRef,
       async (cancel) => {
-        const page = await this.response(this.friendsApi.listFriendRequestHistory({ archived }), cancel);
+        const page = await this.response(this.friendsApi.listRequests({ archived }), cancel);
         return page.requests;
       },
       [],
@@ -986,10 +983,10 @@ export class ChatListStore {
     try {
       await this.response<unknown>(
         action === FriendRequestAction.Accept
-          ? this.friendsApi.acceptFriendRequest(id)
+          ? this.friendsApi.acceptRequest({ requestId: id })
           : action === FriendRequestAction.Reject
-            ? this.friendsApi.rejectFriendRequest(id)
-            : this.friendsApi.archiveFriendRequest(id),
+            ? this.friendsApi.rejectRequest({ requestId: id })
+            : this.friendsApi.archiveRequest({ requestId: id }),
       );
       if (
         !this.destroyRef.destroyed &&
@@ -1030,7 +1027,7 @@ export class ChatListStore {
         try {
           const read = async (cursor?: string) => {
             const page = await this.response(
-              this.threadsApi.getThreads({
+              this.threadsApi.list({
                 limit: 20,
                 archived: current.archived,
                 ...(cursor ? { before: cursor } : {}),

@@ -18,7 +18,7 @@ import {
 import { TranslocoPipe } from '@jsverse/transloco';
 import { chevronBackOutline, eyeOffOutline, eyeOutline, peopleOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
-import { FriendsService } from '../../../generated/endpoints/friends/friends.service';
+import { RpcApi } from '../../../generated/rpc-api';
 import { PresenceVisibility, PrivacyExceptionKind } from '../../../generated/models';
 import { PanelNavigation } from '../../navigation/panel-navigation';
 import { Presence } from '../../presence/presence';
@@ -53,7 +53,7 @@ import { PrivacyExceptions } from '../privacy-exceptions/privacy-exceptions';
   host: { class: 'ion-page' },
 })
 export class PresenceSettings {
-  private readonly friends = inject(FriendsService);
+  private readonly api = inject(RpcApi);
   private readonly presence = inject(Presence);
   protected readonly ExceptionKind = PrivacyExceptionKind;
   protected readonly panels = inject(PanelNavigation);
@@ -80,7 +80,7 @@ export class PresenceSettings {
     this.loading.set(true);
     this.loadError.set(false);
     try {
-      const settings = await firstValueFrom(this.friends.getMyPresenceSettings());
+      const settings = await firstValueFrom(this.api.privacy.getPresenceSettings());
       this.visibility.set(settings.visibility);
       this.savedVisibility = settings.visibility;
       this.requestedVisibility = settings.visibility;
@@ -108,7 +108,7 @@ export class PresenceSettings {
     this.saved.set(false);
     this.saveError.set(false);
     try {
-      const settings = await firstValueFrom(this.friends.updateMyPresenceSettings({ visibility: this.visibility() }));
+      const settings = await firstValueFrom(this.api.privacy.updatePresenceSettings({ visibility: this.visibility() }));
       this.visibility.set(settings.visibility);
       this.savedVisibility = settings.visibility;
       this.requestedVisibility = settings.visibility;

@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::config::MediaConfig;
+use crate::errors::AppError;
 
 pub const PUBLIC_MEDIA_CACHE_CONTROL: &str = "public,max-age=31536000,immutable";
 /// RFC 5987 allows only `attr-char` unescaped in an extended parameter value,
@@ -71,18 +72,15 @@ impl MediaStore {
         content_length: i64,
         content_disposition: Option<&str>,
         expires_in: Duration,
-    ) -> Result<PresignedUpload, (StatusCode, &'static str)> {
+    ) -> Result<PresignedUpload, AppError> {
         let presigning_config = PresigningConfig::expires_in(
             expires_in
                 .to_std()
-                .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Invalid URL expiry"))?,
+                .map_err(|_| AppError::Internal("Invalid URL expiry"))?,
         )
-        .map_err(|e| {
-            tracing::error!("presigning config error: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to configure presigned URL",
-            )
+        .map_err(|error| {
+            tracing::error!(?error, "presigning config error");
+            AppError::Internal("Failed to configure presigned URL")
         })?;
 
         let mut request = self
@@ -97,13 +95,13 @@ impl MediaStore {
         if let Some(content_disposition) = content_disposition {
             request = request.content_disposition(content_disposition);
         }
-        let presigned_request = request.presigned(presigning_config).await.map_err(|e| {
-            tracing::error!("Failed to generate presigned URL: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to generate upload URL",
-            )
-        })?;
+        let presigned_request = request
+            .presigned(presigning_config)
+            .await
+            .map_err(|error| {
+                tracing::error!(?error, "failed to generate presigned URL");
+                AppError::Internal("Failed to generate upload URL")
+            })?;
 
         let mut upload_headers: BTreeMap<String, String> = presigned_request
             .headers()

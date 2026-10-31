@@ -1,14 +1,14 @@
 import { DestroyRef, inject, Injectable } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom, type Observable } from 'rxjs';
-import { ChatsService } from '../../generated/endpoints/chats/chats.service';
+import { RpcApi } from '../../generated/rpc-api';
 import { ServerWsMessageType, type MessageResponse } from '../../generated/models';
 import { Connection } from '../api/connection';
 import { SessionStore } from '../session/session-store';
 import type { SnowflakeID } from '../api/snowflake-id';
 @Injectable()
 export class MessageActions {
-  private readonly chatsApi = inject(ChatsService);
+  private readonly api = inject(RpcApi);
 
   private readonly realtime = inject(Connection);
   private readonly session = inject(SessionStore);
@@ -16,7 +16,7 @@ export class MessageActions {
   private readonly destroyRef = inject(DestroyRef);
 
   async recall(message: MessageResponse) {
-    await this.response(this.chatsApi.deleteMessage(message.chatId, message.id));
+    await this.response(this.api.messages.delete({ chatId: message.chatId, messageId: message.id }));
     this.realtime.acceptChange({
       type: ServerWsMessageType.messageDeleted,
       payload: {
@@ -32,7 +32,7 @@ export class MessageActions {
   }
 
   async recallMany(chatId: SnowflakeID, messageIds: SnowflakeID[]) {
-    const payload = await this.response(this.chatsApi.bulkDeleteMessages(chatId, { messageIds }));
+    const payload = await this.response(this.api.messages.deleteMany({ chatId, messageIds }));
     this.realtime.acceptChange({ type: ServerWsMessageType.messagesBulkDeleted, payload });
     return payload;
   }
@@ -62,8 +62,8 @@ export class MessageActions {
     try {
       await this.response(
         reacted
-          ? this.chatsApi.putReaction(message.chatId, message.id, encodeURIComponent(emoji))
-          : this.chatsApi.deleteReaction(message.chatId, message.id, encodeURIComponent(emoji)),
+          ? this.api.reactions.add({ chatId: message.chatId, messageId: message.id, emoji })
+          : this.api.reactions.remove({ chatId: message.chatId, messageId: message.id, emoji }),
       );
     } catch (error) {
       // The menu closes before the request runs, so a rejected reaction has to undo its own optimistic change.

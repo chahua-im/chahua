@@ -17,8 +17,7 @@ import { Router } from '@angular/router';
 import { IonButton, IonContent, IonSpinner } from '@ionic/angular';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { firstValueFrom } from 'rxjs';
-import { ChatsService } from '../../generated/endpoints/chats/chats.service';
-import { UsersService } from '../../generated/endpoints/users/users.service';
+import { RpcApi } from '../../generated/rpc-api';
 import { encodeId } from '../api/snowflake-id';
 import { ChatDetails, DetailView } from '../chats/chat-details/chat-details';
 import { ConversationPage } from '../conversations/conversation/conversation.page';
@@ -53,8 +52,7 @@ export class PanelPage {
   readonly source = input<unknown>();
   protected readonly panels = inject(PanelNavigation);
   private readonly router = inject(Router);
-  private readonly users = inject(UsersService);
-  private readonly chats = inject(ChatsService);
+  private readonly api = inject(RpcApi);
   private readonly destroy = inject(DestroyRef);
   private readonly outlet = viewChild(NgComponentOutlet);
   protected readonly content = signal<{ component: Type<unknown>; props: Record<string, unknown> } | undefined>(
@@ -114,7 +112,7 @@ export class PanelPage {
         const uid = Number(params['uid'] ?? url.queryParams['uid']);
         if (!uid) throw new Error('User unavailable');
         const response = await firstValueFrom(
-          this.users.getUserSearch({ q: String(uid), limit: 20 }).pipe(takeUntilDestroyed(this.destroy)),
+          this.api.users.search({ q: String(uid), limit: 20 }).pipe(takeUntilDestroyed(this.destroy)),
         );
         const user = response.members.find((user) => user.uid === uid);
         if (!user) throw new Error('User unavailable');
@@ -128,8 +126,8 @@ export class PanelPage {
               ? context.threadRoot
               : undefined;
           props['threadRoot'] ??= await firstValueFrom(
-            this.chats
-              .getMessage(encodeId(params['id']), encodeId(params['threadId']))
+            this.api.messages
+              .get({ chatId: encodeId(params['id']), messageId: encodeId(params['threadId']) })
               .pipe(takeUntilDestroyed(this.destroy)),
           );
         }

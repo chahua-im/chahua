@@ -1,6 +1,6 @@
 import { signal } from '@angular/core';
 import { firstValueFrom, from, fromEvent, takeUntil, timeout } from 'rxjs';
-import { AttachmentsService } from '../../generated/endpoints/attachments/attachments.service';
+import { RpcApi } from '../../generated/rpc-api';
 import { AttachmentUploadPurpose, type SnowflakeID } from '../../generated/models';
 import { prepareMedia } from './media-processing/prepare-media';
 import { UploadError, UploadErrorCode, UploadStage, uploadFailure, type UploadFailure } from './upload-error';
@@ -41,7 +41,7 @@ export class AttachmentUpload {
   };
 
   constructor(
-    private readonly api: AttachmentsService,
+    private readonly api: RpcApi,
     readonly file: File,
     readonly purpose: AttachmentUploadPurpose,
   ) {
@@ -107,7 +107,9 @@ export class AttachmentUpload {
       if (!this.file.name.trim() || Array.from(this.file.name).length > 255)
         throw new UploadError(UploadErrorCode.Filename);
       if (navigator.onLine === false) throw new UploadError(UploadErrorCode.Offline);
-      const config = await firstValueFrom(this.api.getConfig().pipe(timeout(IDLE_TIMEOUT), takeUntil(aborted)));
+      const config = await firstValueFrom(
+        this.api.attachments.getConfig().pipe(timeout(IDLE_TIMEOUT), takeUntil(aborted)),
+      );
       maximumSize = config.maxFileSizeBytes;
       signal.throwIfAborted();
       if (processing) {
@@ -129,8 +131,8 @@ export class AttachmentUpload {
         progress: uploadStart,
       }));
       const response = await firstValueFrom(
-        this.api
-          .postUploadUrl({
+        this.api.attachments
+          .createUploadUrl({
             filename: file.name,
             contentType: file.type || 'application/octet-stream',
             size: file.size,

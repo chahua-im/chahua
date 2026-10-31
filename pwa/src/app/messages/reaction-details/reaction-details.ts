@@ -15,7 +15,7 @@ import {
 } from '@ionic/angular';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { firstValueFrom } from 'rxjs';
-import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
+import { RpcApi } from '../../../generated/rpc-api';
 import type { ReactionDetailGroup, ReactionReactor, SnowflakeID } from '../../../generated/models';
 import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
 import { PanelNavigation } from '../../navigation/panel-navigation';
@@ -49,7 +49,7 @@ export class ReactionDetails {
   readonly chatId = input.required<SnowflakeID>();
   readonly messageId = input.required<SnowflakeID>();
   protected readonly panels = inject(PanelNavigation);
-  private readonly api = inject(ChatsService);
+  private readonly api = inject(RpcApi);
   protected readonly groups = signal<ReactionDetailGroup[]>([]);
   protected readonly emoji = signal('');
   protected readonly loading = signal(true);
@@ -83,7 +83,10 @@ export class ReactionDetails {
     this.loading.set(true);
     this.error.set(false);
     try {
-      this.groups.set((await firstValueFrom(this.api.getReactionDetails(this.chatId(), this.messageId()))).reactions);
+      this.groups.set(
+        (await firstValueFrom(this.api.reactions.list({ chatId: this.chatId(), messageId: this.messageId() })))
+          .reactions,
+      );
     } catch {
       this.error.set(true);
     } finally {

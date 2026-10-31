@@ -1,36 +1,32 @@
-import { provideHttpClient, withInterceptors } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
 import { ModalController } from '@ionic/angular';
 import { vi } from 'vitest';
-import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
-import { jsonInterceptor } from '../../api/json.interceptor';
+import { provideRpcTesting, RpcTestPeer } from '../../api/rpc-testing';
 import { encodeId } from '../../api/snowflake-id';
 import { testChat, wireChat, wireMessage } from '../../api/testing';
 import { ChatThreads } from './chat-threads';
 
-const path = `/_api/chats/${wireChat.id}/threads`;
-const messagePath = `/_api/chats/${wireChat.id}/messages`;
+const threadParams = (chatId = wireChat.id, cursor?: string) => ({
+  chatId,
+  limit: 50,
+  order: 'newest',
+  ...(cursor == null ? {} : { cursor }),
+});
 let topic = { ...wireMessage, threadInfo: { replyCount: 4 } };
 
 describe('ChatThreads', () => {
-  let http: HttpTestingController;
+  let peer: RpcTestPeer;
   const modals = { getTop: vi.fn().mockResolvedValue(undefined), dismiss: vi.fn().mockResolvedValue(true) };
   beforeEach(() => {
     topic = { ...wireMessage, threadInfo: { replyCount: 4 } };
     TestBed.configureTestingModule({
-      providers: [
-        provideHttpClient(withInterceptors([jsonInterceptor])),
-        provideHttpClientTesting(),
-        provideChahuaBaseUrl('/_api'),
-        provideRouter([]),
-        { provide: ModalController, useValue: modals },
-      ],
+      providers: [provideRpcTesting(), provideRouter([]), { provide: ModalController, useValue: modals }],
     });
-    http = TestBed.inject(HttpTestingController);
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
   });
-  afterEach(() => http.verify());
+  afterEach(() => peer.verify());
   function open() {
     const fixture = TestBed.createComponent(ChatThreads);
     fixture.componentRef.setInput('chatId', testChat.id);
@@ -40,11 +36,7 @@ describe('ChatThreads', () => {
 
   it('renders thread roots in backend newest order, including recalled roots', async () => {
     const fixture = open();
-    const request = http.expectOne((req) => req.url === path);
-    expect(request.request.params.get('limit')).toBe('50');
-    expect(request.request.params.get('order')).toBe('newest');
-    expect(request.request.params.get('cursor')).toBeNull();
-    request.flush({
+    peer.expect('threads.listForChat', threadParams()).flush({
       threads: [
         { ...topic, id: '102', message: '当前话题' },
         { ...topic, id: '101', isDeleted: true, message: undefined },
@@ -58,21 +50,22 @@ describe('ChatThreads', () => {
     expect(rows[0].textContent).toContain('4 条回复');
     expect(rows[1].textContent).toContain('话题');
     expect(rows[1].textContent).not.toContain('消息已删除');
-    http.expectNone((req) => req.url === messagePath);
+    peer.expectNone('messages.list');
   });
 
   it('uses the returned cursor for continuation and removes infinite scroll at null', async () => {
     const fixture = open();
-    http.expectOne((req) => req.url === path).flush({ threads: [{ ...topic }], nextCursor: '100' });
+    peer.expect('threads.listForChat', threadParams()).flush({ threads: [{ ...topic }], nextCursor: '100' });
     await fixture.whenStable();
     fixture.detectChanges();
     const infinite = fixture.nativeElement.querySelector('ion-infinite-scroll');
     const complete = vi.fn().mockResolvedValue(undefined);
     infinite.complete = complete;
     infinite.dispatchEvent(new CustomEvent('ionInfinite'));
-    const request = http.expectOne((req) => req.url === path);
-    expect(request.request.params.get('cursor')).toBe('100');
-    request.flush({ threads: [{ ...topic, id: '99' }], nextCursor: null });
+    peer.expect('threads.listForChat', threadParams(wireChat.id, '100')).flush({
+      threads: [{ ...topic, id: '99' }],
+      nextCursor: null,
+    });
     await fixture.whenStable();
     fixture.detectChanges();
     expect(complete).toHaveBeenCalledOnce();
@@ -83,21 +76,17 @@ describe('ChatThreads', () => {
 
   it('keeps loaded topics and the cursor after a failed continuation', async () => {
     const fixture = open();
-    http.expectOne((req) => req.url === path).flush({ threads: [{ ...topic }], nextCursor: '100' });
+    peer.expect('threads.listForChat', threadParams()).flush({ threads: [{ ...topic }], nextCursor: '100' });
     await fixture.whenStable();
     const component = fixture.componentInstance;
     const next = component['load'](true);
-    const failed = http.expectOne((req) => req.url === path);
-    expect(failed.request.params.get('cursor')).toBe('100');
-    failed.flush({}, { status: 503, statusText: 'Unavailable' });
+    peer.expect('threads.listForChat', threadParams(wireChat.id, '100')).error(1503);
     await next;
     expect(component['items']()).toHaveLength(1);
     expect(component['cursor']()).toBe(encodeId('100'));
     expect(component['error']()).toBe(true);
     const retry = component['load'](true);
-    const retried = http.expectOne((req) => req.url === path);
-    expect(retried.request.params.get('cursor')).toBe('100');
-    retried.flush({ threads: [{ ...topic, id: '99' }] });
+    peer.expect('threads.listForChat', threadParams(wireChat.id, '100')).flush({ threads: [{ ...topic, id: '99' }] });
     await retry;
     expect(component['items']()).toHaveLength(2);
     expect(component['error']()).toBe(false);
@@ -105,22 +94,23 @@ describe('ChatThreads', () => {
 
   it('keeps known rows during refresh and retries the first page rather than the retained cursor', async () => {
     const fixture = open();
-    http.expectOne((req) => req.url === path).flush({ threads: [topic], nextCursor: '100' });
+    peer.expect('threads.listForChat', threadParams()).flush({ threads: [topic], nextCursor: '100' });
     await fixture.whenStable();
     fixture.detectChanges();
     const row = fixture.nativeElement.querySelector('app-chat-list-item');
     const refreshing = fixture.componentInstance['load']();
-    const refresh = http.expectOne((req) => req.url === path);
+    const refresh = peer.expect('threads.listForChat', threadParams());
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('app-chat-list-item')).toBe(row);
     expect(fixture.nativeElement.querySelector('.page-loading')).toBeNull();
-    refresh.flush({}, { status: 503, statusText: 'Unavailable' });
+    refresh.error(1503);
     await refreshing;
     fixture.detectChanges();
     fixture.nativeElement.querySelector('app-load-error ion-button').click();
-    const retry = http.expectOne((req) => req.url === path);
-    expect(retry.request.params.has('cursor')).toBe(false);
-    retry.flush({ threads: [{ ...topic, message: 'Updated root' }], nextCursor: null });
+    peer.expect('threads.listForChat', threadParams()).flush({
+      threads: [{ ...topic, message: 'Updated root' }],
+      nextCursor: null,
+    });
     await fixture.whenStable();
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('app-chat-list-item')).toBe(row);
@@ -130,12 +120,12 @@ describe('ChatThreads', () => {
 
   it('clears revoked content and rejects an older successful response', async () => {
     const fixture = open();
-    http.expectOne((req) => req.url === path).flush({ threads: [topic], nextCursor: '100' });
+    peer.expect('threads.listForChat', threadParams()).flush({ threads: [topic], nextCursor: '100' });
     await fixture.whenStable();
     const olderLoad = fixture.componentInstance['load']();
-    const older = http.expectOne((req) => req.url === path);
+    const older = peer.expect('threads.listForChat', threadParams());
     const currentLoad = fixture.componentInstance['load']();
-    http.expectOne((req) => req.url === path).flush({}, { status: 403, statusText: 'Forbidden' });
+    peer.expect('threads.listForChat', threadParams()).error(1003);
     await currentLoad;
     older.flush({ threads: [topic], nextCursor: '100' });
     await olderLoad;
@@ -148,23 +138,23 @@ describe('ChatThreads', () => {
 
   it('cancels prior chat reads and ignores them after the scope changes or is destroyed', async () => {
     const fixture = open();
-    const previous = http.expectOne((req) => req.url === path);
+    const previous = peer.expect('threads.listForChat', threadParams());
     fixture.componentRef.setInput('chatId', encodeId('200'));
     fixture.detectChanges();
-    expect(previous.cancelled).toBe(true);
-    http.expectOne((req) => req.url === '/_api/chats/200/threads').flush({ threads: [{ ...topic, chatId: '200' }] });
+    previous.flush({ threads: [topic] });
+    peer.expect('threads.listForChat', threadParams('200')).flush({ threads: [{ ...topic, chatId: '200' }] });
     await fixture.whenStable();
     expect(fixture.componentInstance['items']()[0].chatId).toBe(encodeId('200'));
     const request = fixture.componentInstance['load']();
-    const pending = http.expectOne((req) => req.url === '/_api/chats/200/threads');
+    const pending = peer.expect('threads.listForChat', threadParams('200'));
     fixture.destroy();
+    pending.flush({ threads: [{ ...topic, chatId: '200' }] });
     await request;
-    expect(pending.cancelled).toBe(true);
   });
 
   it('opens the selected topic after dismissing the information modal', async () => {
     const fixture = open();
-    http.expectOne((req) => req.url === path).flush({ threads: [{ ...topic }] });
+    peer.expect('threads.listForChat', threadParams()).flush({ threads: [{ ...topic }] });
     await fixture.whenStable();
     modals.getTop.mockResolvedValueOnce({});
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);

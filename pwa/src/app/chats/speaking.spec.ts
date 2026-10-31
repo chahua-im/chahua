@@ -1,12 +1,10 @@
-import { HttpErrorResponse, provideHttpClient, withInterceptors } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
-import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
 import { GroupRole, ServerWsMessageType, SpeakingMode, type ServerWsMessage } from '../../generated/models';
 import { Connection } from '../api/connection';
-import { jsonInterceptor } from '../api/json.interceptor';
+import { RpcError, RpcErrorCode } from '../api/rpc-error';
+import { provideRpcTesting, RpcTestPeer } from '../api/rpc-testing';
 import { mockRealtime, testChat, testUser, wireChat } from '../api/testing';
 import { SessionStore } from '../session/session-store';
 import { ChatStore } from './chat-store';
@@ -32,23 +30,29 @@ describe('speaking permissions', () => {
   });
 
   it('recognizes only the structured speaking restriction, not unrelated authorization errors', () => {
-    const error = (body: unknown, status = 403) => new HttpErrorResponse({ status, error: body });
-    expect(speakingErrorMode(error({ code: 'speakingRestricted', effectiveSpeakingMode: 'readOnly' }))).toBe(
-      SpeakingMode.readOnly,
-    );
-    expect(speakingErrorMode(error('Forbidden'))).toBeUndefined();
-    expect(speakingErrorMode(error({ code: 'speakingRestricted', effectiveSpeakingMode: 'unknown' }))).toBeUndefined();
     expect(
-      speakingErrorMode(error({ code: 'speakingRestricted', effectiveSpeakingMode: 'readOnly' }, 500)),
+      speakingErrorMode(
+        new RpcError(RpcErrorCode.SpeakingRestricted, 'Speaking is restricted', {
+          effectiveSpeakingMode: 'readOnly',
+        }),
+      ),
+    ).toBe(SpeakingMode.readOnly);
+    expect(speakingErrorMode(new RpcError(RpcErrorCode.Forbidden, 'Forbidden'))).toBeUndefined();
+    expect(
+      speakingErrorMode(
+        new RpcError(RpcErrorCode.SpeakingRestricted, 'Speaking is restricted', { effectiveSpeakingMode: 'unknown' }),
+      ),
+    ).toBeUndefined();
+    expect(
+      speakingErrorMode(new RpcError(RpcErrorCode.Internal, 'Internal', { effectiveSpeakingMode: 'readOnly' })),
     ).toBeUndefined();
   });
 });
 
 describe('speaking state synchronization', () => {
   let store: ChatStore;
-  let http: HttpTestingController;
+  let peer: RpcTestPeer;
   let events: Subject<ServerWsMessage>;
-  const url = `/_api/group/${wireChat.id}`;
   const details = {
     ...wireChat,
     myRole: GroupRole.member,
@@ -60,21 +64,20 @@ describe('speaking state synchronization', () => {
     events = new Subject();
     TestBed.configureTestingModule({
       providers: [
-        provideHttpClient(withInterceptors([jsonInterceptor])),
-        provideHttpClientTesting(),
-        provideChahuaBaseUrl('/_api'),
+        provideRpcTesting(),
         { provide: Connection, useValue: mockRealtime({ events$: events }) },
         { provide: SessionStore, useValue: { user: signal(testUser) } },
       ],
     });
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
     store = TestBed.inject(ChatStore);
-    http = TestBed.inject(HttpTestingController);
   });
-  afterEach(() => http.verify());
+  afterEach(() => peer.verify());
 
   async function load() {
     const request = store.ensureDetails(testChat.id);
-    http.expectOne(url).flush(details);
+    peer.expect('groups.get', { chatId: wireChat.id }).flush(details);
     await request;
   }
   function group(mode: SpeakingMode) {
@@ -100,11 +103,11 @@ describe('speaking state synchronization', () => {
   it('applies live restrictions before details arrive and rejects the stale snapshot', async () => {
     const pending = store.ensureDetails(testChat.id);
     member(GroupRole.member, SpeakingMode.readOnly);
-    http.expectOne(url).flush(details);
+    peer.expect('groups.get', { chatId: wireChat.id }).flush(details);
     await pending;
     expect(store.get(testChat.id)?.mySpeakingMode).toBe(SpeakingMode.readOnly);
     expect(store.canSpeak(testChat.id, SpeakingAction.ThreadReply)).toBe(false);
-    http.expectNone(() => true);
+    peer.expectNone('groups.get');
   });
 
   it('updates group and personal modes independently and applies promotion and demotion immediately', async () => {
@@ -118,17 +121,19 @@ describe('speaking state synchronization', () => {
     member(GroupRole.member, SpeakingMode.unrestricted);
     expect(store.canSpeak(testChat.id, SpeakingAction.ChatMessage)).toBe(false);
     expect(store.canSpeak(testChat.id, SpeakingAction.CreateThread)).toBe(true);
-    http.expectNone(() => true);
+    peer.expectNone('groups.get');
   });
 
   it('does not let a detail read started during a save restore the previous group mode', async () => {
     await load();
     const saving = store.setSpeakingMode(testChat.id, SpeakingMode.readOnly);
-    const write = http.expectOne(`${url}/speaking-mode`);
-    expect(write.request.body).toEqual({ speakingMode: 'readOnly' });
+    const write = peer.expect('groups.updateSpeakingMode', {
+      chatId: wireChat.id,
+      speakingMode: SpeakingMode.readOnly,
+    });
     store.invalidate();
     const reading = store.ensureDetails(testChat.id);
-    const read = http.expectOne(url);
+    const read = peer.expect('groups.get', { chatId: wireChat.id });
     write.flush({ chatId: wireChat.id, speakingMode: 'readOnly' });
     await saving;
     read.flush(details);
@@ -140,7 +145,10 @@ describe('speaking state synchronization', () => {
     await load();
     const saving = store.setSpeakingMode(testChat.id, SpeakingMode.readOnly);
     group(SpeakingMode.repliesOnly);
-    http.expectOne(`${url}/speaking-mode`).flush({ chatId: wireChat.id, speakingMode: 'readOnly' });
+    peer.expect('groups.updateSpeakingMode', { chatId: wireChat.id, speakingMode: SpeakingMode.readOnly }).flush({
+      chatId: wireChat.id,
+      speakingMode: 'readOnly',
+    });
     await saving;
     expect(store.speakingMode(testChat.id)).toBe(SpeakingMode.repliesOnly);
   });
@@ -150,7 +158,9 @@ describe('speaking state synchronization', () => {
     group(SpeakingMode.threadsOnly);
     const saving = store.setSpeakingMode(testChat.id, SpeakingMode.readOnly);
     const rejected = expect(saving).rejects.toBeDefined();
-    http.expectOne(`${url}/speaking-mode`).flush({}, { status: 403, statusText: 'Forbidden' });
+    peer
+      .expect('groups.updateSpeakingMode', { chatId: wireChat.id, speakingMode: SpeakingMode.readOnly })
+      .error(RpcErrorCode.Forbidden);
     await rejected;
     expect(store.speakingMode(testChat.id)).toBe(SpeakingMode.threadsOnly);
     TestBed.inject(SessionStore).user.set({ ...testUser, uid: 2 });

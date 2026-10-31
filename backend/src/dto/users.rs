@@ -41,6 +41,19 @@ pub struct UpdateStickerPackOrderRequest {
     pub order: Vec<UpdateStickerPackOrderItem>,
 }
 
+#[derive(Debug, Deserialize, ToSchema, utoipa::IntoParams)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchUsersQuery {
+    pub q: Option<String>,
+    pub limit: Option<i64>,
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[schema(value_type = Option<String>)]
+    pub exclude_member_of: Option<i64>,
+}
+
 #[derive(Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MeResponse {

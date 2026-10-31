@@ -3,9 +3,8 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
 import { SwPush } from '@angular/service-worker';
 import { ModalController } from '@ionic/angular';
-import { BehaviorSubject, of, Subject } from 'rxjs';
+import { BehaviorSubject, Subject } from 'rxjs';
 import { vi } from 'vitest';
-import { PushService } from '../../generated/endpoints/push/push.service';
 import {
   GroupKind,
   MessageType,
@@ -14,11 +13,12 @@ import {
   type ThreadSubscriptionStatusResponse,
 } from '../../generated/models';
 import { Connection } from '../api/connection';
+import { RpcTestPeer, type RpcTestRequest, provideRpcTesting } from '../api/rpc-testing';
 import { decodeId, encodeId, type SnowflakeID } from '../api/snowflake-id';
 import { testChat, testMessage, testUser } from '../api/testing';
-import { ListTab } from '../chats/list-tabs';
 import { ChatListStore } from '../chats/chat-list-store';
 import { ChatStore } from '../chats/chat-store';
+import { ListTab } from '../chats/list-tabs';
 import { ConversationNavigation } from '../conversations/conversation-navigation';
 import { SessionStore } from '../session/session-store';
 import { PushNotifications } from './push-notifications';
@@ -37,6 +37,7 @@ describe('online notifications', () => {
   let clicks: Subject<{ notification: { data: object } }>;
   let state: { archived?: boolean; mutedUntil?: string; muteOverride?: boolean };
   let subscription: ThreadSubscriptionStatusResponse;
+  let peer: RpcTestPeer;
   const commands: {
     type: string;
     suppress?: boolean;
@@ -61,6 +62,18 @@ describe('online notifications', () => {
   const badges = { setAppBadge: vi.fn(), clearAppBadge: vi.fn() };
   const modals = { getTop: vi.fn(), dismiss: vi.fn() };
   const settle = () => vi.advanceTimersByTimeAsync(200);
+
+  async function request(method: string, params?: Record<string, unknown>): Promise<RpcTestRequest> {
+    let captured!: RpcTestRequest;
+    await vi.waitFor(() => {
+      captured = peer.expect(method, params);
+    });
+    return captured;
+  }
+
+  async function unsubscribe() {
+    return request('push.unsubscribe', { provider: 'webPush', endpoint: 'mock-endpoint' });
+  }
 
   beforeEach(async () => {
     vi.useFakeTimers();
@@ -117,6 +130,7 @@ describe('online notifications', () => {
           { path: 'chats/chat/:id', component: EmptyPage },
           { path: 'chats/chat/:id/thread/:threadId', component: EmptyPage },
         ]),
+        provideRpcTesting(),
         { provide: Connection, useValue: { events$: events, resync$: new Subject() } },
         {
           provide: ChatStore,
@@ -141,10 +155,6 @@ describe('online notifications', () => {
             selection: signal({ tab: ListTab.Friends, archived: false, requestHistory: false }),
           },
         },
-        {
-          provide: PushService,
-          useValue: { postSubscribe: () => of(undefined), postUnsubscribe: () => of(undefined) },
-        },
         { provide: SessionStore, useValue: { user: signal(testUser) } },
         { provide: ModalController, useValue: modals },
         {
@@ -161,16 +171,26 @@ describe('online notifications', () => {
         },
       ],
     });
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
     service = TestBed.inject(PushNotifications);
     router = TestBed.inject(Router);
     await router.navigateByUrl('/chats');
     service.start();
+    (
+      await request('push.subscribe', {
+        provider: 'webPush',
+        endpoint: 'mock-endpoint',
+        keys: { p256dh: 'key', auth: 'auth' },
+      })
+    ).flush(null);
     await settle();
     expect(commands[0]).toEqual({ type: 'CHAHUA_SESSION', uid: testUser.uid });
     commands.length = 0;
   });
 
   afterEach(() => {
+    peer.verify();
     TestBed.resetTestingModule();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -192,13 +212,13 @@ describe('online notifications', () => {
   });
 
   it('does not activate badge counts when the browser cannot display them', async () => {
-    // Create a fresh service so startup sees the unsupported browser.
     TestBed.resetTestingModule();
     expect(release).toHaveBeenCalledOnce();
     vi.stubGlobal('navigator', { serviceWorker: navigator.serviceWorker });
     TestBed.configureTestingModule({
       providers: [
         provideRouter([]),
+        provideRpcTesting(),
         { provide: Connection, useValue: { events$: events, resync$: new Subject() } },
         { provide: ChatStore, useValue: { changes$: reads } },
         {
@@ -213,9 +233,10 @@ describe('online notifications', () => {
         { provide: SessionStore, useValue: { user: signal(testUser) } },
         { provide: ModalController, useValue: modals },
         { provide: SwPush, useValue: { isEnabled: false, notificationClicks: clicks } },
-        { provide: PushService, useValue: {} },
       ],
     });
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
     unread.activate.mockClear();
     TestBed.inject(PushNotifications).start();
     await settle();
@@ -260,7 +281,9 @@ describe('online notifications', () => {
     'does not request foreground notifications with %s permission',
     async (permission) => {
       vi.stubGlobal('Notification', { permission });
-      await service.refresh();
+      const refreshed = service.refresh();
+      (await unsubscribe()).flush(null);
+      await refreshed;
       events.next({ type: ServerWsMessageType.message, payload: incoming });
       await settle();
       expect(commands.filter((command) => command.type === 'CHAHUA_NOTIFY')).toHaveLength(0);
@@ -365,11 +388,11 @@ describe('online notifications', () => {
     await settle();
     expect(router.url).toBe(chatPath + '#msg=' + decodeId(incoming.id));
     expect(goTo).not.toHaveBeenCalled();
-    // Repeated clicks still locate the message even when Angular ignores the identical URL.
     clicks.next({ notification: { data: { chatId: decodeId(incoming.chatId), messageId: decodeId(incoming.id) } } });
     await settle();
     expect(goTo).toHaveBeenCalledOnce();
   });
+
   it('uses ordinary DM eligibility for online mention and reply messages', async () => {
     vi.spyOn(TestBed.inject(ChatStore), 'get').mockReturnValue({ ...testChat, kind: GroupKind.dm });
     state = { mutedUntil: '9999-12-31T23:59:59Z' };

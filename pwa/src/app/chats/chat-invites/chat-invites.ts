@@ -17,8 +17,7 @@ import {
   IonSpinner,
 } from '@ionic/angular';
 import { firstValueFrom } from 'rxjs';
-import { GroupsService } from '../../../generated/endpoints/groups/groups.service';
-import { InvitesService } from '../../../generated/endpoints/invites/invites.service';
+import { RpcApi } from '../../../generated/rpc-api';
 import type { MemberSummary } from '../../../generated/models';
 import {
   GroupSearchMode,
@@ -64,11 +63,10 @@ enum InviteAction {
 })
 export class ChatInvites {
   readonly chatId = input.required<SnowflakeID>();
-  private readonly api = inject(InvitesService);
+  private readonly api = inject(RpcApi);
   private readonly store = inject(ChatStore);
   private readonly destroy = inject(DestroyRef);
   protected readonly restriction = signal<SpeakingMode | undefined>(undefined);
-  private readonly groupsApi = inject(GroupsService);
   private readonly alerts = inject(AlertController);
   private readonly transloco = inject(TranslocoService);
   protected readonly Type = InviteType;
@@ -117,7 +115,7 @@ export class ChatInvites {
     this.loading.set(true);
     this.error.set(false);
     try {
-      this.invites.set((await firstValueFrom(this.api.getInvites({ groupId: this.chatId(), limit: 100 }))).invites);
+      this.invites.set((await firstValueFrom(this.api.invites.list({ groupId: this.chatId(), limit: 100 }))).invites);
     } catch {
       this.error.set(true);
     } finally {
@@ -131,7 +129,7 @@ export class ChatInvites {
     this.groupsError.set(false);
     try {
       const page = await firstValueFrom(
-        this.groupsApi.getGroups({
+        this.api.groups.list({
           q: this.groupQuery(),
           mode: GroupSearchMode.submitted,
           scope: GroupSelectorScope.joined,
@@ -167,7 +165,7 @@ export class ChatInvites {
     try {
       const values = this.values();
       const invite = await firstValueFrom(
-        this.api.postInvite({
+        this.api.invites.create({
           chatId: this.chatId(),
           inviteType: this.type(),
           targetUid: this.type() === InviteType.targeted ? this.target()?.uid : undefined,
@@ -202,7 +200,7 @@ export class ChatInvites {
     if ((await alert.onDidDismiss()).role !== 'confirm') return;
     this.pending.set({ action: InviteAction.Revoke, id: invite.id });
     try {
-      await firstValueFrom(this.api.deleteInvite(invite.id));
+      await firstValueFrom(this.api.invites.delete({ inviteId: invite.id }));
       this.invites.update((items) => items.filter((item) => item.id !== invite.id));
     } catch {
       this.error.set(true);
@@ -225,7 +223,7 @@ export class ChatInvites {
         return;
       }
       await firstValueFrom(
-        this.api.postSendInviteMessage({
+        this.api.invites.send({
           sourceChatId,
           inviteId: invite.id,
           destinationChatId: destination,

@@ -13,7 +13,7 @@ import { AlertController } from '@ionic/angular';
 import { TranslocoService } from '@jsverse/transloco';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { filter, firstValueFrom, from, fromEvent, merge, Subject, takeUntil, timeout, type Observable } from 'rxjs';
-import { ChatsService } from '../../generated/endpoints/chats/chats.service';
+import { RpcApi } from '../../generated/rpc-api';
 import {
   MessageType,
   type SpeakingMode,
@@ -24,6 +24,7 @@ import {
   type MentionInfo,
 } from '../../generated/models';
 import { Connection } from '../api/connection';
+import { RpcError, RpcErrorCode, RpcTransportError } from '../api/rpc-error';
 import { speakingErrorMode } from '../chats/speaking';
 import type { SnowflakeID } from '../api/snowflake-id';
 import { SessionStore } from '../session/session-store';
@@ -87,7 +88,7 @@ interface Task {
 /** Owns submitted content and uploads independently of the mounted conversation. */
 @Service()
 export class MessageOutbox {
-  private readonly api = inject(ChatsService);
+  private readonly api = inject(RpcApi);
   private readonly injector = inject(Injector);
   private readonly connection = inject(Connection);
   private readonly session = inject(SessionStore);
@@ -572,7 +573,7 @@ export class MessageOutbox {
     const task = this.tasks.get(item)!;
     const submitted = (!item.confirmed() && task.create) || task.ready!;
     try {
-      if (navigator.onLine === false) throw new Error('Offline');
+      if (navigator.onLine === false) throw new RpcTransportError('disconnected');
       const id = item.editId ?? item.confirmed()?.id;
       task.inflight = submitted;
       if (id == null) task.create = submitted;
@@ -580,22 +581,26 @@ export class MessageOutbox {
       const response = await this.request(
         item,
         id != null
-          ? this.api.patchMessage(item.chatId, id, {
+          ? this.api.messages.edit({
+              chatId: item.chatId,
+              messageId: id,
               message: submitted.body.message!,
               attachmentIds: submitted.body.attachmentIds,
             })
           : submitted.forward
             ? submitted.forward.messageIds.length === 1
-              ? this.api.forwardMessage(item.chatId, submitted.forward.messageIds[0], {
+              ? this.api.messages.forwardOne({
+                  chatId: item.chatId,
+                  messageId: submitted.forward.messageIds[0],
                   sourceChatId: submitted.forward.sourceChatId,
                   allowPlaceholders: submitted.forward.allowPlaceholders,
                   clientGeneratedId: submitted.forward.clientGeneratedId,
                   threadId: submitted.forward.threadId,
                 })
-              : this.api.forwardMessages(item.chatId, submitted.forward)
+              : this.api.messages.forward({ chatId: item.chatId, ...submitted.forward })
             : item.threadId != null
-              ? this.api.postThreadMessage(item.chatId, item.threadId, submitted.body)
-              : this.api.postMessage(item.chatId, submitted.body),
+              ? this.api.messages.sendInThread({ chatId: item.chatId, threadId: item.threadId, ...submitted.body })
+              : this.api.messages.send({ chatId: item.chatId, ...submitted.body }),
       );
       if (item.disposed) return;
       if (id == null) {
@@ -615,7 +620,7 @@ export class MessageOutbox {
       }
     } catch (error) {
       if (!this.needsSend(item)) return;
-      // A WS acknowledgement wins over failed HTTP; pump will submit any newer edit.
+      // A realtime acknowledgement wins over a failed RPC response; pump submits any newer edit.
       if (task.inflight && task.acknowledged() >= task.inflight.revision) return;
       if (await this.confirmForwardFallback(item, submitted, error)) {
         await this.send(item);
@@ -623,7 +628,7 @@ export class MessageOutbox {
       }
       if (!this.needsSend(item)) return;
       item.delivery.set(MessageDelivery.Failed);
-      item.speakingRestriction?.set(speakingErrorMode(error));
+      item.speakingRestriction?.set(error instanceof RpcError ? speakingErrorMode(error) : undefined);
       task.retryable = task.retryable && retryable(error);
       this.schedule(item);
     } finally {
@@ -634,11 +639,16 @@ export class MessageOutbox {
 
   /** The server checks current source state; replacements require explicit consent. */
   private async confirmForwardFallback(item: OutgoingMessage, submitted: Submission, error: unknown): Promise<boolean> {
-    if (!submitted.forward || submitted.forward.allowPlaceholders || errorStatus(error) !== 400) return false;
-    const detail = error && typeof error === 'object' && 'error' in error ? error.error : undefined;
+    if (
+      !submitted.forward ||
+      submitted.forward.allowPlaceholders ||
+      !(error instanceof RpcError) ||
+      error.code !== RpcErrorCode.BadRequest
+    )
+      return false;
     const replacementRequired =
-      detail === 'Audio messages cannot be forwarded until transcoding finishes' ||
-      detail === 'Forwarded messages cannot include nested forwarded messages';
+      error.message === 'Audio messages cannot be forwarded until transcoding finishes' ||
+      error.message === 'Forwarded messages cannot include nested forwarded messages';
     if (!replacementRequired) return false;
     const task = this.tasks.get(item)!;
     const i18n = this.injector.get(TranslocoService);
@@ -709,12 +719,14 @@ export class MessageOutbox {
       return Promise.resolve();
     task.deletion = (async () => {
       try {
-        await this.request(item, this.api.deleteMessage(item.chatId, message.id));
+        await this.request(item, this.api.messages.delete({ chatId: item.chatId, messageId: message.id }));
       } catch (error) {
         if (item.disposed || task.deleted) return;
-        // Missing or already deleted is success; other 4xx require intervention.
-        const status = errorStatus(error);
-        if (status !== 404 && status !== 410) {
+        // Missing or already deleted is success; other application failures require intervention.
+        if (
+          !(error instanceof RpcError) ||
+          (error.code !== RpcErrorCode.NotFound && error.code !== RpcErrorCode.Gone)
+        ) {
           task.retryable = retryable(error);
           item.delivery.set(MessageDelivery.Failed);
           this.schedule(item);
@@ -751,14 +763,19 @@ export class MessageOutbox {
     task.retryDelay = Math.min(task.retryDelay * 2, 30_000);
   }
 
-  private request<T>(item: OutgoingMessage, request: Observable<T>) {
-    return firstValueFrom(
-      request.pipe(
-        timeout(REQUEST_TIMEOUT),
-        takeUntil(merge(this.tasks.get(item)!.stopped, fromEvent(window, 'offline'))),
-        takeUntilDestroyed(this.destroyRef),
-      ),
-    );
+  private async request<T>(item: OutgoingMessage, request: Observable<T>) {
+    try {
+      return await firstValueFrom(
+        request.pipe(
+          timeout(REQUEST_TIMEOUT),
+          takeUntil(merge(this.tasks.get(item)!.stopped, fromEvent(window, 'offline'))),
+          takeUntilDestroyed(this.destroyRef),
+        ),
+      );
+    } catch (error) {
+      if (navigator.onLine === false) throw new RpcTransportError('disconnected');
+      throw error;
+    }
   }
 
   private async checkPublished(item: OutgoingMessage, id: SnowflakeID) {
@@ -766,7 +783,7 @@ export class MessageOutbox {
     if (task.checking) return;
     task.checking = true;
     try {
-      const message = await this.request(item, this.api.getMessage(item.chatId, id));
+      const message = await this.request(item, this.api.messages.get({ chatId: item.chatId, messageId: id }));
       if (item.disposed || item.published()) return;
       this.created(item, message, true);
       if (!item.cancelled()) this.connection.accept(message);
@@ -872,12 +889,16 @@ function matchesBody(
     message.attachments.every((attachment) => ids.includes(attachment.id))
   );
 }
-function errorStatus(error: unknown) {
-  return error && typeof error === 'object' && 'status' in error ? Number(error.status) : undefined;
-}
 function retryable(error: unknown) {
-  const status = errorStatus(error);
-  return status == null || status === 0 || status === 408 || status === 429 || status >= 500;
+  return (
+    (error instanceof RpcTransportError &&
+      (error.kind === 'disconnected' || error.kind === 'timeout' || error.kind === 'overloaded')) ||
+    (error instanceof Error && error.name === 'TimeoutError') ||
+    (error instanceof RpcError &&
+      (error.code === RpcErrorCode.Unavailable ||
+        error.code === RpcErrorCode.Internal ||
+        error.code === RpcErrorCode.Overloaded))
+  );
 }
 function localAttachments(uploads: readonly AttachmentUpload[]) {
   return uploads.map((upload) => {

@@ -13,7 +13,7 @@ import {
   type InfiniteScrollCustomEvent,
 } from '@ionic/angular';
 import { firstValueFrom } from 'rxjs';
-import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
+import { RpcApi } from '../../../generated/rpc-api';
 import { ChatAttachmentKindFilter, type ChatAttachmentResponse, type SnowflakeID } from '../../../generated/models';
 import { ConversationNavigation } from '../../conversations/conversation-navigation';
 import { openMediaViewer } from '../../messages/media-viewer/media-viewer';
@@ -48,7 +48,7 @@ export class ChatAttachments {
   protected readonly opening = signal<SnowflakeID | undefined>(undefined);
   protected readonly openFailed = signal(false);
   protected readonly error = signal(false);
-  private readonly api = inject(ChatsService);
+  private readonly api = inject(RpcApi);
   private readonly navigation = inject(ConversationNavigation);
   private readonly router = inject(Router);
   private readonly destroy = inject(DestroyRef);
@@ -79,8 +79,13 @@ export class ChatAttachments {
     this.error.set(false);
     try {
       const page = await firstValueFrom(
-        this.api
-          .getChatAttachments(this.chatId(), { kind: this.kind(), limit: 36, before: more ? this.cursor() : undefined })
+        this.api.attachments
+          .listForChat({
+            chatId: this.chatId(),
+            kind: this.kind(),
+            limit: 36,
+            before: more ? this.cursor() : undefined,
+          })
           .pipe(takeUntilDestroyed(this.destroy)),
       );
       if (version !== this.version) return;
@@ -101,7 +106,7 @@ export class ChatAttachments {
     this.openFailed.set(false);
     try {
       const message = await firstValueFrom(
-        this.api.getMessage(chatId, item.messageId).pipe(takeUntilDestroyed(this.destroy)),
+        this.api.messages.get({ chatId, messageId: item.messageId }).pipe(takeUntilDestroyed(this.destroy)),
       );
       if (this.destroy.destroyed || this.chatId() !== chatId || this.kind() !== kind) return;
       const media = message.attachments
@@ -128,7 +133,7 @@ export class ChatAttachments {
     this.locateFailed.set(false);
     try {
       const message = await firstValueFrom(
-        this.api.getMessage(chatId, item.messageId).pipe(takeUntilDestroyed(this.destroy)),
+        this.api.messages.get({ chatId, messageId: item.messageId }).pipe(takeUntilDestroyed(this.destroy)),
       );
       if (this.destroy.destroyed || this.chatId() !== chatId || this.kind() !== kind) return;
       await this.navigation.open(message.chatId, message.replyRootId, item.messageId);

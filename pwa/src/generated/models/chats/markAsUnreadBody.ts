@@ -7,9 +7,6 @@
  */
 import type { SnowflakeID } from '../snowflakeID';
 
-/**
- * Optional body for the unread endpoint — allows resetting read position to a specific message.
- */
 export interface MarkAsUnreadBody {
   messageId?: SnowflakeID;
 }

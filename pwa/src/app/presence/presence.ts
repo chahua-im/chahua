@@ -6,7 +6,7 @@ import {
   type PresenceSnapshotPayload,
   type UserPresenceResponse,
 } from '../../generated/models';
-import { Connection } from '../api/connection';
+import { Connection, ResyncReason } from '../api/connection';
 import type { SnowflakeID } from '../api/snowflake-id';
 import { SessionStore } from '../session/session-store';
 
@@ -81,9 +81,9 @@ export class Presence {
     this.connection.events$.pipe(takeUntilDestroyed()).subscribe((event) => {
       if (event.type === ServerWsMessageType.presenceSnapshot) this.receive(event.payload);
     });
-    this.connection.resync$.pipe(takeUntilDestroyed()).subscribe(() => {
+    this.connection.resync$.pipe(takeUntilDestroyed()).subscribe((reason) => {
       this.clock.set(Date.now());
-      if (this.live() && this.sessionUid != null) this.publish(this.scope());
+      if (reason !== ResyncReason.Connected && this.live() && this.sessionUid != null) this.publish(this.scope());
     });
   }
 

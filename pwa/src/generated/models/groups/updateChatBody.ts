@@ -10,7 +10,7 @@ import type { MembershipMessageVisibility } from '../membershipMessageVisibility
 import type { SnowflakeID } from '../snowflakeID';
 
 export interface UpdateChatBody {
-  avatarImageId?: null | SnowflakeID;
+  avatarImageId?: SnowflakeID | null;
   description?: string;
   membershipMessageVisibility?: MembershipMessageVisibility;
   name?: string;

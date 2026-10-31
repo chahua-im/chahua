@@ -1,4 +1,5 @@
 import { Component, inject } from '@angular/core';
+import { rxResource } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 import {
   IonButton,
@@ -16,7 +17,7 @@ import {
 } from '@ionic/angular';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { chevronBackOutline } from 'ionicons/icons';
-import { getBlocksResource } from '../../../generated/endpoints/blocks/blocks.resource';
+import { RpcApi } from '../../../generated/rpc-api';
 import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
 import { PanelNavigation } from '../../navigation/panel-navigation';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
@@ -49,7 +50,8 @@ import { LoadError } from '../../ui/load-error/load-error';
 export class BlockedUsers {
   protected readonly panels = inject(PanelNavigation);
   protected readonly backIcon = chevronBackOutline;
-  protected readonly blocks = getBlocksResource();
+  private readonly api = inject(RpcApi);
+  protected readonly blocks = rxResource({ stream: () => this.api.blocks.list() });
   panelResume() {
     this.blocks.reload();
   }

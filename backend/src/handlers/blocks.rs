@@ -3,24 +3,15 @@ use axum::{
     http::StatusCode,
 };
 use serde::Deserialize;
-use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use crate::dto::blocks::{BlockResponse, ListBlocksResponse};
+use crate::dto::blocks::{BlockRequestBody, ListBlocksResponse};
 use crate::errors::AppError;
 use crate::extractors::DbConn;
-use crate::handlers::users::build_member_summary_map;
-use crate::services::authz::Action as AuthzAction;
-use crate::services::social;
-use crate::utils::auth::Principal;
+use crate::services::api::blocks;
+use crate::services::authentication::Principal;
 use crate::AppState;
-
-#[derive(Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct BlockRequestBody {
-    uid: i32,
-}
 
 #[derive(Deserialize)]
 struct BlockPath {
@@ -40,21 +31,13 @@ async fn get_blocks(
     State(state): State<AppState>,
     mut conn: DbConn,
 ) -> Result<Json<ListBlocksResponse>, AppError> {
-    let conn = &mut *conn;
-    let uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialRead)?;
-    let blocks = social::list_blocks_with_since(conn, uid)?;
-    let uids: Vec<i32> = blocks.iter().map(|(uid, _)| *uid).collect();
-    let summaries = build_member_summary_map(conn, &state, &uids)?;
-    let blocks = blocks
-        .into_iter()
-        .filter_map(|(uid, since)| {
-            summaries.get(&uid).map(|user| BlockResponse {
-                user: user.clone(),
-                since,
-            })
-        })
-        .collect();
-    Ok(Json(ListBlocksResponse { blocks }))
+    let blocks = blocks::get_blocks(
+        principal,
+        &mut conn,
+        &state.authz_service,
+        state.avatars.as_ref(),
+    )?;
+    Ok(Json(blocks))
 }
 
 #[utoipa::path(
@@ -72,15 +55,13 @@ async fn block_user(
     mut conn: DbConn,
     Json(body): Json<BlockRequestBody>,
 ) -> Result<StatusCode, AppError> {
-    let conn = &mut *conn;
-    let uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialWrite)?;
-    social::block_user(conn, uid, body.uid)?;
-    state.presence_service.pair_policy_changed(uid, body.uid);
-    crate::services::read_receipts::broadcast_pair_privacy_changed(
-        conn,
+    blocks::block_user(
+        principal,
+        body,
+        &mut conn,
+        &state.authz_service,
+        state.presence_service.as_ref(),
         &state.ws_registry,
-        uid,
-        body.uid,
     )?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -102,18 +83,13 @@ async fn unblock_user(
     mut conn: DbConn,
     Path(BlockPath { uid: other }): Path<BlockPath>,
 ) -> Result<StatusCode, AppError> {
-    let conn = &mut *conn;
-    let uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialWrite)?;
-    let removed = social::unblock_user(conn, uid, other)?;
-    if !removed {
-        return Err(AppError::NotFound("Block not found"));
-    }
-    state.presence_service.pair_policy_changed(uid, other);
-    crate::services::read_receipts::broadcast_pair_privacy_changed(
-        conn,
-        &state.ws_registry,
-        uid,
+    blocks::unblock_user(
+        principal,
         other,
+        &mut conn,
+        &state.authz_service,
+        state.presence_service.as_ref(),
+        &state.ws_registry,
     )?;
     Ok(StatusCode::NO_CONTENT)
 }

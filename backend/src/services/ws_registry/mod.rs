@@ -4,7 +4,7 @@
 mod metrics;
 pub use metrics::WsMetrics;
 
-use crate::dto::ws::{PresenceUpdatePayload, ServerWsMessage};
+use crate::dto::ws::{OnlineClientStatus, PresenceUpdatePayload, ServerWsMessage};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -18,6 +18,15 @@ const AWAY_TIMEOUT_SECS: u64 = 300;
 pub enum AppPresenceState {
     Active = 1,
     Inactive = 2,
+}
+
+impl From<OnlineClientStatus> for AppPresenceState {
+    fn from(status: OnlineClientStatus) -> Self {
+        match status {
+            OnlineClientStatus::Active => Self::Active,
+            OnlineClientStatus::Inactive => Self::Inactive,
+        }
+    }
 }
 
 impl AppPresenceState {

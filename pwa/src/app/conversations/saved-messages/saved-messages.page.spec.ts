@@ -1,17 +1,12 @@
-import { provideHttpClient, withInterceptors } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
-import { Subject } from 'rxjs';
+import { provideIonicAngular } from '@ionic/angular';
 import { vi } from 'vitest';
-import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
 import { MessageType } from '../../../generated/models';
-import { Connection } from '../../api/connection';
-import { jsonInterceptor } from '../../api/json.interceptor';
+import { RpcTestPeer, provideRpcTesting } from '../../api/rpc-testing';
 import { encodeId } from '../../api/snowflake-id';
-import { mockRealtime, testUser, wireChat, wireMessage } from '../../api/testing';
+import { testUser, wireChat, wireMessage } from '../../api/testing';
 import { SavedMessageList } from '../../messages/saved-message-list/saved-message-list';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
@@ -37,33 +32,33 @@ const savedSnapshot = () => ({
 describe('SavedMessagesPage', () => {
   let fixture: ComponentFixture<SavedMessagesPage>;
   let page: SavedMessagesPage;
-  let http: HttpTestingController;
+  let peer: RpcTestPeer;
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
       imports: [SavedMessagesPage],
       providers: [
+        provideIonicAngular({ animated: false }),
         provideRouter([
           { path: 'chats/saved', children: [] },
           { path: 'media', children: [], data: { modal: true } },
           { path: 'chats/saved/500/forwarded', children: [], data: { preserveConversation: true } },
           { path: 'chats', children: [] },
         ]),
-        provideHttpClient(withInterceptors([jsonInterceptor])),
-        provideHttpClientTesting(),
-        provideChahuaBaseUrl('/_api'),
-        { provide: SessionStore, useValue: { user: signal(testUser) } },
-        { provide: Preferences, useValue: { showAllAvatars: () => false } },
-        { provide: Connection, useValue: mockRealtime({ events$: new Subject(), resync$: new Subject() }) },
+        provideRpcTesting(),
+        SessionStore,
+        Preferences,
       ],
     }).compileComponents();
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
+    TestBed.inject(SessionStore).user.set(testUser);
     fixture = TestBed.createComponent(SavedMessagesPage);
     page = fixture.componentInstance;
-    http = TestBed.inject(HttpTestingController);
   });
 
   afterEach(() => {
-    http.verify();
+    peer.verify();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -74,7 +69,7 @@ describe('SavedMessagesPage', () => {
 
   async function saved() {
     fixture.detectChanges();
-    http.expectOne('/_api/saved-messages?limit=50').flush({ savedMessages: [savedSnapshot()], nextCursor: '499' });
+    peer.expect('savedMessages.list', { limit: 50 }).flush({ savedMessages: [savedSnapshot()], nextCursor: '499' });
     await fixture.whenStable();
     fixture.detectChanges();
   }
@@ -83,7 +78,7 @@ describe('SavedMessagesPage', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(2027, 0, 1, 12));
     fixture.detectChanges();
-    http.expectOne('/_api/saved-messages?limit=50').flush({
+    peer.expect('savedMessages.list', { limit: 50 }).flush({
       savedMessages: [
         {
           ...savedSnapshot(),
@@ -108,8 +103,8 @@ describe('SavedMessagesPage', () => {
     expect(fixture.nativeElement.querySelector('ion-textarea')).toBeNull();
     expect(list()['saved']()[0]).not.toHaveProperty('clientGeneratedId');
     const loading = list()['load'](true);
-    http
-      .expectOne('/_api/saved-messages?limit=50&before=499')
+    peer
+      .expect('savedMessages.list', { limit: 50, before: '499' })
       .flush({ savedMessages: [savedSnapshot(), { ...savedSnapshot(), id: '499' }] });
     await loading;
     expect(
@@ -131,18 +126,20 @@ describe('SavedMessagesPage', () => {
     await saved();
     const removing = list()['removeSaved'](list()['saved']()[0]);
     expect(list()['saved']()).toEqual([]);
-    http.expectOne('/_api/saved-messages/by-id/500').flush(null);
+    peer.expect('savedMessages.delete', { savedMessageId: '500' }).flush(null);
     await removing;
     expect(list()['saved']()).toEqual([]);
   });
 
   it('ignores an old saved page after leaving and reentering the virtual conversation', async () => {
     fixture.detectChanges();
-    const old = http.expectOne('/_api/saved-messages?limit=50');
+    const old = peer.expect('savedMessages.list', { limit: 50 });
     page.ionViewDidLeave();
+    fixture.detectChanges();
     page.ionViewDidEnter();
-    http.expectOne('/_api/saved-messages?limit=50').flush({ savedMessages: [{ ...savedSnapshot(), id: '501' }] });
-    expect(old.cancelled).toBe(true);
+    fixture.detectChanges();
+    peer.expect('savedMessages.list', { limit: 50 }).flush({ savedMessages: [{ ...savedSnapshot(), id: '501' }] });
+    old.flush({ savedMessages: [savedSnapshot()] });
     await fixture.whenStable();
     expect(
       list()
@@ -152,22 +149,26 @@ describe('SavedMessagesPage', () => {
     expect(list()['nextCursor']()).toBeUndefined();
   });
 
-  it('cancels collection HTTP when the page is destroyed', async () => {
+  it('cancels collection reads when the page is destroyed without accepting a late reply', async () => {
     fixture.detectChanges();
-    const request = http.expectOne('/_api/saved-messages?limit=50');
+    const collection = list();
+    const request = peer.expect('savedMessages.list', { limit: 50 });
     fixture.destroy();
-    expect(request.cancelled).toBe(true);
+    request.flush({ savedMessages: [savedSnapshot()] });
+    expect(collection['saved']()).toEqual([]);
   });
+
   it('restores an optimistically removed snapshot if deletion fails', async () => {
     await saved();
     const item = list()['saved']()[0];
     const removing = list()['removeSaved'](item);
     expect(list()['saved']()).toEqual([]);
-    http.expectOne('/_api/saved-messages/by-id/500').flush('failed', { status: 500, statusText: 'Error' });
+    peer.expect('savedMessages.delete', { savedMessageId: '500' }).error(1500);
     await removing;
     expect(list()['saved']()).toEqual([item]);
     expect(list()['removeFailed']()).toBe(true);
   });
+
   it('preserves saved rows beneath media details and releases them when leaving the collection', async () => {
     await saved();
     const node = fixture.nativeElement.querySelector('app-message');
@@ -177,7 +178,7 @@ describe('SavedMessagesPage', () => {
     await router.navigateByUrl('/chats/saved');
     page.ionViewDidEnter();
     expect(fixture.nativeElement.querySelector('app-message')).toBe(node);
-    http.expectNone('/_api/saved-messages?limit=50');
+    peer.expectNone('savedMessages.list');
     await router.navigateByUrl('/media');
     page.ionViewDidLeave();
     await router.navigateByUrl('/chats');
@@ -195,14 +196,14 @@ describe('SavedMessagesPage', () => {
     page.ionViewDidEnter();
     expect(fixture.nativeElement.querySelector('app-message')).toBe(node);
     expect(list()['nextCursor']()).toBe(encodeId('499'));
-    http.expectNone('/_api/saved-messages?limit=50');
+    peer.expectNone('savedMessages.list');
   });
 
   it('offers the saved-message menu for system snapshots without per-row action buttons', async () => {
     fixture.detectChanges();
-    http
-      .expectOne('/_api/saved-messages?limit=50')
-      .flush({ savedMessages: [{ ...savedSnapshot(), messageType: MessageType.system, message: 'joined the chat' }] });
+    peer.expect('savedMessages.list', { limit: 50 }).flush({
+      savedMessages: [{ ...savedSnapshot(), messageType: MessageType.system, message: 'joined the chat' }],
+    });
     await fixture.whenStable();
     fixture.detectChanges();
     const entry = fixture.nativeElement.querySelector('.system-message') as HTMLElement;

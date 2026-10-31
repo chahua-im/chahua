@@ -6,8 +6,8 @@ use utoipa_axum::routes;
 use crate::dto::external::sessions::SessionGenerationResponse;
 use crate::errors::AppError;
 use crate::extractors::DbConn;
+use crate::services::authentication::Principal;
 use crate::services::authz::Action as AuthzAction;
-use crate::utils::auth::Principal;
 use crate::AppState;
 
 #[utoipa::path(
@@ -25,7 +25,7 @@ async fn get_session_generation(
     Path(uid): Path<i32>,
 ) -> Result<Json<SessionGenerationResponse>, AppError> {
     let conn = &mut *conn;
-    principal.require_service_action(conn, &state, AuthzAction::SessionRead)?;
+    principal.require_service_action(conn, &state.authz_service, AuthzAction::SessionRead)?;
     validate_uid(uid)?;
     let token_gen = state.token_generation.stored(conn, uid)?;
 
@@ -47,7 +47,7 @@ async fn post_revoke_sessions(
     Path(uid): Path<i32>,
 ) -> Result<Json<SessionGenerationResponse>, AppError> {
     let conn = &mut *conn;
-    principal.require_service_action(conn, &state, AuthzAction::SessionRevoke)?;
+    principal.require_service_action(conn, &state.authz_service, AuthzAction::SessionRevoke)?;
     validate_uid(uid)?;
     let token_gen = state.token_generation.bump(conn, uid)?;
 

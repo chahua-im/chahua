@@ -14,6 +14,7 @@ pub struct CreateServiceTokenRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ServiceTokenResponse {
     #[serde(with = "crate::serde_i64_string")]
+    #[schema(schema_with = crate::serde_i64_string::schema)]
     pub id: i64,
     pub token: String,
     pub name: String,

@@ -24,7 +24,7 @@ import {
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { addOutline, chevronBackOutline, closeCircleOutline, cubeOutline, happyOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
-import { StickersService } from '../../../generated/endpoints/stickers/stickers.service';
+import { RpcApi } from '../../../generated/rpc-api';
 import type { StickerPackSummary, UpdateStickerPackOrderItem } from '../../../generated/models';
 import { decodeId } from '../../api/snowflake-id';
 import { EmojiPicker } from '../../messages/emoji-picker/emoji-picker';
@@ -122,7 +122,7 @@ import { AUTO_SORT_LIMIT, sortStickerPacksByPreference, StickerPreferences } fro
 export class StickerSettings {
   private readonly destroy = inject(DestroyRef);
   private readonly editor = viewChild(StickerEditor);
-  private readonly api = inject(StickersService);
+  private readonly api = inject(RpcApi);
   private readonly transloco = inject(TranslocoService);
   private readonly router = inject(Router);
   protected readonly panels = inject(PanelNavigation);
@@ -158,8 +158,8 @@ export class StickerSettings {
     this.loadError.set(false);
     try {
       const [ownedPacks, subscribed] = await Promise.all([
-        firstValueFrom(this.api.getMyOwnedPacks()),
-        firstValueFrom(this.api.getMySubscribedPacks()),
+        firstValueFrom(this.api.stickers.listOwnedPacks()),
+        firstValueFrom(this.api.stickers.listSubscribedPacks()),
       ]);
       this.loaded.set(true);
       this.owned.set(ownedPacks.packs);
@@ -195,7 +195,7 @@ export class StickerSettings {
     this.creating.set(true);
     this.createError.set(undefined);
     try {
-      const pack = await firstValueFrom(this.api.postPack({ name: name.trim() }));
+      const pack = await firstValueFrom(this.api.stickers.createPack({ name: name.trim() }));
       if (this.destroy.destroyed) return;
       this.owned.update((owned) => [...owned, pack]);
       this.packs.update((packs) => [pack, ...packs]);

@@ -1,39 +1,118 @@
 import { SessionStore } from '../session/session-store';
-import { MembershipMessageVisibility, GroupKind, SystemMessageKind } from '../../generated/models';
-import { provideHttpClient, withInterceptors } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
-import { MessageType, ServerWsMessageType, type ThreadListItem } from '../../generated/models';
+import {
+  GroupKind,
+  MembershipMessageVisibility,
+  MessageType,
+  ServerWsMessageType,
+  SystemMessageKind,
+  type ThreadListItem,
+} from '../../generated/models';
 import { ChatStore } from '../chats/chat-store';
 import { Connection } from '../api/connection';
-import { jsonInterceptor } from '../api/json.interceptor';
-import { encodeId } from '../api/snowflake-id';
+import { RpcErrorCode } from '../api/rpc-error';
+import { RpcTestPeer, provideRpcTesting } from '../api/rpc-testing';
+import { decodeId, encodeId } from '../api/snowflake-id';
 import { mockRealtime, testUser, testChat, testMessage, wireChat, wireMessage } from '../api/testing';
 import { ConversationError, ConversationStore, PageDirection } from './conversation-store';
 
-const root = `/_api/chats/${wireChat.id}/messages`;
 const message = (id: string) => ({ ...testMessage, id: encodeId(id) });
 const wire = (id: string) => ({ ...wireMessage, id });
 
 describe('ConversationStore', () => {
   let timeline: ConversationStore;
-  let http: HttpTestingController;
+  let peer: RpcTestPeer;
+  const messages = (params: Record<string, unknown> = {}) =>
+    peer.expect('messages.list', { chatId: decodeId(testChat.id), max: 50, ...params });
   beforeEach(() => {
     TestBed.configureTestingModule({
-      providers: [
-        ConversationStore,
-        { provide: Connection, useValue: mockRealtime() },
-        provideHttpClient(withInterceptors([jsonInterceptor])),
-        provideHttpClientTesting(),
-        provideChahuaBaseUrl('/_api'),
-      ],
+      providers: [ConversationStore, { provide: Connection, useValue: mockRealtime() }, provideRpcTesting()],
     });
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
     timeline = TestBed.inject(ConversationStore);
-    http = TestBed.inject(HttpTestingController);
     timeline.reset(testChat.id);
   });
-  afterEach(() => http.verify());
+  afterEach(() => {
+    try {
+      peer.verify();
+    } finally {
+      TestBed.resetTestingModule();
+    }
+  });
+  it.each([
+    { current: undefined, removed: undefined, clears: true },
+    { current: '90', removed: undefined, clears: true },
+    { current: '90', removed: '90', clears: true },
+    { current: '90', removed: '91', clears: false },
+    { current: undefined, removed: '90', clears: false },
+  ])('invalidates only the revoked conversation scope ($current, $removed)', async ({ current, removed, clears }) => {
+    TestBed.inject(SessionStore).user.set(testUser);
+    const chats = TestBed.inject(ChatStore);
+    const threadId = current ? encodeId(current) : undefined;
+    timeline.reset(testChat.id, threadId);
+    const params = current ? { threadId: current } : {};
+    const opening = timeline.open();
+    messages(params).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [wire('100')],
+      olderCursor: '100',
+    });
+    await opening;
+    const loading = timeline.load(PageDirection.Older);
+    const held = messages({ ...params, before: '100' });
+    const state = {
+      chatId: testChat.id,
+      threadId: removed ? encodeId(removed) : undefined,
+      accessible: false,
+      unreadCount: 0,
+      unreadMentions: 0,
+      unreadReactions: 0,
+    };
+    chats['acceptReadStates']([state]);
+    expect(timeline.items().map(({ id }) => id)).toEqual(clears ? [] : [encodeId('100')]);
+    expect(timeline.error()).toBe(clears ? ConversationError.Open : undefined);
+    held.flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('50')] });
+    await loading;
+    expect(timeline.items().map(({ id }) => id)).toEqual((clears ? [] : ['50', '100']).map(encodeId));
+    if (clears) {
+      chats['acceptReadStates']([{ ...state, accessible: true }]);
+      const retry = timeline.open();
+      messages(params).flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('110')] });
+      expect(await retry).toBe(true);
+      expect(timeline.items().map(({ id }) => id)).toEqual([encodeId('110')]);
+    }
+  });
+  it('does not restore an opening response after revocation and permits a fresh retry after access returns', async () => {
+    TestBed.inject(SessionStore).user.set(testUser);
+    const chats = TestBed.inject(ChatStore);
+    const opening = timeline.open();
+    const held = messages();
+    const state = {
+      chatId: testChat.id,
+      accessible: false,
+      unreadCount: 0,
+      unreadMentions: 0,
+      unreadReactions: 0,
+    };
+    chats['acceptReadStates']([state]);
+    held.flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('100')] });
+    expect(await opening).toBe(false);
+    expect(timeline.items()).toEqual([]);
+    expect(timeline.error()).toBe(ConversationError.Open);
+
+    const blockedRetry = timeline.open();
+    messages().flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('101')] });
+    expect(await blockedRetry).toBe(false);
+    expect(timeline.items()).toEqual([]);
+    expect(timeline.error()).toBe(ConversationError.Open);
+
+    chats['acceptReadStates']([{ ...state, accessible: true }]);
+    const retry = timeline.open();
+    messages().flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('102')] });
+    expect(await retry).toBe(true);
+    expect(timeline.items().map(({ id }) => id)).toEqual([encodeId('102')]);
+  });
 
   it.each(
     [
@@ -51,7 +130,7 @@ describe('ConversationStore', () => {
       const policy = (canView: boolean) => ({ visibility: MembershipMessageVisibility.admins, canView });
       chats.remember([{ ...testChat, membershipMessagePolicy: policy(beforeView) }]);
       const opening = timeline.open(undefined, false, true);
-      http.expectOne(`${root}?max=50`).flush({
+      messages().flush({
         chatSettings: { showMembershipMessages: beforeShow },
         membershipMessagePolicy: policy(beforeView),
         messages: [wire('100')],
@@ -70,7 +149,7 @@ describe('ConversationStore', () => {
         ['50', '25', undefined],
       ] as const) {
         const loading = timeline.load(PageDirection.Older);
-        http.expectOne(`${root}?max=50&before=${before}`).flush({
+        messages({ before: before }).flush({
           chatSettings: settings,
           membershipMessagePolicy: updatedPolicy,
           messages: [wire(id)],
@@ -83,7 +162,7 @@ describe('ConversationStore', () => {
       }
 
       const reconnecting = timeline.reconnect();
-      http.expectOne(`${root}?max=50&after=100`).flush({
+      messages({ after: '100' }).flush({
         chatSettings: settings,
         membershipMessagePolicy: updatedPolicy,
         messages: [wire('150')],
@@ -102,11 +181,13 @@ describe('ConversationStore', () => {
     const chats = TestBed.inject(ChatStore);
     chats.remember([testChat]);
     const opening = timeline.open();
-    const request = http.expectOne(`${root}?max=50`);
+    const request = messages();
     const policy = { visibility: MembershipMessageVisibility.nobody, canView: false };
     const refreshing = chats.refreshMembershipPolicy(testChat.id);
     await Promise.resolve();
-    http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...wireChat, membershipMessagePolicy: policy });
+    peer
+      .expect('groups.get', { chatId: decodeId(testChat.id) })
+      .flush({ ...wireChat, membershipMessagePolicy: policy });
     await refreshing;
     request.flush({
       chatSettings: { showMembershipMessages: true },
@@ -115,7 +196,7 @@ describe('ConversationStore', () => {
     });
     await Promise.resolve();
     await Promise.resolve();
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: true },
       membershipMessagePolicy: policy,
       messages: [wire('90')],
@@ -137,24 +218,21 @@ describe('ConversationStore', () => {
       session.user.set(testUser);
       TestBed.inject(ChatStore).remember([{ ...testChat, kind }]);
       timeline.reset(testChat.id, threadId);
+      const threadParams = threadId ? { threadId: decodeId(threadId) } : {};
       const opening = timeline.open();
-      http
-        .expectOne((request) => request.url === root)
-        .flush({
-          chatSettings: { showMembershipMessages: true },
-          messages: [wire('100')],
-          olderCursor: '100',
-        });
+      messages(threadParams).flush({
+        chatSettings: { showMembershipMessages: true },
+        messages: [wire('100')],
+        olderCursor: '100',
+      });
       await opening;
       const settings = { showMembershipMessages: false };
       if (savedLocally) session.acceptChatSettings(settings, testUser.uid);
       const loading = timeline.load(PageDirection.Older);
-      http
-        .expectOne((request) => request.url === root && request.params.get('before') === '100')
-        .flush({
-          chatSettings: settings,
-          messages: [wire('50')],
-        });
+      messages({ ...threadParams, before: '100' }).flush({
+        chatSettings: settings,
+        messages: [wire('50')],
+      });
       await loading;
       expect(timeline.items().map(({ id }) => id)).toEqual([encodeId('50'), encodeId('100')]);
       expect(timeline.page()?.olderCursor).toBeUndefined();
@@ -171,23 +249,20 @@ describe('ConversationStore', () => {
       session.user.set(testUser);
       TestBed.inject(ChatStore).remember([{ ...testChat, kind }]);
       timeline.reset(testChat.id, threadId);
+      const threadParams = threadId ? { threadId: decodeId(threadId) } : {};
       const opening = timeline.open();
-      http
-        .expectOne((request) => request.url === root)
-        .flush({
-          chatSettings: { showMembershipMessages: true },
-          messages: [wire('100')],
-        });
+      messages(threadParams).flush({
+        chatSettings: { showMembershipMessages: true },
+        messages: [wire('100')],
+      });
       await opening;
       const settings = { showMembershipMessages: false };
       if (savedLocally) session.acceptChatSettings(settings, testUser.uid);
       const reconnecting = timeline.reconnect();
-      http
-        .expectOne((request) => request.url === root && request.params.get('after') === '100')
-        .flush({
-          chatSettings: settings,
-          messages: [],
-        });
+      messages({ ...threadParams, after: '100' }).flush({
+        chatSettings: settings,
+        messages: [],
+      });
       await reconnecting;
       expect(timeline.atLatest()).toBe(true);
       expect(timeline.error()).toBeUndefined();
@@ -201,13 +276,13 @@ describe('ConversationStore', () => {
     const session = TestBed.inject(SessionStore);
     session.user.set(testUser);
     const opening = timeline.open();
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: false },
       messages: [wire('99')],
     });
     for (let i = 0; i < 8; i++) await Promise.resolve();
     expect(timeline.items()).toHaveLength(0);
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: false },
       messages: [wire('100')],
     });
@@ -220,14 +295,14 @@ describe('ConversationStore', () => {
     const session = TestBed.inject(SessionStore);
     session.user.set(testUser);
     const opening = timeline.open();
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('100')],
       olderCursor: '100',
     });
     await opening;
     const loading = timeline.load(PageDirection.Older);
-    http.expectOne(`${root}?max=50&before=100`).flush({
+    messages({ before: '100' }).flush({
       chatSettings: { showMembershipMessages: false },
       messages: [wire('50')],
     });
@@ -238,29 +313,29 @@ describe('ConversationStore', () => {
 
   it('reconnects from the last loaded message and completes an empty filtered continuation', async () => {
     const opening = timeline.open(undefined, false, true);
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('100')],
       olderCursor: '100',
     });
     await opening;
     const older = timeline.load(PageDirection.Older);
-    http.expectOne(`${root}?max=50&before=100`).flush({
+    messages({ before: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('50')],
     });
     await older;
     const reconnecting = timeline.reconnect();
-    http.expectOne(`${root}?max=50&after=100`).flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
+    messages({ after: '100' }).flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
     await reconnecting;
     expect(timeline.atLatest()).toBe(true);
     expect(timeline.items().map((message) => message.id)).toEqual([encodeId('50'), encodeId('100')]);
-    http.expectNone(() => true);
+    peer.verify();
   });
 
   it('drops the old live boundary when a membership event becomes hidden', async () => {
     const opening = timeline.open();
-    http.expectOne(`${root}?max=50`).flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('100')] });
+    messages().flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('100')] });
     await opening;
     timeline.receive({
       ...message('200'),
@@ -268,12 +343,12 @@ describe('ConversationStore', () => {
       systemKind: SystemMessageKind.member_joined,
     });
     const hiding = timeline.open(undefined, false, true);
-    http.expectOne(`${root}?max=50`).flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('100')] });
+    messages().flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('100')] });
     await hiding;
     expect(timeline.items().map(({ id }) => id)).toEqual([encodeId('100')]);
     expect(timeline.atLatest()).toBe(true);
     expect(timeline.page()?.newerCursor).toBeUndefined();
-    http.expectNone(() => true);
+    peer.verify();
   });
 
   it('does not create a forward gap for hidden live events while the latest page is loading', async () => {
@@ -285,7 +360,7 @@ describe('ConversationStore', () => {
       messageType: MessageType.system,
       systemKind: SystemMessageKind.member_joined,
     });
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: false },
       messages: [wire('100')],
     });
@@ -293,42 +368,45 @@ describe('ConversationStore', () => {
     expect(timeline.atLatest()).toBe(true);
     expect(timeline.page()?.newerCursor).toBeUndefined();
     expect(timeline.items().map(({ id }) => id)).toEqual([encodeId('100')]);
-    http.expectNone(() => true);
+    peer.verify();
   });
 
   it('retains a confirmed empty filtered range while reconnecting and completes without a synthetic cursor', async () => {
     const opening = timeline.open(undefined, false, true);
-    http.expectOne(`${root}?max=50`).flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
+    messages().flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
     await opening;
     const previous = timeline.page();
     const reconnecting = timeline.reconnect();
     expect(timeline.page()).toBe(previous);
-    http.expectOne(`${root}?max=50`).flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
+    messages().flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
     await reconnecting;
     expect(timeline.atLatest()).toBe(true);
     expect(timeline.page()?.newerCursor).toBeUndefined();
-    http.expectNone(() => true);
+    peer.verify();
   });
 
   it('replaces a filtered range when showing membership messages and cancels obsolete filter responses', async () => {
     const first = timeline.open(undefined, false, true);
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('100')],
     });
     await first;
     const showing = timeline.open(undefined, false, false);
-    const obsolete = http.expectOne(`${root}?max=50`);
+    const obsolete = messages();
     expect(timeline.items()).toHaveLength(1);
     const hiding = timeline.open(undefined, false, true);
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('100')],
     });
-    await Promise.all([showing, hiding]);
-    expect(obsolete.cancelled).toBe(true);
+    obsolete.flush({ chatSettings: { showMembershipMessages: false }, messages: [wire('100')] });
+    expect(timeline.items()).toEqual([message('100')]);
+    expect(await showing).toBe(false);
+    await hiding;
+    expect(timeline.items()).toEqual([message('100')]);
     const restored = timeline.open(undefined, false, false);
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: true },
       messages: [
         wire('100'),
@@ -353,7 +431,7 @@ describe('ConversationStore', () => {
     const session = TestBed.inject(SessionStore);
     session.user.set({ ...testUser, showMembershipMessages: show });
     const opening = timeline.open(undefined, false, !show);
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: show },
       messages: empty ? [] : [wire('100')],
     });
@@ -361,7 +439,7 @@ describe('ConversationStore', () => {
     const previous = timeline.page();
     session.acceptChatSettings({ showMembershipMessages: !show }, testUser.uid);
     const switching = timeline.open(undefined, false, show);
-    const obsolete = http.expectOne(`${root}?max=50`);
+    const obsolete = messages();
     timeline.receive(message('101'));
     const membership = {
       ...wire('102'),
@@ -371,15 +449,16 @@ describe('ConversationStore', () => {
     timeline.receive({ ...membership, id: encodeId('102'), chatId: testChat.id });
     session.acceptChatSettings({ showMembershipMessages: show }, testUser.uid);
     const restoring = timeline.open(around, around != null, !show);
-    expect(obsolete.cancelled).toBe(true);
     expect(timeline.page()).toBe(previous);
     expect(timeline.loading()).toBe(true);
     const expected = [...(empty ? [] : [wire('100')]), wire('101'), ...(show ? [membership] : [])];
     const expectedIds = expected.map(({ id }) => encodeId(id));
-    http.expectOne(`${root}?max=50${around ? '&around=100' : ''}`).flush({
+    messages(around ? { around: '100' } : {}).flush({
       chatSettings: { showMembershipMessages: show },
       messages: expected,
     });
+    obsolete.flush({ chatSettings: { showMembershipMessages: !show }, messages: [wire('100')] });
+    expect(timeline.page()).toBe(previous);
     expect(await switching).toBe(false);
     expect(await restoring).toBe(true);
     expect(timeline.items().map(({ id }) => id)).toEqual(expectedIds);
@@ -387,14 +466,14 @@ describe('ConversationStore', () => {
     expect(timeline.page()?.newerCursor).toBeUndefined();
     timeline.receive(message('103'));
     expect(timeline.items().at(-1)?.id).toBe(encodeId('103'));
-    http.expectNone(() => true);
+    peer.verify();
   });
 
   it('retries a failed read after switching back without treating the retained range as current', async () => {
     const session = TestBed.inject(SessionStore);
     session.user.set(testUser);
     const opening = timeline.open();
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('100')],
     });
@@ -402,19 +481,20 @@ describe('ConversationStore', () => {
     const previous = timeline.page();
     session.acceptChatSettings({ showMembershipMessages: false }, testUser.uid);
     const hiding = timeline.open(undefined, false, true);
-    const obsolete = http.expectOne(`${root}?max=50`);
+    const obsolete = messages();
     timeline.receive(message('101'));
     session.acceptChatSettings({ showMembershipMessages: true }, testUser.uid);
     const restoring = timeline.open(undefined, false, false);
-    expect(obsolete.cancelled).toBe(true);
-    http.expectOne(`${root}?max=50`).flush('', { status: 503, statusText: 'Unavailable' });
+    obsolete.flush({ chatSettings: { showMembershipMessages: false }, messages: [wire('100'), wire('101')] });
+    expect(timeline.page()).toBe(previous);
+    messages().error(RpcErrorCode.Unavailable, 'Unavailable');
     expect(await hiding).toBe(false);
     expect(await restoring).toBe(false);
     expect(timeline.error()).toBe(ConversationError.Open);
     expect(timeline.page()).toBe(previous);
     const retrying = timeline.open();
     expect(timeline.page()).toBe(previous);
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('100'), wire('101')],
     });
@@ -426,7 +506,7 @@ describe('ConversationStore', () => {
 
   it('does not mistake an explicitly returned hidden target for a missing message', async () => {
     const opening = timeline.open(encodeId('260'), true, true);
-    http.expectOne(`${root}?max=50&around=260`).flush({
+    messages({ around: '260' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [
         wire('100'),
@@ -452,7 +532,7 @@ describe('ConversationStore', () => {
     );
     const staleVersion = store.snapshot();
     const opening = timeline.open();
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: true },
       messages: [{ ...wire('99'), createdAt: previous.createdAt, message: 'previous' }, wire('100')],
       olderCursor: '99',
@@ -469,7 +549,7 @@ describe('ConversationStore', () => {
       staleVersion,
     );
     expect(store.chat(testChat.id).lastMessage?.id).toBe(previous.id);
-    http.expectNone(() => true);
+    peer.verify();
   });
 
   for (const edge of ['complete', 'older', 'newer', 'unknown'] as const) {
@@ -481,7 +561,7 @@ describe('ConversationStore', () => {
         store.snapshot(),
       );
       const opening = timeline.open();
-      http.expectOne(`${root}?max=50`).flush({
+      messages().flush({
         chatSettings: { showMembershipMessages: true },
         messages: [wire('100')],
         olderCursor: edge === 'older' ? '100' : undefined,
@@ -499,7 +579,7 @@ describe('ConversationStore', () => {
         expect(store.chat(testChat.id).lastMessage?.id).toBe(latest.id);
         expect(store.chat(testChat.id).lastMessageAt).toBe(latest.createdAt);
       }
-      http.expectNone(() => true);
+      peer.verify();
     });
   }
 
@@ -511,7 +591,7 @@ describe('ConversationStore', () => {
       store.snapshot(),
     );
     const opening = timeline.open();
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('99'), wire('100'), wire('101')],
     });
@@ -557,7 +637,7 @@ describe('ConversationStore', () => {
       const staleVersion = store.snapshot();
       timeline.reset(testChat.id, rootId);
       const opening = timeline.open();
-      http.expectOne(`${root}?max=50&threadId=90`).flush({
+      messages({ threadId: '90' }).flush({
         chatSettings: { showMembershipMessages: true },
         messages: [
           { ...wire('90'), threadInfo: { replyCount: 2 } },
@@ -599,13 +679,13 @@ describe('ConversationStore', () => {
         connection.acceptChange({ type: ServerWsMessageType.messageDeleted, payload: { ...latest, isDeleted: true } });
         expect(store.thread(rootId)?.lastReply?.id).toBe(next.id);
       }
-      http.expectNone(() => true);
+      peer.verify();
     });
   }
 
-  it('stores only the message range and current paging edges from HTTP responses', async () => {
+  it('stores only the message range and current paging edges from RPC responses', async () => {
     const opening = timeline.open();
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('100')],
       olderCursor: '100',
@@ -621,7 +701,7 @@ describe('ConversationStore', () => {
       newerCursor: null,
     });
     const older = timeline.load(PageDirection.Older);
-    http.expectOne(`${root}?max=50&before=100`).flush({
+    messages({ before: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('99')],
       olderCursor: null,
@@ -639,7 +719,7 @@ describe('ConversationStore', () => {
 
   it('buffers one fetched page until insertion is safe and preserves live arrivals', async () => {
     const opening = timeline.open();
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('100')],
       olderCursor: '100',
@@ -650,9 +730,7 @@ describe('ConversationStore', () => {
       release = resolve;
     });
     const older = timeline.load(PageDirection.Older, () => idle);
-    http
-      .expectOne(`${root}?max=50&before=100`)
-      .flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('99')] });
+    messages({ before: '100' }).flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('99')] });
     await Promise.resolve();
     expect(timeline.items()).toEqual([message('100')]);
     expect(timeline.canLoad(PageDirection.Older)).toBe(false);
@@ -664,7 +742,7 @@ describe('ConversationStore', () => {
 
   it('discards a buffered page after navigation', async () => {
     const opening = timeline.open();
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('100')],
       olderCursor: '100',
@@ -675,9 +753,7 @@ describe('ConversationStore', () => {
       release = resolve;
     });
     const older = timeline.load(PageDirection.Older, () => idle);
-    http
-      .expectOne(`${root}?max=50&before=100`)
-      .flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('99')] });
+    messages({ before: '100' }).flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('99')] });
     await Promise.resolve();
     timeline.reset();
     release();
@@ -685,11 +761,12 @@ describe('ConversationStore', () => {
     expect(timeline.items()).toEqual([]);
   });
 
-  it('cancels an in-flight HTTP request and releases the range when its owner is destroyed', async () => {
+  it('cancels an in-flight RPC request and releases the range when its owner is destroyed', async () => {
     const opening = timeline.open();
-    const request = http.expectOne(`${root}?max=50`);
+    const request = messages();
     TestBed.resetTestingModule();
-    expect(request.cancelled).toBe(true);
+    request.flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('100')] });
+    expect(timeline.items()).toEqual([]);
     expect(await opening).toBe(false);
     expect(timeline.items()).toEqual([]);
     expect(timeline.error()).toBeUndefined();
@@ -697,7 +774,7 @@ describe('ConversationStore', () => {
 
   it('cancels pagination without discarding the parent range and can catch up on return', async () => {
     const opening = timeline.open();
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('100')],
       olderCursor: '100',
@@ -705,17 +782,16 @@ describe('ConversationStore', () => {
     await opening;
     const page = timeline.page();
     const loading = timeline.load(PageDirection.Older);
-    const request = http.expectOne(`${root}?max=50&before=100`);
+    const request = messages({ before: '100' });
     timeline.cancelLoading();
-    expect(request.cancelled).toBe(true);
+    request.flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('99')] });
+    expect(timeline.page()).toBe(page);
     await loading;
     expect(timeline.page()).toBe(page);
     expect(timeline.paging()).toBe(false);
     expect(timeline.error()).toBeUndefined();
     const reconnecting = timeline.reconnect();
-    http
-      .expectOne(`${root}?max=50&after=100`)
-      .flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('101')] });
+    messages({ after: '100' }).flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('101')] });
     await reconnecting;
     expect(timeline.items().map((message) => message.id)).toEqual([encodeId('100'), encodeId('101')]);
   });
@@ -724,7 +800,7 @@ describe('ConversationStore', () => {
     expect(timeline.atLatest()).toBe(false);
     expect(timeline.canLoad(PageDirection.Older)).toBe(false);
     const opening = timeline.open(encodeId('100'), true);
-    http.expectOne(`${root}?max=50&around=100`).flush({
+    messages({ around: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('100'), wire('101')],
       olderCursor: '100',
@@ -737,7 +813,7 @@ describe('ConversationStore', () => {
     const older = timeline.load(PageDirection.Older);
     expect(timeline.canLoad(PageDirection.Older)).toBe(false);
     expect(timeline.canLoad(PageDirection.Newer)).toBe(false);
-    http.expectOne(`${root}?max=50&before=100`).flush({
+    messages({ before: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('99')],
       olderCursor: null,
@@ -746,7 +822,7 @@ describe('ConversationStore', () => {
     await older;
     expect(timeline.page()?.newerCursor).toBe(encodeId('101'));
     const newer = timeline.load(PageDirection.Newer);
-    http.expectOne(`${root}?max=50&after=101`).flush({
+    messages({ after: '101' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('102')],
       newerCursor: null,
@@ -768,16 +844,17 @@ describe('ConversationStore', () => {
 
   it('preserves the current range if around only returns a deleted target’s neighbours', async () => {
     const initial = timeline.open();
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: true },
       messages: [{ ...wireMessage }],
       olderCursor: wireMessage.id,
     });
     await initial;
     const jump = timeline.open(encodeId('100'), true);
-    http
-      .expectOne(`${root}?max=50&around=100`)
-      .flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('99'), wire('101')] });
+    messages({ around: '100' }).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [wire('99'), wire('101')],
+    });
     expect(await jump).toBe(false);
     expect(timeline.items()).toEqual([testMessage]);
     expect(timeline.error()).toBe(ConversationError.Missing);
@@ -785,7 +862,7 @@ describe('ConversationStore', () => {
 
   it('does not stitch live messages onto a historical range or fetch the entire gap on reconnect', async () => {
     const opening = timeline.open(encodeId('100'));
-    http.expectOne(`${root}?max=50&around=100`).flush({
+    messages({ around: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('100')],
       newerCursor: '100',
@@ -796,7 +873,7 @@ describe('ConversationStore', () => {
     await timeline.reconnect();
     expect(timeline.items()).toEqual([message('100')]);
     const latest = timeline.open();
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: true },
       messages: [{ ...wireMessage }],
       olderCursor: wireMessage.id,
@@ -807,14 +884,14 @@ describe('ConversationStore', () => {
 
   it('fetches only one reconnect batch and retains previously loaded history', async () => {
     const opening = timeline.open();
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('100')],
       olderCursor: '100',
     });
     await opening;
     const reconnect = timeline.reconnect();
-    http.expectOne(`${root}?max=50&after=100`).flush({
+    messages({ after: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('101')],
       newerCursor: '101',
@@ -826,20 +903,22 @@ describe('ConversationStore', () => {
 
   it('cancels old navigation and pagination requests after a later jump', async () => {
     const opening = timeline.open(encodeId('100'));
-    const staleOpen = http.expectOne(`${root}?max=50&around=100`);
+    const staleOpen = messages({ around: '100' });
     const latest = timeline.open();
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: true },
       messages: [{ ...wireMessage }],
       olderCursor: wireMessage.id,
     });
     await latest;
-    expect(staleOpen.cancelled).toBe(true);
+    staleOpen.flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('100')] });
+    expect(timeline.items()).toEqual([testMessage]);
     await opening;
     const paging = timeline.load(PageDirection.Older);
-    const stalePage = http.expectOne(`${root}?max=50&before=${wireMessage.id}`);
+    const stalePage = messages({ before: wireMessage.id });
     await timeline.open(testMessage.id, true);
-    expect(stalePage.cancelled).toBe(true);
+    stalePage.flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('99')] });
+    expect(timeline.items()).toEqual([testMessage]);
     await paging;
     expect(timeline.items()).toEqual([testMessage]);
     expect(timeline.loading()).toBe(false);
@@ -848,7 +927,7 @@ describe('ConversationStore', () => {
   it('keeps a forward cursor for live messages arriving during an initial or reconnect request', async () => {
     const opening = timeline.open();
     timeline.receive(message('102'));
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('100')],
       newerCursor: null,
@@ -857,7 +936,7 @@ describe('ConversationStore', () => {
     expect(timeline.page()?.newerCursor).toBe(encodeId('100'));
     const newer = timeline.load(PageDirection.Newer);
     timeline.receive(message('103'));
-    http.expectOne(`${root}?max=50&after=100`).flush({
+    messages({ after: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('101'), wire('102')],
       newerCursor: null,
@@ -868,7 +947,7 @@ describe('ConversationStore', () => {
 
   it('merges live messages arriving while older pages load without losing or duplicating them', async () => {
     const opening = timeline.open();
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('100')],
       olderCursor: '100',
@@ -878,9 +957,11 @@ describe('ConversationStore', () => {
     expect(timeline.atLatest()).toBe(true);
     timeline.receive(message('101'));
     timeline.receive(message('101'));
-    http
-      .expectOne(`${root}?max=50&before=100`)
-      .flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('99')], olderCursor: null });
+    messages({ before: '100' }).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [wire('99')],
+      olderCursor: null,
+    });
     await older;
     expect(timeline.items().map((item) => item.id)).toEqual([encodeId('99'), encodeId('100'), encodeId('101')]);
     timeline.reset();
@@ -889,13 +970,13 @@ describe('ConversationStore', () => {
   it('reconciles a reconnect received while the initial request was in flight', async () => {
     const opening = timeline.open();
     await timeline.reconnect();
-    http.expectOne(`${root}?max=50`).flush({
+    messages().flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('100')],
       olderCursor: '100',
     });
     await Promise.resolve();
-    http.expectOne(`${root}?max=50&after=100`).flush({
+    messages({ after: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('101')],
       newerCursor: null,
@@ -907,15 +988,15 @@ describe('ConversationStore', () => {
   it('recovers the first live message when an empty initial snapshot arrives late', async () => {
     const opening = timeline.open();
     timeline.receive(message('100'));
-    http.expectOne(`${root}?max=50`).flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
+    messages().flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
     await Promise.resolve();
-    http.expectOne(`${root}?max=50`).flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('100')] });
+    messages().flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('100')] });
     await opening;
     expect(timeline.items()).toEqual([message('100')]);
   });
   it('can reach the end after a historical range receives a reconnect event', async () => {
     const opening = timeline.open(encodeId('100'));
-    http.expectOne(`${root}?max=50&around=100`).flush({
+    messages({ around: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('100')],
       newerCursor: '100',
@@ -923,7 +1004,7 @@ describe('ConversationStore', () => {
     await opening;
     await timeline.reconnect();
     const newer = timeline.load(PageDirection.Newer);
-    http.expectOne(`${root}?max=50&after=100`).flush({
+    messages({ after: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('101')],
       newerCursor: null,
@@ -935,23 +1016,24 @@ describe('ConversationStore', () => {
   it('scopes every topic page and reconnect request with the backend camelCase parameter', async () => {
     timeline.reset(testChat.id, encodeId('100'));
     const opening = timeline.open(encodeId('102'));
-    http.expectOne(`${root}?max=50&around=102&threadId=100`).flush({
+    messages({ around: '102', threadId: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [{ ...wire('102'), replyRootId: '100' }],
       olderCursor: '102',
     });
     await opening;
     const older = timeline.load(PageDirection.Older);
-    http
-      .expectOne(`${root}?max=50&before=102&threadId=100`)
-      .flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('100')] });
+    messages({ before: '102', threadId: '100' }).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [wire('100')],
+    });
     await older;
     timeline.receive(message('105'));
     timeline.receive({ ...message('104'), replyRootId: encodeId('99') });
     timeline.receive({ ...message('103'), replyRootId: encodeId('100') });
     expect(timeline.items().map((item) => item.id)).toEqual([encodeId('100'), encodeId('102'), encodeId('103')]);
     const reconnect = timeline.reconnect();
-    http.expectOne(`${root}?max=50&after=103&threadId=100`).flush({
+    messages({ after: '103', threadId: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [{ ...wire('106'), replyRootId: '100' }],
     });
@@ -967,21 +1049,23 @@ describe('ConversationStore', () => {
   it('rejects a previous topic response when changing topics inside the same chat', async () => {
     timeline.reset(testChat.id, encodeId('100'));
     const oldOpening = timeline.open(encodeId('100'));
-    const oldRequest = http.expectOne(`${root}?max=50&around=100&threadId=100`);
+    const oldRequest = messages({ around: '100', threadId: '100' });
     timeline.reset(testChat.id, encodeId('200'));
     const opening = timeline.open(encodeId('200'));
-    http
-      .expectOne(`${root}?max=50&around=200&threadId=200`)
-      .flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('200')] });
+    messages({ around: '200', threadId: '200' }).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [wire('200')],
+    });
     await opening;
-    expect(oldRequest.cancelled).toBe(true);
+    oldRequest.flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('100')] });
+    expect(timeline.items().map((item) => item.id)).toEqual([encodeId('200')]);
     await oldOpening;
     expect(timeline.items().map((item) => item.id)).toEqual([encodeId('200')]);
   });
 
   it('patches edits and single or bulk deletions in historical ranges without adding unrelated messages', async () => {
     const opening = timeline.open(encodeId('100'));
-    http.expectOne(`${root}?max=50&around=100`).flush({
+    messages({ around: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('100'), wire('101'), wire('102')],
       olderCursor: '100',
@@ -1035,7 +1119,7 @@ describe('ConversationStore', () => {
 
   it('preserves personal reaction state omitted from broadcasts and honors explicit changes and removals', async () => {
     const opening = timeline.open(encodeId('100'));
-    http.expectOne(`${root}?max=50&around=100`).flush({
+    messages({ around: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [
         {
@@ -1081,7 +1165,7 @@ describe('ConversationStore', () => {
     timeline.update({ ...message('100'), message: 'edited while loading' });
     timeline.updateReactions(encodeId('100'), [{ emoji: '👍', count: 1, reactedByMe: true }]);
     expect(timeline.items()).toEqual([]);
-    http.expectOne(`${root}?max=50&around=100`).flush({
+    messages({ around: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('100')],
       olderCursor: '100',
@@ -1102,7 +1186,7 @@ describe('ConversationStore', () => {
       type: ServerWsMessageType.messagesBulkDeleted,
       payload: { chatId: testChat.id, messageIds: [encodeId('97')] },
     });
-    http.expectOne(`${root}?max=50&before=100`).flush({
+    messages({ before: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('97'), wire('98'), wire('99'), wire('100')],
     });
@@ -1125,7 +1209,7 @@ describe('ConversationStore', () => {
 
   it('keeps live edits and known reaction ownership during a jump but accepts a later fresh snapshot', async () => {
     const opening = timeline.open(encodeId('100'));
-    http.expectOne(`${root}?max=50&around=100`).flush({
+    messages({ around: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [
         {
@@ -1145,7 +1229,7 @@ describe('ConversationStore', () => {
         reactions: [{ emoji: '👍', count: 2 }],
       },
     });
-    http.expectOne(`${root}?max=50&around=100`).flush({
+    messages({ around: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [
         {
@@ -1161,7 +1245,7 @@ describe('ConversationStore', () => {
       reactions: [{ emoji: '👍', count: 2, reactedByMe: true }],
     });
     const fresh = timeline.open(encodeId('100'));
-    http.expectOne(`${root}?max=50&around=100`).flush({
+    messages({ around: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [{ ...wire('100'), message: 'later server state', reactions: [] }],
     });
@@ -1178,9 +1262,7 @@ describe('ConversationStore', () => {
       type: ServerWsMessageType.messageDeleted,
       payload: { ...message('100'), isDeleted: true },
     });
-    http
-      .expectOne(`${root}?max=50&around=100`)
-      .flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('100')] });
+    messages({ around: '100' }).flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('100')] });
     expect(await opening).toBe(false);
     expect(timeline.error()).toBe(ConversationError.Missing);
     expect(timeline.items()).toEqual([]);
@@ -1188,7 +1270,7 @@ describe('ConversationStore', () => {
 
   it('keeps a recalled thread root as an exact target', async () => {
     const opening = timeline.open(encodeId('100'), true);
-    http.expectOne(`${root}?max=50&around=100`).flush({
+    messages({ around: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [{ ...wire('100'), isDeleted: true, message: null, threadInfo: { replyCount: 2 } }],
     });
@@ -1200,9 +1282,9 @@ describe('ConversationStore', () => {
 
   it('drops the recalled body and the quote snapshots that reference it', async () => {
     const opening = timeline.open(encodeId('100'));
-    http.expectOne(`${root}?max=50&around=100`).flush({
+    messages({ around: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
-      messages: [wire('100'), { ...wire('101'), replyToMessage: { ...message('100'), mentions: [] } }],
+      messages: [wire('100'), { ...wire('101'), replyToMessage: { ...wire('100'), mentions: [] } }],
     });
     await opening;
     expect(timeline.items()[1].replyToMessage?.message).toBe('测试消息');
@@ -1229,9 +1311,9 @@ describe('ConversationStore', () => {
   it('redacts quote snapshots in a page that arrives after the recall event', async () => {
     const opening = timeline.open(encodeId('100'));
     timeline.update({ ...message('100'), isDeleted: true, message: undefined, attachments: [] });
-    http.expectOne(`${root}?max=50&around=100`).flush({
+    messages({ around: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
-      messages: [wire('100'), { ...wire('101'), replyToMessage: { ...message('100'), mentions: [] } }],
+      messages: [wire('100'), { ...wire('101'), replyToMessage: { ...wire('100'), mentions: [] } }],
     });
     await opening;
     expect(timeline.items()[1].replyToMessage?.isDeleted).toBe(true);
@@ -1240,9 +1322,9 @@ describe('ConversationStore', () => {
 
   it('refreshes quote snapshots when the cited message is edited', async () => {
     const opening = timeline.open(encodeId('100'));
-    http.expectOne(`${root}?max=50&around=100`).flush({
+    messages({ around: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
-      messages: [wire('100'), { ...wire('101'), replyToMessage: { ...message('100'), mentions: [] } }],
+      messages: [wire('100'), { ...wire('101'), replyToMessage: { ...wire('100'), mentions: [] } }],
     });
     await opening;
     timeline.update({ ...message('100'), message: '编辑后的消息', isEdited: true });
@@ -1264,9 +1346,9 @@ describe('ConversationStore', () => {
   it('refreshes quote snapshots in a page that arrives after the edit event', async () => {
     const opening = timeline.open(encodeId('100'));
     timeline.update({ ...message('100'), message: '编辑后的消息', isEdited: true });
-    http.expectOne(`${root}?max=50&around=100`).flush({
+    messages({ around: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
-      messages: [wire('100'), { ...wire('101'), replyToMessage: { ...message('100'), mentions: [] } }],
+      messages: [wire('100'), { ...wire('101'), replyToMessage: { ...wire('100'), mentions: [] } }],
     });
     await opening;
     expect(timeline.items()[1].replyToMessage?.message).toBe('编辑后的消息');
@@ -1275,11 +1357,11 @@ describe('ConversationStore', () => {
   it('keeps updates scoped to the active topic and clears pending updates after navigation', async () => {
     timeline.reset(testChat.id, encodeId('100'));
     const oldOpening = timeline.open(encodeId('100'));
-    const oldRequest = http.expectOne(`${root}?max=50&around=100&threadId=100`);
+    const oldRequest = messages({ around: '100', threadId: '100' });
     timeline.delete(encodeId('100'));
     timeline.reset(testChat.id, encodeId('200'));
     const opening = timeline.open(encodeId('200'));
-    http.expectOne(`${root}?max=50&around=200&threadId=200`).flush({
+    messages({ around: '200', threadId: '200' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [wire('200'), { ...wire('201'), replyRootId: '200' }],
       newerCursor: '201',
@@ -1295,7 +1377,8 @@ describe('ConversationStore', () => {
       replyRootId: encodeId('200'),
       message: 'this topic',
     });
-    expect(oldRequest.cancelled).toBe(true);
+    oldRequest.flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('100')] });
+    expect(timeline.items()[0].isDeleted).toBe(false);
     await oldOpening;
     expect(timeline.items()[0].isDeleted).toBe(false);
     expect(timeline.items()[1].message).toBe('this topic');
@@ -1310,7 +1393,7 @@ describe('ConversationStore', () => {
     };
     const opening = timeline.open(encodeId('100'));
     timeline.updateThread(update);
-    http.expectOne(`${root}?max=50&around=100`).flush({
+    messages({ around: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [{ ...wire('100'), threadInfo: { replyCount: 1 } }],
       newerCursor: '100',
@@ -1326,7 +1409,7 @@ describe('ConversationStore', () => {
   it('replays reply count changes for roots arriving in an older page without restoring cleared threads', async () => {
     const oldInfo = { replyCount: 1 };
     const opening = timeline.open(encodeId('101'));
-    http.expectOne(`${root}?max=50&around=101`).flush({
+    messages({ around: '101' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [{ ...wire('101'), threadInfo: oldInfo }],
       olderCursor: '101',
@@ -1346,7 +1429,7 @@ describe('ConversationStore', () => {
       replyCount: 0,
       lastReplyAt: testMessage.createdAt,
     });
-    http.expectOne(`${root}?max=50&before=101`).flush({
+    messages({ before: '101' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [
         { ...wire('100'), threadInfo: oldInfo },

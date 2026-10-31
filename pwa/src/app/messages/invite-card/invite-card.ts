@@ -2,7 +2,7 @@ import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
 import { Component, effect, inject, input, signal } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { IonSpinner } from '@ionic/angular';
-import { InvitesService } from '../../../generated/endpoints/invites/invites.service';
+import { RpcApi } from '../../../generated/rpc-api';
 import type { InvitePreviewResponse } from '../../../generated/models';
 import { inviteCode, inviteStatus, InviteStatus } from '../../chats/invite';
 @Component({
@@ -13,7 +13,7 @@ import { inviteCode, inviteStatus, InviteStatus } from '../../chats/invite';
 })
 export class InviteCard {
   readonly code = input.required<string>();
-  private readonly api = inject(InvitesService);
+  private readonly api = inject(RpcApi);
   protected readonly preview = signal<InvitePreviewResponse | undefined>(undefined);
   protected readonly loading = signal(true);
   protected readonly failed = signal(false);
@@ -25,7 +25,7 @@ export class InviteCard {
       this.loading.set(true);
       this.failed.set(false);
       this.preview.set(undefined);
-      const subscription = this.api.getInviteByCode({ inviteCode: code }).subscribe({
+      const subscription = this.api.invites.getByCode({ inviteCode: code }).subscribe({
         next: (preview) => {
           this.preview.set(preview);
           this.loading.set(false);

@@ -25,6 +25,19 @@ pub struct UpdateStickerPackBody {
     pub visibility: Option<StickerPackVisibility>,
 }
 
+#[derive(utoipa::ToSchema)]
+#[allow(dead_code)]
+pub struct PostStickerMultipart {
+    /// Sticker image file
+    pub file: Vec<u8>,
+    /// Emoji for the sticker
+    pub emoji: String,
+    /// Optional sticker name
+    pub name: Option<String>,
+    /// Optional sticker description
+    pub description: Option<String>,
+}
+
 fn deserialize_visibility_update<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<StickerPackVisibility>, D::Error> {
@@ -125,7 +138,7 @@ pub enum StickerPackSort {
     Trending,
 }
 
-#[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[derive(Debug, Deserialize, utoipa::IntoParams, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[into_params(parameter_in = Query)]
 pub struct StickerPackDiscoveryQuery {

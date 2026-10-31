@@ -29,7 +29,36 @@ pub const MAX_SCOPES: usize = 512;
 #[derive(Clone)]
 pub struct StateWatch {
     pub request_id: u32,
+    /// Assigned by the owning transport; legacy sockets use zero.
+    pub generation: u64,
     pub conversations: Vec<ConversationRef>,
+}
+
+/// A state-watch result retains its installation generation until final
+/// publication, allowing a transport to discard an already queued old scope.
+pub struct StateWatchEvent {
+    pub generation: u64,
+    pub message: ServerWsMessage,
+}
+
+enum WatchOutput {
+    Legacy(mpsc::Sender<ServerWsMessage>),
+    Tagged(mpsc::Sender<StateWatchEvent>),
+}
+
+impl WatchOutput {
+    async fn send(&self, generation: u64, message: ServerWsMessage) -> bool {
+        match self {
+            Self::Legacy(output) => output.send(message).await.is_ok(),
+            Self::Tagged(output) => output
+                .send(StateWatchEvent {
+                    generation,
+                    message,
+                })
+                .await
+                .is_ok(),
+        }
+    }
 }
 
 pub fn valid_scopes(scopes: &[ConversationRef]) -> bool {
@@ -176,26 +205,61 @@ pub async fn run(
     subscription: watch::Receiver<Option<StateWatch>>,
     output: mpsc::Sender<ServerWsMessage>,
 ) {
-    run_with(changed, subscription, output, move |watch| {
-        let db = db.clone();
-        let service = service.clone();
-        async move {
-            tokio::task::spawn_blocking(move || {
-                let mut conn = db.get().map_err(|error| error.to_string())?;
-                load_states(&mut conn, &service, uid, &watch.conversations)
-                    .map_err(|error| error.to_string())
-            })
-            .await
-            .map_err(|error| error.to_string())?
-        }
-    })
+    run_with(
+        changed,
+        subscription,
+        WatchOutput::Legacy(output),
+        move |watch| {
+            let db = db.clone();
+            let service = service.clone();
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    let mut conn = db.get().map_err(|error| error.to_string())?;
+                    load_states(&mut conn, &service, uid, &watch.conversations)
+                        .map_err(|error| error.to_string())
+                })
+                .await
+                .map_err(|error| error.to_string())?
+            }
+        },
+    )
+    .await;
+}
+
+/// Runs a watch while retaining the installation generation on queued output.
+pub async fn run_tagged(
+    db: DbPool,
+    service: Arc<UnreadService>,
+    uid: i32,
+    changed: Arc<Notify>,
+    subscription: watch::Receiver<Option<StateWatch>>,
+    output: mpsc::Sender<StateWatchEvent>,
+) {
+    run_with(
+        changed,
+        subscription,
+        WatchOutput::Tagged(output),
+        move |watch| {
+            let db = db.clone();
+            let service = service.clone();
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    let mut conn = db.get().map_err(|error| error.to_string())?;
+                    load_states(&mut conn, &service, uid, &watch.conversations)
+                        .map_err(|error| error.to_string())
+                })
+                .await
+                .map_err(|error| error.to_string())?
+            }
+        },
+    )
     .await;
 }
 
 async fn run_with<F, Fut>(
     changed: Arc<Notify>,
     mut subscription: watch::Receiver<Option<StateWatch>>,
-    output: mpsc::Sender<ServerWsMessage>,
+    output: WatchOutput,
     mut load: F,
 ) where
     F: FnMut(StateWatch) -> Fut,
@@ -218,6 +282,7 @@ async fn run_with<F, Fut>(
             _ = async { match deadline { Some(at) => tokio::time::sleep_until(at).await, None => std::future::pending().await } } => {
                 let Some(watch) = current.clone() else { continue; };
                 let request_id = watch.request_id;
+                let generation = watch.generation;
                 let result = load(watch).await;
                 match subscription.has_changed() { Ok(false) => {}, Ok(true) => continue, Err(_) => break }
                 match result {
@@ -225,13 +290,36 @@ async fn run_with<F, Fut>(
                         deadline = None; retry = Duration::from_secs(1);
                         let states: Vec<_> = rows.iter().filter(|row| full || previous.get(&row.conversation) != Some(*row)).cloned().collect();
                         previous = rows.into_iter().map(|row| (row.conversation, row)).collect();
-                        if (full || !states.is_empty()) && output.send(ServerWsMessage::ConversationStates(ConversationStatesPayload { request_id, full, states })).await.is_err() { break; }
+                        if (full || !states.is_empty())
+                            && !output
+                                .send(
+                                    generation,
+                                    ServerWsMessage::ConversationStates(ConversationStatesPayload {
+                                        request_id,
+                                        full,
+                                        states,
+                                    }),
+                                )
+                                .await
+                        {
+                            break;
+                        }
                         full = false;
                     }
                     Err(error) => {
                         tracing::warn!(?error, "conversation state snapshot failed");
                         full = true; deadline = Some(Instant::now() + retry); retry = (retry * 2).min(Duration::from_secs(30));
-                        if output.send(ServerWsMessage::ConversationStatesError(ConversationUnreadErrorPayload { request_id })).await.is_err() { break; }
+                        if !output
+                            .send(
+                                generation,
+                                ServerWsMessage::ConversationStatesError(
+                                    ConversationUnreadErrorPayload { request_id },
+                                ),
+                            )
+                            .await
+                        {
+                            break;
+                        }
                     }
                 }
             }
@@ -367,25 +455,31 @@ mod tests {
         let (output, mut messages) = mpsc::channel(8);
         let count = Arc::new(std::sync::atomic::AtomicI64::new(2));
         let load_count = count.clone();
-        let task = tokio::spawn(run_with(changed.clone(), rx, output, move |watch| {
-            let count = load_count.load(std::sync::atomic::Ordering::SeqCst);
-            async move {
-                Ok(watch
-                    .conversations
-                    .into_iter()
-                    .map(|conversation| ConversationState {
-                        conversation,
-                        accessible: true,
-                        last_read_message_id: None,
-                        unread_count: count,
-                        unread_mentions: 0,
-                        unread_reactions: 0,
-                    })
-                    .collect())
-            }
-        }));
+        let task = tokio::spawn(run_with(
+            changed.clone(),
+            rx,
+            WatchOutput::Legacy(output),
+            move |watch| {
+                let count = load_count.load(std::sync::atomic::Ordering::SeqCst);
+                async move {
+                    Ok(watch
+                        .conversations
+                        .into_iter()
+                        .map(|conversation| ConversationState {
+                            conversation,
+                            accessible: true,
+                            last_read_message_id: None,
+                            unread_count: count,
+                            unread_mentions: 0,
+                            unread_reactions: 0,
+                        })
+                        .collect())
+                }
+            },
+        ));
         tx.send_replace(Some(StateWatch {
             request_id: 1,
+            generation: 0,
             conversations: vec![ConversationRef {
                 chat_id: 1,
                 thread_id: None,

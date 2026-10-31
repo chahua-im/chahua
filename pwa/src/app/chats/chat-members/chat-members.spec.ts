@@ -1,11 +1,9 @@
-import { HttpTestingController } from '@angular/common/http/testing';
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { AlertController, IonPopover, IonToast } from '@ionic/angular';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
-import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
 import {
   GroupRole,
   SpeakingMode,
@@ -13,7 +11,9 @@ import {
   type ServerWsMessage,
   type MemberResponse,
 } from '../../../generated/models';
-import { encodeId } from '../../api/snowflake-id';
+import { decodeId, encodeId } from '../../api/snowflake-id';
+import { RpcErrorCode } from '../../api/rpc-error';
+import { provideRpcTesting, RpcTestPeer } from '../../api/rpc-testing';
 import { mockRealtime, testChat, testUser, wireChat } from '../../api/testing';
 import { Connection } from '../../api/connection';
 import { SessionStore } from '../../session/session-store';
@@ -29,10 +29,15 @@ const member: MemberResponse = {
 };
 const admin: MemberResponse = { ...member, uid: 3, username: '管理员乙', role: GroupRole.admin };
 const self: MemberResponse = { ...admin, uid: testUser.uid, username: testUser.username };
-const url = `/_api/group/${wireChat.id}/members`;
+const membersParams = (params: Record<string, unknown> = {}) => ({
+  chatId: wireChat.id,
+  limit: 40,
+  mode: 'autocomplete',
+  ...params,
+});
 
 describe('ChatMembers management', () => {
-  let http: HttpTestingController;
+  let peer: RpcTestPeer;
   let events: Subject<ServerWsMessage>;
   let resync: Subject<void>;
   const alert = { present: vi.fn(), onDidDismiss: vi.fn() };
@@ -46,22 +51,25 @@ describe('ChatMembers management', () => {
     vi.spyOn(IonToast.prototype, 'present').mockResolvedValue();
     TestBed.configureTestingModule({
       providers: [
-        provideChahuaBaseUrl('/_api'),
+        provideRpcTesting(),
         { provide: Connection, useValue: mockRealtime({ events$: events, resync$: resync }) },
         { provide: SessionStore, useValue: { user: signal(testUser) } },
         { provide: AlertController, useValue: { create: vi.fn().mockResolvedValue(alert) } },
       ],
     });
-    http = TestBed.inject(HttpTestingController);
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
   });
-  afterEach(() => http.verify());
+  afterEach(() => peer.verify());
 
   async function open(canManage = true) {
     const fixture = TestBed.createComponent(ChatMembers);
     fixture.componentRef.setInput('chatId', testChat.id);
     fixture.componentRef.setInput('canManage', canManage);
     fixture.detectChanges();
-    http.expectOne((req) => req.url === url).flush({ members: [self, member, admin], canManageMembers: canManage });
+    peer
+      .expect('groups.listMembers', membersParams())
+      .flush({ members: [self, member, admin], canManageMembers: canManage });
     await fixture.whenStable();
     fixture.detectChanges();
     return fixture;
@@ -78,7 +86,7 @@ describe('ChatMembers management', () => {
     const fixture = await open();
     const component = fixture.componentInstance;
     search(fixture, '成员');
-    const read = http.expectOne((req) => req.url === url);
+    const read = peer.expect('groups.listMembers', membersParams({ q: '成员' }));
     events.next({
       type: ServerWsMessageType.memberSpeakingModeChanged,
       payload: {
@@ -94,7 +102,11 @@ describe('ChatMembers management', () => {
     await fixture.whenStable();
     expect(component['members']()[0].speakingMode).toBe(SpeakingMode.readOnly);
     const saving = component['changeSpeakingMode'](component['members']()[0], SpeakingMode.unrestricted);
-    const request = http.expectOne(`${url}/${member.uid}/speaking-mode`);
+    const request = peer.expect('groups.updateMemberSpeakingMode', {
+      chatId: wireChat.id,
+      uid: member.uid,
+      speakingMode: SpeakingMode.unrestricted,
+    });
     events.next({
       type: ServerWsMessageType.memberSpeakingModeChanged,
       payload: {
@@ -123,10 +135,10 @@ describe('ChatMembers management', () => {
     const component = fixture.componentInstance;
     const row = fixture.nativeElement.querySelectorAll('ion-list > ion-item')[1];
     await component['changeSpeakingMode'](admin, SpeakingMode.readOnly);
-    http.expectNone((req) => req.method === 'PUT');
+    peer.expectNone('groups.updateMemberSpeakingMode');
     resync.next();
-    http.expectOne('/_api/users/me/notification-settings').flush({});
-    const refresh = http.expectOne((req) => req.url === url);
+    peer.expect('users.getNotificationSettings', {}).flush({});
+    const refresh = peer.expect('groups.listMembers', membersParams());
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelectorAll('ion-list > ion-item')[1]).toBe(row);
     refresh.flush({ members: [self, { ...member, speakingMode: SpeakingMode.readOnly }, admin] });
@@ -140,10 +152,10 @@ describe('ChatMembers management', () => {
     const fixture = await open();
     const row = fixture.nativeElement.querySelectorAll('ion-list > ion-item')[1];
     search(fixture, ' 成员 ');
-    const request = http.expectOne((req) => req.url === url);
-    expect(request.request.params.get('q')).toBe('成员');
-    expect(request.request.params.get('mode')).toBe('autocomplete');
-    expect(request.request.params.has('after')).toBe(false);
+    const request = peer.expect('groups.listMembers', membersParams({ q: '成员' }));
+    expect(request.params?.['q']).toBe('成员');
+    expect(request.params?.['mode']).toBe('autocomplete');
+    expect(request.params?.['after']).toBeUndefined();
     expect(fixture.nativeElement.querySelectorAll('ion-list > ion-item')).toHaveLength(3);
     expect(fixture.nativeElement.querySelector('.page-loading')).toBeNull();
     request.flush({ members: [member], nextCursor: member.uid, canManageMembers: true });
@@ -152,9 +164,9 @@ describe('ChatMembers management', () => {
     expect(fixture.nativeElement.querySelector('ion-list > ion-item')).toBe(row);
     expect(row.querySelector('ion-button')).not.toBeNull();
     const more = fixture.componentInstance['load'](true);
-    const next = http.expectOne((req) => req.url === url);
-    expect(next.request.params.get('q')).toBe('成员');
-    expect(next.request.params.get('after')).toBe(String(member.uid));
+    const next = peer.expect('groups.listMembers', membersParams({ q: '成员', after: member.uid }));
+    expect(next.params?.['q']).toBe('成员');
+    expect(next.params?.['after']).toBe(member.uid);
     next.flush({ members: [admin], canManageMembers: true });
     await more;
     expect(fixture.componentInstance['members']()).toEqual([member, admin]);
@@ -163,18 +175,19 @@ describe('ChatMembers management', () => {
   it('cancels outdated searches and pagination, and restores the full list when cleared', async () => {
     const fixture = await open();
     search(fixture, '甲');
-    const obsolete = http.expectOne((req) => req.url === url);
+    const obsolete = peer.expect('groups.listMembers', membersParams({ q: '甲' }));
     search(fixture, '乙');
-    expect(obsolete.cancelled).toBe(true);
-    http.expectOne((req) => req.params.get('q') === '乙').flush({ members: [admin], nextCursor: admin.uid });
+    const current = peer.expect('groups.listMembers', membersParams({ q: '乙' }));
+    current.flush({ members: [admin], nextCursor: admin.uid });
+    obsolete.flush({ members: [member] });
     await fixture.whenStable();
     const more = fixture.componentInstance['load'](true);
-    const pagination = http.expectOne((req) => req.params.get('after') === String(admin.uid));
+    const pagination = peer.expect('groups.listMembers', membersParams({ q: '乙', after: admin.uid }));
     search(fixture, '');
-    expect(pagination.cancelled).toBe(true);
-    const cleared = http.expectOne((req) => req.url === url);
-    expect(cleared.request.params.has('q')).toBe(false);
-    expect(cleared.request.params.has('after')).toBe(false);
+    pagination.flush({ members: [member] });
+    const cleared = peer.expect('groups.listMembers', membersParams());
+    expect(cleared.params?.['q']).toBeUndefined();
+    expect(cleared.params?.['after']).toBeUndefined();
     cleared.flush({ members: [self, member, admin] });
     await more;
     await fixture.whenStable();
@@ -185,14 +198,14 @@ describe('ChatMembers management', () => {
   it('retains results on search failure and shows an empty state only after successful retry', async () => {
     const fixture = await open(false);
     search(fixture, '不存在');
-    http.expectOne((req) => req.url === url).flush({}, { status: 500, statusText: 'Server Error' });
+    peer.expect('groups.listMembers', membersParams({ q: '不存在' })).error(RpcErrorCode.Internal);
     await fixture.whenStable();
     fixture.detectChanges();
     expect(fixture.componentInstance['members']()).toEqual([self, member, admin]);
     expect(fixture.nativeElement.querySelector('app-load-error')).not.toBeNull();
     expect(fixture.nativeElement.textContent).not.toContain('没有找到匹配的群成员');
     const retry = fixture.componentInstance['load']();
-    http.expectOne((req) => req.params.get('q') === '不存在').flush({ members: [] });
+    peer.expect('groups.listMembers', membersParams({ q: '不存在' })).flush({ members: [] });
     await retry;
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('没有找到匹配的群成员');
@@ -202,15 +215,15 @@ describe('ChatMembers management', () => {
   it('defers the latest search until a management request completes', async () => {
     const fixture = await open();
     const operation = fixture.componentInstance['changeRole'](member);
-    const update = http.expectOne(`${url}/${member.uid}`);
+    const update = peer.expect('groups.updateMember', { chatId: wireChat.id, uid: member.uid, role: GroupRole.admin });
     search(fixture, '甲');
     search(fixture, '成员');
-    http.expectNone((req) => req.method === 'GET');
+    peer.expectNone('groups.listMembers');
     update.flush({ ...member, role: GroupRole.admin });
     await operation;
     fixture.detectChanges();
-    const request = http.expectOne((req) => req.url === url);
-    expect(request.request.params.get('q')).toBe('成员');
+    const request = peer.expect('groups.listMembers', membersParams({ q: '成员' }));
+    expect(request.params?.['q']).toBe('成员');
     request.flush({ members: [{ ...member, role: GroupRole.admin }] });
     await fixture.whenStable();
     expect(fixture.componentInstance['members']()[0].role).toBe(GroupRole.admin);
@@ -219,14 +232,18 @@ describe('ChatMembers management', () => {
   it('resets the search and cancels old reads when changing groups', async () => {
     const fixture = await open();
     search(fixture, '甲');
-    const obsolete = http.expectOne((req) => req.url === url);
+    const obsolete = peer.expect('groups.listMembers', membersParams({ q: '甲' }));
     fixture.componentRef.setInput('chatId', encodeId('9007199254740995'));
     fixture.detectChanges();
-    expect(obsolete.cancelled).toBe(true);
+    obsolete.flush({ members: [member] });
     expect(fixture.componentInstance['query']()).toBe('');
     expect(fixture.componentInstance['members']()).toEqual([]);
-    const request = http.expectOne((req) => req.url.endsWith('/9007199254740995/members'));
-    expect(request.request.params.has('q')).toBe(false);
+    const request = peer.expect('groups.listMembers', {
+      chatId: decodeId(encodeId('9007199254740995')),
+      limit: 40,
+      mode: 'autocomplete',
+    });
+    expect(request.params?.['q']).toBeUndefined();
     request.flush({ members: [admin] });
     await fixture.whenStable();
     expect(fixture.componentInstance['members']()).toEqual([admin]);
@@ -248,7 +265,7 @@ describe('ChatMembers management', () => {
     expect(fixture.nativeElement.querySelector('ion-button')).toBeNull();
     expect(fixture.componentInstance['selected']()).toBeUndefined();
     await fixture.componentInstance['changeRole'](member);
-    http.expectNone((req) => req.method === 'PATCH');
+    peer.expectNone('groups.updateMember');
   });
 
   it('retains profile navigation for ordinary members without management buttons', async () => {
@@ -272,28 +289,31 @@ describe('ChatMembers management', () => {
     expect(row.querySelector('ion-spinner')).not.toBeNull();
     expect(fixture.componentInstance['members']().find((item) => item.uid === target.uid)?.role).toBe(target.role);
     await fixture.componentInstance['changeRole'](target);
-    const request = http.expectOne(`${url}/${target.uid}`);
-    expect(request.request.method).toBe('PATCH');
-    expect(request.request.body).toEqual({ role });
+    const request = peer.expect('groups.updateMember', { chatId: wireChat.id, uid: target.uid, role });
+    expect(request.params).toEqual({ chatId: wireChat.id, uid: target.uid, role });
     request.flush({ ...target, role });
     await operation;
     fixture.detectChanges();
     expect(fixture.componentInstance['members']().find((item) => item.uid === target.uid)?.role).toBe(role);
     expect(fixture.nativeElement.querySelectorAll('ion-list > ion-item')[target.uid - 1]).toBe(row);
     expect(fixture.componentInstance['pending']()).toBeUndefined();
-    http.expectNone((req) => req.method === 'GET');
+    peer.expectNone('groups.listMembers');
   });
 
   it('preserves a failed role change and allows retry', async () => {
     const fixture = await open();
     const operation = fixture.componentInstance['changeRole'](member);
-    http.expectOne(`${url}/${member.uid}`).flush({}, { status: 403, statusText: 'Forbidden' });
+    peer
+      .expect('groups.updateMember', { chatId: wireChat.id, uid: member.uid, role: GroupRole.admin })
+      .error(RpcErrorCode.Forbidden);
     await operation;
     expect(fixture.componentInstance['members']()[1]).toEqual(member);
     expect(fixture.componentInstance['pending']()).toBeUndefined();
     expect(IonToast.prototype.present).toHaveBeenCalled();
     const retry = fixture.componentInstance['changeRole'](member);
-    http.expectOne(`${url}/${member.uid}`).flush({ ...member, role: GroupRole.admin });
+    peer
+      .expect('groups.updateMember', { chatId: wireChat.id, uid: member.uid, role: GroupRole.admin })
+      .flush({ ...member, role: GroupRole.admin });
     await retry;
     expect(fixture.componentInstance['members']()[1].role).toBe(GroupRole.admin);
   });
@@ -302,12 +322,11 @@ describe('ChatMembers management', () => {
     const fixture = await open();
     alert.onDidDismiss.mockResolvedValueOnce({ role: 'cancel' });
     await fixture.componentInstance['remove'](member);
-    http.expectNone((req) => req.method === 'DELETE');
+    peer.expectNone('groups.removeMember');
     const operation = fixture.componentInstance['remove'](member);
     await vi.waitFor(() => expect(fixture.componentInstance['pending']()).toBe(member.uid));
-    const request = http.expectOne(`${url}/${member.uid}`);
-    expect(request.request.method).toBe('DELETE');
-    expect(request.request.params.has('deleteMessages')).toBe(false);
+    const request = peer.expect('groups.removeMember', { chatId: wireChat.id, uid: member.uid });
+    expect(request.params).toEqual({ chatId: wireChat.id, uid: member.uid });
     request.flush(null);
     await operation;
     expect(fixture.componentInstance['members']().map((item) => item.uid)).toEqual([self.uid, admin.uid]);
@@ -327,17 +346,17 @@ describe('ChatMembers management', () => {
     fixture.detectChanges();
     confirm({ role: 'confirm' });
     await operation;
-    http.expectNone((req) => req.method === 'DELETE');
+    peer.expectNone('groups.removeMember');
   });
 
   it('ignores a delayed response after switching groups', async () => {
     const fixture = await open();
     const operation = fixture.componentInstance['changeRole'](member);
-    const request = http.expectOne(`${url}/${member.uid}`);
+    const request = peer.expect('groups.updateMember', { chatId: wireChat.id, uid: member.uid, role: GroupRole.admin });
     fixture.componentRef.setInput('chatId', encodeId('9007199254740995'));
     fixture.detectChanges();
-    http
-      .expectOne((req) => req.url.endsWith('/9007199254740995/members'))
+    peer
+      .expect('groups.listMembers', { chatId: decodeId(encodeId('9007199254740995')), limit: 40, mode: 'autocomplete' })
       .flush({ members: [member], canManageMembers: true });
     await fixture.whenStable();
     request.flush({ ...member, role: GroupRole.admin });

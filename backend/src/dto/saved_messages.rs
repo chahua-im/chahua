@@ -97,3 +97,16 @@ pub struct ListSavedMessagesResponse {
     #[schema(value_type = Option<String>)]
     pub next_cursor: Option<i64>,
 }
+#[derive(Debug, Deserialize, utoipa::IntoParams, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListSavedMessagesQuery {
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[param(value_type = Option<String>)]
+    #[schema(schema_with = crate::serde_i64_string::schema_opt)]
+    pub before: Option<i64>,
+    #[serde(default)]
+    pub limit: Option<i64>,
+}

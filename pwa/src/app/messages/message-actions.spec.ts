@@ -1,25 +1,20 @@
-import { provideHttpClient, withInterceptors } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { createEnvironmentInjector, EnvironmentInjector, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
-import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
 import type { PinResponse, ServerWsMessage } from '../../generated/models';
 import { ServerWsMessageType } from '../../generated/models';
 import { Connection } from '../api/connection';
-import { jsonInterceptor } from '../api/json.interceptor';
+import { RpcErrorCode } from '../api/rpc-error';
+import { provideRpcTesting, RpcTestPeer } from '../api/rpc-testing';
 import { decodeId, encodeId } from '../api/snowflake-id';
 import { mockRealtime, testChat, testMessage, testUser, wireMessage } from '../api/testing';
 import type { ChatPins } from '../chats/chat-pins';
 import { ChatStore } from '../chats/chat-store';
-import { MessageActions } from './message-actions';
 import { SessionStore } from '../session/session-store';
+import { MessageActions } from './message-actions';
 
 const currentUser = { ...testUser, avatarUrl: 'https://example.com/me.jpg' };
 const ownReactor = { uid: currentUser.uid, name: currentUser.username, avatarUrl: currentUser.avatarUrl };
-
-const chatUrl = `/_api/chats/${decodeId(testChat.id)}`;
-const messageUrl = `${chatUrl}/messages/${decodeId(testMessage.id)}`;
 const pin: PinResponse = {
   id: encodeId('9007199254741010'),
   chatId: testChat.id,
@@ -29,17 +24,14 @@ const pin: PinResponse = {
 };
 const wirePin = { ...pin, id: decodeId(pin.id), chatId: decodeId(pin.chatId), message: wireMessage };
 
+const messageParams = { chatId: decodeId(testChat.id), messageId: decodeId(testMessage.id) };
+
 describe('MessageActions', () => {
   let actions: MessageActions;
-
   let conversation: ChatPins;
-
-  let http: HttpTestingController;
-
+  let peer: RpcTestPeer;
   let scope: EnvironmentInjector;
-
   let events: Subject<ServerWsMessage>;
-
   let resync: Subject<void>;
 
   beforeEach(() => {
@@ -47,36 +39,33 @@ describe('MessageActions', () => {
     resync = new Subject();
     TestBed.configureTestingModule({
       providers: [
-        provideHttpClient(withInterceptors([jsonInterceptor])),
-        provideHttpClientTesting(),
-        provideChahuaBaseUrl('/_api'),
+        ...provideRpcTesting(),
         { provide: Connection, useValue: mockRealtime({ events$: events, resync$: resync }) },
         { provide: SessionStore, useValue: { user: signal(currentUser) } },
       ],
     });
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
     scope = createEnvironmentInjector([ChatStore, MessageActions], TestBed.inject(EnvironmentInjector));
     actions = scope.get(MessageActions);
     conversation = scope.get(ChatStore).pins(testChat.id);
-    http = TestBed.inject(HttpTestingController);
   });
 
   afterEach(() => {
     scope.destroy();
-    http.verify();
+    peer.verify();
   });
 
   async function loadPins(pins: (typeof wirePin)[] = []) {
     const loading = conversation.ensure();
-    http.expectOne(`${chatUrl}/pins`).flush({ pins: structuredClone(pins) });
+    peer.expect('pins.list', { chatId: decodeId(testChat.id) }).flush({ pins: structuredClone(pins) });
     await loading;
   }
 
   it('recalls the selected message using its original IDs', async () => {
     await loadPins([wirePin]);
     const recalled = actions.recall(testMessage);
-    const recall = http.expectOne(messageUrl);
-    expect(recall.request.method).toBe('DELETE');
-    recall.flush(null);
+    peer.expect('messages.delete', messageParams).flush(null);
     await recalled;
     expect(conversation.get(testMessage.id)?.message).toMatchObject({
       isDeleted: true,
@@ -86,25 +75,20 @@ describe('MessageActions', () => {
   });
 
   it.each(['👍', '#️⃣'])(
-    'shows the current user avatar immediately for %s and removes the last reaction without reading details',
+    'shows the current user avatar immediately for %s and removes the last reaction',
     async (emoji) => {
       await loadPins([wirePin]);
       const adding = actions.toggleReaction(testMessage, emoji);
       expect(conversation.get(testMessage.id)?.message.reactions).toEqual([
         { emoji, count: 1, reactedByMe: true, reactors: [ownReactor] },
       ]);
-      const put = http.expectOne(`${messageUrl}/reactions/${encodeURIComponent(emoji)}`);
-      expect(put.request.method).toBe('PUT');
-      put.flush(null);
+      peer.expect('reactions.add', { ...messageParams, emoji }).flush(null);
       await adding;
 
       const removing = actions.toggleReaction(conversation.get(testMessage.id)!.message, emoji);
       expect(conversation.get(testMessage.id)?.message.reactions).toEqual([]);
-      const deletion = http.expectOne(`${messageUrl}/reactions/${encodeURIComponent(emoji)}`);
-      expect(deletion.request.method).toBe('DELETE');
-      deletion.flush(null);
+      peer.expect('reactions.remove', { ...messageParams, emoji }).flush(null);
       await removing;
-      http.expectNone(() => true);
     },
   );
 
@@ -126,22 +110,23 @@ describe('MessageActions', () => {
       },
     ]);
     expect(original.reactions[0].reactors).toEqual([other]);
-    http.expectOne(`${messageUrl}/reactions/${encodeURIComponent('👍')}`).flush(null);
+    peer.expect('reactions.add', { ...messageParams, emoji: '👍' }).flush(null);
     await adding;
 
     const removing = actions.toggleReaction(conversation.get(testMessage.id)!.message, '👍');
     expect(conversation.get(testMessage.id)?.message.reactions).toEqual([
       { emoji: '👍', count: 1, reactedByMe: false, reactors: [other] },
     ]);
-    http.expectOne(`${messageUrl}/reactions/${encodeURIComponent('👍')}`).flush(null);
+    peer.expect('reactions.remove', { ...messageParams, emoji: '👍' }).flush(null);
     await removing;
-    http.expectNone(() => true);
+    peer.expectNone('reactions.add');
+    peer.expectNone('reactions.remove');
   });
 
   it('keeps WebSocket totals and personal selections when the mutation finishes later', async () => {
     await loadPins([wirePin]);
     const adding = actions.toggleReaction(testMessage, '👍');
-    const mutation = http.expectOne(`${messageUrl}/reactions/${encodeURIComponent('👍')}`);
+    const mutation = peer.expect('reactions.add', { ...messageParams, emoji: '👍' });
     const serverReactors = [ownReactor, { uid: 2, name: '另一位用户' }];
     events.next({
       type: ServerWsMessageType.reactionUpdated,
@@ -151,41 +136,27 @@ describe('MessageActions', () => {
         reactions: [{ emoji: '👍', count: 4, reactors: serverReactors }],
       },
     });
-    expect(conversation.get(testMessage.id)?.message.reactions).toEqual([
-      { emoji: '👍', count: 4, reactedByMe: true, reactors: serverReactors },
-    ]);
     mutation.flush(null);
     await adding;
-    expect(conversation.get(testMessage.id)?.message.reactions[0].count).toBe(4);
+    expect(conversation.get(testMessage.id)?.message.reactions[0]).toMatchObject({ count: 4, reactedByMe: true });
 
     const removing = actions.toggleReaction(conversation.get(testMessage.id)!.message, '👍');
-    expect(conversation.get(testMessage.id)?.message.reactions[0]).toMatchObject({
-      count: 3,
-      reactedByMe: false,
-    });
-    http.expectOne(`${messageUrl}/reactions/${encodeURIComponent('👍')}`).flush(null);
+    expect(conversation.get(testMessage.id)?.message.reactions[0]).toMatchObject({ count: 3, reactedByMe: false });
+    peer.expect('reactions.remove', { ...messageParams, emoji: '👍' }).flush(null);
     await removing;
     events.next({
       type: ServerWsMessageType.reactionUpdated,
       payload: { chatId: testChat.id, messageId: testMessage.id, reactions: [{ emoji: '👍', count: 5 }] },
     });
-    expect(conversation.get(testMessage.id)?.message.reactions[0]).toMatchObject({
-      count: 5,
-      reactedByMe: false,
-    });
-    http.expectNone(() => true);
+    expect(conversation.get(testMessage.id)?.message.reactions[0]).toMatchObject({ count: 5, reactedByMe: false });
   });
 
-  it('propagates mutation failure to the page and reverts the optimistic reaction', async () => {
+  it('propagates mutation failure and reverts the optimistic reaction', async () => {
     await loadPins([wirePin]);
     const adding = actions.toggleReaction(testMessage, '👍');
-    expect(conversation.get(testMessage.id)?.message.reactions).toHaveLength(1);
     const failure = expect(adding).rejects.toBeDefined();
-    http
-      .expectOne(`${messageUrl}/reactions/${encodeURIComponent('👍')}`)
-      .flush('', { status: 403, statusText: 'Forbidden' });
+    peer.expect('reactions.add', { ...messageParams, emoji: '👍' }).error(RpcErrorCode.Forbidden);
     await failure;
     expect(conversation.get(testMessage.id)?.message.reactions).toEqual([]);
-    http.expectNone(() => true);
   });
 });

@@ -6,23 +6,12 @@ use serde::Deserialize;
 use utoipa_axum::router::OpenApiRouter;
 
 use crate::{
-    dto::saved_messages::ListSavedMessagesResponse, errors::AppError, extractors::DbConn,
-    handlers::members::check_membership, services::saved_messages as saved_messages_svc,
-    utils::auth::CurrentUid, AppState,
+    dto::saved_messages::{ListSavedMessagesQuery, ListSavedMessagesResponse},
+    errors::AppError,
+    extractors::DbConn,
+    utils::auth::CurrentUid,
+    AppState,
 };
-
-#[derive(Debug, Deserialize, utoipa::IntoParams)]
-#[serde(rename_all = "camelCase")]
-struct ListSavedMessagesQuery {
-    #[serde(
-        default,
-        deserialize_with = "crate::serde_i64_string::opt::deserialize"
-    )]
-    #[param(value_type = Option<String>)]
-    before: Option<i64>,
-    #[serde(default)]
-    limit: Option<i64>,
-}
 
 #[derive(Debug, Deserialize)]
 struct ChatIdPath {
@@ -48,18 +37,10 @@ async fn list_chat_saved_messages(
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
     Query(query): Query<ListSavedMessagesQuery>,
 ) -> Result<Json<ListSavedMessagesResponse>, AppError> {
-    let conn = &mut *conn;
-
-    check_membership(conn, chat_id, uid)?;
-    let response = saved_messages_svc::list_saved_messages(
-        conn,
-        uid,
-        Some(chat_id),
-        query.before,
-        query.limit,
-    )?;
-
-    Ok(Json(response))
+    crate::services::api::chats::saved_messages::list_chat_saved_messages(
+        uid, chat_id, query, &mut conn,
+    )
+    .map(Json)
 }
 
 pub fn router() -> OpenApiRouter<AppState> {

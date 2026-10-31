@@ -17,7 +17,6 @@ export interface FriendRelationshipResponse {
   blocking: boolean;
   /** The server-authoritative decision for whether the current user can send this peer a DM. */
   canDm: boolean;
-  /** The canonical DM group ID, when one exists for this relationship. */
   dmChatId?: SnowflakeID;
   /** The current user has an unresolved request to `peerUid`. */
   hasPendingOutgoingRequest: boolean;

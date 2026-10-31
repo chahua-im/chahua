@@ -16,8 +16,8 @@ import {
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { chevronBackOutline, createOutline, trashOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
+import { RpcApi } from '../../../generated/rpc-api';
 import { CHAHUA_BASE_URL } from '../../../generated/endpoints/chahua.base-url';
-import { StickersService } from '../../../generated/endpoints/stickers/stickers.service';
 import type { StickerPackDetailResponse, StickerSummary } from '../../../generated/models';
 import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { MediaLoaded } from '../../messages/media-loaded';
@@ -116,7 +116,7 @@ import { StickerPreferences } from '../sticker-preferences';
 })
 export class StickerPackDetail {
   readonly packId = input.required<SnowflakeID>();
-  private readonly api = inject(StickersService);
+  private readonly api = inject(RpcApi);
   private readonly transloco = inject(TranslocoService);
   private readonly http = inject(HttpClient);
   private readonly baseUrl = inject(CHAHUA_BASE_URL);
@@ -135,6 +135,7 @@ export class StickerPackDetail {
   protected readonly error = signal(false);
   protected readonly notice = signal<string | undefined>(undefined);
   protected readonly owned = computed(() => this.pack()?.ownerUid === this.session.user()?.uid);
+  private epoch = 0;
 
   constructor() {
     effect(() => void this.load(this.packId()));
@@ -145,14 +146,16 @@ export class StickerPackDetail {
   }
 
   private async load(id: SnowflakeID) {
+    const epoch = ++this.epoch;
     this.busy.set(true);
     this.error.set(false);
     try {
-      this.pack.set(await firstValueFrom(this.api.getPack(id)));
+      const pack = await firstValueFrom(this.api.stickers.getPack({ packId: id }));
+      if (epoch === this.epoch) this.pack.set(pack);
     } catch {
-      this.error.set(true);
+      if (epoch === this.epoch) this.error.set(true);
     } finally {
-      this.busy.set(false);
+      if (epoch === this.epoch) this.busy.set(false);
     }
   }
 
@@ -165,10 +168,13 @@ export class StickerPackDetail {
   protected async saveName({ name }: StickerEditorValue) {
     const pack = this.pack();
     if (!pack || this.busy() || !name.trim() || name.trim() === pack.name) return;
+    const epoch = this.epoch;
     this.busy.set(true);
     this.editorError.set(undefined);
     try {
-      this.pack.set(await firstValueFrom(this.api.patchPack(pack.id, { name: name.trim() })));
+      const updated = await firstValueFrom(this.api.stickers.updatePack({ packId: pack.id, name: name.trim() }));
+      if (this.epoch !== epoch || this.pack()?.id !== pack.id) return;
+      this.pack.set({ ...pack, ...updated, stickers: pack.stickers });
       await this.editor()?.dismiss();
       this.renaming.set(false);
     } catch {
@@ -193,7 +199,7 @@ export class StickerPackDetail {
     if ((await alert.onDidDismiss()).role !== 'destructive') return;
     this.busy.set(true);
     try {
-      await firstValueFrom(this.api.deletePack(pack.id));
+      await firstValueFrom(this.api.stickers.deletePack({ packId: pack.id }));
       this.preferences.removePackOrderItem(pack.id);
       await this.panels.back();
     } catch {
@@ -217,7 +223,7 @@ export class StickerPackDetail {
     if ((await alert.onDidDismiss()).role !== 'destructive') return;
     this.busy.set(true);
     try {
-      await firstValueFrom(this.api.deleteSubscription(pack.id));
+      await firstValueFrom(this.api.stickers.unsubscribeFromPack({ packId: pack.id }));
       this.preferences.removePackOrderItem(pack.id);
       await this.panels.back();
     } catch {
@@ -241,7 +247,7 @@ export class StickerPackDetail {
     if ((await alert.onDidDismiss()).role !== 'destructive') return;
     this.busy.set(true);
     try {
-      await firstValueFrom(this.api.deletePackSticker(pack.id, sticker.id));
+      await firstValueFrom(this.api.stickers.removeFromPack({ packId: pack.id, stickerId: sticker.id }));
       const current = this.pack();
       if (current)
         this.pack.set({

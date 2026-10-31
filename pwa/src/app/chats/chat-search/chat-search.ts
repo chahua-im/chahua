@@ -18,7 +18,7 @@ import {
 } from '@ionic/angular';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { firstValueFrom } from 'rxjs';
-import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
+import { RpcApi } from '../../../generated/rpc-api';
 import { MessageSearchSort, type MessageResponse, type SnowflakeID } from '../../../generated/models';
 import { ConversationNavigation } from '../../conversations/conversation-navigation';
 import { Message } from '../../messages/message/message';
@@ -60,7 +60,7 @@ export class ChatSearch {
   protected readonly loading = signal(false);
   protected readonly error = signal(false);
   protected readonly cursor = signal<number | undefined>(undefined);
-  private readonly api = inject(ChatsService);
+  private readonly api = inject(RpcApi);
   private readonly navigation = inject(ConversationNavigation);
   private readonly destroy = inject(DestroyRef);
   private version = 0;
@@ -93,8 +93,8 @@ export class ChatSearch {
     if (!q) return;
     try {
       const page = await firstValueFrom(
-        this.api
-          .searchMessages(this.chatId(), { q, sort: this.sort(), limit: 40, offset: more ? this.cursor() : undefined })
+        this.api.messages
+          .search({ chatId: this.chatId(), q, sort: this.sort(), limit: 40, offset: more ? this.cursor() : undefined })
           .pipe(takeUntilDestroyed(this.destroy)),
       );
       if (version !== this.version) return;

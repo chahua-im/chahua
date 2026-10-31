@@ -1,12 +1,14 @@
 import { HttpClient, provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
+import { firstValueFrom } from 'rxjs';
 import { vi } from 'vitest';
-import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
-import type { UserGroupTagInfo } from '../../generated/models';
+import { RpcApi } from '../../generated/rpc-api';
 import { authInterceptor } from '../api/auth.interceptor';
-import { jsonInterceptor } from '../api/json.interceptor';
-import { testUser } from '../api/testing';
+import { RpcErrorCode } from '../api/rpc-error';
+import { RpcTestPeer, provideRpcTesting } from '../api/rpc-testing';
+import { testChat, testUser, wireChat, wireMessage } from '../api/testing';
+import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
 import { ChatSettingsChanged, SessionStore } from './session-store';
 
 const TOKEN_KEY = 'jwt_token';
@@ -26,7 +28,9 @@ function tokenPayload(payload: unknown) {
 
 describe('SessionStore', () => {
   let session: SessionStore;
+  let peer: RpcTestPeer;
   let http: HttpTestingController;
+
   beforeEach(() => {
     document.cookie = `${COOKIE_KEY}=; Path=/; Max-Age=0`;
     sessionStorage.clear();
@@ -39,149 +43,57 @@ describe('SessionStore', () => {
     history.replaceState(null, '', '/?token=test-link-token');
     TestBed.configureTestingModule({
       providers: [
-        provideHttpClient(withInterceptors([authInterceptor, jsonInterceptor])),
-        provideHttpClientTesting(),
         provideChahuaBaseUrl('/_api'),
+        provideRpcTesting(),
+        provideHttpClient(withInterceptors([authInterceptor])),
+        provideHttpClientTesting(),
       ],
     });
+    peer = TestBed.inject(RpcTestPeer);
     session = TestBed.inject(SessionStore);
     http = TestBed.inject(HttpTestingController);
   });
+
   afterEach(() => {
-    for (const cookie of document.cookie.split('; ')) {
-      const key = cookie.split('=')[0];
-      if (key.startsWith(TOKEN_KEY) || key.startsWith('chahua.auth.token')) {
-        document.cookie = `${key}=; Path=/; Max-Age=0`;
+    try {
+      http.verify();
+      peer.verify();
+    } finally {
+      TestBed.resetTestingModule();
+      for (const cookie of document.cookie.split('; ')) {
+        const key = cookie.split('=')[0];
+        if (key.startsWith(TOKEN_KEY) || key.startsWith('chahua.auth.token'))
+          document.cookie = `${key}=; Path=/; Max-Age=0`;
       }
+      sessionStorage.clear();
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+      history.replaceState(null, '', '/');
     }
-    sessionStorage.clear();
-    http.verify();
-    vi.unstubAllGlobals();
-    history.replaceState(null, '', '/');
   });
 
-  async function profile(userGroup?: UserGroupTagInfo) {
+  async function refreshProfile(user = testUser, group = { groupId: 3, name: '三水' }) {
+    (await peer.expectAsync('auth.refresh', {})).flush({ token: 'refreshed-token' });
     await Promise.resolve();
-    const request = http.expectOne(`/_api/users/search?q=${testUser.uid}&limit=1`);
-    expect(request.request.headers.get('Authorization')).toBe(`Bearer ${session.token()}`);
-    request.flush({ members: [{ uid: testUser.uid, userGroup }], excluded: [] });
+    (await peer.expectAsync('users.getMe', {})).flush(user);
+    await Promise.resolve();
+    (await peer.expectAsync('users.search', { q: String(user.uid), limit: 1 })).flush({
+      members: [{ uid: user.uid, userGroup: group }],
+      excluded: [],
+    });
   }
 
-  it('loads account membership visibility at startup and after refreshing the session', async () => {
-    localStorage.setItem('chahua.preferences.showMembershipMessages', 'true');
-    session.restoreToken();
-    for (const showMembershipMessages of [false, true]) {
-      const initializing = session.initialize();
-      http.expectOne('/_api/auth/refresh').flush({ token: 'refreshed-token' });
-      await Promise.resolve();
-      http.expectOne('/_api/users/me').flush({ ...testUser, showMembershipMessages });
-      await profile();
-      await initializing;
-      expect(session.user()?.showMembershipMessages).toBe(showMembershipMessages);
-      http.expectNone('/_api/users/me/chat-settings');
-    }
-  });
-
-  it('applies a saved membership preference only after confirmation and preserves other account fields', async () => {
-    session.user.set({ ...testUser });
-    const saving = session.setShowMembershipMessages(false);
-    const request = http.expectOne('/_api/users/me/chat-settings');
-    expect(request.request.method).toBe('PUT');
-    expect(request.request.body).toEqual({ showMembershipMessages: false });
-    expect(session.user()?.showMembershipMessages).toBe(true);
-    session.user.update((user) => user && { ...user, username: 'new name' });
-    request.flush({ showMembershipMessages: false });
-    await saving;
-    expect(session.user()?.showMembershipMessages).toBe(false);
-    expect(session.user()?.username).toBe('new name');
-    expect(localStorage.getItem('chahua.preferences.showMembershipMessages')).toBeNull();
-    const failed = session.setShowMembershipMessages(true);
-    const rejection = expect(failed).rejects.toBeDefined();
-    http.expectOne('/_api/users/me/chat-settings').flush('', { status: 503, statusText: 'Unavailable' });
-    await rejection;
-    expect(session.user()?.showMembershipMessages).toBe(false);
-  });
-
-  it('applies confirmed saves and learns changes from another device on a later read', async () => {
-    session.user.set(testUser);
-    const saving = session.setShowMembershipMessages(false);
-    http.expectOne('/_api/users/me/chat-settings').flush({ showMembershipMessages: false });
-    await saving;
-    expect(session.user()?.showMembershipMessages).toBe(false);
-    session.acceptChatSettings({ showMembershipMessages: true }, testUser.uid);
-    expect(session.user()?.showMembershipMessages).toBe(true);
-  });
-
-  it('rejects a page started before the local preference changed', async () => {
-    session.user.set(testUser);
-    const requestedUser = session.user();
-    const saving = session.setShowMembershipMessages(false);
-    http.expectOne('/_api/users/me/chat-settings').flush({ showMembershipMessages: false });
-    await saving;
-    expect(() => session.requireChatSettings({ showMembershipMessages: true }, requestedUser)).toThrow(
-      ChatSettingsChanged,
-    );
-    expect(session.user()?.showMembershipMessages).toBe(false);
-  });
-
-  it.each([1, 2])('ignores a delayed settings response after logout and login as UID %s', async (uid) => {
-    session.user.set({ ...testUser });
-    const saving = session.setShowMembershipMessages(false);
-    const request = http.expectOne('/_api/users/me/chat-settings');
-    session.logout();
-    session.user.set({ ...testUser, uid, showMembershipMessages: true });
-    request.flush({ showMembershipMessages: false });
-    await saving;
-    expect(session.user()?.showMembershipMessages).toBe(true);
-  });
-
-  it('does not adopt shared or other-origin development cookies when targeting production', async () => {
-    vi.stubGlobal('CHAHUA_DEV_BACKEND', false);
-    history.replaceState(null, '', '/chats');
-    document.cookie = `${TOKEN_KEY}=unscoped-local-token; Path=/`;
-    document.cookie = 'chahua.auth.token=legacy-local-token; Path=/';
-    const otherPort = new URL(window.location.origin);
-    otherPort.port = otherPort.port === '24443' ? '24444' : '24443';
-    const otherProtocol = new URL(window.location.origin);
-    otherProtocol.protocol = otherProtocol.protocol === 'http:' ? 'https:' : 'http:';
-    for (const origin of [otherPort.origin, otherProtocol.origin]) {
-      document.cookie = `${TOKEN_KEY}_${encodeURIComponent(origin)}=other-origin-token; Path=/`;
-    }
-    const cookies = document.cookie;
-    session.restoreToken();
-    await session.initialize();
-    expect(session.token()).toBeUndefined();
-    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
-    http.expectNone(() => true);
-    session.logout();
-    expect(document.cookie).toBe(cookies);
-  });
-
-  it('keeps production cookie restoration and logout compatible with installed PWAs', () => {
-    vi.stubGlobal('ngDevMode', false);
-    history.replaceState(null, '', '/chats');
-    document.cookie = `${TOKEN_KEY}=installed-pwa-token; Path=/`;
-    document.cookie = `${COOKIE_KEY}=development-token; Path=/`;
-    session.restoreToken();
-    expect(session.token()).toBe('installed-pwa-token');
-    expect(localStorage.getItem(TOKEN_KEY)).toBe('installed-pwa-token');
-    expect(document.cookie).toContain(`${TOKEN_KEY}=installed-pwa-token`);
-    session.logout();
-    expect(document.cookie).not.toContain(`${TOKEN_KEY}=`);
-    expect(document.cookie).toContain(`${COOKIE_KEY}=development-token`);
-    http.expectNone(() => true);
-  });
-
-  it('saves a landing token synchronously without requests and preserves the other URL fields', () => {
-    history.replaceState(null, '', '/landing?token=landing-token&example=preserved#install');
-    expect(session.restoreToken()).toBeUndefined();
-    expect(session.token()).toBe('landing-token');
-    expect(localStorage.getItem(TOKEN_KEY)).toBe('landing-token');
-    expect(document.cookie).toContain(`${COOKIE_KEY}=landing-token`);
-    expect(location.pathname + location.search + location.hash).toBe('/landing?example=preserved#install');
-    expect(session.user()).toBeUndefined();
-    http.expectNone(() => true);
-  });
+  async function bootstrap(token = 'test-link-token', user = testUser, group = { groupId: 3, name: '三水' }) {
+    peer.open();
+    (await peer.expectAsync('session.open', { protocolVersion: 1, token, appVersion: 'PWA2-dev' })).flush({
+      protocolVersion: 1,
+      authenticated: true,
+      uid: user.uid,
+      clientId: 'fixture-client',
+    });
+    await Promise.resolve();
+    await refreshProfile(user, group);
+  }
 
   it.each([
     {
@@ -194,16 +106,415 @@ describe('SessionStore', () => {
       incoming: sessionToken(42, 7, { cid: 'discuz-client' }),
       key: 'chahua.auth.token',
     },
-  ])('keeps the existing token for a matching URL identity', ({ stored, incoming, key }) => {
-    localStorage.setItem(key, stored);
-    history.replaceState(null, '', `/landing?token=${incoming}&example=preserved#install`);
+  ])(
+    'keeps a matching URL identity from either persisted token store and refreshes over RPC',
+    async ({ stored, incoming, key }) => {
+      localStorage.setItem(key, stored);
+      history.replaceState(null, '', `/landing?token=${incoming}&example=preserved#install`);
+
+      session.restoreToken();
+      expect(session.token()).toBe(stored);
+      expect(location.pathname + location.search + location.hash).toBe('/landing?example=preserved#install');
+      expect(localStorage.getItem(TOKEN_KEY)).toBe(stored);
+      expect(localStorage.getItem('chahua.auth.token')).toBeNull();
+      expect(document.cookie).toContain(`${COOKIE_KEY}=${stored}`);
+
+      const initialize = session.initialize();
+      await bootstrap(stored);
+      await initialize;
+      expect(session.user()).toMatchObject({ ...testUser, userGroup: { groupId: 3 } });
+      expect(session.token()).toBe('refreshed-token');
+      expect(document.cookie).toContain(`${COOKIE_KEY}=refreshed-token`);
+    },
+  );
+
+  it('adopts a changed URL identity and clears the prior account before accepting new results', async () => {
+    session.user.set({ ...testUser, uid: 1, username: '旧账户' });
+    const oldToken = sessionToken(1, 1);
+    const nextToken = sessionToken(2, 1);
+    session.token.set(oldToken);
+    history.replaceState(null, '', `/?token=${nextToken}`);
 
     session.restoreToken();
+    const initialize = session.initialize();
+    expect(session.user()).toBeUndefined();
+    await bootstrap(nextToken, { ...testUser, uid: 2, username: '新账户' });
+    await initialize;
+    expect(session.user()).toMatchObject({ uid: 2, username: '新账户' });
+  });
 
-    expect(session.token()).toBe(stored);
-    expect(localStorage.getItem(TOKEN_KEY)).toBe(stored);
-    expect(localStorage.getItem('chahua.auth.token')).toBeNull();
-    expect(location.pathname + location.search + location.hash).toBe('/landing?example=preserved#install');
+  it('retains credentials for unavailable RPC failures and clears only unauthorized credentials', async () => {
+    session.restoreToken();
+    let initialize = session.initialize();
+    peer.open();
+    (await peer.expectAsync('session.open')).error(RpcErrorCode.Unavailable);
+    await expect(initialize).rejects.toMatchObject({ code: RpcErrorCode.Unavailable });
+    expect(session.token()).toBe('test-link-token');
+
+    initialize = session.initialize();
+    peer.open();
+    (await peer.expectAsync('session.open')).error(RpcErrorCode.Unauthorized);
+    await expect(initialize).rejects.toMatchObject({ code: RpcErrorCode.Unauthorized });
+    expect(session.token()).toBeUndefined();
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
+    expect(document.cookie).not.toContain(`${COOKIE_KEY}=`);
+  });
+
+  it('keeps login usable when optional group hydration is unavailable', async () => {
+    session.restoreToken();
+    const initialize = session.initialize();
+    peer.open();
+    (await peer.expectAsync('session.open')).flush({
+      protocolVersion: 1,
+      authenticated: true,
+      uid: testUser.uid,
+      clientId: 'fixture-client',
+    });
+    await Promise.resolve();
+    (await peer.expectAsync('auth.refresh', {})).flush({ token: 'refreshed-token' });
+    await Promise.resolve();
+    (await peer.expectAsync('users.getMe', {})).flush(testUser);
+    await Promise.resolve();
+    (await peer.expectAsync('users.search', { q: String(testUser.uid), limit: 1 })).error(RpcErrorCode.Unavailable);
+    await initialize;
+
+    expect(session.user()).toEqual(testUser);
+    expect(session.token()).toBe('refreshed-token');
+  });
+
+  it('runs anonymous development bootstrap, persists its reconnect credential before refresh, and retains the client ID', async () => {
+    sessionStorage.setItem('uid', '7');
+    history.replaceState(null, '', '/chats');
+    session.restoreToken();
+    const initialize = session.initialize();
+    peer.open();
+    (await peer.expectAsync('session.open', { protocolVersion: 1, appVersion: 'PWA2-dev' })).flush({
+      protocolVersion: 1,
+      authenticated: false,
+    });
+    await Promise.resolve();
+    const dev = await peer.expectAsync('auth.createDevSession');
+    expect(dev.params).toMatchObject({ uid: 7, clientId: expect.stringMatching(/^[0-9a-f]{32}$/) });
+    dev.flush({ token: sessionToken(7, 1) });
+    await Promise.resolve();
+    (await peer.expectAsync('auth.refresh', {})).flush({ token: 'refreshed-token' });
+    await Promise.resolve();
+    (await peer.expectAsync('users.getMe', {})).flush({ ...testUser, uid: 7 });
+    await Promise.resolve();
+    (await peer.expectAsync('users.search', { q: '7', limit: 1 })).flush({ members: [], excluded: [] });
+    await initialize;
+
+    expect(session.token()).toBe('refreshed-token');
+    expect(localStorage.getItem('chahua.client-id')).toMatch(/^[0-9a-f]{32}$/);
+  });
+
+  it('defaults an anonymous development session to UID 1', async () => {
+    history.replaceState(null, '', '/chats');
+    session.restoreToken();
+    const initialize = session.initialize();
+    peer.open();
+    (await peer.expectAsync('session.open', { protocolVersion: 1, appVersion: 'PWA2-dev' })).flush({
+      protocolVersion: 1,
+      authenticated: false,
+    });
+    await Promise.resolve();
+    const dev = await peer.expectAsync('auth.createDevSession');
+    expect(dev.params?.['uid']).toBe(1);
+    dev.flush({ token: sessionToken(1, 1) });
+    await Promise.resolve();
+    await refreshProfile();
+    await initialize;
+  });
+
+  it('falls back to an existing credential when development session issuance fails', async () => {
+    const fallback = sessionToken(1, 2);
+    localStorage.setItem(TOKEN_KEY, fallback);
+    history.replaceState(null, '', '/chats');
+    session.restoreToken();
+    const initialize = session.initialize();
+    peer.open();
+    (await peer.expectAsync('session.open', { protocolVersion: 1, appVersion: 'PWA2-dev' })).flush({
+      protocolVersion: 1,
+      authenticated: false,
+    });
+    await Promise.resolve();
+    (await peer.expectAsync('auth.createDevSession')).error(RpcErrorCode.NotFound);
+    await Promise.resolve();
+    await bootstrap(fallback);
+    await initialize;
+
+    expect(session.user()).toMatchObject(testUser);
+  });
+
+  it('refreshes a same-account credential without reopening the authenticated socket or clearing known profile data', async () => {
+    const token = sessionToken(testUser.uid, 3);
+    history.replaceState(null, '', `/?token=${token}`);
+    session.restoreToken();
+    const first = session.initialize();
+    peer.open();
+    (await peer.expectAsync('session.open')).flush({
+      protocolVersion: 1,
+      authenticated: true,
+      uid: testUser.uid,
+      clientId: 'fixture-client',
+    });
+    await Promise.resolve();
+    (await peer.expectAsync('auth.refresh', {})).flush({ token });
+    await Promise.resolve();
+    (await peer.expectAsync('users.getMe', {})).flush({ ...testUser, username: '已知资料' });
+    await Promise.resolve();
+    (await peer.expectAsync('users.search', { q: String(testUser.uid), limit: 1 })).flush({
+      members: [{ uid: testUser.uid, userGroup: { groupId: 3, name: '三水' } }],
+      excluded: [],
+    });
+    await first;
+
+    const refresh = session.initialize();
+    peer.expectNone('session.open');
+    expect(session.user()?.username).toBe('已知资料');
+    (await peer.expectAsync('auth.refresh', {})).flush({ token });
+    await Promise.resolve();
+    (await peer.expectAsync('users.getMe', {})).flush({ ...testUser, username: '已知资料' });
+    await Promise.resolve();
+    (await peer.expectAsync('users.search', { q: String(testUser.uid), limit: 1 })).error(RpcErrorCode.Unavailable);
+    await refresh;
+    expect(session.user()?.userGroup).toEqual({ groupId: 3, name: '三水' });
+
+    const hydrated = session.initialize();
+    (await peer.expectAsync('auth.refresh', {})).flush({ token });
+    await Promise.resolve();
+    (await peer.expectAsync('users.getMe', {})).flush({ ...testUser, username: '已知资料' });
+    await Promise.resolve();
+    (await peer.expectAsync('users.search', { q: String(testUser.uid), limit: 1 })).flush({
+      members: [],
+      excluded: [],
+    });
+    await hydrated;
+    expect(session.user()?.userGroup).toBeUndefined();
+  });
+
+  it('keeps a same-UID authenticated development session live while refreshing its profile', async () => {
+    history.replaceState(null, '', '/chats');
+    peer.authenticate({ uid: testUser.uid });
+    session.token.set(sessionToken(testUser.uid, 6));
+    session.user.set({ ...testUser, username: '已知资料' });
+
+    const initialize = session.initialize();
+    peer.expectNone('session.open');
+    peer.expectNone('auth.createDevSession');
+    (await peer.expectAsync('auth.refresh', {})).flush({ token: sessionToken(testUser.uid, 6) });
+    await Promise.resolve();
+    (await peer.expectAsync('users.getMe', {})).flush({ ...testUser, username: '已知资料' });
+    await Promise.resolve();
+    (await peer.expectAsync('users.search', { q: String(testUser.uid), limit: 1 })).flush({
+      members: [],
+      excluded: [],
+    });
+    await initialize;
+
+    expect(session.user()?.username).toBe('已知资料');
+  });
+
+  it('does not let a canceled bootstrap failure clear or rebind a newer attempt', async () => {
+    const token = sessionToken(testUser.uid, 4);
+    history.replaceState(null, '', `/?token=${token}`);
+    session.restoreToken();
+    const first = session.initialize();
+    peer.open();
+    const stale = await peer.expectAsync('session.open');
+
+    const current = session.initialize();
+    peer.open();
+    (await peer.expectAsync('session.open')).flush({
+      protocolVersion: 1,
+      authenticated: true,
+      uid: testUser.uid,
+      clientId: 'fixture-client',
+    });
+    stale.error(RpcErrorCode.Unauthorized);
+    await Promise.resolve();
+    (await peer.expectAsync('auth.refresh', {})).flush({ token });
+    await Promise.resolve();
+    (await peer.expectAsync('users.getMe', {})).flush(testUser);
+    await Promise.resolve();
+    (await peer.expectAsync('users.search', { q: String(testUser.uid), limit: 1 })).flush({
+      members: [],
+      excluded: [],
+    });
+    await current;
+    await first;
+
+    expect(session.token()).toBe(token);
+    expect(session.user()).toEqual(testUser);
+  });
+
+  it('ignores a canceled bootstrap reply after a newer attempt owns the transport', async () => {
+    const token = sessionToken(testUser.uid, 5);
+    history.replaceState(null, '', `/?token=${token}`);
+    session.restoreToken();
+    const first = session.initialize();
+    peer.open();
+    const stale = await peer.expectAsync('session.open');
+
+    const current = session.initialize();
+    peer.open();
+    (await peer.expectAsync('session.open')).flush({
+      protocolVersion: 1,
+      authenticated: true,
+      uid: testUser.uid,
+      clientId: 'fixture-client',
+    });
+    stale.flush({
+      protocolVersion: 1,
+      authenticated: true,
+      uid: 99,
+      clientId: 'stale-client',
+    });
+    await Promise.resolve();
+    (await peer.expectAsync('auth.refresh', {})).flush({ token });
+    await Promise.resolve();
+    (await peer.expectAsync('users.getMe', {})).flush(testUser);
+    await Promise.resolve();
+    (await peer.expectAsync('users.search', { q: String(testUser.uid), limit: 1 })).flush({
+      members: [],
+      excluded: [],
+    });
+    await current;
+    await first;
+
+    expect(session.token()).toBe(token);
+    expect(session.user()).toEqual(testUser);
+  });
+  it('does not open a production socket without credentials', async () => {
+    vi.stubGlobal('ngDevMode', false);
+    history.replaceState(null, '', '/chats');
+    session.restoreToken();
+
+    await session.initialize();
+
+    expect(session.token()).toBeUndefined();
+    expect(() => peer.latest).toThrow('No RPC socket has been created');
+  });
+
+  it('cancels a timed-out initialization, retains credentials, and permits a clean retry', async () => {
+    vi.useFakeTimers();
+    session.restoreToken();
+    const first = session.initialize();
+    peer.open();
+    const stalled = await peer.expectAsync('session.open');
+    const rejection = expect(first).rejects.toBeDefined();
+    await vi.advanceTimersByTimeAsync(30_000);
+    await rejection;
+    stalled.flush({
+      protocolVersion: 1,
+      authenticated: true,
+      uid: testUser.uid,
+      clientId: 'fixture-client',
+    });
+    expect(session.token()).toBe('test-link-token');
+    expect(session.user()).toBeUndefined();
+
+    const retry = session.initialize();
+    await bootstrap('test-link-token');
+    await retry;
+    expect(session.user()).toMatchObject(testUser);
+  });
+
+  it('adopts own profiles from decoded RPC events', () => {
+    peer.authenticate();
+    session.user.set({ ...testUser, username: '旧名字' });
+
+    peer.notify('events.message', {
+      ...wireMessage,
+      sender: { uid: testUser.uid, name: '事件里的新名字', gender: testUser.gender },
+    });
+
+    expect(session.user()?.username).toBe('事件里的新名字');
+  });
+
+  it('applies confirmed account-settings writes and rejects stale post-logout responses', async () => {
+    peer.authenticate();
+    session.user.set(testUser);
+    const saving = session.setShowMembershipMessages(false);
+    (await peer.expectAsync('users.updateChatSettings', { showMembershipMessages: false })).flush({
+      showMembershipMessages: false,
+    });
+    await saving;
+    expect(session.user()?.showMembershipMessages).toBe(false);
+
+    const delayed = session.setShowMembershipMessages(true);
+    const request = await peer.expectAsync('users.updateChatSettings', { showMembershipMessages: true });
+    const canceled = expect(delayed).rejects.toMatchObject({ kind: 'disconnected' });
+    session.logout();
+    request.flush({ showMembershipMessages: true });
+    await canceled;
+    expect(session.user()).toBeUndefined();
+  });
+
+  it('preserves account-setting version guards', () => {
+    session.user.set(testUser);
+    const requested = session.user();
+    session.user.set({ ...testUser, showMembershipMessages: false });
+    expect(() => session.requireChatSettings({ showMembershipMessages: true }, requested)).toThrow(ChatSettingsChanged);
+  });
+
+  it('loads account membership visibility at startup and after refreshing the session', async () => {
+    localStorage.setItem('chahua.preferences.showMembershipMessages', 'true');
+    session.restoreToken();
+    let token = 'test-link-token';
+    for (const showMembershipMessages of [false, true]) {
+      const initialize = session.initialize();
+      await bootstrap(token, { ...testUser, showMembershipMessages });
+      await initialize;
+      token = 'refreshed-token';
+      expect(session.user()?.showMembershipMessages).toBe(showMembershipMessages);
+      peer.expectNone('users.updateChatSettings');
+    }
+  });
+
+  it('applies confirmed membership changes without overwriting newer profile fields or failed writes', async () => {
+    peer.authenticate();
+    session.user.set(testUser);
+    const saving = session.setShowMembershipMessages(false);
+    const request = await peer.expectAsync('users.updateChatSettings', { showMembershipMessages: false });
+    expect(session.user()?.showMembershipMessages).toBe(true);
+    session.user.update((user) => user && { ...user, username: '新名字' });
+    request.flush({ showMembershipMessages: false });
+    await saving;
+    expect(session.user()).toMatchObject({ showMembershipMessages: false, username: '新名字' });
+    expect(localStorage.getItem('chahua.preferences.showMembershipMessages')).toBeNull();
+
+    const failed = session.setShowMembershipMessages(true);
+    (await peer.expectAsync('users.updateChatSettings', { showMembershipMessages: true })).error(
+      RpcErrorCode.Unavailable,
+    );
+    await expect(failed).rejects.toMatchObject({ code: RpcErrorCode.Unavailable });
+    expect(session.user()?.showMembershipMessages).toBe(false);
+  });
+
+  it('adopts confirmed membership changes from a later read', async () => {
+    peer.authenticate();
+    session.user.set(testUser);
+    const saving = session.setShowMembershipMessages(false);
+    (await peer.expectAsync('users.updateChatSettings', { showMembershipMessages: false })).flush({
+      showMembershipMessages: false,
+    });
+    await saving;
+    session.acceptChatSettings({ showMembershipMessages: true }, testUser.uid);
+    expect(session.user()?.showMembershipMessages).toBe(true);
+  });
+
+  it.each([1, 2])('ignores a delayed membership write after logout and login as UID %s', async (uid) => {
+    peer.authenticate();
+    session.user.set(testUser);
+    const saving = session.setShowMembershipMessages(false);
+    const request = await peer.expectAsync('users.updateChatSettings', { showMembershipMessages: false });
+    const canceled = expect(saving).rejects.toMatchObject({ kind: 'disconnected' });
+    session.logout();
+    session.user.set({ ...testUser, uid, showMembershipMessages: true });
+    request.flush({ showMembershipMessages: false });
+    await canceled;
+    expect(session.user()?.showMembershipMessages).toBe(true);
   });
 
   it('does not issue a development session when a matching URL token retains the stored token', async () => {
@@ -213,22 +524,15 @@ describe('SessionStore', () => {
     history.replaceState(null, '', `/?token=${incoming}`);
     session.restoreToken();
 
-    const startup = session.initialize();
-
-    http.expectNone('/_api/auth/dev-session');
-    const refresh = http.expectOne('/_api/auth/refresh');
-    expect(refresh.request.headers.get('Authorization')).toBe(`Bearer ${stored}`);
-    refresh.flush({ token: 'refreshed-token' });
-    await Promise.resolve();
-    http.expectOne('/_api/users/me').flush(testUser);
-    await profile();
-    await startup;
+    const initialize = session.initialize();
+    peer.expectNone('auth.createDevSession');
+    await bootstrap(stored);
+    await initialize;
   });
 
-  it.each([
-    { stored: sessionToken(42, 7), incoming: sessionToken(43, 7), reason: 'UID changes' },
-    { stored: sessionToken(42, 7), incoming: sessionToken(42, 8), reason: 'generation changes' },
-  ])('adopts the URL token when the $reason', ({ stored, incoming }) => {
+  it('adopts a URL token when only its generation changes', () => {
+    const stored = sessionToken(42, 7);
+    const incoming = sessionToken(42, 8);
     localStorage.setItem(TOKEN_KEY, stored);
     history.replaceState(null, '', `/?token=${incoming}`);
 
@@ -280,32 +584,6 @@ describe('SessionStore', () => {
     expect(location.pathname + location.search + location.hash).toBe('/?example=preserved#install');
   });
 
-  it('removes the URL token, refreshes it, and uses the new token for the current user', async () => {
-    session.restoreToken();
-    const login = session.initialize();
-    expect(location.search).toBe('');
-    const refresh = http.expectOne('/_api/auth/refresh');
-    expect(refresh.request.headers.get('Authorization')).toBe('Bearer test-link-token');
-    expect(refresh.request.headers.get('X-App-Version')).toBe('PWA2-dev');
-    refresh.flush({ token: 'test-refreshed-token' });
-    await Promise.resolve();
-    const me = http.expectOne('/_api/users/me');
-    expect(me.request.headers.get('Authorization')).toBe('Bearer test-refreshed-token');
-    expect(me.request.headers.get('X-App-Version')).toBe('PWA2-dev');
-    me.flush(testUser);
-    const userGroup = { groupId: 3, name: '三水', chatGroupColor: '#4087d2', chatGroupColorDark: '#72a7de' };
-    await profile(userGroup);
-    await login;
-    expect(session.user()).toEqual({ ...testUser, userGroup });
-    expect(window.localStorage.getItem(TOKEN_KEY)).toBe('test-refreshed-token');
-    expect(document.cookie).toContain(`${COOKIE_KEY}=test-refreshed-token`);
-    TestBed.inject(HttpClient).get('/assets/example.json').subscribe();
-    const asset = http.expectOne('/assets/example.json');
-    expect(asset.request.headers.has('Authorization')).toBe(false);
-    expect(asset.request.headers.has('X-App-Version')).toBe(false);
-    asset.flush({});
-  });
-
   it.each([
     { urlToken: undefined, storedToken: undefined, cookieToken: undefined, expected: 'development-token' },
     { urlToken: undefined, storedToken: undefined, cookieToken: 'cookie-token', expected: 'cookie-token' },
@@ -313,129 +591,154 @@ describe('SessionStore', () => {
     { urlToken: undefined, storedToken: 'stored-token', cookieToken: 'old-cookie-token', expected: 'stored-token' },
     { urlToken: 'url-token', storedToken: 'stored-token', cookieToken: 'cookie-token', expected: 'url-token' },
   ])(
-    'uses URL, localStorage, cookie, then the development fallback ($expected)',
+    'uses URL, localStorage, cookie, then the development fallback (%s)',
     async ({ urlToken, storedToken, cookieToken, expected }) => {
       vi.stubGlobal('CHAHUA_DEV_TOKEN', 'development-token');
       history.replaceState(null, '', urlToken ? `/?token=${urlToken}` : '/chats');
       if (storedToken) localStorage.setItem(TOKEN_KEY, storedToken);
       if (cookieToken) document.cookie = `${COOKIE_KEY}=${cookieToken}; Path=/`;
+
       session.restoreToken();
-      const startup = session.initialize();
-      const refresh = http.expectOne('/_api/auth/refresh');
-      expect(refresh.request.headers.get('Authorization')).toBe(`Bearer ${expected}`);
-      expect(localStorage.getItem(TOKEN_KEY)).toBe(expected);
-      expect(document.cookie).toContain(`${COOKIE_KEY}=${expected}`);
-      refresh.flush({ token: 'refreshed-token' });
-      await Promise.resolve();
-      http.expectOne('/_api/users/me').flush(testUser);
-      await profile();
-      await startup;
-      expect(session.user()).toEqual(testUser);
+      const initialize = session.initialize();
+      await bootstrap(expected);
+      await initialize;
+
+      expect(session.user()).toEqual(expect.objectContaining(testUser));
       expect(localStorage.getItem(TOKEN_KEY)).toBe('refreshed-token');
       expect(document.cookie).toContain(`${COOKIE_KEY}=refreshed-token`);
     },
   );
 
-  it('retains a token for network retry and clears an expired token', async () => {
+  it('does not adopt shared or other-origin development cookies when targeting production', async () => {
+    vi.stubGlobal('CHAHUA_DEV_BACKEND', false);
+    history.replaceState(null, '', '/chats');
+    document.cookie = `${TOKEN_KEY}=unscoped-local-token; Path=/`;
+    document.cookie = 'chahua.auth.token=legacy-local-token; Path=/';
+    const otherPort = new URL(window.location.origin);
+    otherPort.port = otherPort.port === '24443' ? '24444' : '24443';
+    const otherProtocol = new URL(window.location.origin);
+    otherProtocol.protocol = otherProtocol.protocol === 'http:' ? 'https:' : 'http:';
+    for (const origin of [otherPort.origin, otherProtocol.origin])
+      document.cookie = `${TOKEN_KEY}_${encodeURIComponent(origin)}=other-origin-token; Path=/`;
+    const cookies = document.cookie;
+
     session.restoreToken();
-    let login = session.initialize();
-    http.expectOne('/_api/auth/refresh').flush('', { status: 503, statusText: 'Unavailable' });
-    await expect(login).rejects.toMatchObject({ status: 503 });
-    expect(session.token()).toBe('test-link-token');
-    expect(localStorage.getItem(TOKEN_KEY)).toBe('test-link-token');
-    expect(document.cookie).toContain(`${COOKIE_KEY}=test-link-token`);
-    login = session.initialize();
-    http.expectOne('/_api/auth/refresh').flush('', { status: 401, statusText: 'Unauthorized' });
-    await expect(login).rejects.toMatchObject({ status: 401 });
+    await session.initialize();
+
+    expect(session.token()).toBeUndefined();
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
+    expect(() => peer.latest).toThrow('No RPC socket has been created');
+    session.logout();
+    expect(document.cookie).toBe(cookies);
+  });
+
+  it('keeps production cookie restoration and logout compatible with installed PWAs', () => {
+    vi.stubGlobal('ngDevMode', false);
+    history.replaceState(null, '', '/chats');
+    document.cookie = `${TOKEN_KEY}=installed-pwa-token; Path=/`;
+    document.cookie = `${COOKIE_KEY}=development-token; Path=/`;
+
+    session.restoreToken();
+    expect(session.token()).toBe('installed-pwa-token');
+    expect(localStorage.getItem(TOKEN_KEY)).toBe('installed-pwa-token');
+    session.logout();
+    expect(document.cookie).not.toContain(`${TOKEN_KEY}=`);
+    expect(document.cookie).toContain(`${COOKIE_KEY}=development-token`);
+  });
+
+  it('saves a landing token synchronously without requests and preserves other URL fields', () => {
+    history.replaceState(null, '', '/landing?token=landing-token&example=preserved#install');
+
+    expect(session.restoreToken()).toBeUndefined();
+    expect(session.token()).toBe('landing-token');
+    expect(localStorage.getItem(TOKEN_KEY)).toBe('landing-token');
+    expect(document.cookie).toContain(`${COOKIE_KEY}=landing-token`);
+    expect(location.pathname + location.search + location.hash).toBe('/landing?example=preserved#install');
+    expect(session.user()).toBeUndefined();
+    expect(() => peer.latest).toThrow('No RPC socket has been created');
+  });
+
+  it('surfaces a failed development session without refreshing when no stored credential exists', async () => {
+    history.replaceState(null, '', '/chats');
+    session.restoreToken();
+    const initialize = session.initialize();
+    peer.open();
+    (await peer.expectAsync('session.open', { protocolVersion: 1, appVersion: 'PWA2-dev' })).flush({
+      protocolVersion: 1,
+      authenticated: false,
+    });
+    await Promise.resolve();
+    (await peer.expectAsync('auth.createDevSession')).error(RpcErrorCode.NotFound);
+
+    await expect(initialize).rejects.toMatchObject({ code: RpcErrorCode.NotFound });
+    peer.expectNone('auth.refresh');
+    expect(session.token()).toBeUndefined();
+  });
+
+  it('clears persistent token stores on logout so a cookie cannot sign the user back in', async () => {
+    session.restoreToken();
+    const initialize = session.initialize();
+    await bootstrap();
+    await initialize;
+
+    session.logout();
+
     expect(session.token()).toBeUndefined();
     expect(session.user()).toBeUndefined();
-    expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
     expect(document.cookie).not.toContain(`${COOKIE_KEY}=`);
     session.restoreToken();
     expect(session.token()).toBeUndefined();
   });
 
-  it('keeps login usable when the optional group lookup fails', async () => {
+  it('shares the login deadline with optional hydration and ignores its real late reply', async () => {
+    vi.useFakeTimers();
     session.restoreToken();
-    const login = session.initialize();
-    http.expectOne('/_api/auth/refresh').flush({ token: 'refreshed-token' });
+    const initialize = session.initialize();
+    peer.open();
+    const opened = await peer.expectAsync('session.open');
+    await vi.advanceTimersByTimeAsync(20_000);
+    opened.flush({
+      protocolVersion: 1,
+      authenticated: true,
+      uid: testUser.uid,
+      clientId: 'fixture-client',
+    });
     await Promise.resolve();
-    http.expectOne('/_api/users/me').flush(testUser);
+    (await peer.expectAsync('auth.refresh', {})).flush({ token: 'refreshed-token' });
     await Promise.resolve();
-    http
-      .expectOne(`/_api/users/search?q=${testUser.uid}&limit=1`)
-      .flush('', { status: 503, statusText: 'Unavailable' });
-    await login;
+    (await peer.expectAsync('users.getMe', {})).flush(testUser);
+    await Promise.resolve();
+    const optional = await peer.expectAsync('users.search', { q: String(testUser.uid), limit: 1 });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await initialize;
+    optional.flush({ members: [{ uid: testUser.uid, userGroup: { groupId: 3, name: '迟到分组' } }], excluded: [] });
+
     expect(session.user()).toEqual(testUser);
-    expect(session.token()).toBe('refreshed-token');
   });
 
-  it('cancels a timed-out request, retains credentials, and permits a clean retry', async () => {
-    vi.useFakeTimers();
-    try {
-      session.restoreToken();
-      const login = session.initialize();
-      const rejection = expect(login).rejects.toMatchObject({ name: 'TimeoutError' });
-      const stalled = http.expectOne('/_api/auth/refresh');
-      await vi.advanceTimersByTimeAsync(30000);
-      await rejection;
-      expect(stalled.cancelled).toBe(true);
-      expect(session.token()).toBe('test-link-token');
-      expect(session.user()).toBeUndefined();
-
-      const retry = session.initialize();
-      http.expectOne('/_api/auth/refresh').flush({ token: 'retry-token' });
-      await Promise.resolve();
-      http.expectOne('/_api/users/me').flush(testUser);
-      await profile();
-      await retry;
-      expect(session.user()).toEqual(testUser);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('shares the login deadline across requests and tolerates an optional lookup timeout', async () => {
-    vi.useFakeTimers();
-    try {
-      session.restoreToken();
-      const login = session.initialize();
-      const refresh = http.expectOne('/_api/auth/refresh');
-      await vi.advanceTimersByTimeAsync(20000);
-      refresh.flush({ token: 'refreshed-token' });
-      await Promise.resolve();
-      http.expectOne('/_api/users/me').flush(testUser);
-      await Promise.resolve();
-      const optional = http.expectOne(`/_api/users/search?q=${testUser.uid}&limit=1`);
-      await vi.advanceTimersByTimeAsync(10000);
-      await login;
-      expect(optional.cancelled).toBe(true);
-      expect(session.user()).toEqual(testUser);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('learns current own identity from HTTP replies while leaving saved snapshots and other users alone', async () => {
-    const group = { groupId: 3, name: '三水' };
-    session.user.set({ ...testUser, userGroup: group });
-    const client = TestBed.inject(HttpClient);
-    client.get('/_api/chats/example/messages').subscribe();
-    http.expectOne('/_api/chats/example/messages').flush({
-      chatSettings: { showMembershipMessages: true },
-      messages: [
-        { sender: { uid: 99, name: '其他人', gender: 2 } },
+  it('adopts current profiles from ordinary RPC replies without accepting saved snapshots', async () => {
+    peer.authenticate();
+    session.user.set({
+      ...testUser,
+      userGroup: { groupId: 3, name: '三水' },
+      avatarUrl: 'https://example.com/old.jpg',
+    });
+    const api = TestBed.inject(RpcApi);
+    const search = firstValueFrom(api.users.search({ q: '99', limit: 1 }));
+    (await peer.expectAsync('users.search', { q: '99', limit: 1 })).flush({
+      members: [
         {
-          sender: {
-            uid: testUser.uid,
-            name: '新名字',
-            gender: 2,
-            avatarUrl: 'https://example.com/new.jpg',
-            userGroup: { groupId: 4, name: '四水' },
-          },
+          uid: testUser.uid,
+          username: '新名字',
+          gender: 2,
+          avatarUrl: 'https://example.com/new.jpg',
+          userGroup: { groupId: 4, name: '四水' },
         },
       ],
+      excluded: [],
     });
+    await search;
     expect(session.user()).toMatchObject({
       username: '新名字',
       gender: 2,
@@ -444,20 +747,30 @@ describe('SessionStore', () => {
       permissions: testUser.permissions,
       stickerPackOrder: testUser.stickerPackOrder,
     });
-    const fresh = session.user();
-    for (const url of ['/_api/saved-messages', '/_api/chats/example/saved-messages']) {
-      client.get(url).subscribe();
-      http.expectOne(url).flush({
-        chatSettings: { showMembershipMessages: true },
-        messages: [{ sender: { uid: testUser.uid, name: '旧名字', gender: 1, userGroup: group } }],
-      });
-    }
-    client.get('/_api/users/search?q=99').subscribe();
-    http.expectOne('/_api/users/search?q=99').flush({ members: [{ uid: 99, username: '其他人', gender: 2 }] });
-    expect(session.user()).toBe(fresh);
+
+    const current = session.user();
+    const other = firstValueFrom(api.users.search({ q: '99', limit: 1 }));
+    (await peer.expectAsync('users.search', { q: '99', limit: 1 })).flush({
+      members: [{ uid: 99, username: '其他人', gender: 2 }],
+      excluded: [],
+    });
+    await other;
+    expect(session.user()).toBe(current);
+
+    const saved = firstValueFrom(api.savedMessages.list());
+    (await peer.expectAsync('savedMessages.list', {})).flush({
+      savedMessages: [{ sender: { uid: testUser.uid, name: '收藏里的旧名字', gender: 1 } }],
+    });
+    await saved;
+    const savedForChat = firstValueFrom(api.savedMessages.listForChat({ chatId: testChat.id }));
+    (await peer.expectAsync('savedMessages.listForChat', { chatId: wireChat.id })).flush({
+      savedMessages: [{ sender: { uid: testUser.uid, name: '聊天收藏里的旧名字', gender: 1 } }],
+    });
+    await savedForChat;
+    expect(session.user()?.username).toBe('新名字');
   });
 
-  it('accepts cleared group and avatar fields without clearing information absent from partial profiles', () => {
+  it('accepts cleared group and avatar fields without clearing absent partial-profile information', () => {
     session.user.set({
       ...testUser,
       userGroup: { groupId: 3, name: '三水' },
@@ -486,66 +799,22 @@ describe('SessionStore', () => {
     expect(session.user()).toBeUndefined();
   });
 
-  it('issues a development session without a token using the stored UID', async () => {
-    sessionStorage.setItem('uid', '7');
-    history.replaceState(null, '', '/chats');
-    session.restoreToken();
-    const login = session.initialize();
-    const devSession = http.expectOne('/_api/auth/dev-session');
-    expect(devSession.request.body).toEqual({ uid: 7 });
-    expect(devSession.request.headers.get('X-Client-Id')).toMatch(/^[0-9a-f]{32}$/);
-    devSession.flush({ token: 'development-token' });
-    await Promise.resolve();
-    const refresh = http.expectOne('/_api/auth/refresh');
-    expect(refresh.request.headers.get('Authorization')).toBe('Bearer development-token');
-    refresh.flush({ token: 'refreshed-token' });
-    await Promise.resolve();
-    http.expectOne('/_api/users/me').flush(testUser);
-    await profile();
-    await login;
-    expect(session.user()).toEqual(testUser);
-    expect(localStorage.getItem(TOKEN_KEY)).toBe('refreshed-token');
-  });
+  it('keeps bearer and app-version interception only for real same-origin HTTP byte requests', () => {
+    session.token.set('upload-token');
+    const client = TestBed.inject(HttpClient);
+    const body = new FormData();
+    body.append('file', new Blob(['sticker']), 'sticker.png');
+    client.post('/_api/stickers/packs/1/stickers', body).subscribe();
+    const upload = http.expectOne('/_api/stickers/packs/1/stickers');
+    expect(upload.request.body).toBe(body);
+    expect(upload.request.headers.get('Authorization')).toBe('Bearer upload-token');
+    expect(upload.request.headers.get('X-App-Version')).toBe('PWA2-dev');
+    upload.flush({});
 
-  it('defaults the development session UID to 1', async () => {
-    history.replaceState(null, '', '/chats');
-    session.restoreToken();
-    const login = session.initialize();
-    const devSession = http.expectOne('/_api/auth/dev-session');
-    expect(devSession.request.body).toEqual({ uid: 1 });
-    devSession.flush({ token: 'development-token' });
-    await Promise.resolve();
-    http.expectOne('/_api/auth/refresh').flush({ token: 'refreshed-token' });
-    await Promise.resolve();
-    http.expectOne('/_api/users/me').flush(testUser);
-    await profile();
-    await login;
-  });
-
-  it('surfaces a failed development session without refreshing', async () => {
-    history.replaceState(null, '', '/chats');
-    session.restoreToken();
-    const login = session.initialize();
-    http.expectOne('/_api/auth/dev-session').flush('', { status: 404, statusText: 'Not Found' });
-    await expect(login).rejects.toMatchObject({ status: 404 });
-    http.expectNone('/_api/auth/refresh');
-    expect(session.token()).toBeUndefined();
-  });
-
-  it('clears both stores on logout so the cookie cannot sign the user back in', async () => {
-    session.restoreToken();
-    const login = session.initialize();
-    http.expectOne('/_api/auth/refresh').flush({ token: 'refreshed-token' });
-    await Promise.resolve();
-    http.expectOne('/_api/users/me').flush(testUser);
-    await profile();
-    await login;
-    session.logout();
-    expect(session.token()).toBeUndefined();
-    expect(session.user()).toBeUndefined();
-    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
-    expect(document.cookie).not.toContain(`${COOKIE_KEY}=`);
-    session.restoreToken();
-    expect(session.token()).toBeUndefined();
+    client.get('/assets/example.json').subscribe();
+    const asset = http.expectOne('/assets/example.json');
+    expect(asset.request.headers.has('Authorization')).toBe(false);
+    expect(asset.request.headers.has('X-App-Version')).toBe(false);
+    asset.flush({});
   });
 });

@@ -1,7 +1,6 @@
 import { describe, expect, it, afterEach, vi } from 'vitest';
 import { TestBed } from '@angular/core/testing';
-import { Router } from '@angular/router';
-import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
+import { provideRouter, Router } from '@angular/router';
 import type { MentionInfo } from '../../../generated/models';
 
 import { MessageText, internalHref, prepareMessageContent } from './message-text';
@@ -187,7 +186,7 @@ describe('same-origin navigation', () => {
   });
 
   function render(interactive = true) {
-    TestBed.configureTestingModule({ providers: [provideChahuaBaseUrl('/_api')] });
+    TestBed.configureTestingModule({ providers: [provideRouter([])] });
     const f = TestBed.createComponent(MessageText);
     f.componentRef.setInput('text', `[chat](${location.origin}/chats?tab=1#msg=2) [external](https://example.com)`);
     f.componentRef.setInput('interactive', interactive);

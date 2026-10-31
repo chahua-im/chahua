@@ -26,16 +26,15 @@ import {
   videocamOutline,
 } from 'ionicons/icons';
 import { switchMap, timer, type Subscription } from 'rxjs';
+import { RpcApi } from '../../../generated/rpc-api';
 import { SessionStore } from '../../session/session-store';
-import { AttachmentsService } from '../../../generated/endpoints/attachments/attachments.service';
-import { MembersService } from '../../../generated/endpoints/members/members.service';
-import type { FriendRelationshipResponse } from '../../../generated/models';
 import {
   AttachmentUploadPurpose,
   MessageType,
   type SpeakingMode,
   UserSearchMode,
   type AttachmentResponse,
+  type FriendRelationshipResponse,
   type MemberResponse,
   type MentionInfo,
   type SnowflakeID,
@@ -127,8 +126,7 @@ export class MessageComposer {
   protected readonly windows = navigator.userAgent.includes('Windows');
   protected readonly macOS = !isPlatform('ios') && navigator.userAgent.includes('Macintosh');
   protected readonly Status = UploadStatus;
-  private readonly api = inject(AttachmentsService);
-  private readonly members = inject(MembersService);
+  private readonly api = inject(RpcApi);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly voice = viewChild(VoiceRecorder);
   protected readonly Panel = Panel;
@@ -416,7 +414,7 @@ export class MessageComposer {
       return;
     }
     this.mentionSearch = timer(200)
-      .pipe(switchMap(() => this.members.getMembers(chatId, { q, mode: UserSearchMode.autocomplete, limit: 8 })))
+      .pipe(switchMap(() => this.api.groups.listMembers({ chatId, q, mode: UserSearchMode.autocomplete, limit: 8 })))
       .subscribe({
         next: ({ members }) => {
           this.mentionCache.delete(key);

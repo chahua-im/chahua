@@ -3,262 +3,22 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
-use chrono::Utc;
-use diesel::prelude::*;
-use diesel::PgConnection;
-use diesel::PgTextExpressionMethods;
 use utoipa_axum::router::OpenApiRouter;
 
 use crate::dto::groups::{
-    AvatarUploadUrlResponse, CreateChatResponse, GroupInfoResponse, GroupSelectorItem,
-    ListGroupsResponse, MuteResponse,
+    AvatarUploadUrlRequest, AvatarUploadUrlResponse, CreateChatBody, CreateChatResponse,
+    GroupInfoResponse, GroupSearchMode, GroupSelectorScope, ListGroupsQuery, ListGroupsResponse,
+    MuteBody, MuteResponse, UpdateChatBody,
 };
 use crate::errors::AppError;
 use crate::extractors::DbConn;
-use crate::handlers::members::{check_membership, require_admin_role};
-use crate::handlers::users::build_member_summary_map;
-use crate::models::{
-    GroupJoinReason, GroupKind, GroupRole, GroupVisibility, Media, MediaPurpose, NewGroup,
-    NewGroupMembership, NewMedia, UpdateGroup,
-};
-use crate::schema::{group_membership, groups, media};
-use crate::services::authz::{Action as AuthzAction, Resource as AuthzResource};
-use crate::services::notification_preferences::{
-    load_chat_notification_setting, load_notification_defaults, publish_chat_notification_setting,
-    update_chat_notification_setting, ChatNotificationCommand, ChatNotificationSetting,
-};
-use crate::utils::ids;
-use crate::utils::{auth::CurrentUid, pagination::validate_limit};
+use crate::services::api::groups;
+use crate::utils::auth::CurrentUid;
 use crate::AppState;
-
-const MAX_GROUP_AVATAR_BYTES: i64 = 10 * 1024 * 1024;
-const MAX_GROUP_SELECTOR_LIMIT: i64 = 50;
-
-#[derive(serde::Deserialize, utoipa::ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct CreateChatBody {
-    name: Option<String>,
-}
 
 #[derive(serde::Deserialize)]
 pub(super) struct ChatIdPath {
     pub(super) chat_id: i64,
-}
-
-#[derive(Debug, Clone, Copy, serde::Deserialize, PartialEq, Eq, utoipa::ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum GroupSearchMode {
-    Autocomplete,
-    Submitted,
-}
-
-#[derive(Debug, Clone, Copy, serde::Deserialize, PartialEq, Eq, utoipa::ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum GroupSelectorScope {
-    Manageable,
-    Joined,
-    Public,
-}
-
-#[derive(serde::Deserialize, utoipa::ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct ListGroupsQuery {
-    #[serde(default)]
-    q: Option<String>,
-    #[serde(default)]
-    mode: Option<GroupSearchMode>,
-    #[serde(default)]
-    limit: Option<i64>,
-    #[serde(
-        default,
-        deserialize_with = "crate::serde_i64_string::opt::deserialize"
-    )]
-    #[schema(value_type = Option<String>)]
-    after: Option<i64>,
-    #[serde(default)]
-    scope: Option<GroupSelectorScope>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ParsedGroupSearch {
-    pattern: String,
-    exact_id: Option<i64>,
-}
-
-#[derive(serde::Deserialize, utoipa::ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct UpdateChatBody {
-    name: Option<String>,
-    description: Option<String>,
-    #[serde(
-        default,
-        deserialize_with = "crate::serde_i64_string::double_opt::deserialize"
-    )]
-    #[schema(value_type = Option<String>)]
-    avatar_image_id: Option<Option<i64>>,
-    visibility: Option<GroupVisibility>,
-    membership_message_visibility: Option<crate::models::MembershipMessageVisibility>,
-}
-
-#[derive(serde::Deserialize, utoipa::ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct AvatarUploadUrlRequest {
-    filename: String,
-    content_type: String,
-    size: i64,
-    width: Option<i32>,
-    height: Option<i32>,
-}
-
-#[derive(serde::Deserialize, utoipa::ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct MuteBody {
-    /// Duration in seconds, or null/absent for indefinite mute.
-    duration_seconds: Option<i64>,
-}
-
-fn parse_group_search_query(
-    raw_query: Option<&str>,
-    mode: GroupSearchMode,
-) -> Option<ParsedGroupSearch> {
-    let query = raw_query?.trim();
-    if query.is_empty() {
-        return None;
-    }
-
-    let exact_id = (mode == GroupSearchMode::Submitted)
-        .then(|| query.parse::<i64>().ok())
-        .flatten();
-
-    let pattern = match mode {
-        GroupSearchMode::Autocomplete => format!("{query}%"),
-        GroupSearchMode::Submitted => format!("%{query}%"),
-    };
-
-    Some(ParsedGroupSearch { pattern, exact_id })
-}
-
-pub(super) fn load_requester_group_role(
-    conn: &mut PgConnection,
-    chat_id: i64,
-    uid: i32,
-) -> Result<Option<GroupRole>, AppError> {
-    use crate::schema::group_membership::dsl as gm_dsl;
-
-    Ok(group_membership::table
-        .filter(gm_dsl::chat_id.eq(chat_id).and(gm_dsl::uid.eq(uid)))
-        .select(gm_dsl::role)
-        .first(conn)
-        .optional()?)
-}
-
-pub(super) fn load_group_info(
-    conn: &mut PgConnection,
-    state: &AppState,
-    chat_id: i64,
-    requester_uid: i32,
-) -> Result<GroupInfoResponse, AppError> {
-    use crate::schema::groups::dsl as groups_dsl;
-
-    let group: crate::models::Group = groups::table
-        .filter(groups_dsl::id.eq(chat_id))
-        .select(crate::models::Group::as_select())
-        .first(conn)
-        .optional()?
-        .ok_or(AppError::NotFound("Chat not found"))?;
-
-    let avatar_image = match group.avatar_image_id {
-        Some(avatar_image_id) => media::table
-            .filter(
-                media::id
-                    .eq(avatar_image_id)
-                    .and(media::deleted_at.is_null()),
-            )
-            .select(Media::as_select())
-            .first(conn)
-            .optional()?,
-        None => None,
-    };
-
-    let my_role = load_requester_group_role(conn, chat_id, requester_uid)?;
-
-    let (archived, notification_setting, my_speaking_mode) = group_membership::table
-        .filter(
-            group_membership::chat_id
-                .eq(chat_id)
-                .and(group_membership::uid.eq(requester_uid)),
-        )
-        .select((
-            group_membership::archived,
-            (
-                group_membership::muted_until,
-                group_membership::mute_override,
-            ),
-            group_membership::speaking_mode.nullable(),
-        ))
-        .first::<(
-            bool,
-            ChatNotificationSetting,
-            Option<crate::models::SpeakingMode>,
-        )>(conn)
-        .optional()?
-        .unwrap_or((
-            false,
-            ChatNotificationSetting {
-                muted_until: None,
-                mute_override: None,
-            },
-            None,
-        ));
-    let defaults = load_notification_defaults(conn, requester_uid)?;
-
-    // For a DM, resolve the other participant so the client can render the
-    // peer's name/avatar instead of the (empty) group name.
-    let peer = if group.kind == GroupKind::Dm {
-        let peer_uid = if group.dm_uid1 == Some(requester_uid) {
-            group.dm_uid2
-        } else {
-            group.dm_uid1
-        };
-        if let Some(puid) = peer_uid {
-            let mut summaries = build_member_summary_map(conn, state, &[puid])?;
-            summaries.remove(&puid)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    Ok(GroupInfoResponse {
-        id: group.id,
-        name: group.name,
-        description: group.description,
-        avatar_image_id: group.avatar_image_id,
-        avatar: avatar_image
-            .as_ref()
-            .filter(|image| image.deleted_at.is_none())
-            .map(|image| state.media.public_url(&image.storage_key)),
-        visibility: group.visibility,
-        created_at: group.created_at,
-        archived,
-        muted_until: notification_setting.muted_until,
-        mute_override: notification_setting.mute_override,
-        is_muted: notification_setting.is_muted(group.kind, defaults, Utc::now()),
-        membership_message_policy: crate::dto::groups::MembershipMessagePolicy {
-            visibility: group.membership_message_visibility,
-            can_view: group.kind == GroupKind::Dm
-                || group.membership_message_visibility.allows(my_role.as_ref()),
-        },
-        speaking_mode: group.speaking_mode,
-        my_speaking_mode,
-        effective_speaking_mode: my_role.as_ref().zip(my_speaking_mode).map(|(role, mode)| {
-            crate::services::speaking::effective_mode(role, group.speaking_mode, mode)
-        }),
-        my_role,
-        kind: group.kind,
-        peer,
-    })
 }
 
 /// POST /group — Create a new chat.
@@ -278,60 +38,9 @@ async fn post_group(
     mut conn: DbConn,
     Json(body): Json<CreateChatBody>,
 ) -> Result<impl IntoResponse, AppError> {
-    let conn = &mut *conn;
-
-    state.authz_service.require_permission(
-        conn,
-        uid,
-        AuthzAction::ChatCreate,
-        AuthzResource::Global,
-    )?;
-
-    let id = ids::next_gid(state.id_gen.as_ref()).await.map_err(|e| {
-        tracing::error!("ferroid next_gid: {:?}", e);
-        AppError::Internal("ID generation failed")
-    })?;
-
-    let now = Utc::now();
-    let name = body
-        .name
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(String::new);
-
-    diesel::insert_into(groups::table)
-        .values(&NewGroup {
-            id,
-            name: name.clone(),
-            description: None,
-            avatar_image_id: None,
-            created_at: now,
-            visibility: GroupVisibility::Public,
-            kind: GroupKind::Group,
-            dm_uid1: None,
-            dm_uid2: None,
-        })
-        .execute(conn)?;
-
-    diesel::insert_into(group_membership::table)
-        .values(&NewGroupMembership {
-            chat_id: id,
-            uid,
-            role: GroupRole::Admin,
-            joined_at: now,
-            join_reason: GroupJoinReason::Creator,
-            join_reason_extra: None,
-            last_read_message_id: None,
-        })
-        .execute(conn)?;
-
-    Ok((
-        StatusCode::CREATED,
-        Json(CreateChatResponse {
-            id,
-            name: if name.is_empty() { None } else { Some(name) },
-            created_at: now,
-        }),
-    ))
+    let response =
+        groups::post_group(uid, body, &mut conn, &state.authz_service, &state.id_gen).await?;
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 /// GET /group — List groups for selector/search.
@@ -355,97 +64,11 @@ async fn get_groups(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     mut conn: DbConn,
-    Query(q): Query<ListGroupsQuery>,
+    Query(query): Query<ListGroupsQuery>,
 ) -> Result<Json<ListGroupsResponse>, AppError> {
-    let conn = &mut *conn;
-
-    let limit = validate_limit(q.limit, MAX_GROUP_SELECTOR_LIMIT);
-    let scope = q.scope.unwrap_or(GroupSelectorScope::Joined);
-    let search = parse_group_search_query(
-        q.q.as_deref(),
-        q.mode.unwrap_or(GroupSearchMode::Autocomplete),
-    );
-
-    type Row = (
-        i64,
-        String,
-        Option<String>,
-        Option<String>,
-        GroupVisibility,
-        Option<GroupRole>,
-    );
-
-    let mut query = groups::table
-        .left_join(
-            media::table.on(groups::avatar_image_id
-                .eq(media::id.nullable())
-                .and(media::deleted_at.is_null())),
-        )
-        .left_join(
-            group_membership::table.on(group_membership::chat_id
-                .eq(groups::id)
-                .and(group_membership::uid.eq(uid))),
-        )
-        .select((
-            groups::id,
-            groups::name,
-            groups::description,
-            media::storage_key.nullable(),
-            groups::visibility,
-            group_membership::role.nullable(),
-        ))
-        .into_boxed();
-
-    // DMs are 1:1 chats, never selectable/searchable groups.
-    query = query.filter(groups::kind.eq(GroupKind::Group));
-
-    query = match scope {
-        GroupSelectorScope::Joined => query.filter(group_membership::uid.is_not_null()),
-        GroupSelectorScope::Manageable => query.filter(group_membership::role.eq(GroupRole::Admin)),
-        GroupSelectorScope::Public => query.filter(groups::visibility.eq(GroupVisibility::Public)),
-    };
-
-    if let Some(after) = q.after {
-        query = query.filter(groups::id.gt(after));
-    }
-
-    if let Some(search) = search {
-        let filter = groups::name.ilike(search.pattern);
-        query = match search.exact_id {
-            Some(exact_id) => query.filter(filter.or(groups::id.eq(exact_id))),
-            None => query.filter(filter),
-        };
-    }
-
-    let rows: Vec<Row> = query
-        .order_by(groups::id.asc())
-        .limit(limit + 1)
-        .load(conn)?;
-
-    let has_more = rows.len() as i64 > limit;
-    let page_rows: Vec<Row> = rows.into_iter().take(limit as usize).collect();
-    let next_cursor = has_more
-        .then(|| page_rows.last().map(|(id, _, _, _, _, _)| *id))
-        .flatten();
-
-    let groups = page_rows
-        .into_iter()
-        .map(
-            |(id, name, description, avatar_key, visibility, role)| GroupSelectorItem {
-                id,
-                name,
-                description,
-                avatar: avatar_key.map(|key| state.media.public_url(&key)),
-                visibility,
-                role,
-            },
-        )
-        .collect();
-
-    Ok(Json(ListGroupsResponse {
-        groups,
-        next_cursor,
-    }))
+    Ok(Json(
+        groups::get_groups(uid, query, &mut conn, &state.media).await?,
+    ))
 }
 
 /// GET /group/:chat_id — Get chat details.
@@ -467,11 +90,16 @@ async fn get_group(
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
     mut conn: DbConn,
 ) -> Result<Json<GroupInfoResponse>, AppError> {
-    let conn = &mut *conn;
-
-    check_membership(conn, chat_id, uid)?;
-
-    Ok(Json(load_group_info(conn, &state, chat_id, uid)?))
+    Ok(Json(
+        groups::get_group(
+            uid,
+            chat_id,
+            &mut conn,
+            &state.media,
+            state.avatars.as_ref(),
+        )
+        .await?,
+    ))
 }
 
 /// POST /group/:chat_id/avatar/upload-url — Create a group avatar upload URL.
@@ -495,60 +123,16 @@ async fn post_avatar_upload_url(
     mut conn: DbConn,
     Json(payload): Json<AvatarUploadUrlRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let conn = &mut *conn;
-
-    if !payload.content_type.starts_with("image/") {
-        return Err(AppError::BadRequest("Avatar uploads must be images"));
-    }
-    if payload.size <= 0 || payload.size > MAX_GROUP_AVATAR_BYTES {
-        return Err(AppError::BadRequest("Avatar size is invalid"));
-    }
-    require_admin_role(conn, chat_id, uid)?;
-
-    let id = ids::next_message_id(state.id_gen.as_ref())
-        .await
-        .map_err(|e| {
-            tracing::error!("next_message_id for group avatar: {:?}", e);
-            AppError::Internal("Failed to generate ID")
-        })?;
-
-    let s3_item_id = uuid::Uuid::new_v4().to_string();
-    let storage_key = state.media.attachment_key(&payload.filename, &s3_item_id);
-    let presigned_upload = state
-        .media
-        .presign_upload(
-            &storage_key,
-            &payload.content_type,
-            payload.size,
-            None,
-            chrono::Duration::minutes(15),
-        )
-        .await?;
-
-    diesel::insert_into(media::table)
-        .values(&NewMedia {
-            id,
-            content_type: payload.content_type,
-            storage_key,
-            size: payload.size,
-            created_at: Utc::now(),
-            deleted_at: None,
-            file_name: payload.filename,
-            width: payload.width,
-            height: payload.height,
-            purpose: MediaPurpose::Avatar,
-            reference: Some(chat_id.to_string()),
-        })
-        .execute(conn)?;
-
-    Ok((
-        StatusCode::CREATED,
-        Json(AvatarUploadUrlResponse {
-            image_id: id.to_string(),
-            upload_url: presigned_upload.upload_url,
-            upload_headers: presigned_upload.upload_headers,
-        }),
-    ))
+    let response = groups::post_avatar_upload_url(
+        uid,
+        chat_id,
+        payload,
+        &mut conn,
+        &state.id_gen,
+        &state.media,
+    )
+    .await?;
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 /// PATCH /group/:chat_id — Update chat metadata (admin only).
@@ -572,81 +156,18 @@ async fn patch_group(
     mut conn: DbConn,
     Json(body): Json<UpdateChatBody>,
 ) -> Result<Json<GroupInfoResponse>, AppError> {
-    let conn = &mut *conn;
-
-    require_admin_role(conn, chat_id, uid)?;
-
-    let current_group: crate::models::Group = groups::table
-        .filter(groups::id.eq(chat_id))
-        .select(crate::models::Group::as_select())
-        .first(conn)
-        .optional()?
-        .ok_or(AppError::NotFound("Chat not found"))?;
-
-    if body.membership_message_visibility.is_some() && current_group.kind != GroupKind::Group {
-        return Err(AppError::BadRequest(
-            "Membership message visibility is only available for groups",
-        ));
-    }
-
-    if let Some(Some(image_id)) = body.avatar_image_id {
-        let owned_image_exists = media::table
-            .filter(
-                media::id
-                    .eq(image_id)
-                    .and(media::purpose.eq(MediaPurpose::Avatar))
-                    .and(media::deleted_at.is_null()),
-            )
-            .count()
-            .get_result::<i64>(conn)?;
-        if owned_image_exists == 0 {
-            return Err(AppError::BadRequest("Invalid avatar image"));
-        }
-    }
-
-    use crate::schema::groups::dsl as groups_dsl;
-    let changeset = UpdateGroup {
-        name: body.name,
-        description: body.description,
-        visibility: body.visibility,
-    };
-    let has_metadata_changes = changeset.name.is_some()
-        || changeset.description.is_some()
-        || changeset.visibility.is_some();
-
-    conn.transaction::<_, diesel::result::Error, _>(|conn| {
-        if let Some(visibility) = body.membership_message_visibility {
-            diesel::update(groups::table.find(chat_id))
-                .set(groups::membership_message_visibility.eq(visibility))
-                .execute(conn)?;
-        }
-        if has_metadata_changes {
-            diesel::update(groups::table.filter(groups_dsl::id.eq(chat_id)))
-                .set(&changeset)
-                .execute(conn)?;
-        }
-
-        if let Some(next_avatar_image_id) = body.avatar_image_id {
-            diesel::update(groups::table.filter(groups_dsl::id.eq(chat_id)))
-                .set(groups_dsl::avatar_image_id.eq(next_avatar_image_id))
-                .execute(conn)?;
-
-            if let Some(previous_avatar_image_id) = current_group.avatar_image_id {
-                if Some(previous_avatar_image_id) != next_avatar_image_id {
-                    diesel::update(media::table.filter(media::id.eq(previous_avatar_image_id)))
-                        .set(media::deleted_at.eq(Some(Utc::now())))
-                        .execute(conn)?;
-                }
-            }
-        }
-
-        Ok(())
-    })?;
-
-    if body.membership_message_visibility.is_some() {
-        crate::services::system_messages::broadcast_policy(conn, &state.ws_registry, chat_id)?;
-    }
-    Ok(Json(load_group_info(conn, &state, chat_id, uid)?))
+    Ok(Json(
+        groups::patch_group(
+            uid,
+            chat_id,
+            body,
+            &mut conn,
+            &state.media,
+            state.avatars.as_ref(),
+            state.ws_registry.as_ref(),
+        )
+        .await?,
+    ))
 }
 
 /// PUT /group/:chat_id/mute — Mute notifications for a chat.
@@ -670,29 +191,9 @@ async fn put_mute(
     mut conn: DbConn,
     Json(body): Json<MuteBody>,
 ) -> Result<Json<MuteResponse>, AppError> {
-    let conn = &mut *conn;
-
-    check_membership(conn, chat_id, uid)?;
-    let _update = crate::services::notification_preferences::lock_notification_update(uid);
-
-    let setting = conn.transaction::<_, AppError, _>(|conn| {
-        update_chat_notification_setting(
-            conn,
-            chat_id,
-            uid,
-            ChatNotificationCommand::LegacyMute {
-                duration_seconds: body.duration_seconds,
-            },
-            Utc::now(),
-        )?;
-        load_chat_notification_setting(conn, chat_id, uid)
-    })?;
-    let muted_until = setting
-        .muted_until
-        .expect("legacy mute always writes an expiry or permanent timestamp");
-
-    publish_chat_notification_setting(&state.ws_registry, uid, setting);
-    Ok(Json(MuteResponse { muted_until }))
+    Ok(Json(
+        groups::put_mute(uid, chat_id, body, &mut conn, state.ws_registry.as_ref()).await?,
+    ))
 }
 
 /// DELETE /group/:chat_id/mute — Unmute notifications for a chat.
@@ -714,22 +215,7 @@ async fn delete_mute(
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
     mut conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    let conn = &mut *conn;
-
-    check_membership(conn, chat_id, uid)?;
-    let _update = crate::services::notification_preferences::lock_notification_update(uid);
-
-    let setting = conn.transaction::<_, AppError, _>(|conn| {
-        update_chat_notification_setting(
-            conn,
-            chat_id,
-            uid,
-            ChatNotificationCommand::LegacyUnmuteAndUnarchive,
-            Utc::now(),
-        )?;
-        load_chat_notification_setting(conn, chat_id, uid)
-    })?;
-    publish_chat_notification_setting(&state.ws_registry, uid, setting);
+    groups::delete_mute(uid, chat_id, &mut conn, state.ws_registry.as_ref()).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -744,15 +230,10 @@ async fn put_notification_setting(
     mut conn: DbConn,
     Json(body): Json<crate::dto::groups::UpdateNotificationSettingRequest>,
 ) -> Result<Json<crate::dto::groups::ChatNotificationSettingResponse>, AppError> {
-    check_membership(&mut conn, chat_id, uid)?;
-    let _update = crate::services::notification_preferences::lock_notification_update(uid);
-    let command = body.try_into()?;
-    let setting = conn.transaction::<_, AppError, _>(|conn| {
-        update_chat_notification_setting(conn, chat_id, uid, command, Utc::now())?;
-        load_chat_notification_setting(conn, chat_id, uid)
-    })?;
-    publish_chat_notification_setting(&state.ws_registry, uid, setting.clone());
-    Ok(Json(setting))
+    Ok(Json(
+        groups::put_notification_setting(uid, chat_id, body, &mut conn, state.ws_registry.as_ref())
+            .await?,
+    ))
 }
 
 #[utoipa::path(
@@ -775,10 +256,10 @@ async fn put_speaking_mode(
     mut conn: DbConn,
     Json(body): Json<crate::dto::speaking::UpdateSpeakingModeRequest>,
 ) -> Result<Json<crate::dto::speaking::GroupSpeakingModeResponse>, AppError> {
-    let updated =
-        crate::services::speaking::update_group_mode(&mut conn, chat_id, uid, body.speaking_mode)?;
-    crate::services::speaking::broadcast_group_mode(&mut conn, &state.ws_registry, chat_id)?;
-    Ok(Json(updated))
+    Ok(Json(
+        groups::put_speaking_mode(uid, chat_id, body, &mut conn, state.ws_registry.as_ref())
+            .await?,
+    ))
 }
 
 pub fn router() -> OpenApiRouter<crate::AppState> {

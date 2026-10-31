@@ -228,46 +228,6 @@ export class UsersService {
       observe: 'body',
     });
   }
-  clearExceptions<TData = NotificationExceptionsCleared>(
-    params: ClearExceptionsParams,
-    options?: HttpClientBodyOptions,
-  ): Observable<TData>;
-  clearExceptions<TData = NotificationExceptionsCleared>(
-    params: ClearExceptionsParams,
-    options?: HttpClientEventOptions,
-  ): Observable<HttpEvent<TData>>;
-  clearExceptions<TData = NotificationExceptionsCleared>(
-    params: ClearExceptionsParams,
-    options?: HttpClientResponseOptions,
-  ): Observable<AngularHttpResponse<TData>>;
-  clearExceptions<TData = NotificationExceptionsCleared>(
-    params: ClearExceptionsParams,
-    options?: HttpClientObserveOptions,
-  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
-    const filteredParams = filterParams({ ...params, ...options?.params }, new Set<string>([]));
-
-    if (options?.observe === 'events') {
-      return this.http.delete<TData>(`${this.baseUrl}/users/me/notification-exceptions`, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'events',
-        params: filteredParams,
-      });
-    }
-
-    if (options?.observe === 'response') {
-      return this.http.delete<TData>(`${this.baseUrl}/users/me/notification-exceptions`, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'response',
-        params: filteredParams,
-      });
-    }
-
-    return this.http.delete<TData>(`${this.baseUrl}/users/me/notification-exceptions`, {
-      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-      observe: 'body',
-      params: filteredParams,
-    });
-  }
   getExceptions<TData = NotificationExceptionsResponse>(
     params: GetExceptionsParams,
     options?: HttpClientBodyOptions,
@@ -303,6 +263,46 @@ export class UsersService {
     }
 
     return this.http.get<TData>(`${this.baseUrl}/users/me/notification-exceptions`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+      params: filteredParams,
+    });
+  }
+  clearExceptions<TData = NotificationExceptionsCleared>(
+    params: ClearExceptionsParams,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  clearExceptions<TData = NotificationExceptionsCleared>(
+    params: ClearExceptionsParams,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  clearExceptions<TData = NotificationExceptionsCleared>(
+    params: ClearExceptionsParams,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  clearExceptions<TData = NotificationExceptionsCleared>(
+    params: ClearExceptionsParams,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    const filteredParams = filterParams({ ...params, ...options?.params }, new Set<string>([]));
+
+    if (options?.observe === 'events') {
+      return this.http.delete<TData>(`${this.baseUrl}/users/me/notification-exceptions`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+        params: filteredParams,
+      });
+    }
+
+    if (options?.observe === 'response') {
+      return this.http.delete<TData>(`${this.baseUrl}/users/me/notification-exceptions`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+        params: filteredParams,
+      });
+    }
+
+    return this.http.delete<TData>(`${this.baseUrl}/users/me/notification-exceptions`, {
       ...(options as Omit<NonNullable<typeof options>, 'observe'>),
       observe: 'body',
       params: filteredParams,

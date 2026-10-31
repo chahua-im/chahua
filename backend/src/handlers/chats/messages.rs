@@ -1,98 +1,28 @@
-use crate::utils::transaction::AsyncTransaction;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     Json,
 };
-use chrono::Utc;
-use diesel::prelude::*;
-use std::time::Instant;
 use utoipa_axum::router::OpenApiRouter;
 
 use crate::{
     dto::{
         messages::{
-            BulkDeleteMessagesBody, ForwardMessageBody, ForwardMessagesBody,
-            ForwardedMessagesResponse, ListMessagesResponse, MessageResponse,
-            SearchMessagesResponse,
+            BulkDeleteMessagesBody, CreateMessageBody, ForwardMessageBody, ForwardMessagesBody,
+            ForwardedMessagesResponse, ListMessagesQuery, ListMessagesResponse, MessageResponse,
+            SearchMessagesQuery, SearchMessagesResponse, UpdateMessageBody,
         },
-        ws::{BulkDeletedPayload, NotificationPayload, NotificationType, ServerWsMessage},
+        ws::BulkDeletedPayload,
     },
     errors::AppError,
     extractors::DbConn,
-    handlers::{groups::load_requester_group_role, members::check_membership},
-    models::{GroupRole, Message, MessageType},
-    schema::{attachments, group_membership, groups, messages, messages::dsl},
-    services::message_search::{
-        filter_authoritative_hits_with_counts, validate_search_query, MessageSearchMetrics,
-        MessageSearchSort, SearchCandidateDropCounts,
-    },
-    utils::{
-        auth::{CurrentUid, Principal},
-        pagination::validate_limit,
-    },
-    AppState, MAX_MESSAGES_LIMIT,
+    services::authentication::Principal,
+    utils::auth::CurrentUid,
+    AppState,
 };
 
-use super::{ChatIdPath, CreateMessageBody};
-use crate::services::authz::Action as AuthzAction;
-use crate::services::forwarding::prepare_forward_message;
-use crate::services::messages::{
-    attach_metadata, attachment_position, authorize_message_send,
-    deserialize_forwarded_bundle_payload, forwarded_messages_response_from_items,
-    load_forwarded_bundle, load_target_forwarded_bundle_from_root, load_username_by_uid,
-    parse_attachment_ids, send_prepared_message, sync_edited_message_mentions, validate_message,
-    PreparedMessageSend, SendMessageOutcome,
-};
-use crate::services::single_forwarding::{prepare_single_forward, PreparedSingleForward};
-use crate::services::social;
-#[derive(serde::Deserialize, utoipa::IntoParams)]
-#[serde(rename_all = "camelCase")]
-#[into_params(parameter_in = Query)]
-pub struct ListMessagesQuery {
-    /// Cursor: fetch messages before this ID
-    #[serde(
-        default,
-        deserialize_with = "crate::serde_i64_string::opt::deserialize"
-    )]
-    #[param(value_type = Option<String>)]
-    before: Option<i64>,
-    /// Cursor: fetch messages around this ID
-    #[serde(
-        default,
-        deserialize_with = "crate::serde_i64_string::opt::deserialize"
-    )]
-    #[param(value_type = Option<String>)]
-    around: Option<i64>,
-    /// Cursor: fetch messages after this ID
-    #[serde(
-        default,
-        deserialize_with = "crate::serde_i64_string::opt::deserialize"
-    )]
-    #[param(value_type = Option<String>)]
-    after: Option<i64>,
-    /// Max number of messages to return
-    #[serde(default)]
-    max: Option<i64>,
-    /// Thread root ID to filter by
-    #[serde(
-        default,
-        deserialize_with = "crate::serde_i64_string::opt::deserialize"
-    )]
-    #[param(value_type = Option<String>)]
-    thread_id: Option<i64>,
-}
-
-#[derive(serde::Deserialize, utoipa::IntoParams)]
-#[serde(rename_all = "camelCase")]
-pub struct SearchMessagesQuery {
-    q: String,
-    #[serde(default)]
-    sort: Option<MessageSearchSort>,
-    limit: Option<i64>,
-    offset: Option<usize>,
-}
+use super::ChatIdPath;
 
 #[derive(serde::Deserialize)]
 pub struct ThreadIdPath {
@@ -117,53 +47,6 @@ pub struct ForwardedBundleMessagesPath {
     bundle_id: i64,
 }
 
-#[derive(serde::Deserialize, utoipa::ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateMessageBody {
-    message: String,
-    /// Complete attachment selection in display order, including retained uploads.
-    #[serde(default)]
-    attachment_ids: Vec<String>,
-}
-
-const SYSTEM_MESSAGE_TYPE_FORBIDDEN: &str = "System messages cannot be sent by clients";
-const INVITE_MESSAGE_TYPE_FORBIDDEN: &str = "Invite messages must be sent through invite APIs";
-const FORWARDED_MESSAGE_TYPE_FORBIDDEN: &str =
-    "Forwarded messages must be sent through forward APIs";
-const PLACEHOLDER_MESSAGE_TYPE_FORBIDDEN: &str =
-    "Placeholder messages must be created through forward APIs";
-const DEFAULT_SEARCH_LIMIT: i64 = 20;
-const MAX_SEARCH_RESULT_WINDOW: usize = 1_000;
-
-fn validate_client_message_type(message_type: &MessageType) -> Result<(), AppError> {
-    match message_type {
-        MessageType::System => Err(AppError::BadRequest(SYSTEM_MESSAGE_TYPE_FORBIDDEN)),
-        MessageType::Invite => Err(AppError::BadRequest(INVITE_MESSAGE_TYPE_FORBIDDEN)),
-        MessageType::Forwarded => Err(AppError::BadRequest(FORWARDED_MESSAGE_TYPE_FORBIDDEN)),
-        MessageType::Placeholder => Err(AppError::BadRequest(PLACEHOLDER_MESSAGE_TYPE_FORBIDDEN)),
-        _ => Ok(()),
-    }
-}
-
-fn search_limit(limit: Option<i64>) -> usize {
-    validate_limit(
-        Some(limit.unwrap_or(DEFAULT_SEARCH_LIMIT)),
-        MAX_MESSAGES_LIMIT,
-    ) as usize
-}
-
-fn search_offset(offset: Option<usize>, limit: usize) -> Result<usize, AppError> {
-    let offset = offset.unwrap_or(0);
-    if offset.saturating_add(limit) > MAX_SEARCH_RESULT_WINDOW {
-        return Err(AppError::BadRequest("Search offset is too large"));
-    }
-    Ok(offset)
-}
-
-fn search_next_offset(next_offset: Option<usize>, limit: usize) -> Option<usize> {
-    next_offset.filter(|offset| offset.saturating_add(limit) <= MAX_SEARCH_RESULT_WINDOW)
-}
-
 /// GET /chats/:chat_id/messages — List messages in a chat (cursor-based).
 #[utoipa::path(
     get,
@@ -185,186 +68,16 @@ async fn get_messages(
     mut conn: DbConn,
     Query(q): Query<ListMessagesQuery>,
 ) -> Result<Json<ListMessagesResponse>, AppError> {
-    let conn = &mut *conn;
-
-    check_membership(conn, chat_id, uid)?;
-
-    let max = validate_limit(q.max, MAX_MESSAGES_LIMIT);
-
-    let q_thread_id = q.thread_id;
-    macro_rules! raw_query {
-        () => {{
-            let mut b = messages::table
-                .into_boxed()
-                .filter(dsl::chat_id.eq(chat_id).and(dsl::is_published.eq(true)));
-            if let Some(tid) = q_thread_id {
-                b = b.filter(
-                    dsl::reply_root_id
-                        .eq(tid)
-                        .and(dsl::deleted_at.is_null())
-                        .or(dsl::id.eq(tid)),
-                );
-            } else {
-                b = b.filter(
-                    dsl::reply_root_id
-                        .is_null()
-                        .and(dsl::deleted_at.is_null().or(dsl::has_thread.eq(true))),
-                );
-            }
-            b
-        }};
-    }
-
-    let (chat_settings, kind, membership_message_policy) =
-        crate::services::user::load_chat_settings_for_chat(conn, uid, chat_id)?;
-    let filtering = !membership_message_policy.can_view
-        || crate::services::system_messages::hides_membership_messages(
-            chat_settings.show_membership_messages,
-            kind,
-            q_thread_id,
-        );
-    macro_rules! base_query {
-        () => {{
-            let mut query = raw_query!();
-            if filtering {
-                query = query.filter(diesel::dsl::sql::<diesel::sql_types::Bool>(
-                    crate::services::system_messages::NON_MEMBERSHIP_PREDICATE,
-                ));
-            }
-            query
-        }};
-    }
-
-    // around=<id>: fetch a window centered on the target message
-    if let Some(target) = q.around {
-        let half = max / 2;
-
-        // Messages with id >= target, ordered ASC (target first, then newer)
-        let newer_rows: Vec<Message> = base_query!()
-            .filter(dsl::id.ge(target))
-            .order(dsl::id.asc())
-            .limit(half + 2)
-            .select(Message::as_select())
-            .load(conn)?;
-
-        // Messages with id < target, ordered DESC (closest to target first)
-        let older_rows: Vec<Message> = base_query!()
-            .filter(dsl::id.lt(target))
-            .order(dsl::id.desc())
-            .limit(half + 1)
-            .select(Message::as_select())
-            .load(conn)?;
-
-        let has_older = older_rows.len() as i64 > half;
-        let has_newer = newer_rows.len() as i64 > half + 1;
-
-        let older_to_use: Vec<Message> = older_rows.into_iter().take(half as usize).collect();
-        let newer_to_use: Vec<Message> = newer_rows.into_iter().take((half + 1) as usize).collect();
-
-        let older_cursor = has_older
-            .then(|| older_to_use.last().map(|m| m.id))
-            .flatten();
-        let newer_cursor = has_newer
-            .then(|| newer_to_use.last().map(|m| m.id))
-            .flatten();
-
-        // Combine: older reversed (oldest first) + newer (target first, ascending)
-        let mut combined: Vec<Message> = older_to_use.into_iter().rev().collect();
-        combined.extend(newer_to_use);
-        // Preserve an explicitly requested hidden target for exact-link validation.
-        // It remains hidden by the client, which positions its visible neighbour.
-        if filtering && membership_message_policy.can_view {
-            if let Some(target_message) = raw_query!()
-                .filter(dsl::id.eq(target))
-                .select(Message::as_select())
-                .first::<Message>(conn)
-                .optional()?
-            {
-                if target_message
-                    .system_kind
-                    .is_some_and(|kind| kind.is_membership())
-                {
-                    combined.push(target_message);
-                    combined.sort_by_key(|message| message.id);
-                }
-            }
-        }
-        let messages_vec = attach_metadata(conn, combined, &state.media, &state.avatars, uid).await;
-
-        return Ok(Json(ListMessagesResponse {
-            membership_message_policy,
-            chat_settings,
-            messages: messages_vec,
-            next_cursor: older_cursor,
-            prev_cursor: newer_cursor,
-            older_cursor,
-            newer_cursor,
-        }));
-    }
-
-    // after=<id>: fetch messages newer than `after`, ascending order
-    if let Some(after) = q.after {
-        let rows: Vec<Message> = base_query!()
-            .filter(dsl::id.gt(after))
-            .order(dsl::id.asc())
-            .limit(max + 1)
-            .select(Message::as_select())
-            .load(conn)?;
-
-        let has_more = rows.len() as i64 > max;
-        let messages_to_process: Vec<Message> = rows.into_iter().take(max as usize).collect();
-        let newer_cursor = has_more
-            .then(|| messages_to_process.last().map(|m| m.id))
-            .flatten();
-        let messages_vec =
-            attach_metadata(conn, messages_to_process, &state.media, &state.avatars, uid).await;
-
-        return Ok(Json(ListMessagesResponse {
-            membership_message_policy,
-            chat_settings,
-            messages: messages_vec,
-            next_cursor: None,
-            prev_cursor: newer_cursor,
-            older_cursor: None,
-            newer_cursor,
-        }));
-    }
-
-    // Default: before cursor, descending (newest first in response, reversed by client)
-    let rows: Vec<Message> = match q.before {
-        None => base_query!()
-            .order(dsl::id.desc())
-            .limit(max + 1)
-            .select(Message::as_select())
-            .load(conn),
-        Some(before) => base_query!()
-            .filter(dsl::id.lt(before))
-            .order(dsl::id.desc())
-            .limit(max + 1)
-            .select(Message::as_select())
-            .load(conn),
-    }?;
-
-    let has_more = rows.len() as i64 > max;
-    let messages_to_process: Vec<Message> = rows.into_iter().take(max as usize).collect();
-    let older_cursor = has_more
-        .then(|| messages_to_process.last().map(|m| m.id))
-        .flatten();
-
-    // Reverse to return ASC (oldest first)
-    let messages_to_process: Vec<Message> = messages_to_process.into_iter().rev().collect();
-    let messages_vec =
-        attach_metadata(conn, messages_to_process, &state.media, &state.avatars, uid).await;
-
-    Ok(Json(ListMessagesResponse {
-        membership_message_policy,
-        chat_settings,
-        messages: messages_vec,
-        next_cursor: older_cursor,
-        prev_cursor: None,
-        older_cursor,
-        newer_cursor: None,
-    }))
+    crate::services::api::chats::messages::get_messages(
+        uid,
+        chat_id,
+        q,
+        &mut conn,
+        &state.media,
+        &state.avatars,
+    )
+    .await
+    .map(Json)
 }
 
 /// GET /chats/:chat_id/messages/search — Search visible messages in a chat.
@@ -390,166 +103,20 @@ async fn search_messages(
     mut conn: DbConn,
     Query(params): Query<SearchMessagesQuery>,
 ) -> Result<Json<SearchMessagesResponse>, AppError> {
-    let started_at = Instant::now();
-    let conn = &mut *conn;
-    let sort = params.sort.unwrap_or(MessageSearchSort::Relevance);
-    let sort_label = sort.as_str();
-
-    if let Err(err) = check_membership(conn, chat_id, uid) {
-        record_search_query_metrics(
-            &state.metrics.message_search,
-            sort_label,
-            "failure",
-            started_at,
-        );
-        return Err(err);
-    }
-
-    let query = match validate_search_query(&params.q) {
-        Ok(query) => query,
-        Err(_) => {
-            record_search_query_metrics(
-                &state.metrics.message_search,
-                sort_label,
-                "failure",
-                started_at,
-            );
-            return Err(AppError::BadRequest(
-                "Search query must be at least 2 characters",
-            ));
-        }
-    };
-    let limit = search_limit(params.limit);
-    let offset = match search_offset(params.offset, limit) {
-        Ok(offset) => offset,
-        Err(err) => {
-            record_search_query_metrics(
-                &state.metrics.message_search,
-                sort_label,
-                "failure",
-                started_at,
-            );
-            return Err(err);
-        }
-    };
-
-    let Some(search_service) = state.message_search.clone() else {
-        record_search_query_metrics(
-            &state.metrics.message_search,
-            sort_label,
-            "failure",
-            started_at,
-        );
-        return Err(AppError::ServiceUnavailable("Message search unavailable"));
-    };
-
-    let candidate_page = match search_service
-        .search_candidates(&query, chat_id, sort, limit, offset)
-        .await
-    {
-        Ok(page) => page,
-        Err(err) => {
-            record_search_query_metrics(
-                &state.metrics.message_search,
-                sort_label,
-                "failure",
-                started_at,
-            );
-            tracing::warn!(
-                chat_id,
-                sort = sort_label,
-                ?err,
-                "message search query failed"
-            );
-            return Err(AppError::ServiceUnavailable("Message search unavailable"));
-        }
-    };
-    state
-        .metrics
-        .message_search
-        .observe_candidates(sort_label, candidate_page.candidates.len());
-    let next_offset = search_next_offset(candidate_page.next_offset, limit);
-
-    if candidate_page.candidates.is_empty() {
-        state.metrics.message_search.observe_results(sort_label, 0);
-        record_search_query_metrics(
-            &state.metrics.message_search,
-            sort_label,
-            "success",
-            started_at,
-        );
-        return Ok(Json(SearchMessagesResponse {
-            messages: Vec::new(),
-            next_offset,
-        }));
-    }
-
-    let candidate_ids = candidate_page
-        .candidates
-        .iter()
-        .map(|candidate| candidate.message_id)
-        .collect::<Vec<_>>();
-    let rows = match messages::table
-        .filter(dsl::id.eq_any(&candidate_ids))
-        .select(Message::as_select())
-        .load::<Message>(conn)
-    {
-        Ok(rows) => rows,
-        Err(err) => {
-            record_search_query_metrics(
-                &state.metrics.message_search,
-                sort_label,
-                "failure",
-                started_at,
-            );
-            return Err(err.into());
-        }
-    };
-
-    let authoritative_hits =
-        filter_authoritative_hits_with_counts(chat_id, &candidate_page.candidates, rows);
-    record_search_candidate_drops(&state.metrics.message_search, authoritative_hits.drops);
-    let messages = attach_metadata(
-        conn,
-        authoritative_hits.messages,
-        &state.media,
-        &state.avatars,
+    crate::services::api::chats::messages::search_messages(
         uid,
+        chat_id,
+        params,
+        &mut conn,
+        crate::services::api::chats::messages::SearchMessagesDeps {
+            media: &state.media,
+            avatars: &state.avatars,
+            metrics: &state.metrics,
+            message_search: &state.message_search,
+        },
     )
-    .await;
-    state
-        .metrics
-        .message_search
-        .observe_results(sort_label, messages.len());
-
-    record_search_query_metrics(
-        &state.metrics.message_search,
-        sort_label,
-        "success",
-        started_at,
-    );
-
-    Ok(Json(SearchMessagesResponse {
-        messages,
-        next_offset,
-    }))
-}
-
-fn record_search_query_metrics(
-    metrics: &MessageSearchMetrics,
-    sort_label: &str,
-    result: &str,
-    started_at: Instant,
-) {
-    metrics.record_query(sort_label, result);
-    metrics.record_query_duration(sort_label, result, started_at.elapsed().as_secs_f64());
-}
-
-fn record_search_candidate_drops(metrics: &MessageSearchMetrics, drops: SearchCandidateDropCounts) {
-    metrics.record_candidate_drop("missing_db_row", drops.missing_db_row);
-    metrics.record_candidate_drop("wrong_chat", drops.wrong_chat);
-    metrics.record_candidate_drop("not_searchable", drops.not_searchable);
-    metrics.record_candidate_drop("stale_version", drops.stale_version);
+    .await
+    .map(Json)
 }
 
 /// GET /chats/:chat_id/messages/:message_id — Get a single message.
@@ -575,35 +142,16 @@ async fn get_message(
     }): Path<MessageIdPath>,
     mut conn: DbConn,
 ) -> Result<Json<MessageResponse>, AppError> {
-    let conn = &mut *conn;
-
-    check_membership(conn, chat_id, uid)?;
-
-    let message: Message = messages::table
-        .filter(
-            dsl::id
-                .eq(message_id)
-                .and(dsl::chat_id.eq(chat_id))
-                .and(dsl::deleted_at.is_null())
-                .and(dsl::is_published.eq(true)),
-        )
-        .select(Message::as_select())
-        .first(conn)
-        .optional()?
-        .ok_or(AppError::NotFound("Message not found"))?;
-
-    if message.system_kind.is_some_and(|kind| kind.is_membership())
-        && !crate::services::user::load_chat_settings_for_chat(conn, uid, chat_id)?
-            .2
-            .can_view
-    {
-        return Err(AppError::NotFound("Message not found"));
-    }
-    let messages_vec =
-        attach_metadata(conn, vec![message], &state.media, &state.avatars, uid).await;
-    let response = messages_vec.into_iter().next().unwrap();
-
-    Ok(Json(response))
+    crate::services::api::chats::messages::get_message(
+        uid,
+        chat_id,
+        message_id,
+        &mut conn,
+        &state.media,
+        &state.avatars,
+    )
+    .await
+    .map(Json)
 }
 
 /// POST /chats/:chat_id/messages — Send a message.
@@ -626,92 +174,23 @@ async fn post_message(
     mut conn: DbConn,
     Json(body): Json<CreateMessageBody>,
 ) -> Result<impl IntoResponse, AppError> {
-    let conn = &mut *conn;
-    let uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfMessageSend)?;
-    validate_client_message_type(&body.message_type)?;
-    let attachment_ids = parse_attachment_ids(&body.attachment_ids)?;
-
-    // Keep message creation and read-position advancement atomic.
-    let publish_immediately = !matches!(body.message_type, MessageType::Audio);
-    let (send_result, receipt_advanced) = {
-        let mut transaction = AsyncTransaction::begin(conn)?;
-        let conn = transaction.connection();
-        let result = async {
-            authorize_message_send(conn, chat_id, None, uid)?;
-            let send_result = send_prepared_message(
-                conn,
-                &state,
-                PreparedMessageSend {
-                    system_kind: None,
-                    forwarded_from_message_id: None,
-                    chat_id,
-                    sender_uid: uid,
-                    message: body.message,
-                    message_type: body.message_type,
-                    sticker_id: body.sticker_id,
-                    reply_to_id: body.reply_to_id,
-                    reply_root_id: None,
-                    client_generated_id: body.client_generated_id,
-                    attachment_ids,
-                    publish_immediately,
-                    forwarded_bundle_id: None,
-                    forwarded_preview_total: None,
-                    forwarded_preview_contains_forwarded_messages: None,
-                    forwarded_preview_items: None,
-                },
-            )
-            .await?;
-
-            let receipt_advanced = if let SendMessageOutcome::Created(send_result) = &send_result {
-                crate::services::chat::mark_chat_as_read(
-                    conn,
-                    chat_id,
-                    uid,
-                    send_result.response.id,
-                )?;
-                crate::services::read_receipts::advance_chat_read_receipt(
-                    conn,
-                    chat_id,
-                    uid,
-                    send_result.response.id,
-                )?
-            } else {
-                false
-            };
-
-            Ok((send_result, receipt_advanced))
-        }
-        .await;
-        transaction.finish(result)?
-    };
-
-    state.ws_registry.invalidate_unread(&[uid]);
-    let response = match send_result {
-        SendMessageOutcome::Created(send_result) => {
-            let send_result = *send_result;
-            send_result.side_effects.fire(&state);
-            if let Some(search_service) = state.message_search.clone() {
-                search_service.upsert_message_best_effort(send_result.inserted_message);
-            }
-            if matches!(send_result.response.message_type, MessageType::Audio) {
-                crate::services::audio_transcode::enqueue_message(send_result.response.id);
-            }
-            send_result.response
-        }
-        SendMessageOutcome::Duplicate(response) => *response,
-    };
-
-    if receipt_advanced {
-        crate::services::read_receipts::broadcast_read_receipt_changed_if_dm(
-            conn,
-            &state.ws_registry,
-            chat_id,
-            false,
-            Some(uid),
-            None,
-        )?;
-    }
-
+    let response = crate::services::api::chats::messages::post_message(
+        principal,
+        chat_id,
+        body,
+        &mut conn,
+        crate::services::api::chats::messages::PostMessageDeps {
+            id_gen: &state.id_gen,
+            media: &state.media,
+            avatars: &state.avatars,
+            metrics: &state.metrics,
+            authz_service: &state.authz_service,
+            ws_registry: &state.ws_registry,
+            push_service: &state.push_service,
+            message_search: &state.message_search,
+        },
+    )
+    .await?;
     Ok((StatusCode::CREATED, Json(response)))
 }
 
@@ -738,101 +217,22 @@ async fn forward_messages(
     mut conn: DbConn,
     Json(body): Json<ForwardMessagesBody>,
 ) -> Result<impl IntoResponse, AppError> {
-    let conn = &mut *conn;
-
-    let (send_result, receipt_advanced, subscription_changes) = {
-        let mut transaction = AsyncTransaction::begin(conn)?;
-        let conn = transaction.connection();
-        let result = async {
-            // Retries still require permission to send to the destination. Source
-            // authorization follows idempotency lookup, so lost-response retries
-            // do not depend on mutable source content.
-            let target = authorize_message_send(conn, dest_chat_id, body.thread_id, uid)?;
-            let prepared =
-                prepare_forward_message(conn, state.id_gen.as_ref(), uid, dest_chat_id, &body)
-                    .await?;
-            let send_result = send_prepared_message(conn, &state, prepared).await?;
-
-            let SendMessageOutcome::Created(created) = &send_result else {
-                return Ok((send_result, false, Vec::new()));
-            };
-            let (receipt_advanced, subscription_changes) = if let Some(root) = &target.thread_root {
-                let thread_state = crate::services::threads::record_thread_send(
-                    conn,
-                    &created.response,
-                    &created.member_uids,
-                    root,
-                    true,
-                    false,
-                )?;
-                (
-                    thread_state.receipt_advanced,
-                    thread_state.subscription_changes,
-                )
-            } else {
-                crate::services::chat::mark_chat_as_read(
-                    conn,
-                    dest_chat_id,
-                    uid,
-                    created.response.id,
-                )?;
-                (
-                    crate::services::read_receipts::advance_chat_read_receipt(
-                        conn,
-                        dest_chat_id,
-                        uid,
-                        created.response.id,
-                    )?,
-                    Vec::new(),
-                )
-            };
-
-            Ok((send_result, receipt_advanced, subscription_changes))
-        }
-        .await;
-        transaction.finish(result)?
-    };
-
-    let created = match send_result {
-        SendMessageOutcome::Created(created) => *created,
-        SendMessageOutcome::Duplicate(response) => {
-            return Ok((StatusCode::CREATED, Json(*response)))
-        }
-    };
-    created.side_effects.fire(&state);
-
-    if receipt_advanced {
-        crate::services::read_receipts::broadcast_read_receipt_changed_if_dm(
-            conn,
-            &state.ws_registry,
-            dest_chat_id,
-            false,
-            Some(uid),
-            body.thread_id,
-        )?;
-    }
-    if let Some(thread_id) = body.thread_id {
-        for changed_uid in subscription_changes {
-            crate::services::threads::broadcast_thread_membership_changed_to_user(
-                conn,
-                &state.ws_registry,
-                changed_uid,
-                dest_chat_id,
-                thread_id,
-            )?;
-        }
-        broadcast_thread_send_updates(
-            conn,
-            &state,
-            dest_chat_id,
-            thread_id,
-            &created.member_uids,
-            uid,
-        )
-        .await;
-    }
-
-    Ok((StatusCode::CREATED, Json(created.response)))
+    let response = crate::services::api::chats::messages::forward_messages(
+        uid,
+        dest_chat_id,
+        body,
+        &mut conn,
+        crate::services::api::chats::messages::ForwardMessagesDeps {
+            id_gen: &state.id_gen,
+            media: &state.media,
+            avatars: &state.avatars,
+            metrics: &state.metrics,
+            ws_registry: &state.ws_registry,
+            push_service: &state.push_service,
+        },
+    )
+    .await?;
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 /// Single forwards retain the original message type, with flattened attribution.
@@ -858,106 +258,24 @@ async fn forward_message(
     mut conn: DbConn,
     Json(body): Json<ForwardMessageBody>,
 ) -> Result<impl IntoResponse, AppError> {
-    let conn = &mut *conn;
-    let (send_result, receipt_advanced, subscription_changes) = {
-        let mut transaction = AsyncTransaction::begin(conn)?;
-        let conn = transaction.connection();
-        let result = async {
-            let target = authorize_message_send(conn, chat_id, body.thread_id, uid)?;
-            let prepared = prepare_single_forward(
-                conn,
-                state.id_gen.as_ref(),
-                uid,
-                chat_id,
-                message_id,
-                &body,
-            )
-            .await?;
-            let send_result = match prepared {
-                PreparedSingleForward::Existing(existing) => {
-                    let response =
-                        attach_metadata(conn, vec![*existing], &state.media, &state.avatars, uid)
-                            .await
-                            .into_iter()
-                            .next()
-                            .ok_or(AppError::Internal("Failed to build message response"))?;
-                    return Ok((
-                        SendMessageOutcome::Duplicate(Box::new(response)),
-                        false,
-                        Vec::new(),
-                    ));
-                }
-                PreparedSingleForward::New(prepared) => {
-                    send_prepared_message(conn, &state, *prepared).await?
-                }
-            };
-            let SendMessageOutcome::Created(created) = &send_result else {
-                return Ok((send_result, false, Vec::new()));
-            };
-            let (receipt_advanced, subscription_changes) = if let Some(root) = &target.thread_root {
-                let thread_state = crate::services::threads::record_thread_send(
-                    conn,
-                    &created.response,
-                    &created.member_uids,
-                    root,
-                    true,
-                    false,
-                )?;
-                (
-                    thread_state.receipt_advanced,
-                    thread_state.subscription_changes,
-                )
-            } else {
-                crate::services::chat::mark_chat_as_read(conn, chat_id, uid, created.response.id)?;
-                (
-                    crate::services::read_receipts::advance_chat_read_receipt(
-                        conn,
-                        chat_id,
-                        uid,
-                        created.response.id,
-                    )?,
-                    Vec::new(),
-                )
-            };
-            Ok((send_result, receipt_advanced, subscription_changes))
-        }
-        .await;
-        transaction.finish(result)?
-    };
-    let created = match send_result {
-        SendMessageOutcome::Created(created) => *created,
-        SendMessageOutcome::Duplicate(response) => {
-            return Ok((StatusCode::CREATED, Json(*response)))
-        }
-    };
-    created.side_effects.fire(&state);
-    if let Some(search) = &state.message_search {
-        search.upsert_message_best_effort(created.inserted_message);
-    }
-    if receipt_advanced {
-        crate::services::read_receipts::broadcast_read_receipt_changed_if_dm(
-            conn,
-            &state.ws_registry,
-            chat_id,
-            false,
-            Some(uid),
-            body.thread_id,
-        )?;
-    }
-    if let Some(thread_id) = body.thread_id {
-        for changed_uid in subscription_changes {
-            crate::services::threads::broadcast_thread_membership_changed_to_user(
-                conn,
-                &state.ws_registry,
-                changed_uid,
-                chat_id,
-                thread_id,
-            )?;
-        }
-        broadcast_thread_send_updates(conn, &state, chat_id, thread_id, &created.member_uids, uid)
-            .await;
-    }
-    Ok((StatusCode::CREATED, Json(created.response)))
+    let response = crate::services::api::chats::messages::forward_message(
+        uid,
+        chat_id,
+        message_id,
+        body,
+        &mut conn,
+        crate::services::api::chats::messages::ForwardMessageDeps {
+            id_gen: &state.id_gen,
+            media: &state.media,
+            avatars: &state.avatars,
+            metrics: &state.metrics,
+            ws_registry: &state.ws_registry,
+            push_service: &state.push_service,
+            message_search: &state.message_search,
+        },
+    )
+    .await?;
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 /// GET /chats/:chat_id/messages/:message_id/forwarded-messages — List forwarded message details.
@@ -983,21 +301,15 @@ async fn get_forwarded_messages(
     }): Path<MessageIdPath>,
     mut conn: DbConn,
 ) -> Result<Json<ForwardedMessagesResponse>, AppError> {
-    let conn = &mut *conn;
-
-    let bundle_id =
-        crate::services::messages::load_chat_forwarded_bundle_id(conn, chat_id, message_id, uid)?;
-    let bundle = load_forwarded_bundle(conn, bundle_id)?;
-    let (total, items) = deserialize_forwarded_bundle_payload(bundle)?;
-
-    Ok(Json(forwarded_messages_response_from_items(
-        conn,
+    crate::services::api::chats::messages::get_forwarded_messages(
+        uid,
+        chat_id,
+        message_id,
+        &mut conn,
         &state.media,
         &state.avatars,
-        uid,
-        total,
-        items,
-    )))
+    )
+    .map(Json)
 }
 
 /// GET /chats/:chat_id/messages/:message_id/forwarded-bundles/:bundle_id/messages — List forwarded message details by reachable bundle.
@@ -1025,21 +337,16 @@ async fn get_forwarded_bundle_messages(
     }): Path<ForwardedBundleMessagesPath>,
     mut conn: DbConn,
 ) -> Result<Json<ForwardedMessagesResponse>, AppError> {
-    let conn = &mut *conn;
-
-    let root_bundle_id =
-        crate::services::messages::load_chat_forwarded_bundle_id(conn, chat_id, message_id, uid)?;
-    let bundle = load_target_forwarded_bundle_from_root(conn, root_bundle_id, bundle_id)?;
-    let (total, items) = deserialize_forwarded_bundle_payload(bundle)?;
-
-    Ok(Json(forwarded_messages_response_from_items(
-        conn,
+    crate::services::api::chats::messages::get_forwarded_bundle_messages(
+        uid,
+        chat_id,
+        message_id,
+        bundle_id,
+        &mut conn,
         &state.media,
         &state.avatars,
-        uid,
-        total,
-        items,
-    )))
+    )
+    .map(Json)
 }
 
 /// POST /chats/:chat_id/threads/:thread_id/messages — Send a message in a thread.
@@ -1064,158 +371,24 @@ pub(super) async fn post_thread_message(
     mut conn: DbConn,
     Json(body): Json<CreateMessageBody>,
 ) -> Result<impl IntoResponse, AppError> {
-    let conn = &mut *conn;
-
-    validate_client_message_type(&body.message_type)?;
-    let attachment_ids = parse_attachment_ids(&body.attachment_ids)?;
-
-    // Begin transaction: message insert + thread_meta + subscriptions are atomic.
-    let publish_immediately = !matches!(body.message_type, MessageType::Audio);
-    let (send_result, receipt_advanced, subscription_changes) = {
-        let mut transaction = AsyncTransaction::begin(conn)?;
-        let conn = transaction.connection();
-        let result = async {
-            let root_msg = authorize_message_send(conn, chat_id, Some(thread_id), uid)?
-                .thread_root
-                .ok_or(AppError::Internal(
-                    "Thread authorization did not return a thread root",
-                ))?;
-
-            let send_result = send_prepared_message(
-                conn,
-                &state,
-                PreparedMessageSend {
-                    system_kind: None,
-                    forwarded_from_message_id: None,
-                    chat_id,
-                    sender_uid: uid,
-                    message: body.message,
-                    message_type: body.message_type,
-                    sticker_id: body.sticker_id,
-                    reply_to_id: body.reply_to_id,
-                    reply_root_id: Some(thread_id),
-                    client_generated_id: body.client_generated_id,
-                    attachment_ids,
-                    publish_immediately,
-                    forwarded_bundle_id: None,
-                    forwarded_preview_total: None,
-                    forwarded_preview_contains_forwarded_messages: None,
-                    forwarded_preview_items: None,
-                },
-            )
-            .await?;
-            let send_result = match send_result {
-                SendMessageOutcome::Created(send_result) => *send_result,
-                SendMessageOutcome::Duplicate(response) => {
-                    return Ok((SendMessageOutcome::Duplicate(response), false, Vec::new()));
-                }
-            };
-            let thread_state = crate::services::threads::record_thread_send(
-                conn,
-                &send_result.response,
-                &send_result.member_uids,
-                &root_msg,
-                publish_immediately,
-                true,
-            )?;
-            Ok((
-                SendMessageOutcome::Created(Box::new(send_result)),
-                thread_state.receipt_advanced,
-                thread_state.subscription_changes,
-            ))
-        }
-        .await;
-        transaction.finish(result)?
-    };
-
-    let send_result = match send_result {
-        SendMessageOutcome::Created(send_result) => *send_result,
-        SendMessageOutcome::Duplicate(response) => {
-            return Ok((StatusCode::CREATED, Json(*response)));
-        }
-    };
-
-    let response = send_result.response;
-    let member_uids = send_result.member_uids;
-    let msg_side_effects = send_result.side_effects;
-
-    state.ws_registry.invalidate_unread(&[uid]);
-    // Post-commit: fire deferred side effects (new message WS broadcast + push)
-    msg_side_effects.fire(&state);
-    if let Some(search_service) = state.message_search.clone() {
-        search_service.upsert_response_best_effort(response.clone());
-    }
-    if matches!(response.message_type, MessageType::Audio) {
-        crate::services::audio_transcode::enqueue_message(response.id);
-    }
-
-    if receipt_advanced {
-        crate::services::read_receipts::broadcast_read_receipt_changed_if_dm(
-            conn,
-            &state.ws_registry,
-            chat_id,
-            false,
-            Some(uid),
-            Some(thread_id),
-        )?;
-    }
-
-    for changed_uid in subscription_changes {
-        crate::services::threads::broadcast_thread_membership_changed_to_user(
-            conn,
-            &state.ws_registry,
-            changed_uid,
-            chat_id,
-            thread_id,
-        )?;
-    }
-
-    if publish_immediately {
-        broadcast_thread_send_updates(conn, &state, chat_id, thread_id, &member_uids, uid).await;
-    }
-
-    Ok((StatusCode::CREATED, Json(response)))
-}
-
-async fn broadcast_thread_send_updates(
-    conn: &mut diesel::PgConnection,
-    state: &AppState,
-    chat_id: i64,
-    thread_id: i64,
-    member_uids: &[i32],
-    uid: i32,
-) {
-    let root = messages::table
-        .filter(dsl::id.eq(thread_id).and(dsl::chat_id.eq(chat_id)))
-        .select(Message::as_select())
-        .first::<Message>(conn)
-        .ok();
-    if let Some(root) = root {
-        if let Some(root_response) =
-            attach_metadata(conn, vec![root], &state.media, &state.avatars, uid)
-                .await
-                .into_iter()
-                .next()
-        {
-            state.ws_registry.broadcast_to_uids(
-                member_uids,
-                std::sync::Arc::new(ServerWsMessage::MessageUpdated(root_response)),
-            );
-        }
-    }
-    if let Err(error) = crate::services::threads::broadcast_thread_update_to_subscribers(
-        conn,
-        &state.ws_registry,
+    let response = crate::services::api::chats::messages::post_thread_message(
+        uid,
         chat_id,
         thread_id,
-    ) {
-        tracing::warn!(
-            chat_id,
-            thread_id,
-            ?error,
-            "failed to broadcast thread update after message send"
-        );
-    }
+        body,
+        &mut conn,
+        crate::services::api::chats::messages::PostThreadMessageDeps {
+            id_gen: &state.id_gen,
+            media: &state.media,
+            avatars: &state.avatars,
+            metrics: &state.metrics,
+            ws_registry: &state.ws_registry,
+            push_service: &state.push_service,
+            message_search: &state.message_search,
+        },
+    )
+    .await?;
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 /// PATCH /chats/:chat_id/messages/:message_id — Edit a message.
@@ -1243,175 +416,21 @@ async fn patch_message(
     mut conn: DbConn,
     Json(body): Json<UpdateMessageBody>,
 ) -> Result<Json<MessageResponse>, AppError> {
-    let conn = &mut *conn;
-
-    check_membership(conn, chat_id, uid)?;
-    social::require_chat_writable(conn, chat_id, uid)?;
-
-    let attachment_ids = parse_attachment_ids(&body.attachment_ids)?;
-    let now = Utc::now();
-    let (updated_message, added_mention_uids) = conn.transaction::<_, AppError, _>(|conn| {
-        use crate::schema::attachments::dsl as a_dsl;
-        use crate::services::speaking;
-        speaking::lock_chat(conn, chat_id, false)?;
-        let message: Message = messages::table
-            .filter(dsl::id.eq(message_id).and(dsl::chat_id.eq(chat_id)))
-            .for_update()
-            .select(Message::as_select())
-            .first(conn)
-            .optional()?
-            .ok_or(AppError::NotFound("Message not found"))?;
-        if message.system_kind.is_some_and(|kind| kind.is_membership())
-            && !crate::services::user::load_chat_settings_for_chat(conn, uid, chat_id)?
-                .2
-                .can_view
-        {
-            return Err(AppError::NotFound("Message not found"));
-        }
-        if message.sender_uid != uid {
-            return Err(AppError::Forbidden("You can only edit your own messages"));
-        }
-        if message.deleted_at.is_some() {
-            return Err(AppError::BadRequest("Cannot edit deleted message"));
-        }
-        if !message.is_published {
-            return Err(AppError::BadRequest("Cannot edit unpublished message"));
-        }
-        // Only text messages have user-editable content. Invite and system
-        // bodies are generated server-side (an invite code, a membership
-        // notice), and stickers, voice notes, and file messages have no
-        // editable text.
-        if message.forwarded_from_message_id.is_some()
-            || message.message_type == MessageType::Placeholder
-        {
-            return Err(AppError::Forbidden("Forwarded messages cannot be edited"));
-        }
-        if !matches!(message.message_type, MessageType::Text) {
-            return Err(AppError::BadRequest("This message type cannot be edited"));
-        }
-
-        speaking::require_edit(conn, &message, uid)?;
-
-        let requested = attachments::table
-            .filter(a_dsl::id.eq_any(&attachment_ids))
-            .order(a_dsl::id.asc())
-            .for_update()
-            .select(crate::models::Attachment::as_select())
-            .load::<crate::models::Attachment>(conn)?;
-        if requested.len() != attachment_ids.len()
-            || requested.iter().any(|attachment| {
-                attachment.deleted_at.is_some()
-                    || (attachment.message_id != Some(message_id)
-                        && (attachment.message_id.is_some()
-                            || attachment.uploader_uid != Some(uid)))
-            })
-        {
-            return Err(AppError::BadRequest("Invalid attachment selection"));
-        }
-        validate_message(
-            &message.message_type,
-            Some(&body.message),
-            message.sticker_id,
-            &requested,
-        )?;
-
-        diesel::update(attachments::table.filter(a_dsl::message_id.eq(message_id)))
-            .set(a_dsl::message_id.eq::<Option<i64>>(None))
-            .execute(conn)?;
-        if !attachment_ids.is_empty() {
-            let attached = diesel::update(
-                attachments::table
-                    .filter(a_dsl::id.eq_any(&attachment_ids))
-                    .filter(a_dsl::message_id.is_null()),
-            )
-            .set((
-                a_dsl::message_id.eq(message_id),
-                a_dsl::order.eq(attachment_position(&attachment_ids, a_dsl::id) - 1i16),
-            ))
-            .execute(conn)?;
-            if attached != attachment_ids.len() {
-                return Err(AppError::BadRequest("Invalid attachment selection"));
-            }
-        }
-        let updated_message: Message =
-            diesel::update(messages::table.filter(dsl::id.eq(message_id)))
-                .set((
-                    dsl::message.eq(&body.message),
-                    dsl::has_attachments.eq(!attachment_ids.is_empty()),
-                    dsl::updated_at.eq(Some(now)),
-                ))
-                .returning(Message::as_returning())
-                .get_result(conn)?;
-
-        // Keep @mention rows in step with the edited body: dropping a mention
-        // clears the stale unread entry, adding one inserts it (member-filtered,
-        // excluding the editor) and auto-subscribes thread replies.
-        let added_mention_uids =
-            sync_edited_message_mentions(conn, &message, &body.message, uid, now)?;
-
-        Ok((updated_message, added_mention_uids))
-    })?;
-
-    if let Some(search_service) = state.message_search.clone() {
-        search_service.upsert_message_best_effort(updated_message.clone());
-    }
-
-    let edited_thread_root_id = updated_message.reply_root_id;
-
-    let response = attach_metadata(
-        conn,
-        vec![updated_message],
-        &state.media,
-        &state.avatars,
+    crate::services::api::chats::messages::patch_message(
         uid,
+        chat_id,
+        message_id,
+        body,
+        &mut conn,
+        crate::services::api::chats::messages::PatchMessageDeps {
+            media: &state.media,
+            avatars: &state.avatars,
+            ws_registry: &state.ws_registry,
+            message_search: &state.message_search,
+        },
     )
     .await
-    .into_iter()
-    .next()
-    .unwrap();
-
-    // Broadcast update to all members
-    let member_uids: Vec<i32> = {
-        use crate::schema::group_membership as gm_dsl;
-        group_membership::table
-            .filter(gm_dsl::chat_id.eq(chat_id))
-            .select(group_membership::uid)
-            .load(conn)?
-    };
-    let ws_msg = std::sync::Arc::new(ServerWsMessage::MessageUpdated(response.clone()));
-    state.ws_registry.broadcast_to_uids(&member_uids, ws_msg);
-
-    // Notify members newly mentioned by the edit. The mention rows are synced
-    // inside the transaction above; this is the realtime counterpart, fired
-    // post-commit like the send path.
-    if let Some(root_id) = edited_thread_root_id {
-        for mentioned_uid in &added_mention_uids {
-            crate::services::threads::broadcast_thread_membership_changed_to_user(
-                conn,
-                &state.ws_registry,
-                *mentioned_uid,
-                chat_id,
-                root_id,
-            )?;
-        }
-    }
-    if !added_mention_uids.is_empty() {
-        let actor_name = load_username_by_uid(conn, uid)?.unwrap_or_else(|| "Someone".to_string());
-        let payload = NotificationPayload {
-            notification_type: NotificationType::Mention,
-            chat_id,
-            message_id,
-            thread_root_id: edited_thread_root_id,
-            actor_uid: uid,
-            actor_name: Some(actor_name),
-        };
-        state.ws_registry.broadcast_to_uids(
-            &added_mention_uids,
-            std::sync::Arc::new(ServerWsMessage::Notification(payload)),
-        );
-    }
-
-    Ok(Json(response))
+    .map(Json)
 }
 
 /// DELETE /chats/:chat_id/messages/:message_id — Delete a message (soft delete).
@@ -1438,173 +457,19 @@ async fn delete_message(
     }): Path<MessageIdPath>,
     mut conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    let conn = &mut *conn;
-
-    check_membership(conn, chat_id, uid)?;
-    social::require_chat_writable(conn, chat_id, uid)?;
-
-    // Verify message exists and belongs to the user
-    let message: Message = messages::table
-        .filter(dsl::id.eq(message_id).and(dsl::chat_id.eq(chat_id)))
-        .select(Message::as_select())
-        .first(conn)
-        .optional()?
-        .ok_or(AppError::NotFound("Message not found"))?;
-
-    if message.system_kind.is_some_and(|kind| kind.is_membership())
-        && !crate::services::user::load_chat_settings_for_chat(conn, uid, chat_id)?
-            .2
-            .can_view
-    {
-        return Err(AppError::NotFound("Message not found"));
-    }
-    if message.sender_uid != uid {
-        // Not the sender — allow if requester is an admin
-        let role = load_requester_group_role(conn, chat_id, uid)?;
-        if role != Some(GroupRole::Admin) {
-            return Err(AppError::Forbidden("You can only delete your own messages"));
-        }
-    }
-
-    crate::services::message_deletion::validate_deletable_message_type(&message.message_type)?;
-    if message.deleted_at.is_some() {
-        return Err(AppError::Gone("Message already deleted"));
-    }
-    if !message.is_published {
-        return Err(AppError::BadRequest("Cannot delete unpublished message"));
-    }
-
-    // Transaction: soft-delete + thread_meta + group last_message
-    let now = Utc::now();
-    let deleted_message: Message = conn.transaction::<_, diesel::result::Error, _>(|conn| {
-        let deleted_message: Message =
-            diesel::update(messages::table.filter(dsl::id.eq(message_id)))
-                .set(dsl::deleted_at.eq(Some(now)))
-                .returning(Message::as_returning())
-                .get_result(conn)?;
-
-        // Clean up @mention rows for the deleted message.
-        {
-            use crate::schema::message_mentions::dsl as mm_dsl;
-            diesel::delete(mm_dsl::message_mentions.filter(mm_dsl::message_id.eq(message_id)))
-                .execute(conn)?;
-        }
-
-        if let Some(reply_root_id) = deleted_message.reply_root_id {
-            crate::services::threads::recalculate_thread_meta(conn, chat_id, reply_root_id)?;
-        }
-
-        {
-            use crate::schema::groups::dsl as g_dsl;
-            let group_last_msg: Option<i64> = groups::table
-                .filter(g_dsl::id.eq(chat_id))
-                .select(g_dsl::last_message_id)
-                .first::<Option<i64>>(conn)?;
-
-            if group_last_msg == Some(message_id) {
-                crate::services::chat::recalculate_group_last_message(conn, chat_id)
-                    .map_err(|_| diesel::result::Error::RollbackTransaction)?;
-            }
-        }
-
-        // Shift any read pointers anchored on the deleted message so they
-        // don't dangle (PWA `around=<last_read_message_id>` would strand
-        // scroll). Only a top-level message with no thread can dangle a
-        // chat-level pointer; a reply dangles its thread-level pointer.
-        if let Some(thread_root_id) = deleted_message.reply_root_id {
-            crate::services::threads::shift_thread_read_pointers_on_delete(
-                conn,
-                thread_root_id,
-                &[message_id],
-            )?;
-        } else if !deleted_message.has_thread {
-            crate::services::chat::shift_chat_read_pointers_on_delete(
-                conn,
-                chat_id,
-                &[message_id],
-            )?;
-        }
-
-        Ok(deleted_message)
-    })?;
-
-    if let Some(search_service) = state.message_search.clone() {
-        search_service.delete_message_best_effort(message_id);
-    }
-
-    let response = attach_metadata(
-        conn,
-        vec![deleted_message],
-        &state.media,
-        &state.avatars,
+    crate::services::api::chats::messages::delete_message(
         uid,
+        chat_id,
+        message_id,
+        &mut conn,
+        crate::services::api::chats::messages::DeleteMessageDeps {
+            media: &state.media,
+            avatars: &state.avatars,
+            ws_registry: &state.ws_registry,
+            message_search: &state.message_search,
+        },
     )
-    .await
-    .into_iter()
-    .next()
-    .unwrap();
-
-    // Membership deletions obey the same audience as their original messages.
-    let member_uids: Vec<i32> = if message.system_kind.is_some_and(|kind| kind.is_membership()) {
-        group_membership::table
-            .inner_join(groups::table)
-            .filter(groups::id.eq(chat_id))
-            .filter(crate::services::system_messages::membership_allowed())
-            .select(group_membership::uid)
-            .load(conn)?
-    } else {
-        group_membership::table
-            .filter(group_membership::chat_id.eq(chat_id))
-            .select(group_membership::uid)
-            .load(conn)?
-    };
-    let ws_msg = std::sync::Arc::new(ServerWsMessage::MessageDeleted(response.clone()));
-    state.ws_registry.broadcast_to_uids(&member_uids, ws_msg);
-
-    // Thread reply deletion: broadcast the lighter ThreadUpdate (carries reply_count /
-    // last_reply_at) to subscribers for the thread-list view. The parent-chat bubble
-    // badge is refreshed for ALL members by the MessageUpdated(root) broadcast below.
-    if let Some(reply_root_id) = response.reply_root_id {
-        if let Err(err) = crate::services::threads::broadcast_thread_update_to_subscribers(
-            conn,
-            &state.ws_registry,
-            chat_id,
-            reply_root_id,
-        ) {
-            tracing::warn!(
-                chat_id,
-                reply_root_id,
-                ?err,
-                "failed to broadcast thread update after reply deletion"
-            );
-        }
-    }
-
-    // Broadcast the updated root message to ALL members so the thread-reply
-    // count badge (threadInfo.replyCount) decreases in real-time — mirrors the
-    // reply-create path which broadcasts MessageUpdated(root) to all members.
-    // The ThreadUpdate above only reaches subscribed users; the bubble audience
-    // is all members viewing the parent timeline, many of whom are not
-    // subscribed (thread view does not set subscribed=true).
-    if let Some(reply_root_id) = response.reply_root_id {
-        let root_msg_updated: Option<Message> = messages::table
-            .filter(dsl::id.eq(reply_root_id).and(dsl::chat_id.eq(chat_id)))
-            .select(Message::as_select())
-            .first(conn)
-            .ok();
-        if let Some(root_msg) = root_msg_updated {
-            let root_response =
-                attach_metadata(conn, vec![root_msg], &state.media, &state.avatars, uid)
-                    .await
-                    .into_iter()
-                    .next();
-            if let Some(root_response) = root_response {
-                let ws_msg = std::sync::Arc::new(ServerWsMessage::MessageUpdated(root_response));
-                state.ws_registry.broadcast_to_uids(&member_uids, ws_msg);
-            }
-        }
-    }
-
+    .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1630,63 +495,20 @@ async fn bulk_delete_messages(
     mut conn: DbConn,
     Json(body): Json<BulkDeleteMessagesBody>,
 ) -> Result<Json<BulkDeletedPayload>, AppError> {
-    use crate::services::message_deletion::{delete_selection, validate_message_ids};
-
-    let ids = validate_message_ids(body.message_ids)?;
-    let conn = &mut *conn;
-    check_membership(conn, chat_id, uid)?;
-    social::require_chat_writable(conn, chat_id, uid)?;
-    let is_admin = load_requester_group_role(conn, chat_id, uid)? == Some(GroupRole::Admin);
-    let deletion = delete_selection(conn, chat_id, uid, is_admin, &ids)?;
-    let payload = BulkDeletedPayload {
-        chat_id: chat_id.to_string(),
-        message_ids: deletion
-            .impact
-            .message_ids
-            .iter()
-            .map(i64::to_string)
-            .collect(),
-        complete: Some(true),
-        thread_root_ids: Some(
-            deletion
-                .impact
-                .thread_root_ids
-                .iter()
-                .map(i64::to_string)
-                .collect(),
-        ),
-    };
-
-    if let Some(search) = &state.message_search {
-        search.delete_message_ids_best_effort(ids);
-    }
-    state.ws_registry.broadcast_to_uids(
-        &deletion.member_uids,
-        std::sync::Arc::new(ServerWsMessage::MessagesBulkDeleted(payload.clone())),
-    );
-    for root in &deletion.roots {
-        if let Err(error) = crate::services::threads::broadcast_thread_update_to_uids(
-            conn,
-            &state.ws_registry,
-            &deletion.member_uids,
-            chat_id,
-            root.id,
-        ) {
-            tracing::warn!(
-                chat_id,
-                root_id = root.id,
-                ?error,
-                "failed to broadcast thread update after bulk deletion"
-            );
-        }
-    }
-    for root in attach_metadata(conn, deletion.roots, &state.media, &state.avatars, uid).await {
-        state.ws_registry.broadcast_to_uids(
-            &deletion.member_uids,
-            std::sync::Arc::new(ServerWsMessage::MessageUpdated(root)),
-        );
-    }
-    Ok(Json(payload))
+    crate::services::api::chats::messages::bulk_delete_messages(
+        uid,
+        chat_id,
+        body,
+        &mut conn,
+        crate::services::api::chats::messages::BulkDeleteMessagesDeps {
+            media: &state.media,
+            avatars: &state.avatars,
+            ws_registry: &state.ws_registry,
+            message_search: &state.message_search,
+        },
+    )
+    .await
+    .map(Json)
 }
 
 pub fn router() -> OpenApiRouter<crate::AppState> {
@@ -1707,15 +529,6 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        search_limit, search_next_offset, search_offset, validate_client_message_type,
-        FORWARDED_MESSAGE_TYPE_FORBIDDEN, INVITE_MESSAGE_TYPE_FORBIDDEN, MAX_SEARCH_RESULT_WINDOW,
-        SYSTEM_MESSAGE_TYPE_FORBIDDEN,
-    };
-    use crate::dto::messages::ForwardMessagesBody;
-    use crate::errors::AppError;
-    use crate::models::MessageType;
-    use crate::services::message_search::MessageSearchSort;
     #[test]
     fn message_query_documentation_matches_runtime_names_and_preserves_id_precision() {
         let document = serde_json::to_value(super::router().into_openapi()).unwrap();
@@ -1744,116 +557,5 @@ mod tests {
         let parsed = axum::extract::Query::<super::ListMessagesQuery>::try_from_uri(&uri).unwrap();
         assert_eq!(parsed.thread_id, Some(i64::MAX));
         assert_eq!(parsed.after, Some(9_007_199_254_740_993));
-    }
-
-    #[test]
-    fn rejects_system_message_type_from_clients() {
-        let err = validate_client_message_type(&MessageType::System)
-            .expect_err("system should be rejected");
-        assert!(matches!(err, AppError::BadRequest(msg) if msg == SYSTEM_MESSAGE_TYPE_FORBIDDEN));
-    }
-
-    #[test]
-    fn allows_standard_message_types_from_clients() {
-        assert!(validate_client_message_type(&MessageType::Text).is_ok());
-        assert!(validate_client_message_type(&MessageType::Audio).is_ok());
-        assert!(validate_client_message_type(&MessageType::File).is_ok());
-        assert!(validate_client_message_type(&MessageType::Sticker).is_ok());
-    }
-
-    #[test]
-    fn rejects_invite_message_type_from_generic_message_api() {
-        let err = validate_client_message_type(&MessageType::Invite)
-            .expect_err("invite should be rejected");
-        assert!(matches!(err, AppError::BadRequest(msg) if msg == INVITE_MESSAGE_TYPE_FORBIDDEN));
-    }
-
-    #[test]
-    fn rejects_forwarded_message_type_from_generic_message_api() {
-        let err = validate_client_message_type(&MessageType::Forwarded)
-            .expect_err("forwarded should be rejected");
-        assert!(
-            matches!(err, AppError::BadRequest(msg) if msg == FORWARDED_MESSAGE_TYPE_FORBIDDEN)
-        );
-    }
-
-    #[test]
-    fn forward_request_requires_the_client_generated_id() {
-        let body = serde_json::from_value::<ForwardMessagesBody>(serde_json::json!({
-            "sourceChatId": "42",
-            "messageIds": ["10"],
-            "clientGeneratedId": "forward-retry-42"
-        }))
-        .expect("forward request should retain the caller-generated id");
-
-        assert_eq!(body.client_generated_id, "forward-retry-42");
-        assert!(
-            serde_json::from_value::<ForwardMessagesBody>(serde_json::json!({
-                "sourceChatId": "42",
-                "messageIds": ["10"]
-            }))
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn merged_forward_request_accepts_an_optional_string_thread_id() {
-        let mut json = serde_json::json!({
-            "sourceChatId": "42",
-            "messageIds": ["10", "20"],
-            "clientGeneratedId": "forward-thread-42"
-        });
-        let body: ForwardMessagesBody = serde_json::from_value(json.clone()).unwrap();
-        assert_eq!(body.thread_id, None);
-        json["threadId"] = serde_json::Value::Null;
-        let body: ForwardMessagesBody = serde_json::from_value(json.clone()).unwrap();
-        assert_eq!(body.thread_id, None);
-        json["threadId"] = i64::MAX.to_string().into();
-        let body: ForwardMessagesBody = serde_json::from_value(json.clone()).unwrap();
-        assert_eq!(body.thread_id, Some(i64::MAX));
-        json["threadId"] = "invalid".into();
-        assert!(serde_json::from_value::<ForwardMessagesBody>(json).is_err());
-    }
-
-    #[test]
-    fn search_limit_defaults_to_twenty_and_caps_to_message_max() {
-        assert_eq!(search_limit(None), 20);
-        assert_eq!(search_limit(Some(500)), 100);
-        assert_eq!(search_limit(Some(0)), 1);
-    }
-
-    #[test]
-    fn search_offset_rejects_requests_outside_result_window() {
-        assert_eq!(search_offset(None, 20).unwrap(), 0);
-        assert_eq!(
-            search_offset(Some(MAX_SEARCH_RESULT_WINDOW - 20), 20).unwrap(),
-            980
-        );
-        assert!(matches!(
-            search_offset(Some(MAX_SEARCH_RESULT_WINDOW - 19), 20),
-            Err(AppError::BadRequest("Search offset is too large"))
-        ));
-    }
-
-    #[test]
-    fn search_next_offset_stops_at_result_window() {
-        assert_eq!(
-            search_next_offset(Some(MAX_SEARCH_RESULT_WINDOW - 20), 20),
-            Some(980)
-        );
-        assert_eq!(
-            search_next_offset(Some(MAX_SEARCH_RESULT_WINDOW - 19), 20),
-            None
-        );
-        assert_eq!(search_next_offset(None, 20), None);
-    }
-
-    #[test]
-    fn search_sort_rejects_unknown_values() {
-        assert!(serde_json::from_str::<MessageSearchSort>("\"oldest\"").is_err());
-        assert_eq!(
-            serde_json::from_str::<MessageSearchSort>("\"newest\"").unwrap(),
-            MessageSearchSort::Newest
-        );
     }
 }

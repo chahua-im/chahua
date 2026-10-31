@@ -1,270 +1,135 @@
-import { HttpClient, provideHttpClient, withInterceptors } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { ApplicationRef, signal, type Signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { expectTypeOf } from 'vitest';
 
-import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
-import { getMessagesResource } from '../../generated/endpoints/chats/chats.resource';
-import { ChatsService } from '../../generated/endpoints/chats/chats.service';
-import { GroupsService } from '../../generated/endpoints/groups/groups.service';
-import { InvitesService } from '../../generated/endpoints/invites/invites.service';
-import type {
-  ListThreadsResponse,
-  MessageResponse,
-  ServiceTokenResponse,
-  ThreadListItem,
-  UserGroupTagInfo,
-} from '../../generated/models';
+import { RpcApi } from '../../generated/rpc-api';
+import { rpcEvents, rpcSchemas } from '../../generated/rpc-codecs';
+import { MessageType, type ServiceTokenResponse } from '../../generated/models';
+import type { MessagesListParams, SessionOpenResult } from '../../generated/rpc-models';
 import { decodeJsonIds, encodeJsonIds } from './json-ids';
-import { jsonInterceptor } from './json.interceptor';
+import { provideRpcTesting, RpcTestPeer } from './rpc-testing';
 import { encodeId, type SnowflakeID } from './snowflake-id';
-import { testChat, testMessage, wireChat, wireMessage } from './testing';
 
-describe('Generated API client', () => {
+describe('RPC API boundary', () => {
   beforeEach(() => {
-    TestBed.configureTestingModule({
-      providers: [
-        provideHttpClient(withInterceptors([jsonInterceptor])),
-        provideHttpClientTesting(),
-        provideChahuaBaseUrl('/_api'),
-      ],
-    });
+    TestBed.configureTestingModule({ providers: [provideRpcTesting()] });
   });
 
-  it('preserves snowflake IDs beyond the safe integer range in paths and cursors', () => {
-    const mockChatId = ((1n << 63n) - 1n).toString();
-    const mockCursor = (BigInt(Number.MAX_SAFE_INTEGER) + 2n).toString();
+  it('serializes flat RPC params without losing Snowflakes, null, or zero', () => {
+    const chatId = '9223372036854775806';
+    const before = '9223372036854775805';
+    const received = vi.fn();
+    const peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
 
-    TestBed.inject(ChatsService)
-      .getMessages(encodeId(mockChatId), { before: encodeId(mockCursor) })
-      .subscribe();
+    TestBed.inject(RpcApi)
+      .messages.list({ chatId: encodeId(chatId), before: encodeId(before), max: 0 })
+      .subscribe(received);
 
-    const http = TestBed.inject(HttpTestingController);
-    const request = http.expectOne(`/_api/chats/${mockChatId}/messages?before=${mockCursor}`);
-    expect(request.request.method).toBe('GET');
-    request.flush({
-      chatSettings: { showMembershipMessages: true },
-      messages: [],
+    peer.expect('messages.list', { chatId, before, max: 0 }).flush({
+      messages: [{ id: before, chatId, message: null, sticker: null }],
       nextCursor: null,
       prevCursor: null,
       olderCursor: null,
       newerCursor: null,
     });
-    http.verify();
-  });
 
-  it('round-trips reaction snapshot boundaries and thread IDs without precision loss', () => {
-    const api = TestBed.inject(ChatsService);
-    const http = TestBed.inject(HttpTestingController);
-    const threadId = '9007199254741999';
-    const boundary = '2026-10-20T00:00:00.123456Z';
-    const receive = vi.fn();
-    api.getChatReactions(testChat.id, { threadId: encodeId(threadId) }).subscribe(receive);
-    http.expectOne(`/_api/chats/${wireChat.id}/reactions?threadId=${threadId}`).flush({
-      messageIds: [wireMessage.id],
-      readThrough: boundary,
-    });
-    expect(receive).toHaveBeenCalledWith({ messageIds: [testMessage.id], readThrough: boundary });
-    api.acknowledgeChatReactions(testChat.id, { threadId: encodeId(threadId), readThrough: boundary }).subscribe();
-    const ack = http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`);
-    expect(ack.request.body).toEqual({ threadId, readThrough: boundary });
-    ack.flush({ unreadReactions: 0 });
-    api.getChatMentions(testChat.id, { threadId: encodeId(threadId) }).subscribe();
-    http.expectOne(`/_api/chats/${wireChat.id}/mentions?threadId=${threadId}`).flush({ messageIds: [] });
-    http.verify();
-  });
-
-  it('encodes forward destinations, thread IDs and nested record replies losslessly', () => {
-    const api = TestBed.inject(ChatsService);
-    const http = TestBed.inject(HttpTestingController);
-    const thread = '9223372036854775806';
-    const bundle = '9223372036854775805';
-    api
-      .forwardMessages(testChat.id, {
-        sourceChatId: testChat.id,
-        messageIds: [testMessage.id, encodeId(bundle)],
-        clientGeneratedId: 'forward-test',
-        threadId: encodeId(thread),
-      })
-      .subscribe();
-    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages/forward`);
-    expect(request.request.body).toEqual({
-      sourceChatId: wireChat.id,
-      messageIds: [wireMessage.id, bundle],
-      clientGeneratedId: 'forward-test',
-      threadId: thread,
-    });
-    request.flush(structuredClone(wireMessage));
-    const receive = vi.fn();
-    api.getForwardedBundleMessages(testChat.id, testMessage.id, encodeId(bundle)).subscribe(receive);
-    http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}/forwarded-bundles/${bundle}/messages`).flush({
-      total: 2,
-      messages: [
-        {
-          originalMessageId: wireMessage.id,
-          originalChatId: wireChat.id,
-          forwardedBundleId: bundle,
-          reply: {
-            kind: 'internal',
-            originalMessageId: thread,
-            preview: { originalMessageId: thread, originalChatId: wireChat.id, attachments: [] },
-          },
-        },
-        { originalMessageId: thread, originalChatId: wireChat.id, reply: { kind: 'redacted' } },
-      ],
-    });
-    const messages = receive.mock.calls[0][0].messages;
-    expect(messages[0].forwardedBundleId).toBe(encodeId(bundle));
-    expect(messages[0].reply.originalMessageId).toBe(encodeId(thread));
-    expect(messages[0].reply.preview.originalChatId).toBe(testChat.id);
-    expect(messages[1].reply).toEqual({ kind: 'redacted' });
-    http.verify();
-  });
-
-  it('preserves null in nested response fields and preserves explicit cache clears for both clients', async () => {
-    const body = () => ({
-      messages: [{ ...wireMessage, message: null, sticker: null, replyToMessage: null }],
+    expect(received).toHaveBeenCalledWith({
+      messages: [{ id: encodeId(before), chatId: encodeId(chatId), message: null, sticker: null }],
+      nextCursor: null,
+      prevCursor: null,
       olderCursor: null,
       newerCursor: null,
     });
-    const http = TestBed.inject(HttpTestingController);
-    const receive = vi.fn();
-    TestBed.inject(ChatsService).getMessages(testChat.id).subscribe(receive);
-    http.expectOne(`/_api/chats/${wireChat.id}/messages`).flush(body());
-    const value = receive.mock.calls[0][0];
-    expect(value.olderCursor).toBeNull();
-    expect(Object.hasOwn(value, 'olderCursor')).toBe(true);
-    expect(value.messages[0].sticker).toBeNull();
-    expect(Object.hasOwn(value.messages[0], 'sticker')).toBe(true);
-    expect(value.messages[0].id).toBe(testMessage.id);
-    expect(value.messages[0].chatId).toBe(testChat.id);
-
-    const resource = TestBed.runInInjectionContext(() => getMessagesResource(signal(testChat.id)));
-    TestBed.tick();
-    http.expectOne(`/_api/chats/${wireChat.id}/messages`).flush(body());
-    await TestBed.inject(ApplicationRef).whenStable();
-    TestBed.tick();
-    expect(resource.value()).toEqual(value);
-    http.verify();
+    TestBed.inject(RpcApi)
+      .groups.update({ chatId: encodeId(chatId), avatarImageId: null })
+      .subscribe();
+    peer.expect('groups.update', { chatId, avatarImageId: null }).flush({});
+    peer.verify();
   });
 
-  it('keeps wire clearing requests, third-party responses, and empty HTTP bodies intact', () => {
-    const http = TestBed.inject(HttpTestingController);
-    const client = TestBed.inject(HttpClient);
-    const empty = vi.fn();
-    TestBed.inject(GroupsService).patchGroup(testChat.id, { avatarImageId: null }).subscribe(empty);
-    const patch = http.expectOne(`/_api/group/${wireChat.id}`);
-    expect(patch.request.body).toEqual({ avatarImageId: null });
-    patch.flush(null, { status: 204, statusText: 'No Content' });
-    expect(empty).toHaveBeenCalledWith(null);
-
-    const external = vi.fn();
-    client.get('https://example.com/data').subscribe(external);
-    http.expectOne('https://example.com/data').flush({ value: null });
-    expect(external).toHaveBeenCalledWith({ value: null });
-
-    TestBed.inject(InvitesService).patchInvite(testMessage.id, { expiresAt: null }).subscribe();
-    const invite = http.expectOne(`/_api/invites/invite/${wireMessage.id}`);
-    expect(invite.request.body).toEqual({ expiresAt: null });
-    invite.flush(null, { status: 204, statusText: 'No Content' });
-    http.verify();
-  });
-
-  it('restores nested request IDs and arrays without changing application objects', () => {
-    const body = {
-      messageType: testMessage.messageType,
-      message: '9007199254740993',
-      clientGeneratedId: '9223372036854775807',
-      replyToId: testMessage.id,
-      attachmentIds: [encodeId('9223372036854775807')],
-    };
-    TestBed.inject(ChatsService).postMessage(testChat.id, body).subscribe();
-    const http = TestBed.inject(HttpTestingController);
-    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
-    expect(request.request.body).toEqual({
-      ...body,
-      replyToId: wireMessage.id,
-      attachmentIds: ['9223372036854775807'],
-    });
-    expect(body.replyToId).toBe(testMessage.id);
-    expect(body.attachmentIds).toEqual([encodeId('9223372036854775807')]);
-    request.flush({ ...wireMessage });
-    http.verify();
-  });
-
-  it('converts nested DTO IDs while preserving ordinary numbers, numeric text, and timestamp cursors', () => {
-    const message = {
-      ...wireMessage,
-      clientGeneratedId: '9223372036854775807',
-      sender: { uid: 7, userGroup: { groupId: 3, name: null } },
-      sticker: { id: '9223372036854775807', media: { id: '9007199254740993' } },
-      systemLinks: { messageId: '9223372036854775807', uid: 42 },
-    };
-    const encoded = encodeJsonIds(message, 'MessageResponse') as MessageResponse;
-    expect(encoded.id).toBe(testMessage.id);
-    expect(encoded.sticker?.id).toBe(encodeId('9223372036854775807'));
-    expect(encoded.sticker?.media.id).toBe(testChat.id);
-    expect(encoded.systemLinks).toEqual({ messageId: encodeId('9223372036854775807'), uid: 42 });
-    expect(encoded.sender.uid).toBe(7);
-    expect(encoded.sender.userGroup?.groupId).toBe(3);
-    expect(encoded.sender.userGroup?.name).toBeNull();
-    expect(encoded.clientGeneratedId).toBe('9223372036854775807');
-    expect(encodeJsonIds(encoded, 'MessageResponse')).toEqual(encoded);
-    expect((decodeJsonIds(encoded, 'MessageResponse') as { id: string }).id).toBe(wireMessage.id);
-    expect(encodeJsonIds({ nextCursor: '2026-09-06T12:00:00Z', threads: [] }, 'ListThreadsResponse')).toEqual({
-      nextCursor: '2026-09-06T12:00:00Z',
-      threads: [],
-    });
-    const threadPage = encodeJsonIds(
-      { threads: [message], nextCursor: '9007199254740993' },
-      'ListChatThreadsResponse',
-    ) as { threads: MessageResponse[]; nextCursor: SnowflakeID };
-    expect(threadPage.threads[0].id).toBe(testMessage.id);
-    expect(threadPage.nextCursor).toBe(testChat.id);
-    const decodedPage = decodeJsonIds(threadPage, 'ListChatThreadsResponse') as {
-      threads: { id: string }[];
-      nextCursor: string;
-    };
-    expect(decodedPage.threads[0].id).toBe(wireMessage.id);
-    expect(decodedPage.nextCursor).toBe('9007199254740993');
-    expect(encodeJsonIds({ participants: [], nextCursor: 42 }, 'ListThreadParticipantsResponse')).toEqual({
-      participants: [],
-      nextCursor: 42,
-    });
-    expect(encodeJsonIds({ id: 42 }, 'ServiceTokenResponse')).toEqual({ id: 42 });
-  });
-
-  it('keeps encoded IDs distinct in generated DTOs, service arguments, and resource signals', () => {
-    expectTypeOf<MessageResponse['id']>().toEqualTypeOf<SnowflakeID>();
-    expectTypeOf<ThreadListItem['chatId']>().toEqualTypeOf<SnowflakeID>();
-    expectTypeOf<Parameters<ChatsService['getMessages']>[0]>().toEqualTypeOf<SnowflakeID>();
-    expectTypeOf<Parameters<typeof getMessagesResource>[0]>().toEqualTypeOf<Signal<SnowflakeID>>();
-    expectTypeOf<ServiceTokenResponse['id']>().toEqualTypeOf<number>();
-    expectTypeOf<UserGroupTagInfo['groupId']>().toEqualTypeOf<number>();
-    expectTypeOf<ListThreadsResponse['nextCursor']>().toEqualTypeOf<string | undefined>();
-  });
-
-  it('preserves array positions, false, zero, and empty strings and is safe to encode twice', () => {
-    const value = { entries: [null, { value: null }], enabled: false, count: 0, text: '' };
-    encodeJsonIds(value);
-    expect(value).toEqual({ entries: [null, { value: null }], enabled: false, count: 0, text: '' });
-    expect(Object.hasOwn(value.entries, 0)).toBe(true);
-    expect(encodeJsonIds(value)).toEqual(value);
-  });
-  it('preserves binary multipart bodies while decoding the sticker response IDs', () => {
-    const body = new FormData();
-    const file = new File(['sticker-bytes'], 'tea.webp', { type: 'image/webp' });
-    body.append('file', file);
-    body.append('emoji', '🍵');
+  it('keeps the timestamp-based global thread cursor as an exact string', () => {
+    const cursor = '2026-10-31T12:34:56.123456Z';
     const received = vi.fn();
-    TestBed.inject(HttpClient).post('/_api/stickers/packs/9007199254740993/stickers', body).subscribe(received);
-    const http = TestBed.inject(HttpTestingController);
-    const request = http.expectOne('/_api/stickers/packs/9007199254740993/stickers');
-    expect(request.request.body).toBe(body);
-    expect(request.request.body.get('file').name).toBe('tea.webp');
-    request.flush({ id: '9007199254741003', media: { id: '9007199254741004' } });
-    expect(received.mock.calls[0][0].id).toBe(encodeId('9007199254741003'));
-    http.verify();
+    const peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
+
+    TestBed.inject(RpcApi).threads.list().subscribe(received);
+    peer.expect('threads.list', {}).flush({ threads: [], nextCursor: cursor });
+
+    expect(received).toHaveBeenCalledWith({ threads: [], nextCursor: cursor });
+    peer.verify();
+  });
+
+  it('converts explicitly marked service-token IDs and leaves ordinary values unchanged', () => {
+    const wireId = '9223372036854775804';
+    const value = {
+      id: encodeId(wireId),
+      createdByUid: 7,
+      enabled: false,
+      count: 0,
+      empty: '',
+      nullable: null,
+      omitted: undefined,
+    };
+
+    const request = decodeJsonIds(value, rpcSchemas['ServiceTokenResponse'], rpcSchemas);
+    expect(request).toEqual({
+      id: wireId,
+      createdByUid: 7,
+      enabled: false,
+      count: 0,
+      empty: '',
+      nullable: null,
+      omitted: undefined,
+    });
+    expect(value.id).toBe(encodeId(wireId));
+
+    const response = encodeJsonIds(request, rpcSchemas['ServiceTokenResponse'], rpcSchemas);
+    expect(response).toEqual(value);
+    expect(encodeJsonIds(response, rpcSchemas['ServiceTokenResponse'], rpcSchemas)).toEqual(response);
+  });
+
+  it('serializes marked attachment arrays through the real RPC peer and decodes nested pack-order events', () => {
+    const chatId = '9223372036854775803';
+    const attachmentId = '9223372036854775802';
+    const packId = '9223372036854775801';
+    const peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
+
+    TestBed.inject(RpcApi)
+      .messages.send({
+        chatId: encodeId(chatId),
+        attachmentIds: [encodeId(attachmentId)],
+        clientGeneratedId: 'attachment-regression',
+        message: '',
+        messageType: MessageType.text,
+      })
+      .subscribe();
+
+    peer
+      .expect('messages.send', {
+        chatId,
+        attachmentIds: [attachmentId],
+        clientGeneratedId: 'attachment-regression',
+        message: '',
+        messageType: 'text',
+      })
+      .flush({ id: attachmentId, chatId, attachments: [{ id: attachmentId }] });
+
+    expect(
+      encodeJsonIds(
+        { order: [{ stickerPackId: packId, position: 0 }] },
+        rpcEvents['events.stickerPackOrderUpdated'],
+        rpcSchemas,
+      ),
+    ).toEqual({ order: [{ stickerPackId: encodeId(packId), position: 0 }] });
+    peer.verify();
+  });
+
+  it('exports literal session authentication variants and branded service-token IDs', () => {
+    expectTypeOf<Extract<SessionOpenResult, { authenticated: true }>['protocolVersion']>().toEqualTypeOf<1>();
+    expectTypeOf<Extract<SessionOpenResult, { authenticated: false }>['protocolVersion']>().toEqualTypeOf<1>();
+    expectTypeOf<ServiceTokenResponse['id']>().toEqualTypeOf<SnowflakeID>();
+    expectTypeOf<MessagesListParams['before']>().toEqualTypeOf<SnowflakeID | undefined>();
   });
 });

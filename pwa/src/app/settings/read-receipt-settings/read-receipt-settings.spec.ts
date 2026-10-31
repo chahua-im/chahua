@@ -1,36 +1,50 @@
 import { EMPTY } from 'rxjs';
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { provideIonicAngular } from '@ionic/angular';
-import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
+import { RpcTestPeer, provideRpcTesting } from '../../api/rpc-testing';
 import { ChatStore } from '../../chats/chat-store';
 import { ReadReceiptSettings } from './read-receipt-settings';
 
 describe('Read receipt toggle', () => {
-  let http: HttpTestingController;
+  let peer: RpcTestPeer;
   const invalidate = vi.fn();
-  const url = '/_api/me/read-receipt-settings';
   beforeEach(() => {
     invalidate.mockClear();
     TestBed.configureTestingModule({
       providers: [
         provideIonicAngular({ animated: false }),
-        provideHttpClient(),
-        provideHttpClientTesting(),
-        provideChahuaBaseUrl('/_api'),
+        provideRpcTesting(),
         { provide: ChatStore, useValue: { invalidateReadReceiptPrivacy: invalidate, privacyOverrides$: EMPTY } },
       ],
     });
-    http = TestBed.inject(HttpTestingController);
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
   });
-  afterEach(() => http.verify());
+  afterEach(() => {
+    try {
+      peer.verify();
+    } finally {
+      TestBed.resetTestingModule();
+    }
+  });
 
   it('saves immediately, blocks duplicate changes and retries a failed write', async () => {
     const fixture = TestBed.createComponent(ReadReceiptSettings);
-    http.expectOne(url).flush({ visibility: 'friends' });
+    const settings = peer.expect('privacy.getReadReceiptSettings');
+    settings.flush({ visibility: 'friends' });
     await fixture.whenStable();
     fixture.detectChanges();
+    (
+      await peer.expectAsync(
+        'presence.watch',
+        (params) =>
+          typeof params['requestId'] === 'number' &&
+          Array.isArray(params['userIds']) &&
+          params['userIds'].length === 0 &&
+          Array.isArray(params['chatIds']) &&
+          params['chatIds'].length === 0,
+      )
+    ).flush(null);
     const page: HTMLElement = fixture.nativeElement;
     const toggle = page.querySelector('ion-toggle')!;
     expect(toggle.checked).toBe(true);
@@ -40,9 +54,7 @@ describe('Read receipt toggle', () => {
     fixture.detectChanges();
     expect(toggle.disabled).toBe(true);
     toggle.dispatchEvent(new CustomEvent('ionChange', { detail: { checked: true } }));
-    const write = http.expectOne(url);
-    expect(write.request.body).toEqual({ visibility: 'nobody' });
-    write.flush({}, { status: 503, statusText: 'Unavailable' });
+    peer.expect('privacy.updateReadReceiptSettings', { visibility: 'nobody' }).error(1503);
     await fixture.whenStable();
     fixture.detectChanges();
     expect(invalidate).not.toHaveBeenCalled();
@@ -51,7 +63,7 @@ describe('Read receipt toggle', () => {
       (button) => button.textContent?.trim() === '重试',
     )!;
     retry.click();
-    http.expectOne(url).flush({ visibility: 'nobody' });
+    peer.expect('privacy.updateReadReceiptSettings', { visibility: 'nobody' }).flush({ visibility: 'nobody' });
     await fixture.whenStable();
     fixture.detectChanges();
     expect(toggle.checked).toBe(false);

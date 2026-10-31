@@ -1,24 +1,22 @@
 import { Location } from '@angular/common';
 import { provideLocationMocks } from '@angular/common/testing';
-import { provideHttpClient, withInterceptors } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting, type TestRequest } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { NavigationSkipped, NavigationSkippedCode, provideRouter, Router } from '@angular/router';
 import { ToastController } from '@ionic/angular';
 import { TranslocoService } from '@jsverse/transloco';
 import { firstValueFrom } from 'rxjs';
-import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
-import { jsonInterceptor } from '../../api/json.interceptor';
+import { RpcErrorCode } from '../../api/rpc-error';
+import { provideRpcTesting, RpcTestPeer, type RpcTestRequest } from '../../api/rpc-testing';
 import { wireMessage } from '../../api/testing';
 import { routes } from '../../app.routes';
 
 const link = '/m/ACAAAAAAAAEAIAAAAAAACw';
-const messageUrl = '/_api/chats/9007199254740993/messages/9007199254741003';
+const messageParams = { chatId: '9007199254740993', messageId: '9007199254741003' };
 const conversation = '/chats/chat/9007199254740993';
 
 describe('Message permalink navigation', () => {
   let router: Router;
-  let http: HttpTestingController;
+  let peer: RpcTestPeer;
   let toast: { present: ReturnType<typeof vi.fn>; remove: ReturnType<typeof vi.fn> };
   let create: ReturnType<typeof vi.fn>;
 
@@ -35,44 +33,52 @@ describe('Message permalink navigation', () => {
           { path: 'chats/chat/:id/thread/:threadId', children: [] },
         ]),
         provideLocationMocks(),
-        provideHttpClient(withInterceptors([jsonInterceptor])),
-        provideHttpClientTesting(),
-        provideChahuaBaseUrl('/_api'),
+        provideRpcTesting(),
         { provide: ToastController, useValue: { create } },
       ],
     });
     router = TestBed.inject(Router);
     router.setUpLocationChangeListener();
-    http = TestBed.inject(HttpTestingController);
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
     await firstValueFrom(TestBed.inject(TranslocoService).load('zh-CN'));
   });
 
-  afterEach(() => http.verify());
+  afterEach(() => {
+    try {
+      peer.verify();
+    } finally {
+      TestBed.resetTestingModule();
+    }
+  });
 
   async function requestLink() {
     const navigation = router.navigateByUrl(link);
-    let request!: TestRequest;
+    let request!: RpcTestRequest;
     await vi.waitFor(() => {
-      request = http.expectOne(messageUrl);
+      request = peer.expect('messages.get', messageParams);
     });
     return { navigation, request };
   }
 
-  it.each([404, 403, 500, 0])(
+  it.each([RpcErrorCode.NotFound, RpcErrorCode.Forbidden, RpcErrorCode.Internal, 'disconnected'] as const)(
     'keeps the current URL and history on failure (%s), showing one toast',
-    async (status) => {
+    async (code) => {
       await router.navigateByUrl('/chats');
       await router.navigateByUrl(conversation + '#msg=123');
       const location = TestBed.inject(Location);
       const { navigation, request } = await requestLink();
       expect(router.url).toBe(conversation + '#msg=123');
       expect(location.path(true)).toBe(conversation + '#msg=123');
-      request.flush({}, { status, statusText: 'Unavailable' });
+      if (code === 'disconnected') {
+        peer.disconnect();
+        request.flush(wireMessage);
+      } else request.error(code);
       expect(await navigation).toBe(false);
       expect(router.url).toBe(conversation + '#msg=123');
       expect(location.path(true)).toBe(conversation + '#msg=123');
       expect(create).toHaveBeenCalledExactlyOnceWith({
-        message: status === 404 ? '消息已撤回或不存在' : '链接无法打开',
+        message: code === RpcErrorCode.NotFound ? '消息已撤回或不存在' : '链接无法打开',
         duration: 3000,
       });
       expect(toast.present).toHaveBeenCalledOnce();
@@ -106,7 +112,7 @@ describe('Message permalink navigation', () => {
 
   it('opens the chat list with a toast when an unavailable link is the initial URL', async () => {
     const { navigation, request } = await requestLink();
-    request.flush({}, { status: 404, statusText: 'Not found' });
+    request.error(RpcErrorCode.NotFound);
     expect(await navigation).toBe(true);
     expect(router.url).toBe('/chats');
     expect(toast.present).toHaveBeenCalledOnce();
@@ -117,7 +123,7 @@ describe('Message permalink navigation', () => {
     const { navigation, request } = await requestLink();
     await router.navigateByUrl('/settings');
     expect(await navigation).toBe(false);
-    expect(request.cancelled).toBe(true);
+    request.flush(wireMessage);
     expect(router.url).toBe('/settings');
     expect(create).not.toHaveBeenCalled();
   });
@@ -131,7 +137,7 @@ describe('Message permalink navigation', () => {
     );
     await router.navigateByUrl(conversation);
     const { navigation, request } = await requestLink();
-    request.flush({}, { status: 404, statusText: 'Not found' });
+    request.error(RpcErrorCode.NotFound);
     await vi.waitFor(() => expect(create).toHaveBeenCalledOnce());
     await router.navigateByUrl('/settings');
     finish(toast);
@@ -145,7 +151,7 @@ describe('Message permalink navigation', () => {
     expect(await router.navigateByUrl('/m/invalid')).toBe(false);
     expect(router.url).toBe(conversation);
     expect(create).toHaveBeenCalledExactlyOnceWith({ message: '链接无法打开', duration: 3000 });
-    http.expectNone(messageUrl);
+    peer.expectNone('messages.get');
   });
 
   it('uses the active language for the unavailable-message toast', async () => {
@@ -154,7 +160,7 @@ describe('Message permalink navigation', () => {
     i18n.setActiveLang('en');
     await router.navigateByUrl(conversation);
     const { navigation, request } = await requestLink();
-    request.flush({}, { status: 404, statusText: 'Not found' });
+    request.error(RpcErrorCode.NotFound);
     await navigation;
     expect(create).toHaveBeenCalledExactlyOnceWith({
       message: 'This message was deleted or no longer exists',

@@ -14,6 +14,46 @@ pub enum ChatAttachmentKindFilter {
     All,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum AttachmentUploadPurpose {
+    Media,
+    Voice,
+    File,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadUrlRequest {
+    pub filename: String,
+    pub content_type: String,
+    pub size: i64,
+    pub purpose: Option<AttachmentUploadPurpose>,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+    pub order: Option<i16>,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListChatAttachmentsQuery {
+    pub kind: ChatAttachmentKindFilter,
+    #[serde(default)]
+    pub limit: Option<i64>,
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[schema(schema_with = crate::serde_i64_string::schema_opt)]
+    pub before: Option<i64>,
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[schema(schema_with = crate::serde_i64_string::schema_opt)]
+    pub after: Option<i64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentResponse {

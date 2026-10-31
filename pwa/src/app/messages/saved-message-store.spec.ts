@@ -1,46 +1,37 @@
-import { provideHttpClient, withInterceptors } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
-import type { SavedMessageResponse } from '../../generated/models';
-import { jsonInterceptor } from '../api/json.interceptor';
+import { RpcErrorCode } from '../api/rpc-error';
+import { provideRpcTesting, RpcTestPeer } from '../api/rpc-testing';
 import { decodeId, encodeId } from '../api/snowflake-id';
 import { testChat, testMessage } from '../api/testing';
 import { SavedMessageStore } from './saved-message-store';
 
-const savedRow = (messageId: string) => ({ originalMessageId: encodeId(messageId) }) as SavedMessageResponse;
+const wireSavedRow = (messageId: string) => ({ originalMessageId: messageId });
 
 describe('SavedMessageStore', () => {
   let store: SavedMessageStore;
-  let http: HttpTestingController;
+  let peer: RpcTestPeer;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({
-      providers: [
-        provideHttpClient(withInterceptors([jsonInterceptor])),
-        provideHttpClientTesting(),
-        provideChahuaBaseUrl('/_api'),
-      ],
-    });
+    TestBed.configureTestingModule({ providers: [...provideRpcTesting()] });
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
     store = TestBed.inject(SavedMessageStore);
-    http = TestBed.inject(HttpTestingController);
   });
 
-  afterEach(() => http.verify());
+  afterEach(() => peer.verify());
 
   async function load() {
     const loading = store.ensure(testChat.id);
-    http
-      .expectOne((request) => request.url.endsWith('/saved-messages'))
+    peer.expect('savedMessages.listForChat', { chatId: decodeId(testChat.id), limit: 50 }).flush({
+      savedMessages: [wireSavedRow('9007199254741001')],
+      nextCursor: '9007199254741001',
+    });
+    await Promise.resolve();
+    peer
+      .expect('savedMessages.listForChat', { chatId: decodeId(testChat.id), limit: 50, before: '9007199254741001' })
       .flush({
-        savedMessages: [savedRow('9007199254741001')],
-        nextCursor: encodeId('9007199254741001'),
+        savedMessages: [wireSavedRow('9007199254741002')],
       });
-    // The next page is requested once the first response settles.
-    await new Promise((resolve) => setTimeout(resolve));
-    http
-      .expectOne((request) => request.url.endsWith('/saved-messages') && request.params.has('before'))
-      .flush({ savedMessages: [savedRow('9007199254741002')] });
     await loading;
   }
 
@@ -55,11 +46,8 @@ describe('SavedMessageStore', () => {
     await load();
     const saving = store.save(testMessage);
     expect(store.isSaved(testChat.id, testMessage.id)).toBe(true);
-    const failure = expect(saving).rejects.toBeDefined();
-    http
-      .expectOne(`/_api/saved-messages/${decodeId(testMessage.id)}`)
-      .flush('', { status: 403, statusText: 'Forbidden' });
-    await failure;
+    peer.expect('savedMessages.save', { messageId: decodeId(testMessage.id) }).error(RpcErrorCode.Forbidden);
+    await expect(saving).rejects.toBeDefined();
     expect(store.isSaved(testChat.id, testMessage.id)).toBe(false);
   });
 
@@ -68,11 +56,8 @@ describe('SavedMessageStore', () => {
     const message = { ...testMessage, id: encodeId('9007199254741001') };
     const removing = store.unsave(message);
     expect(store.isSaved(testChat.id, message.id)).toBe(false);
-    const failure = expect(removing).rejects.toBeDefined();
-    http
-      .expectOne(`/_api/saved-messages/by-message/${decodeId(message.id)}`)
-      .flush('', { status: 500, statusText: 'Server Error' });
-    await failure;
+    peer.expect('savedMessages.deleteByMessage', { messageId: decodeId(message.id) }).error(RpcErrorCode.Internal);
+    await expect(removing).rejects.toBeDefined();
     expect(store.isSaved(testChat.id, message.id)).toBe(true);
   });
 
@@ -80,11 +65,8 @@ describe('SavedMessageStore', () => {
     await load();
     const message = { ...testMessage, id: encodeId('9007199254741001') };
     const saving = store.save(message);
-    const failure = expect(saving).rejects.toBeDefined();
-    http
-      .expectOne(`/_api/saved-messages/${decodeId(message.id)}`)
-      .flush('', { status: 500, statusText: 'Server Error' });
-    await failure;
+    peer.expect('savedMessages.save', { messageId: decodeId(message.id) }).error(RpcErrorCode.Internal);
+    await expect(saving).rejects.toBeDefined();
     expect(store.isSaved(testChat.id, message.id)).toBe(true);
   });
 });

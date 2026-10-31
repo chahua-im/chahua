@@ -1,10 +1,7 @@
-import { provideHttpClient, withInterceptors } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { signal, type WritableSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
-import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
 import {
   GroupKind,
   MembershipMessageVisibility,
@@ -16,7 +13,8 @@ import {
   type ServerWsMessage,
 } from '../../generated/models';
 import { Connection } from '../api/connection';
-import { jsonInterceptor } from '../api/json.interceptor';
+import { RpcErrorCode } from '../api/rpc-error';
+import { RpcTestPeer, provideRpcTesting } from '../api/rpc-testing';
 import { decodeId, encodeId } from '../api/snowflake-id';
 import { mockRealtime, testChat, testMessage, testUser, wireChat, wireMessage } from '../api/testing';
 import { ChatListError, ChatListStore, type ChatQuery } from './chat-list-store';
@@ -28,11 +26,12 @@ describe('ChatListStore', () => {
   let query: ChatQuery;
   let releaseQuery: () => void;
   let messages: Connection;
-  let http: HttpTestingController;
+  let peer: RpcTestPeer;
   let incoming: Subject<MessageResponse>;
   let events: Subject<ServerWsMessage>;
   let resync: Subject<void>;
   let connected: WritableSignal<boolean>;
+
   beforeEach(() => {
     incoming = new Subject<MessageResponse>();
     events = new Subject<ServerWsMessage>();
@@ -40,26 +39,66 @@ describe('ChatListStore', () => {
     connected = signal(true);
     TestBed.configureTestingModule({
       providers: [
-        provideHttpClient(withInterceptors([jsonInterceptor])),
-        provideHttpClientTesting(),
-        provideChahuaBaseUrl('/_api'),
+        provideRpcTesting(),
         {
           provide: Connection,
           useValue: mockRealtime({ messages$: incoming, resync$: resync, events$: events, connected }),
         },
       ],
     });
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
     data = TestBed.inject(ChatListStore);
     query = data.chats(false);
     releaseQuery = query.activate();
     messages = TestBed.inject(Connection);
-    http = TestBed.inject(HttpTestingController);
     TestBed.tick();
   });
+
   afterEach(() => {
-    http.verify();
-    vi.useRealTimers();
+    try {
+      peer.verify();
+    } finally {
+      vi.useRealTimers();
+      TestBed.resetTestingModule();
+    }
   });
+
+  function expectChats(params: Record<string, unknown> = { limit: 50 }) {
+    return peer.expect('chats.list', params);
+  }
+
+  function expectThreads(params: Record<string, unknown>) {
+    return peer.expect('threads.list', params);
+  }
+
+  function expectUnread(chatId: string) {
+    return peer.expect('chats.getUnreadCount', { chatId });
+  }
+
+  function expectReceipt(chatId: string, threadId?: string) {
+    return peer.expect('chats.getReadReceipt', { chatId, ...(threadId ? { threadId } : {}) });
+  }
+
+  function expectMarkRead(chatId: string, messageId: string) {
+    return peer.expect('chats.markAsRead', { chatId, messageId });
+  }
+
+  function expectMarkUnread(chatId: string) {
+    return peer.expect('chats.markAsUnread', { chatId });
+  }
+
+  function expectArchive(chatId: string) {
+    return peer.expect('chats.archive', { chatId });
+  }
+
+  function expectUnarchive(chatId: string) {
+    return peer.expect('chats.unarchive', { chatId });
+  }
+
+  function expectNotificationSetting(chatId: string, mode: string) {
+    return peer.expect('groups.updateNotificationSetting', { chatId, mode });
+  }
 
   function selectQuery(archived: boolean) {
     releaseQuery();
@@ -103,7 +142,7 @@ describe('ChatListStore', () => {
         lastMessageAt: '2026-10-25T09:00:00Z',
       };
       const expectedIds = hasVisibleMessage ? [wireChat.id, other.id] : [other.id, wireChat.id];
-      http.expectOne('/_api/chats?limit=50').flush(
+      expectChats().flush(
         structuredClone({
           chatSettings: { showMembershipMessages: true },
           chats: [{ ...wireChat, lastMessage: membership, lastMessageAt: membership.createdAt }, other],
@@ -117,7 +156,7 @@ describe('ChatListStore', () => {
         lastMessage: hasVisibleMessage ? visible : null,
         lastMessageAt: hasVisibleMessage ? visible.createdAt : null,
       };
-      http.expectOne('/_api/chats?limit=50').flush({
+      expectChats().flush({
         chatSettings: { showMembershipMessages: true },
         chats: hasVisibleMessage ? [restricted, other] : [other, restricted],
       });
@@ -129,8 +168,8 @@ describe('ChatListStore', () => {
         else expect(chat.lastMessageAt == null).toBe(true);
         expect(query.items().map((chat) => decodeId(chat.id))).toEqual(expectedIds);
       };
-      const followup = http.expectOne('/_api/chats?limit=50');
-      followup.flush('', { status: 503, statusText: 'Unavailable' });
+      const followup = expectChats();
+      followup.error(RpcErrorCode.Unavailable, 'Unavailable');
       assertPreview();
       await settle();
       assertPreview();
@@ -149,7 +188,7 @@ describe('ChatListStore', () => {
       const session = TestBed.inject(SessionStore);
       session.user.set(testUser);
       const current = { ...wireChat, lastMessage: wireMessage, lastMessageAt: wireMessage.createdAt };
-      http.expectOne('/_api/chats?limit=50').flush(
+      expectChats().flush(
         structuredClone({
           chatSettings: { showMembershipMessages: true },
           chats: [current],
@@ -160,7 +199,7 @@ describe('ChatListStore', () => {
       if (!show) {
         session.acceptChatSettings({ showMembershipMessages: false }, testUser.uid);
         await settle();
-        http.expectOne('/_api/chats?limit=50').flush(
+        expectChats().flush(
           structuredClone({
             chatSettings: { showMembershipMessages: false },
             chats: [current],
@@ -185,10 +224,10 @@ describe('ChatListStore', () => {
       // Restricted groups do not deliver a system announcement to the new member.
       if (canView) incoming.next(announcement);
       await settle();
-      http.expectNone(() => true);
+      peer.expectNone('chats.list');
       events.next({ type: ServerWsMessageType.chatMembershipChanged, payload: { chatId: encodeId(chatId) } });
       await settle();
-      http.expectOne(`/_api/chats?limit=1&archived=false&chatId=${chatId}`).flush({
+      expectChats({ limit: 1, chatId: chatId, archived: false }).flush({
         chatSettings: { showMembershipMessages: show },
         chats: [
           {
@@ -210,7 +249,7 @@ describe('ChatListStore', () => {
       if (!visible) expect(query.items()[1].lastMessage).toBeNull();
       expect(query.hasMore()).toBe(true);
       expect(query.loadedThrough()).toBe(boundary);
-      http.expectNone(() => true);
+      peer.expectNone('chats.list');
     },
   );
 
@@ -218,11 +257,13 @@ describe('ChatListStore', () => {
     'defers a membership event without an announcement until the list is ready (%s)',
     async (state) => {
       const session = TestBed.inject(SessionStore);
-      const initial = http.expectOne('/_api/chats?limit=50');
+      const initial = expectChats();
       session.user.set({ ...testUser, showMembershipMessages: false });
       await settle();
-      expect(initial.cancelled).toBe(true);
-      const head = http.expectOne('/_api/chats?limit=50');
+      initial.flush({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] });
+      await settle();
+      expect(query.items()).toEqual([]);
+      const head = expectChats();
       if (state !== 'loading') {
         head.flush({ chatSettings: { showMembershipMessages: false }, chats: [] });
         await settle();
@@ -234,7 +275,7 @@ describe('ChatListStore', () => {
         payload: { chatId: testChat.id },
       });
       await settle();
-      http.expectNone(() => true);
+      peer.expectNone('chats.list');
       if (state === 'inactive') releaseQuery = query.activate();
       if (state === 'background') {
         hidden.mockReturnValue(false);
@@ -242,7 +283,7 @@ describe('ChatListStore', () => {
       }
       if (state === 'loading') head.flush({ chatSettings: { showMembershipMessages: false }, chats: [] });
       await settle();
-      http.expectOne(`/_api/chats?limit=1&archived=false&chatId=${wireChat.id}`).flush({
+      expectChats({ limit: 1, chatId: wireChat.id, archived: false }).flush({
         chatSettings: { showMembershipMessages: false },
         chats: [{ ...wireChat }],
       });
@@ -253,11 +294,13 @@ describe('ChatListStore', () => {
   );
 
   it('does not discover groups for hidden membership events affecting other users', async () => {
-    const initial = http.expectOne('/_api/chats?limit=50');
+    const initial = expectChats();
     TestBed.inject(SessionStore).user.set({ ...testUser, showMembershipMessages: false });
     await settle();
-    expect(initial.cancelled).toBe(true);
-    http.expectOne('/_api/chats?limit=50').flush({ chatSettings: { showMembershipMessages: false }, chats: [] });
+    initial.flush({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] });
+    await settle();
+    expect(query.items()).toEqual([]);
+    expectChats().flush({ chatSettings: { showMembershipMessages: false }, chats: [] });
     await settle();
     for (const kind of [
       SystemMessageKind.member_added,
@@ -275,13 +318,13 @@ describe('ChatListStore', () => {
     }
     await settle();
     expect(query.items()).toEqual([]);
-    http.expectNone(() => true);
+    peer.expectNone('chats.list');
   });
 
   it('restarts from the head when another device changes settings during pagination', async () => {
     const session = TestBed.inject(SessionStore);
     session.user.set(testUser);
-    http.expectOne('/_api/chats?limit=50').flush({
+    expectChats().flush({
       chatSettings: { showMembershipMessages: true },
       chats: [{ ...wireChat }],
       nextCursor: wireChat.id,
@@ -289,7 +332,7 @@ describe('ChatListStore', () => {
     await settle();
     const previous = query.items();
     const loading = query.loadMore();
-    http.expectOne(`/_api/chats?limit=50&after=${wireChat.id}`).flush({
+    expectChats({ limit: 50, after: wireChat.id }).flush({
       chatSettings: { showMembershipMessages: false },
       chats: [{ ...wireChat, name: 'must not merge' }],
     });
@@ -297,12 +340,12 @@ describe('ChatListStore', () => {
     await settle();
     expect(session.user()?.showMembershipMessages).toBe(false);
     expect(query.items()).toEqual(previous);
-    http.expectOne('/_api/chats?limit=50').flush('', { status: 503, statusText: 'Unavailable' });
+    expectChats().error(RpcErrorCode.Unavailable, 'Unavailable');
     await settle();
     expect(query.items()).toEqual(previous);
     expect(query.hasMore()).toBe(false);
     const retrying = query.retry();
-    http.expectOne('/_api/chats?limit=50').flush({
+    expectChats().flush({
       chatSettings: { showMembershipMessages: false },
       chats: [{ ...wireChat, name: 'fresh' }],
     });
@@ -329,17 +372,16 @@ describe('ChatListStore', () => {
       lastMessage: { ...wireMessage, chatId: bId, createdAt: '2026-10-24T11:00:00Z' },
       lastMessageAt: '2026-10-24T11:00:00Z',
     };
-    http.expectOne('/_api/chats?limit=50').flush({ chatSettings: { showMembershipMessages: true }, chats: [a, b] });
+    expectChats().flush({ chatSettings: { showMembershipMessages: true }, chats: [a, b] });
     await settle();
     const previous = query.items();
     session.user.set({ ...testUser, showMembershipMessages: false });
     await settle();
-    const filteredUrl = '/_api/chats?limit=50';
-    http.expectOne(filteredUrl).flush({ chatSettings: { showMembershipMessages: false }, chats: [b], nextCursor: bId });
+    expectChats().flush({ chatSettings: { showMembershipMessages: false }, chats: [b], nextCursor: bId });
     await settle();
     expect(query.items()).toEqual(previous);
     expect(query.loading()).toBe(true);
-    http.expectOne(`${filteredUrl}&after=${bId}`).flush({
+    expectChats({ limit: 50, after: bId }).flush({
       chatSettings: { showMembershipMessages: false },
       chats: [{ ...a, lastMessage: aVisible, lastMessageAt: aVisible.createdAt }],
     });
@@ -354,38 +396,37 @@ describe('ChatListStore', () => {
       systemKind: SystemMessageKind.member_left,
     });
     await flushReads();
-    http.expectOne(`/_api/chats/${wireChat.id}/unread`).flush({ unreadCount: 3 });
+    expectUnread(wireChat.id).flush({ unreadCount: 3 });
     await settle();
     expect(query.items().map((chat) => decodeId(chat.id))).toEqual([bId, wireChat.id]);
     expect(query.items()[1].lastMessageAt).toBe(aVisible.createdAt);
-    http.expectNone(filteredUrl);
+    peer.expectNone('chats.list');
     // Re-enabling then switching back cancels the old-policy request without clearing the list.
     session.user.set(testUser);
     await settle();
-    const obsolete = http.expectOne('/_api/chats?limit=50');
+    const obsolete = expectChats();
     session.user.set({ ...testUser, showMembershipMessages: false });
     await settle();
-    expect(obsolete.cancelled).toBe(true);
+    obsolete.flush({ chatSettings: { showMembershipMessages: true }, chats: [a, b] });
+    await settle();
     expect(query.items()[1].lastMessageAt).toBe(aVisible.createdAt);
-    http.expectOne(filteredUrl).flush({
+    expectChats().flush({
       chatSettings: { showMembershipMessages: false },
       chats: [b, { ...a, lastMessage: aVisible, lastMessageAt: aVisible.createdAt }],
     });
     await settle();
   });
 
-  it.each([true, false])('recovers unread errors from accepted WS state (HTTP fails first: %s)', async (failsFirst) => {
+  it.each([true, false])('recovers unread errors from accepted WS state (RPC fails first: %s)', async (failsFirst) => {
     TestBed.inject(SessionStore).user.set(testUser);
     const watch = vi.spyOn(messages, 'watchConversationStates');
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     incoming.next(testMessage);
     await flushReads();
-    const unread = http.expectOne(`/_api/chats/${wireChat.id}/unread`);
+    const unread = expectUnread(wireChat.id);
     if (failsFirst) {
-      unread.flush('', { status: 503, statusText: 'Unavailable' });
+      unread.error(RpcErrorCode.Unavailable, 'Unavailable');
       await settle();
       expect(query.error()).toBe(ChatListError.Unread);
     }
@@ -407,7 +448,7 @@ describe('ChatListStore', () => {
     expect(data['chatInfo'].cachedReadState(testChat.id)?.unreadCount).toBe(1);
     expect(query.error()).toBeUndefined();
     if (!failsFirst) {
-      unread.flush('', { status: 503, statusText: 'Unavailable' });
+      unread.error(RpcErrorCode.Unavailable, 'Unavailable');
       await settle();
       expect(query.error()).toBeUndefined();
     }
@@ -419,7 +460,7 @@ describe('ChatListStore', () => {
     TestBed.inject(SessionStore).user.set(testUser);
     const watch = vi.spyOn(messages, 'watchConversationStates');
     const other = encodeId('123');
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [wireChat, { ...wireChat, id: '123' }],
@@ -430,11 +471,10 @@ describe('ChatListStore', () => {
     incoming.next(testMessage);
     incoming.next({ ...testMessage, chatId: other });
     await flushReads();
-    for (const id of [wireChat.id, '123'])
-      http.expectOne(`/_api/chats/${id}/unread`).flush('', { status: 503, statusText: 'Unavailable' });
+    for (const id of [wireChat.id, '123']) expectUnread(id).error(RpcErrorCode.Unavailable, 'Unavailable');
     await settle();
     const more = query.loadMore();
-    http.expectOne(`/_api/chats?limit=50&after=${wireChat.id}`).flush('', { status: 503, statusText: 'Unavailable' });
+    expectChats({ limit: 50, after: wireChat.id }).error(RpcErrorCode.Unavailable, 'Unavailable');
     await more;
     const state = { accessible: true, unreadCount: 0, unreadMentions: 0, unreadReactions: 0 };
     const requestId = watch.mock.calls.at(-1)![0];
@@ -450,9 +490,7 @@ describe('ChatListStore', () => {
     expect(query.listError()).toBe(ChatListError.More);
     expect(query.error()).toBe(ChatListError.More);
     const retry = query.retry();
-    http
-      .expectOne(`/_api/chats?limit=50&after=${wireChat.id}`)
-      .flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
+    expectChats({ limit: 50, after: wireChat.id }).flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
     await retry;
     expect(query.error()).toBe(ChatListError.Unread);
     events.next({
@@ -468,7 +506,7 @@ describe('ChatListStore', () => {
   });
 
   it('retries a failed continuation at its cursor while retaining the loaded window', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [wireChat],
@@ -477,15 +515,14 @@ describe('ChatListStore', () => {
     );
     await settle();
     const pending = query.loadMore();
-    http.expectOne(`/_api/chats?limit=50&after=${wireChat.id}`).flush('', { status: 503, statusText: 'Unavailable' });
+    expectChats({ limit: 50, after: wireChat.id }).error(RpcErrorCode.Unavailable, 'Unavailable');
     await pending;
     expect(query.error()).toBe(ChatListError.More);
     expect(query.items().map((chat) => chat.id)).toEqual([testChat.id]);
     const retry = query.retry();
     expect(query.loadingMore()).toBe(true);
     expect(query.loading()).toBe(false);
-    http.expectNone('/_api/chats?limit=50');
-    http.expectOne(`/_api/chats?limit=50&after=${wireChat.id}`).flush(
+    expectChats({ limit: 50, after: wireChat.id }).flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, id: '111' }],
@@ -502,7 +539,7 @@ describe('ChatListStore', () => {
     { paging: true, unreadFirst: false },
     { paging: true, unreadFirst: true },
   ])('keeps list failures recoverable with overlapping unread failures: %j', async ({ paging, unreadFirst }) => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [wireChat],
@@ -513,11 +550,11 @@ describe('ChatListStore', () => {
     const pending = paging ? query.loadMore() : query.refresh();
     incoming.next(testMessage);
     await flushReads();
-    const listUrl = paging ? `/_api/chats?limit=50&after=${wireChat.id}` : '/_api/chats?limit=50';
-    const listRequest = http.expectOne(listUrl);
-    const unreadRequest = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    const listParams = paging ? { limit: 50, after: wireChat.id } : { limit: 50 };
+    const listRequest = expectChats(listParams);
+    const unreadRequest = expectUnread(decodeId(testChat.id));
     for (const request of unreadFirst ? [unreadRequest, listRequest] : [listRequest, unreadRequest]) {
-      request.flush('', { status: 503, statusText: 'Unavailable' });
+      request.error(RpcErrorCode.Unavailable, 'Unavailable');
       await settle();
     }
     await pending;
@@ -527,8 +564,7 @@ describe('ChatListStore', () => {
     expect(query.items()).toHaveLength(1);
 
     const retry = query.retry();
-    if (paging) http.expectNone('/_api/chats?limit=50');
-    http.expectOne(listUrl).flush(
+    expectChats(listParams).flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: paging ? [] : [wireChat],
@@ -542,46 +578,38 @@ describe('ChatListStore', () => {
     expect(query.error()).toBe(paging ? ChatListError.Unread : undefined);
     incoming.next(testMessage);
     await flushReads();
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ unreadCount: 1 });
+    expectUnread(decodeId(testChat.id)).flush({ unreadCount: 1 });
     await settle();
     expect(query.error()).toBeUndefined();
     const more = query.loadMore();
-    http
-      .expectOne(`/_api/chats?limit=50&after=${wireChat.id}`)
-      .flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
+    expectChats({ limit: 50, after: wireChat.id }).flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
     await more;
     expect(query.hasMore()).toBe(false);
   });
 
   it('keeps an unread failure when an older list response cannot refresh that read state', async () => {
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     query.refresh();
     incoming.next(testMessage);
     await flushReads();
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush('', { status: 503, statusText: 'Unavailable' });
+    expectUnread(decodeId(testChat.id)).error(RpcErrorCode.Unavailable, 'Unavailable');
     await settle();
     expect(query.error()).toBe(ChatListError.Unread);
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     expect(data['chatInfo'].cachedReadState(testChat.id)).toBeUndefined();
     expect(query.listError()).toBeUndefined();
     expect(query.error()).toBe(ChatListError.Unread);
     query.refresh();
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     expect(query.error()).toBeUndefined();
   });
 
   it('refreshes a loaded DM preview receipt when the peer reads', async () => {
     TestBed.inject(SessionStore).user.set(testUser);
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, kind: GroupKind.dm, lastMessage: wireMessage }],
@@ -593,18 +621,18 @@ describe('ChatListStore', () => {
       payload: { chatId: testChat.id, readerUid: 2 },
     });
     await settle();
-    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`).flush({ lastReadMessageId: wireMessage.id });
+    expectReceipt(wireChat.id).flush({ lastReadMessageId: wireMessage.id });
     await settle();
     expect(TestBed.inject(ChatStore).chat(testChat.id).peerLastReadMessageId).toBe(testMessage.id);
   });
 
   it('handles a chat-wide privacy event when only its thread row is loaded', async () => {
     TestBed.inject(SessionStore).user.set(testUser);
-    http.expectOne('/_api/chats?limit=50').flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
+    expectChats().flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
     const release = data.threads(false).activate();
     const rootId = '9007199254741999';
     await settle();
-    http.expectOne('/_api/threads?limit=20&archived=false').flush({
+    expectThreads({ limit: 20, archived: false }).flush({
       threads: [
         {
           chatId: wireChat.id,
@@ -628,7 +656,7 @@ describe('ChatListStore', () => {
       payload: { chatId: testChat.id, privacyChanged: true },
     });
     expect(data.threads(false).items()[0].peerLastReadMessageId).toBeUndefined();
-    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt?threadId=${rootId}`).flush({ lastReadMessageId: null });
+    expectReceipt(wireChat.id, rootId).flush({ lastReadMessageId: null });
     await settle();
     expect(data.threads(false).items()[0].peerLastReadMessageId).toBeNull();
     release();
@@ -636,9 +664,7 @@ describe('ChatListStore', () => {
 
   it('derives tab badges from unmuted conversation counts and mentions', async () => {
     TestBed.inject(SessionStore).user.set(testUser);
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [] }));
     await settle();
     const watch = vi.fn();
     (TestBed.inject(Connection) as unknown as { watchConversationUnread: typeof watch }).watchConversationUnread =
@@ -679,10 +705,13 @@ describe('ChatListStore', () => {
     release();
   });
   it('coalesces message and mention notifications and ignores unrelated known edits', async () => {
-    vi.spyOn(TestBed.inject(SessionStore), 'user').mockReturnValue(testUser);
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    TestBed.inject(SessionStore).user.set(testUser);
+    TestBed.tick();
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    await settle();
+    (await peer.expectAsync('chats.list', { limit: 50 })).flush(
+      structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }),
+    );
     await settle();
     incoming.next({ ...testMessage, sender: { ...testMessage.sender, uid: 2 }, mentions: [{ uid: 1, gender: 0 }] });
     events.next({
@@ -695,7 +724,7 @@ describe('ChatListStore', () => {
       },
     });
     await flushReads();
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ unreadCount: 3, unreadMentions: 1 });
+    expectUnread(decodeId(testChat.id)).flush({ unreadCount: 3, unreadMentions: 1 });
     await settle();
     events.next({
       type: ServerWsMessageType.messageUpdated,
@@ -706,14 +735,12 @@ describe('ChatListStore', () => {
       },
     });
     await flushReads();
-    http.expectNone((request) => request.url.endsWith('/unread'));
+    peer.expectNone('chats.getUnreadCount');
     expect(query.items()[0].unreadMentions).toBe(1);
   });
 
   it('defers notifications while the document is hidden even if the list remains active', async () => {
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
     events.next({
@@ -726,17 +753,17 @@ describe('ChatListStore', () => {
       },
     });
     await flushReads();
-    http.expectNone((request) => request.url.endsWith('/unread'));
+    peer.expectNone('chats.getUnreadCount');
     hidden.mockReturnValue(false);
     document.dispatchEvent(new Event('visibilitychange'));
     await flushReads();
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ unreadCount: 3, unreadMentions: 1 });
+    expectUnread(decodeId(testChat.id)).flush({ unreadCount: 3, unreadMentions: 1 });
     await settle();
     expect(query.items()[0].unreadMentions).toBe(1);
   });
 
   it('ignores constructed DM mentions but still updates ordinary message unread counts', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, kind: GroupKind.dm }],
@@ -753,18 +780,16 @@ describe('ChatListStore', () => {
       },
     });
     await flushReads();
-    http.expectNone((request) => request.url.endsWith('/unread'));
+    peer.expectNone('chats.getUnreadCount');
     incoming.next({ ...testMessage, sender: { ...testMessage.sender, uid: 2 } });
     await flushReads();
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ unreadCount: 3, unreadMentions: 0 });
+    expectUnread(decodeId(testChat.id)).flush({ unreadCount: 3, unreadMentions: 0 });
     await settle();
     expect(query.items()[0].unreadCount).toBe(3);
   });
 
   it('refreshes the chat reaction count on a directed reaction notification', async () => {
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
 
     events.next({
@@ -780,18 +805,16 @@ describe('ChatListStore', () => {
     await settle();
 
     await flushReads();
-    http
-      .expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`)
-      .flush(structuredClone({ lastReadMessageId: wireMessage.id, unreadCount: 0, unreadReactions: 1 }));
+    expectUnread(decodeId(testChat.id)).flush(
+      structuredClone({ lastReadMessageId: wireMessage.id, unreadCount: 0, unreadReactions: 1 }),
+    );
     await settle();
     TestBed.tick();
     expect(query.items()[0].unreadReactions).toBe(1);
   });
 
   it('refreshes the chat mention count on a directed mention notification', async () => {
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
 
     events.next({
@@ -807,16 +830,16 @@ describe('ChatListStore', () => {
     await settle();
 
     await flushReads();
-    http
-      .expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`)
-      .flush(structuredClone({ lastReadMessageId: wireMessage.id, unreadCount: 0, unreadMentions: 1 }));
+    expectUnread(decodeId(testChat.id)).flush(
+      structuredClone({ lastReadMessageId: wireMessage.id, unreadCount: 0, unreadMentions: 1 }),
+    );
     await settle();
     TestBed.tick();
     expect(query.items()[0].unreadMentions).toBe(1);
   });
 
   it('clears the last reaction badge after its removal broadcast', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, unreadReactions: 1 }],
@@ -834,13 +857,13 @@ describe('ChatListStore', () => {
       },
     });
     await flushReads();
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ unreadCount: 0, unreadReactions: 0 });
+    expectUnread(decodeId(testChat.id)).flush({ unreadCount: 0, unreadReactions: 0 });
     await settle();
     expect(query.items()[0].unreadReactions).toBe(0);
   });
 
   it('clears a row mention badge without fetching a global summary when an edit removes it', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, unreadMentions: 1 }],
@@ -853,25 +876,23 @@ describe('ChatListStore', () => {
       payload: { ...testMessage, message: 'edited', mentions: [] },
     });
     await flushReads();
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ unreadCount: 1, unreadMentions: 0 });
+    expectUnread(decodeId(testChat.id)).flush({ unreadCount: 1, unreadMentions: 0 });
     await settle();
     await settle();
     expect(query.items()[0].unreadMentions).toBe(0);
-    http.expectNone('/_api/chats/unread');
+    peer.expectNone('chats.getTotalUnreadCount');
   });
 
   it('loads archives separately and excludes topic messages from main chat previews', async () => {
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     TestBed.tick();
     incoming.next({ ...testMessage, replyRootId: encodeId('100') });
-    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    peer.expectNone('chats.getUnreadCount');
     expect(query.items()[0].lastMessage).toBeUndefined();
     selectQuery(true);
     TestBed.tick();
-    http.expectOne('/_api/chats?limit=50&archived=true').flush(
+    expectChats({ limit: 50, archived: true }).flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, archived: true }],
@@ -881,46 +902,41 @@ describe('ChatListStore', () => {
     TestBed.tick();
     expect(query.items()[0].archived).toBe(true);
     const restoring = data['chatInfo'].setArchived(testChat.id, false);
-    const action = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/archive`);
-    expect(action.request.method).toBe('DELETE');
+    const action = expectUnarchive(decodeId(testChat.id));
     action.flush(null);
     await restoring;
     TestBed.tick();
-    http.expectNone('/_api/chats?limit=50&archived=true');
+    peer.expectNone('chats.list');
     await settle();
     TestBed.tick();
     expect(query.items()).toEqual([]);
   });
 
   it('reconciles archive changes missed while disconnected without retaining an old local override', async () => {
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     TestBed.tick();
     const archiving = data['chatInfo'].setArchived(testChat.id, true);
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/archive`).flush(null);
+    expectArchive(decodeId(testChat.id)).flush(null);
     await archiving;
     TestBed.tick();
-    http.expectNone('/_api/chats?limit=50');
+    peer.expectNone('chats.list');
     await settle();
     TestBed.tick();
     reconnect();
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     TestBed.tick();
     expect(query.items()).toEqual([testChat]);
     reconnect();
-    http.expectOne('/_api/chats?limit=50').flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
+    expectChats().flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
     await settle();
     TestBed.tick();
     expect(query.items()).toEqual([]);
   });
 
   it('loads response models, filters them, and follows the conversation cursor', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [wireChat],
@@ -932,7 +948,7 @@ describe('ChatListStore', () => {
     expect(query.items()).toEqual([testChat]);
     const loading = query.loadMore();
     const dm = { ...testChat, id: encodeId('9007199254740995'), kind: GroupKind.dm };
-    http.expectOne('/_api/chats?limit=50&after=9007199254740993').flush({
+    expectChats({ limit: 50, after: '9007199254740993' }).flush({
       chatSettings: { showMembershipMessages: true },
       chats: [{ ...dm, id: decodeId(dm.id) }],
       nextCursor: null,
@@ -944,9 +960,7 @@ describe('ChatListStore', () => {
     expect(info.get(dm.id)?.kind).toBe(GroupKind.dm);
     selectQuery(true);
     TestBed.tick();
-    http
-      .expectOne('/_api/chats?limit=50&archived=true')
-      .flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
+    expectChats({ limit: 50, archived: true }).flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
     await settle();
     expect(query.items()).toEqual([]);
     expect(info.get(testChat.id)?.name).toBe(testChat.name);
@@ -954,7 +968,7 @@ describe('ChatListStore', () => {
   });
 
   it('ignores an old pagination response after the list has refreshed', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [wireChat],
@@ -964,15 +978,13 @@ describe('ChatListStore', () => {
     await settle();
     TestBed.tick();
     const loading = query.loadMore();
-    const oldPage = http.expectOne('/_api/chats?limit=50&after=9007199254740993');
+    const oldPage = expectChats({ limit: 50, after: '9007199254740993' });
     data.refreshChats();
     TestBed.tick();
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush({ chatSettings: { showMembershipMessages: true }, chats: [], nextCursor: null });
+    expectChats().flush({ chatSettings: { showMembershipMessages: true }, chats: [], nextCursor: null });
     await settle();
     TestBed.tick();
-    expect(oldPage.cancelled).toBe(true);
+    oldPage.flush({ chatSettings: { showMembershipMessages: true }, chats: [wireChat], nextCursor: null });
     await loading;
     expect(query.items()).toEqual([]);
   });
@@ -982,13 +994,11 @@ describe('ChatListStore', () => {
       id: String(9007199254000000 + index),
       lastMessageAt: new Date(Date.UTC(2026, 0, 1, 0, 59 - index)).toISOString(),
     }));
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: many }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: many }));
     await settle();
     expect(query.items()).toHaveLength(60);
     query.refresh();
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...many[0], lastMessage: structuredClone(wireMessage) }, ...structuredClone(many.slice(1, 50))],
@@ -998,16 +1008,16 @@ describe('ChatListStore', () => {
     await settle();
     expect(query.items()[0].lastMessage?.id).toBe(testMessage.id);
     expect(query.loading()).toBe(true);
-    http
-      .expectOne('/_api/chats?limit=50&after=9007199254740993')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: many.slice(50) }));
+    expectChats({ limit: 50, after: '9007199254740993' }).flush(
+      structuredClone({ chatSettings: { showMembershipMessages: true }, chats: many.slice(50) }),
+    );
     await settle();
     expect(query.loading()).toBe(false);
     expect(query.items()).toHaveLength(60);
   });
 
   it('updates the preview once and uses the authoritative live unread count without losing pagination', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [wireChat],
@@ -1020,8 +1030,8 @@ describe('ChatListStore', () => {
     incoming.next(testMessage);
     incoming.next(testMessage);
     await flushReads();
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ unreadCount: 7 });
-    http.expectOne('/_api/chats?limit=50&after=9007199254740993').flush(
+    expectUnread(decodeId(testChat.id)).flush({ unreadCount: 7 });
+    expectChats({ limit: 50, after: '9007199254740993' }).flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, id: '9007199254740995' }],
@@ -1035,7 +1045,7 @@ describe('ChatListStore', () => {
   });
 
   it('keeps an edit visible over a list response that started before the change', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, lastMessage: wireMessage }],
@@ -1043,7 +1053,7 @@ describe('ChatListStore', () => {
     );
     await settle();
     query.refresh();
-    const stale = http.expectOne('/_api/chats?limit=50');
+    const stale = expectChats();
     stale.flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
@@ -1055,9 +1065,9 @@ describe('ChatListStore', () => {
     expect(query.items()[0].lastMessage?.message).toBe(edited.message);
     await settle();
     expect(query.items()[0].lastMessage?.message).toBe(edited.message);
-    http.expectNone('/_api/chats?limit=50');
+    peer.expectNone('chats.list');
     query.refresh();
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, lastMessage: { ...wireMessage, message: edited.message } }],
@@ -1068,25 +1078,22 @@ describe('ChatListStore', () => {
   });
 
   it('withdraws a live preview immediately and retires it after the authoritative tombstone arrives', async () => {
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     incoming.next(testMessage);
     await flushReads();
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ unreadCount: 7 });
+    expectUnread(decodeId(testChat.id)).flush({ unreadCount: 7 });
     await settle();
     query.refresh();
-    const stale = http.expectOne('/_api/chats?limit=50');
+    const stale = expectChats();
     const deleted = { ...testMessage, message: undefined, isDeleted: true, attachments: [], mentions: [] };
     messages.acceptChange({ type: ServerWsMessageType.messageDeleted, payload: deleted });
     expect(query.items()[0].lastMessage).toMatchObject({ id: testMessage.id, isDeleted: true });
     expect(query.items()[0].unreadCount).toBe(7);
     await settle();
-    expect(stale.cancelled).toBe(false);
     stale.flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
-    http.expectOne(`/_api/chats?limit=1&archived=false&chatId=${wireChat.id}`).flush(
+    expectChats({ limit: 1, chatId: wireChat.id, archived: false }).flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, lastMessage: { ...wireMessage, isDeleted: true, message: null }, unreadCount: 3 }],
@@ -1097,12 +1104,12 @@ describe('ChatListStore', () => {
     incoming.next(testMessage);
     expect(query.items()[0].lastMessage?.isDeleted).toBe(true);
     await flushReads();
-    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    peer.expectNone('chats.getUnreadCount');
     await settle();
   });
 
   it('waits for bulk reconciliation and refreshes one row without reloading its loaded pages', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [wireChat],
@@ -1112,7 +1119,7 @@ describe('ChatListStore', () => {
     await settle();
     const more = query.loadMore();
     const older = { ...wireChat, id: '9007199254740995' };
-    http.expectOne(`/_api/chats?limit=50&after=${wireChat.id}`).flush(
+    expectChats({ limit: 50, after: wireChat.id }).flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [older],
@@ -1125,13 +1132,13 @@ describe('ChatListStore', () => {
       payload: { chatId: testChat.id, messageIds: [testMessage.id], complete: false },
     });
     await settle();
-    http.expectNone(() => true);
+    peer.expectNone('chats.list');
     messages.acceptChange({
       type: ServerWsMessageType.messagesBulkDeleted,
       payload: { chatId: testChat.id, messageIds: [], complete: true, threadRootIds: [] },
     });
     await settle();
-    http.expectOne(`/_api/chats?limit=1&archived=false&chatId=${wireChat.id}`).flush(
+    expectChats({ limit: 1, chatId: wireChat.id, archived: false }).flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, unreadCount: 0 }],
@@ -1140,14 +1147,12 @@ describe('ChatListStore', () => {
     await settle();
     expect(query.items()).toHaveLength(2);
     const next = query.loadMore();
-    http
-      .expectOne(`/_api/chats?limit=50&after=${older.id}`)
-      .flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
+    expectChats({ limit: 50, after: older.id }).flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
     await next;
   });
 
   it('coalesces bulk withdrawals and takes unread state from the refreshed list', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, lastMessage: wireMessage, unreadCount: 7 }],
@@ -1165,19 +1170,19 @@ describe('ChatListStore', () => {
       unreadCount: 7,
     });
     await settle();
-    http.expectOne(`/_api/chats?limit=1&archived=false&chatId=${wireChat.id}`).flush(
+    expectChats({ limit: 1, chatId: wireChat.id, archived: false }).flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, lastMessage: { ...wireMessage, isDeleted: true }, unreadCount: 4 }],
       }),
     );
-    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    peer.expectNone('chats.getUnreadCount');
     await settle();
     expect(query.items()[0].unreadCount).toBe(4);
   });
 
   it('ignores topic edits and reaction broadcasts, and reloads hidden changed chats on return', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, lastMessage: wireMessage }],
@@ -1193,15 +1198,15 @@ describe('ChatListStore', () => {
       payload: { chatId: testChat.id, messageId: testMessage.id, reactions: [] },
     });
     await settle();
-    http.expectNone(() => true);
+    peer.expectNone('chats.list');
     releaseQuery();
     messages.acceptChange({ type: ServerWsMessageType.messageDeleted, payload: { ...testMessage, isDeleted: true } });
     expect(query.items()[0].lastMessage?.isDeleted).toBe(true);
     await settle();
-    http.expectNone(() => true);
+    peer.expectNone('chats.list');
     releaseQuery = query.activate();
     await settle();
-    http.expectOne(`/_api/chats?limit=1&archived=false&chatId=${wireChat.id}`).flush(
+    expectChats({ limit: 1, chatId: wireChat.id, archived: false }).flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, lastMessage: { ...wireMessage, isDeleted: true } }],
@@ -1212,20 +1217,17 @@ describe('ChatListStore', () => {
   });
 
   it('coalesces visible messages into one read and keeps its result over an older chat-list response', async () => {
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     TestBed.tick();
     query.refresh();
-    const oldList = http.expectOne('/_api/chats?limit=50');
+    const oldList = expectChats();
     vi.useFakeTimers();
     const reading = data['chatInfo'].markRead(testChat.id, encodeId('9007199254741000'));
     const newer = data['chatInfo'].markRead(testChat.id, testMessage.id);
     data['chatInfo'].markRead(testChat.id, encodeId('9007199254741001'));
     await vi.advanceTimersByTimeAsync(1000);
-    const request = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/read`);
-    expect(request.request.body).toEqual({ messageId: wireMessage.id });
+    const request = expectMarkRead(decodeId(testChat.id), wireMessage.id);
     request.flush(structuredClone({ lastReadMessageId: wireMessage.id, unreadCount: 1 }));
     await Promise.all([reading, newer]);
     oldList.flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
@@ -1233,47 +1235,42 @@ describe('ChatListStore', () => {
     expect(query.items()[0].lastReadMessageId).toBe(testMessage.id);
     expect(query.items()[0].unreadCount).toBe(1);
     await data['chatInfo'].markRead(testChat.id, encodeId('9007199254741000'));
-    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    peer.expectNone('chats.getUnreadCount');
   });
 
   it('serializes read requests while retaining the largest next visible message', async () => {
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     TestBed.tick();
     vi.useFakeTimers();
     const reading = data['chatInfo'].markRead(testChat.id, testMessage.id);
     await vi.advanceTimersByTimeAsync(1000);
-    const first = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/read`);
+    const first = expectMarkRead(decodeId(testChat.id), wireMessage.id);
     data['chatInfo'].markRead(testChat.id, encodeId('9007199254741010'));
     data['chatInfo'].markRead(testChat.id, encodeId('9007199254741009'));
     await vi.advanceTimersByTimeAsync(1000);
-    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/read`);
+    peer.expectNone('chats.markAsRead');
     first.flush(structuredClone({ lastReadMessageId: wireMessage.id, unreadCount: 4 }));
     await vi.advanceTimersByTimeAsync(1000);
-    const second = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/read`);
-    expect(second.request.body).toEqual({ messageId: '9007199254741010' });
+    const second = expectMarkRead(decodeId(testChat.id), '9007199254741010');
     second.flush({ lastReadMessageId: '9007199254741010', unreadCount: 0 });
     await reading;
     expect(query.items()[0].unreadCount).toBe(0);
   });
 
   it('discards an unread snapshot when a newer live message arrives during its request', async () => {
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     TestBed.tick();
     const refreshing = data['chatInfo']['refreshUnread'](testChat.id);
     await flushReads();
-    const stale = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    const stale = expectUnread(decodeId(testChat.id));
     incoming.next(testMessage);
     stale.flush({ lastReadMessageId: '9007199254741000', unreadCount: 0 });
     await settle();
     expect(query.items()[0].unreadCount).toBe(testChat.unreadCount);
     await flushReads();
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({
+    expectUnread(decodeId(testChat.id)).flush({
       lastReadMessageId: '9007199254741000',
       unreadCount: 1,
     });
@@ -1281,22 +1278,18 @@ describe('ChatListStore', () => {
     expect(query.items()[0].unreadCount).toBe(1);
   });
 
-  it('applies the server read advancement after our own send, including duplicate HTTP and WebSocket delivery', async () => {
+  it('applies the server read advancement after our own send, including duplicate RPC-result and WebSocket delivery', async () => {
     vi.spyOn(TestBed.inject(SessionStore), 'user').mockReturnValue(testUser);
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     TestBed.tick();
     const initialRead = data['chatInfo']['refreshUnread'](testChat.id);
     await flushReads();
-    http
-      .expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`)
-      .flush(structuredClone({ unreadCount: wireChat.unreadCount }));
+    expectUnread(decodeId(testChat.id)).flush(structuredClone({ unreadCount: wireChat.unreadCount }));
     await initialRead;
     // A concurrent list fetch can discover our send before either send-response delivery path.
     query.refresh();
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, lastMessage: wireMessage }],
@@ -1306,7 +1299,7 @@ describe('ChatListStore', () => {
     incoming.next(testMessage);
     messages.accept(testMessage);
     await flushReads();
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush(
+    expectUnread(decodeId(testChat.id)).flush(
       structuredClone({
         lastReadMessageId: wireMessage.id,
         unreadCount: 0,
@@ -1317,19 +1310,17 @@ describe('ChatListStore', () => {
     expect(query.items()[0].unreadCount).toBe(0);
   });
 
-  it('applies a read response immediately and prevents an older in-flight unread GET from undoing it', async () => {
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+  it('applies a read response immediately and prevents an older in-flight unread snapshot from undoing it', async () => {
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     TestBed.tick();
     const refreshing = data['chatInfo']['refreshUnread'](testChat.id);
     await flushReads();
-    const oldUnread = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    const oldUnread = expectUnread(decodeId(testChat.id));
     vi.useFakeTimers();
     const reading = data['chatInfo'].markRead(testChat.id, testMessage.id);
     await vi.advanceTimersByTimeAsync(1000);
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/read`).flush(
+    expectMarkRead(decodeId(testChat.id), wireMessage.id).flush(
       structuredClone({
         lastReadMessageId: wireMessage.id,
         unreadCount: 0,
@@ -1341,7 +1332,7 @@ describe('ChatListStore', () => {
     await settle();
     expect(query.items()[0].lastReadMessageId).toBe(testMessage.id);
     await flushReads();
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush(
+    expectUnread(decodeId(testChat.id)).flush(
       structuredClone({
         lastReadMessageId: wireMessage.id,
         unreadCount: 1,
@@ -1351,47 +1342,39 @@ describe('ChatListStore', () => {
     expect(query.items()[0].unreadCount).toBe(1);
   });
 
-  it('reconciles a live message that arrived after the read POST started', async () => {
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+  it('reconciles a live message that arrived after the read command started', async () => {
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     TestBed.tick();
     vi.useFakeTimers();
     const reading = data['chatInfo'].markRead(testChat.id, testMessage.id);
     await vi.advanceTimersByTimeAsync(1000);
-    const read = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/read`);
+    const read = expectMarkRead(decodeId(testChat.id), wireMessage.id);
     incoming.next({ ...testMessage, id: encodeId('9007199254741010') });
     await flushReads();
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ unreadCount: 4 });
+    expectUnread(decodeId(testChat.id)).flush({ unreadCount: 4 });
     await vi.advanceTimersByTimeAsync(0);
     read.flush(structuredClone({ lastReadMessageId: wireMessage.id, unreadCount: 1 }));
     await settle();
     expect(query.items()[0].unreadCount).toBe(1);
     await flushReads();
-    http
-      .expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`)
-      .flush(structuredClone({ lastReadMessageId: wireMessage.id, unreadCount: 2 }));
+    expectUnread(decodeId(testChat.id)).flush(structuredClone({ lastReadMessageId: wireMessage.id, unreadCount: 2 }));
     await reading;
     expect(query.items()[0].unreadCount).toBe(2);
   });
 
   it('refreshes read state for out-of-order delivery while preserving the newest preview', async () => {
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     TestBed.tick();
     incoming.next({ ...testMessage, id: encodeId('9007199254741010') });
     await flushReads();
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ unreadCount: 5 });
+    expectUnread(decodeId(testChat.id)).flush({ unreadCount: 5 });
     await settle();
     await settle();
     incoming.next(testMessage);
     await flushReads();
-    http
-      .expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`)
-      .flush(structuredClone({ lastReadMessageId: wireMessage.id, unreadCount: 1 }));
+    expectUnread(decodeId(testChat.id)).flush(structuredClone({ lastReadMessageId: wireMessage.id, unreadCount: 1 }));
     await settle();
     expect(query.items()[0].lastMessage?.id).toBe(encodeId('9007199254741010'));
     expect(query.items()[0].lastReadMessageId).toBe(testMessage.id);
@@ -1399,27 +1382,25 @@ describe('ChatListStore', () => {
   });
 
   it('can retry a failed read without advancing the local pointer prematurely', async () => {
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     TestBed.tick();
     vi.useFakeTimers();
     const failed = expect(data['chatInfo'].markRead(testChat.id, testMessage.id)).rejects.toBeDefined();
     await vi.advanceTimersByTimeAsync(1000);
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/read`).flush('failed', { status: 500, statusText: 'Error' });
+    expectMarkRead(decodeId(testChat.id), wireMessage.id).error(RpcErrorCode.Internal, 'Internal error');
     await failed;
     expect(query.items()[0].lastReadMessageId).toBeUndefined();
     const retry = data['chatInfo'].markRead(testChat.id, testMessage.id);
     await vi.advanceTimersByTimeAsync(1000);
-    http
-      .expectOne(`/_api/chats/${decodeId(testChat.id)}/read`)
-      .flush(structuredClone({ lastReadMessageId: wireMessage.id, unreadCount: 0 }));
+    expectMarkRead(decodeId(testChat.id), wireMessage.id).flush(
+      structuredClone({ lastReadMessageId: wireMessage.id, unreadCount: 0 }),
+    );
     await retry;
   });
 
   it('discards a throttled read when marking unread and retains a later newly queued read', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, lastReadMessageId: '200', unreadCount: 1 }],
@@ -1431,9 +1412,7 @@ describe('ChatListStore', () => {
     const unread = data['chatInfo'].markUnread(testChat.id);
     expect(data['chatInfo'].markUnread(testChat.id)).toBe(unread);
     await flushReads();
-    const request = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`);
-    expect(request.request.method).toBe('POST');
-    expect(request.request.body).toBeNull();
+    const request = expectMarkUnread(decodeId(testChat.id));
     await data['chatInfo'].markRead(testChat.id, encodeId('202'));
     request.flush({ lastReadMessageId: '200', unreadCount: 1 });
     await unread;
@@ -1441,17 +1420,16 @@ describe('ChatListStore', () => {
     const nextRead = data['chatInfo'].markRead(testChat.id, encodeId('202'));
     await vi.advanceTimersByTimeAsync(500);
     await oldRead;
-    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/read`);
+    peer.expectNone('chats.markAsRead');
     expect(data['chatInfo'].markRead(testChat.id, encodeId('203'))).toBe(nextRead);
     await vi.advanceTimersByTimeAsync(500);
-    const next = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/read`);
-    expect(next.request.body).toEqual({ messageId: '203' });
+    const next = expectMarkRead(decodeId(testChat.id), '203');
     next.flush({ lastReadMessageId: '203', unreadCount: 0 });
     await nextRead;
   });
 
   it('waits for a sent read, drops its queued target, and accepts the authoritative unread rewind', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, lastReadMessageId: '200', unreadCount: 1 }],
@@ -1461,45 +1439,42 @@ describe('ChatListStore', () => {
     vi.useFakeTimers();
     const reading = data['chatInfo'].markRead(testChat.id, encodeId('201'));
     await vi.advanceTimersByTimeAsync(1000);
-    const read = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/read`);
+    const read = expectMarkRead(decodeId(testChat.id), '201');
     data['chatInfo'].markRead(testChat.id, encodeId('205'));
     const unread = data['chatInfo'].markUnread(testChat.id);
     await data['chatInfo'].markRead(testChat.id, encodeId('206'));
-    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    peer.expectNone('chats.getUnreadCount');
     read.flush({ lastReadMessageId: '201', unreadCount: 0 });
     await reading;
     await settle();
     await flushReads();
-    const request = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`);
-    expect(request.request.method).toBe('POST');
+    const request = expectMarkUnread(decodeId(testChat.id));
     request.flush({ lastReadMessageId: '200', unreadCount: 1 });
     await unread;
     await vi.advanceTimersByTimeAsync(2000);
-    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/read`);
+    peer.expectNone('chats.markAsRead');
     expect(query.items()[0].lastReadMessageId).toBe(encodeId('200'));
     expect(query.items()[0].unreadCount).toBe(1);
   });
 
   it('still marks unread after a previously sent read fails', async () => {
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     vi.useFakeTimers();
     const reading = expect(data['chatInfo'].markRead(testChat.id, encodeId('201'))).rejects.toBeDefined();
     await vi.advanceTimersByTimeAsync(1000);
     const unread = data['chatInfo'].markUnread(testChat.id);
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/read`).flush('failed', { status: 500, statusText: 'Error' });
+    expectMarkRead(decodeId(testChat.id), '201').error(RpcErrorCode.Internal, 'Internal error');
     await reading;
     await settle();
     await flushReads();
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ lastReadMessageId: '200', unreadCount: 1 });
+    expectMarkUnread(decodeId(testChat.id)).flush({ lastReadMessageId: '200', unreadCount: 1 });
     await unread;
     expect(query.items()[0].lastReadMessageId).toBe(encodeId('200'));
   });
 
-  it('prevents an old unread GET from overriding a successful rewind', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+  it('prevents an old unread snapshot from overriding a successful rewind', async () => {
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, lastReadMessageId: '201', unreadCount: 0 }],
@@ -1508,28 +1483,23 @@ describe('ChatListStore', () => {
     await settle();
     const refreshing = data['chatInfo']['refreshUnread'](testChat.id);
     await flushReads();
-    const stale = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    const stale = expectUnread(decodeId(testChat.id));
     const unread = data['chatInfo'].markUnread(testChat.id);
-    http
-      .expectOne(
-        (request) => request.url === `/_api/chats/${decodeId(testChat.id)}/unread` && request.method === 'POST',
-      )
-      .flush({ lastReadMessageId: '200', unreadCount: 1 });
+    expectMarkUnread(decodeId(testChat.id)).flush({ lastReadMessageId: '200', unreadCount: 1 });
     await settle();
     expect(query.items()[0].lastReadMessageId).toBe(encodeId('200'));
     stale.flush({ lastReadMessageId: '201', unreadCount: 0 });
     await settle();
     expect(query.items()[0].lastReadMessageId).toBe(encodeId('200'));
     await flushReads();
-    const fresh = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`);
-    expect(fresh.request.method).toBe('GET');
+    const fresh = expectUnread(decodeId(testChat.id));
     fresh.flush({ lastReadMessageId: '200', unreadCount: 1 });
     await Promise.all([refreshing, unread]);
     expect(query.items()[0].unreadCount).toBe(1);
   });
 
-  it('reconciles a new message received while the unread POST response was delayed', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+  it('reconciles a new message received while the unread command response was delayed', async () => {
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, lastReadMessageId: '201', unreadCount: 0 }],
@@ -1538,21 +1508,21 @@ describe('ChatListStore', () => {
     await settle();
     const unread = data['chatInfo'].markUnread(testChat.id);
     await flushReads();
-    const delayed = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    const delayed = expectMarkUnread(decodeId(testChat.id));
     incoming.next(testMessage);
     await flushReads();
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ lastReadMessageId: '200', unreadCount: 2 });
+    expectUnread(decodeId(testChat.id)).flush({ lastReadMessageId: '200', unreadCount: 2 });
     await settle();
     delayed.flush({ lastReadMessageId: '200', unreadCount: 1 });
     await settle();
     await flushReads();
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ lastReadMessageId: '200', unreadCount: 2 });
+    expectUnread(decodeId(testChat.id)).flush({ lastReadMessageId: '200', unreadCount: 2 });
     await unread;
     expect(query.items()[0].unreadCount).toBe(2);
   });
 
   it('preserves state on a failed unread command and permits retry', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, lastReadMessageId: '201', unreadCount: 0 }],
@@ -1561,66 +1531,58 @@ describe('ChatListStore', () => {
     await settle();
     const failed = expect(data['chatInfo'].markUnread(testChat.id)).rejects.toBeDefined();
     await flushReads();
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush('failed', { status: 500, statusText: 'Error' });
+    expectMarkUnread(decodeId(testChat.id)).error(RpcErrorCode.Internal, 'Internal error');
     await failed;
     expect(query.items()[0].lastReadMessageId).toBe(encodeId('201'));
     const retry = data['chatInfo'].markUnread(testChat.id);
     await flushReads();
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ lastReadMessageId: '200', unreadCount: 1 });
+    expectMarkUnread(decodeId(testChat.id)).flush({ lastReadMessageId: '200', unreadCount: 1 });
     await retry;
     expect(query.items()[0].lastReadMessageId).toBe(encodeId('200'));
   });
 
   it('mutes a direct chat indefinitely using server metadata and reconciles later remote changes', async () => {
     const chat = { ...wireChat, kind: GroupKind.dm, mutedUntil: null };
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [chat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [chat] }));
     await settle();
     const muting = data['chatInfo'].setMuted(testChat.id, true);
     expect(data['chatInfo'].isMuted(testChat.id)).toBe(true);
-    const request = http.expectOne(`/_api/group/${decodeId(testChat.id)}/notification-setting`);
-    expect(request.request.method).toBe('PUT');
-    expect(request.request.body).toEqual({ mode: 'alwaysMuted' });
+    const request = expectNotificationSetting(decodeId(testChat.id), 'alwaysMuted');
     request.flush({ mutedUntil: null, muteOverride: true });
     await muting;
     TestBed.tick();
     expect(query.items()[0].muteOverride).toBe(true);
     expect(query.items()[0].archived).toBe(false);
-    http.expectNone('/_api/chats?limit=50');
+    peer.expectNone('chats.list');
     await settle();
     reconnect();
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [chat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [chat] }));
     await settle();
     expect(query.items()[0].mutedUntil).toBeNull();
   });
 
   it('enables notifications without unarchiving the conversation', async () => {
-    http.expectOne('/_api/chats?limit=50').flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
+    expectChats().flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
     await settle();
     selectQuery(true);
     TestBed.tick();
-    http.expectOne('/_api/chats?limit=50&archived=true').flush({
+    expectChats({ limit: 50, archived: true }).flush({
       chatSettings: { showMembershipMessages: true },
       chats: [{ ...wireChat, archived: true, mutedUntil: '9999-12-31T23:59:59Z', muteOverride: true }],
     });
     await settle();
     const unmuting = data['chatInfo'].setMuted(testChat.id, false);
-    const request = http.expectOne(`/_api/group/${decodeId(testChat.id)}/notification-setting`);
-    expect(request.request.method).toBe('PUT');
-    expect(request.request.body).toEqual({ mode: 'alwaysUnmuted' });
+    const request = expectNotificationSetting(decodeId(testChat.id), 'alwaysUnmuted');
     request.flush({ archived: true, mutedUntil: null, muteOverride: false });
     await unmuting;
     TestBed.tick();
     expect(query.items()[0]).toMatchObject({ archived: true, muteOverride: false });
     expect(data['chatInfo'].isMuted(testChat.id)).toBe(false);
-    http.expectNone('/_api/chats?limit=50&archived=true');
+    peer.expectNone('chats.list');
   });
 
   it('updates mute immediately and restores the original metadata when the command fails', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, mutedUntil: null }],
@@ -1629,50 +1591,44 @@ describe('ChatListStore', () => {
     await settle();
     const failed = expect(data['chatInfo'].setMuted(testChat.id, true)).rejects.toBeDefined();
     expect(data['chatInfo'].isMuted(testChat.id)).toBe(true);
-    http
-      .expectOne(`/_api/group/${decodeId(testChat.id)}/notification-setting`)
-      .flush('failed', { status: 500, statusText: 'Error' });
+    expectNotificationSetting(decodeId(testChat.id), 'alwaysMuted').error(RpcErrorCode.Internal, 'Internal error');
     await failed;
     expect(query.items()[0].mutedUntil).toBeNull();
   });
 
-  it('joins an existing read-state GET without invalidating it and fetches a missing deep link', async () => {
-    http.expectOne('/_api/chats?limit=50').flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
+  it('joins an existing read-state request without invalidating it and fetches a missing deep link', async () => {
+    expectChats().flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
     await settle();
     const first = data['chatInfo'].getReadState(testChat.id);
     expect(data['chatInfo'].getReadState(testChat.id)).toBe(first);
     await flushReads();
-    const initial = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    const initial = expectUnread(decodeId(testChat.id));
     initial.flush({ lastReadMessageId: '200', unreadCount: 1 });
     await first;
     expect(data['chatInfo']['readOperations'].size).toBe(0);
     reconnect();
     const joined = data['chatInfo'].getReadState(testChat.id);
-    http.expectOne('/_api/chats?limit=50').flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
+    expectChats().flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
     await flushReads();
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ lastReadMessageId: '200', unreadCount: 2 });
+    expectUnread(decodeId(testChat.id)).flush({ lastReadMessageId: '200', unreadCount: 2 });
     expect(await joined).toEqual({ lastReadMessageId: encodeId('200'), unreadCount: 2 });
-    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    peer.expectNone('chats.getUnreadCount');
   });
 
   it('accepts a later list snapshot for read and preview state', async () => {
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     incoming.next(testMessage);
     await flushReads();
-    http
-      .expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`)
-      .flush(structuredClone({ lastReadMessageId: wireMessage.id, unreadCount: 0 }));
+    expectUnread(decodeId(testChat.id)).flush(structuredClone({ lastReadMessageId: wireMessage.id, unreadCount: 0 }));
     await settle();
     expect(data['chatInfo']['readOperations'].size).toBe(0);
     expect(data['chatInfo'].cachedReadState(testChat.id)?.unreadCount).toBe(0);
     data.refreshChats();
     TestBed.tick();
-    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    peer.expectNone('chats.getUnreadCount');
     // A different device marked this conversation unread after our previous snapshot.
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, lastMessage: wireMessage, lastReadMessageId: '200', unreadCount: 2 }],
@@ -1683,54 +1639,50 @@ describe('ChatListStore', () => {
   });
 
   it('deduplicates reads for deep links and reloads their state on demand after reconnect', async () => {
-    http.expectOne('/_api/chats?limit=50').flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
+    expectChats().flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
     await settle();
     vi.useFakeTimers();
     const reading = data['chatInfo'].markRead(testChat.id, testMessage.id);
     await vi.advanceTimersByTimeAsync(1000);
-    http
-      .expectOne(`/_api/chats/${decodeId(testChat.id)}/read`)
-      .flush(structuredClone({ lastReadMessageId: wireMessage.id, unreadCount: 0 }));
+    expectMarkRead(decodeId(testChat.id), wireMessage.id).flush(
+      structuredClone({ lastReadMessageId: wireMessage.id, unreadCount: 0 }),
+    );
     await reading;
     await data['chatInfo'].markRead(testChat.id, testMessage.id);
     await vi.advanceTimersByTimeAsync(1000);
-    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/read`);
+    peer.expectNone('chats.markAsRead');
     reconnect();
     const joined = data['chatInfo'].getReadState(testChat.id);
-    http.expectOne('/_api/chats?limit=50').flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
+    expectChats().flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
     await flushReads();
-    http
-      .expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`)
-      .flush(structuredClone({ lastReadMessageId: wireMessage.id, unreadCount: 1 }));
+    expectUnread(decodeId(testChat.id)).flush(structuredClone({ lastReadMessageId: wireMessage.id, unreadCount: 1 }));
     await joined;
     expect(data['chatInfo']['readOperations'].size).toBe(0);
     reconnect();
-    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
-    http.expectOne('/_api/chats?limit=50').flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
+    peer.expectNone('chats.getUnreadCount');
+    expectChats().flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
     await settle();
   });
 
   it('keeps a new read over an older list response and accepts the next reload', async () => {
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     data.refreshChats();
     TestBed.tick();
-    const oldList = http.expectOne('/_api/chats?limit=50');
+    const oldList = expectChats();
     vi.useFakeTimers();
     const reading = data['chatInfo'].markRead(testChat.id, testMessage.id);
     await vi.advanceTimersByTimeAsync(1000);
-    http
-      .expectOne(`/_api/chats/${decodeId(testChat.id)}/read`)
-      .flush(structuredClone({ lastReadMessageId: wireMessage.id, unreadCount: 0 }));
+    expectMarkRead(decodeId(testChat.id), wireMessage.id).flush(
+      structuredClone({ lastReadMessageId: wireMessage.id, unreadCount: 0 }),
+    );
     await reading;
     oldList.flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     expect(query.items()[0]).toMatchObject({ lastReadMessageId: testMessage.id, unreadCount: 0 });
     data.refreshChats();
     TestBed.tick();
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, lastReadMessageId: wireMessage.id, unreadCount: 1 }],
@@ -1742,94 +1694,80 @@ describe('ChatListStore', () => {
 
   it('keeps an open conversation read pointer when a fresh list later switches to another query', async () => {
     const chat = { ...wireChat, lastReadMessageId: wireMessage.id, unreadCount: 0 };
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [chat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [chat] }));
     await settle();
     query.refresh();
-    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    peer.expectNone('chats.getUnreadCount');
     TestBed.tick();
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [chat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [chat] }));
     await settle();
     selectQuery(true);
     TestBed.tick();
-    http
-      .expectOne('/_api/chats?limit=50&archived=true')
-      .flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
+    expectChats({ limit: 50, archived: true }).flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
     await settle();
     vi.useFakeTimers();
     const reading = data['chatInfo'].markRead(testChat.id, testMessage.id);
     await vi.advanceTimersByTimeAsync(1000);
-    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/read`);
+    peer.expectNone('chats.markAsRead');
     await reading;
   });
 
   it('keeps historical chats without refreshing their reads in the background', async () => {
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     incoming.next(testMessage);
     await flushReads();
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ unreadCount: 1 });
+    expectUnread(decodeId(testChat.id)).flush({ unreadCount: 1 });
     await settle();
     selectQuery(true);
     TestBed.tick();
-    http
-      .expectOne('/_api/chats?limit=50&archived=true')
-      .flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
+    expectChats({ limit: 50, archived: true }).flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
     await settle();
     expect(data['chatInfo']['readOperations'].size).toBe(0);
     reconnect();
-    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
-    http
-      .expectOne('/_api/chats?limit=50&archived=true')
-      .flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
+    peer.expectNone('chats.getUnreadCount');
+    expectChats({ limit: 50, archived: true }).flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
     await settle();
   });
 
   it('cancels a pending read delay and the list request when the service is destroyed', async () => {
-    const list = http.expectOne('/_api/chats?limit=50');
+    const list = expectChats();
     vi.useFakeTimers();
     const reading = data['chatInfo'].markRead(testChat.id, testMessage.id);
     TestBed.resetTestingModule();
-    expect(list.cancelled).toBe(true);
+    list.flush({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] });
+    expect(query.items()).toEqual([]);
     await reading;
     await vi.advanceTimersByTimeAsync(2000);
     incoming.next(testMessage);
     resync.next();
-    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/read`);
+    peer.expectNone('chats.markAsRead');
     expect(data['chatInfo']['readOperations'].size).toBe(0);
   });
 
-  it('cancels unread HTTP reconciliation on destruction and does not start its queued retry', async () => {
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+  it('cancels unread RPC reconciliation on destruction and does not start its queued retry', async () => {
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     data['chatInfo'].invalidateReads(new Set([testChat.id]));
     const refreshing = expect(data['chatInfo'].getReadState(testChat.id)).rejects.toBeDefined();
     await flushReads();
-    const unread = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    const unread = expectUnread(decodeId(testChat.id));
     incoming.next(testMessage);
     TestBed.resetTestingModule();
-    expect(unread.cancelled).toBe(true);
+    unread.flush({ lastReadMessageId: wireMessage.id, unreadCount: 1 });
     await refreshing;
     await settle();
     expect(data['chatInfo']['readOperations'].size).toBe(0);
-    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    peer.expectNone('chats.getUnreadCount');
   });
 
   it('shares a stable query, its initial request and pagination until its last consumer leaves', async () => {
     expect(data.chats(false)).toBe(query);
     data.chats(true);
-    http.expectNone('/_api/chats?limit=50&archived=true');
+    const initial = expectChats();
+    peer.expectNone('chats.list');
     const releaseSecond = data.chats(false).activate();
-    const initial = http.expectOne('/_api/chats?limit=50');
     releaseQuery();
-    expect(initial.cancelled).toBe(false);
     initial.flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
@@ -1840,20 +1778,20 @@ describe('ChatListStore', () => {
     await settle();
     const paging = query.loadMore();
     expect(query.loadMore()).toBe(paging);
-    const page = http.expectOne('/_api/chats?limit=50&after=9007199254740993');
+    const page = expectChats({ limit: 50, after: '9007199254740993' });
     releaseSecond();
-    expect(page.cancelled).toBe(true);
+    page.flush({ chatSettings: { showMembershipMessages: true }, chats: [{ ...wireChat, id: '9007199254740995' }] });
     await paging;
     expect(query.items()).toEqual([testChat]);
     expect(query.loadingMore()).toBe(false);
     query.activate();
     await settle();
-    http.expectNone('/_api/chats?limit=50');
+    peer.expectNone('chats.list');
     expect(query.items()).toEqual([testChat]);
   });
 
   it('cancels a departing query page without applying it to the other query', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [wireChat],
@@ -1863,10 +1801,10 @@ describe('ChatListStore', () => {
     await settle();
     const regular = query;
     const paging = query.loadMore();
-    const old = http.expectOne('/_api/chats?limit=50&after=9007199254740993');
+    const old = expectChats({ limit: 50, after: '9007199254740993' });
     selectQuery(true);
-    expect(old.cancelled).toBe(true);
-    http.expectOne('/_api/chats?limit=50&archived=true').flush(
+    old.flush({ chatSettings: { showMembershipMessages: true }, chats: [{ ...wireChat, id: '9007199254740996' }] });
+    expectChats({ limit: 50, archived: true }).flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, id: '9007199254740995', archived: true }],
@@ -1878,12 +1816,12 @@ describe('ChatListStore', () => {
     expect(regular.items()).toEqual([testChat]);
     selectQuery(false);
     await settle();
-    http.expectNone('/_api/chats?limit=50');
+    peer.expectNone('chats.list');
     expect(query.hasMore()).toBe(true);
   });
 
   it('merges a recent conversation before an older pagination response without losing either page', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [wireChat],
@@ -1892,12 +1830,12 @@ describe('ChatListStore', () => {
     );
     await settle();
     const paging = query.loadMore();
-    const old = http.expectOne('/_api/chats?limit=50&after=9007199254740993');
+    const old = expectChats({ limit: 50, after: '9007199254740993' });
     const otherId = encodeId('9007199254740995');
     incoming.next({ ...testMessage, chatId: otherId });
     await flushReads();
-    http.expectNone('/_api/chats/9007199254740995/unread');
-    http.expectOne('/_api/chats?limit=50').flush(
+    peer.expectNone('chats.getUnreadCount');
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [
@@ -1928,20 +1866,18 @@ describe('ChatListStore', () => {
   });
 
   it('does not expose an obsolete by-id count after live unread reconciliation fails', async () => {
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     incoming.next(testMessage);
     const failed = expect(data['chatInfo'].getReadState(testChat.id)).rejects.toBeDefined();
     await flushReads();
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush('failed', { status: 500, statusText: 'Error' });
+    expectUnread(decodeId(testChat.id)).error(RpcErrorCode.Internal, 'Internal error');
     await failed;
     await settle();
     expect(data['chatInfo'].cachedReadState(testChat.id)).toBeUndefined();
     expect(query.error()).toBe(ChatListError.Unread);
     query.refresh();
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, unreadCount: 4 }],
@@ -1952,7 +1888,7 @@ describe('ChatListStore', () => {
   });
 
   it('serves a fresh by-id read snapshot across queries and falls back after hidden invalidation', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, lastReadMessageId: '200', unreadCount: 3 }],
@@ -1961,9 +1897,7 @@ describe('ChatListStore', () => {
     await settle();
     const regular = query;
     selectQuery(true);
-    http
-      .expectOne('/_api/chats?limit=50&archived=true')
-      .flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
+    expectChats({ limit: 50, archived: true }).flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
     await settle();
     expect(data['chatInfo'].cachedReadState(testChat.id)).toMatchObject({
       lastReadMessageId: encodeId('200'),
@@ -1973,14 +1907,11 @@ describe('ChatListStore', () => {
     });
     data.refreshChats();
     expect(data['chatInfo'].cachedReadState(testChat.id)).toBeUndefined();
-    http.expectNone('/_api/chats?limit=50');
-    http
-      .expectOne('/_api/chats?limit=50&archived=true')
-      .flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
+    expectChats({ limit: 50, archived: true }).flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
     await settle();
     expect(regular.items()[0].unreadCount).toBe(3);
     selectQuery(false);
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, lastReadMessageId: '199', unreadCount: 4 }],
@@ -1996,32 +1927,30 @@ describe('ChatListStore', () => {
   });
 
   it('keeps hidden rows and defers unread reads until they are shown', async () => {
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     releaseQuery();
     incoming.next(testMessage);
-    http.expectNone('/_api/chats?limit=50');
+    peer.expectNone('chats.list');
     await flushReads();
-    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    peer.expectNone('chats.getUnreadCount');
     releaseQuery = query.activate();
     await flushReads();
-    const unread = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    const unread = expectUnread(decodeId(testChat.id));
     expect(data['chatInfo'].cachedReadState(testChat.id)).toBeUndefined();
     expect(query.items()).toHaveLength(1);
     expect(query.items()[0].lastMessage?.id).toBe(testMessage.id);
     unread.flush(structuredClone({ lastReadMessageId: wireMessage.id, unreadCount: 5 }));
     await settle();
     expect(query.items()[0].unreadCount).toBe(5);
-    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
-    http.expectNone('/_api/chats?limit=50');
+    peer.expectNone('chats.getUnreadCount');
+    peer.expectNone('chats.list');
   });
 
   it('reorders a covered list as soon as a live message arrives', async () => {
     const olderId = encodeId('9007199254742001');
     const newerId = encodeId('9007199254742003');
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [
@@ -2036,12 +1965,12 @@ describe('ChatListStore', () => {
     expect(query.items().map((chat) => chat.id)).toEqual([olderId, newerId]);
     expect(query.items()[0].lastMessage?.message).toBe(testMessage.message);
     await flushReads();
-    http.expectNone(`/_api/chats/${decodeId(olderId)}/unread`);
+    peer.expectNone('chats.getUnreadCount');
     await settle();
   });
 
   it('reads only the head page when a hidden list missed a new conversation', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [wireChat],
@@ -2052,9 +1981,9 @@ describe('ChatListStore', () => {
     releaseQuery();
     const otherId = encodeId('9007199254740995');
     incoming.next({ ...testMessage, chatId: otherId });
-    http.expectNone('/_api/chats?limit=50');
+    peer.expectNone('chats.list');
     releaseQuery = query.activate();
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, id: decodeId(otherId) }],
@@ -2071,7 +2000,7 @@ describe('ChatListStore', () => {
       id: String(9007199254000000 + index * 2),
       lastMessageAt: new Date(Date.UTC(2026, 0, 1, 0, 59 - index)).toISOString(),
     }));
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: chats.slice(0, 50),
@@ -2081,7 +2010,7 @@ describe('ChatListStore', () => {
     await settle();
     data.refreshChats();
     expect(query.items()).toHaveLength(50);
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: chats.slice(1),
@@ -2094,7 +2023,7 @@ describe('ChatListStore', () => {
   });
 
   it.each([false, true])('bridges multiple hidden head pages with existing pagination=%s', async (paginated) => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, lastMessageAt: '2025-01-01T00:00:00Z' }],
@@ -2111,7 +2040,7 @@ describe('ChatListStore', () => {
     for (const chat of chats)
       incoming.next({ ...testMessage, chatId: encodeId(chat.id), createdAt: chat.lastMessageAt });
     releaseQuery = query.activate();
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: chats.slice(0, 50),
@@ -2119,9 +2048,9 @@ describe('ChatListStore', () => {
       }),
     );
     await settle();
-    http
-      .expectOne(`/_api/chats?limit=50&after=${chats[49].id}`)
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: chats.slice(50) }));
+    expectChats({ limit: 50, after: chats[49].id }).flush(
+      structuredClone({ chatSettings: { showMembershipMessages: true }, chats: chats.slice(50) }),
+    );
     await settle();
     expect(new Set(query.items().map((chat) => decodeId(chat.id)))).toEqual(
       new Set([wireChat.id, ...chats.map((chat) => chat.id)]),
@@ -2129,15 +2058,16 @@ describe('ChatListStore', () => {
     expect(query.hasMore()).toBe(paginated);
     if (paginated) {
       const loading = query.loadMore();
-      http
-        .expectOne(`/_api/chats?limit=50&after=${wireChat.id}`)
-        .flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
+      expectChats({ limit: 50, after: wireChat.id }).flush({
+        chatSettings: { showMembershipMessages: true },
+        chats: [],
+      });
       await loading;
     }
   });
 
   it('stops head reconciliation once it overlaps the previous coverage', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, lastMessageAt: '2026-01-02T00:00:00Z' }],
@@ -2149,7 +2079,7 @@ describe('ChatListStore', () => {
     const otherId = '9007199254000000';
     incoming.next({ ...testMessage, chatId: encodeId(otherId) });
     releaseQuery = query.activate();
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, id: otherId, lastMessageAt: '2026-01-03T00:00:00Z' }],
@@ -2158,7 +2088,7 @@ describe('ChatListStore', () => {
     );
     await settle();
     const olderId = '9007199254000002';
-    http.expectOne(`/_api/chats?limit=50&after=${otherId}`).flush(
+    expectChats({ limit: 50, after: otherId }).flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, id: olderId, lastMessageAt: '2026-01-01T00:00:00Z' }],
@@ -2166,40 +2096,34 @@ describe('ChatListStore', () => {
       }),
     );
     await settle();
-    http.expectNone(`/_api/chats?limit=50&after=${olderId}`);
+    peer.expectNone('chats.list');
     expect(query.loadedThrough()).toBe(Date.parse('2026-01-02T00:00:00Z'));
     const loading = query.loadMore();
-    http
-      .expectOne(`/_api/chats?limit=50&after=${wireChat.id}`)
-      .flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
+    expectChats({ limit: 50, after: wireChat.id }).flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
     await loading;
   });
 
   it('keeps the list through a foreground resync and reloads it after a reconnect', async () => {
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     releaseQuery();
     resync.next();
-    http.expectNone('/_api/chats?limit=50');
-    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    peer.expectNone('chats.list');
+    peer.expectNone('chats.getUnreadCount');
     releaseQuery = query.activate();
-    http.expectNone('/_api/chats?limit=50');
+    peer.expectNone('chats.list');
     TestBed.tick();
     connected.set(false);
     TestBed.tick();
     connected.set(true);
     TestBed.tick();
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     expect(query.items()).toHaveLength(1);
   });
 
   it('does not use a stale cursor after a refresh fails', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [wireChat],
@@ -2208,29 +2132,29 @@ describe('ChatListStore', () => {
     );
     await settle();
     query.refresh();
-    http.expectOne('/_api/chats?limit=50').flush('failed', { status: 500, statusText: 'Error' });
+    expectChats().error(RpcErrorCode.Internal, 'Internal error');
     await settle();
     expect(query.error()).toBe(ChatListError.Load);
     expect(query.items()).toEqual([testChat]);
     expect(query.hasMore()).toBe(false);
     expect(data['chatInfo'].cachedReadState(testChat.id)).toBeUndefined();
     await query.loadMore();
-    http.expectNone('/_api/chats?limit=50&after=9007199254740993');
+    peer.expectNone('chats.list');
   });
 
-  it('catches up an initial list with a fresh head snapshot instead of an extra unread GET', async () => {
-    const initial = http.expectOne('/_api/chats?limit=50');
+  it('catches up an initial list with a fresh head snapshot instead of an extra unread refresh', async () => {
+    const initial = expectChats();
     incoming.next(testMessage);
     incoming.next(testMessage);
     await flushReads();
-    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    peer.expectNone('chats.getUnreadCount');
     initial.flush({
       chatSettings: { showMembershipMessages: true },
       chats: [],
       nextCursor: '9007199254740993',
     });
     await settle();
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, lastMessage: wireMessage, lastReadMessageId: wireMessage.id, unreadCount: 0 }],
@@ -2243,7 +2167,7 @@ describe('ChatListStore', () => {
   });
 
   it('shares the latest unread count when switching to a cached query', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, lastReadMessageId: '200', unreadCount: 3 }],
@@ -2252,7 +2176,7 @@ describe('ChatListStore', () => {
     await settle();
     const archived = data.chats(true);
     archived.activate();
-    http.expectOne('/_api/chats?limit=50&archived=true').flush(
+    expectChats({ limit: 50, archived: true }).flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, archived: true, lastReadMessageId: '200', unreadCount: 3 }],
@@ -2260,14 +2184,14 @@ describe('ChatListStore', () => {
     );
     await settle();
     archived.refresh();
-    const old = http.expectOne('/_api/chats?limit=50&archived=true');
+    const old = expectChats({ limit: 50, archived: true });
     vi.useFakeTimers();
     const reading = data['chatInfo'].markRead(testChat.id, encodeId('205'));
     await vi.advanceTimersByTimeAsync(1000);
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/read`).flush({ lastReadMessageId: '205', unreadCount: 0 });
+    expectMarkRead(decodeId(testChat.id), '205').flush({ lastReadMessageId: '205', unreadCount: 0 });
     await reading;
     query.refresh();
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, lastReadMessageId: '205', unreadCount: 0 }],
@@ -2291,7 +2215,7 @@ describe('ChatListStore', () => {
     });
   });
   it('refreshes the loaded conversation depth and keeps the final paging cursor', async () => {
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [structuredClone(wireChat)],
@@ -2301,14 +2225,14 @@ describe('ChatListStore', () => {
     await settle();
     const olderChat = { ...wireChat, id: '9007199254740900', name: 'Older' };
     const more = query.loadMore();
-    http.expectOne(`/_api/chats?limit=50&after=${wireChat.id}`).flush({
+    expectChats({ limit: 50, after: wireChat.id }).flush({
       chatSettings: { showMembershipMessages: true },
       chats: [structuredClone(olderChat)],
       nextCursor: olderChat.id,
     });
     await more;
     query.refresh();
-    http.expectOne('/_api/chats?limit=50').flush(
+    expectChats().flush(
       structuredClone({
         chatSettings: { showMembershipMessages: true },
         chats: [{ ...wireChat, name: 'Updated' }],
@@ -2317,7 +2241,7 @@ describe('ChatListStore', () => {
     );
     await settle();
     expect(query.items()).toHaveLength(2);
-    http.expectOne(`/_api/chats?limit=50&after=${wireChat.id}`).flush({
+    expectChats({ limit: 50, after: wireChat.id }).flush({
       chatSettings: { showMembershipMessages: true },
       chats: [structuredClone(olderChat)],
       nextCursor: olderChat.id,
@@ -2325,39 +2249,52 @@ describe('ChatListStore', () => {
     await settle();
     expect(query.items().map((chat) => chat.name)).toEqual(['Updated', 'Older']);
     const next = query.loadMore();
-    http
-      .expectOne(`/_api/chats?limit=50&after=${olderChat.id}`)
-      .flush({ chatSettings: { showMembershipMessages: true }, chats: [] });
+    expectChats({ limit: 50, after: olderChat.id }).flush({
+      chatSettings: { showMembershipMessages: true },
+      chats: [],
+    });
     await next;
   });
   it('removes an archived chat immediately and puts it back if the write fails', async () => {
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     const operation = data['chatInfo'].setArchived(testChat.id, true);
     const failed = expect(operation).rejects.toBeDefined();
     expect(query.items()).toEqual([]);
-    http.expectOne(`/_api/chats/${wireChat.id}/archive`).flush('failed', { status: 500, statusText: 'Error' });
+    expectArchive(wireChat.id).error(RpcErrorCode.Internal, 'Internal error');
     await failed;
     expect(query.items().map((chat) => chat.id)).toEqual([testChat.id]);
     expect(data['chatInfo'].isMuted(testChat.id)).toBe(false);
   });
 
   it('does not undo a newer mute choice when an older request fails', async () => {
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     const first = expect(data['chatInfo'].setMuted(testChat.id, true)).rejects.toBeDefined();
-    const old = http.expectOne({ method: 'PUT', url: `/_api/group/${wireChat.id}/notification-setting` });
+    const old = expectNotificationSetting(wireChat.id, 'alwaysMuted');
     const latest = data['chatInfo'].setMuted(testChat.id, false);
-    old.flush('failed', { status: 500, statusText: 'Error' });
+    old.error(RpcErrorCode.Internal, 'Internal error');
     await first;
     expect(data['chatInfo'].isMuted(testChat.id)).toBe(false);
-    http.expectOne({ method: 'PUT', url: `/_api/group/${wireChat.id}/notification-setting` }).flush(null);
+    expectNotificationSetting(wireChat.id, 'alwaysUnmuted').flush(null);
     await latest;
     await settle();
-    http.expectNone('/_api/chats?limit=50');
+    peer.expectNone('chats.list');
+  });
+
+  it('keeps an inactive query empty when its cancelled list reply arrives late', async () => {
+    const request = expectChats();
+    releaseQuery();
+    request.flush({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] });
+    await settle();
+    expect(query.items()).toEqual([]);
+  });
+
+  it('accepts a flat list result without rebuilding the active query', async () => {
+    const active = query;
+    expectChats().flush({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] });
+    await settle();
+    expect(data.chats(false)).toBe(active);
+    expect(active.items()).toEqual([testChat]);
   });
 });

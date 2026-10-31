@@ -1,6 +1,4 @@
 import { Location } from '@angular/common';
-import { provideHttpClient, withInterceptors } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { signal, type WritableSignal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
@@ -15,12 +13,11 @@ import {
   iosTransitionAnimation,
   NavController,
 } from '@ionic/angular';
-import { of, Subject } from 'rxjs';
+import { Subject } from 'rxjs';
 import { vi } from 'vitest';
 import WaveSurfer from 'wavesurfer.js';
-import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
-import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
-import { PinsService } from '../../../generated/endpoints/pins/pins.service';
+import { RpcTestPeer, provideRpcTesting } from '../../api/rpc-testing';
+import { RpcErrorCode } from '../../api/rpc-error';
 import {
   AttachmentUploadPurpose,
   GroupKind,
@@ -35,7 +32,6 @@ import {
   type ThreadSubscriptionStatusResponse,
 } from '../../../generated/models';
 import { Connection, ResyncReason } from '../../api/connection';
-import { jsonInterceptor } from '../../api/json.interceptor';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { mockRealtime, testChat, testMessage, testUser, wireChat, wireMessage } from '../../api/testing';
 import { ChatListStore } from '../../chats/chat-list-store';
@@ -73,17 +69,29 @@ function deferred<T>() {
 
 describe('ConversationPage', () => {
   let component: ConversationPage;
+
   let fixture: ComponentFixture<ConversationPage>;
-  let http: HttpTestingController;
+
+  let peer: RpcTestPeer;
+
   let incoming: Subject<MessageResponse>;
+
   let events: Subject<ServerWsMessage>;
+
   let resync: Subject<ResyncReason | void>;
+
   let subscriptions: WritableSignal<Map<SnowflakeID, ThreadSubscriptionStatusResponse>>;
+
   let scroll: HTMLElement;
+
   let resizes: Map<Element, () => void>;
+
   const avatars = signal(false);
+
   const dmDetails = signal(true);
+
   const membershipMessages = signal(true);
+
   beforeEach(async () => {
     vi.spyOn(IonActionSheet.prototype, 'present').mockResolvedValue();
     vi.spyOn(IonActionSheet.prototype, 'onDidDismiss').mockResolvedValue({
@@ -143,9 +151,7 @@ describe('ConversationPage', () => {
           provide: Preferences,
           useValue: { showAllAvatars: avatars, showDmDetails: dmDetails, showMembershipMessages: membershipMessages },
         },
-        provideHttpClient(withInterceptors([jsonInterceptor])),
-        provideHttpClientTesting(),
-        provideChahuaBaseUrl('/_api'),
+        ...provideRpcTesting(),
         {
           provide: SavedMessageStore,
           useValue: {
@@ -167,16 +173,8 @@ describe('ConversationPage', () => {
         },
       ],
     }).compileComponents();
-    vi.spyOn(TestBed.inject(PinsService), 'listPins').mockImplementation((() =>
-      of({ pins: [] })) as unknown as PinsService['listPins']);
-    vi.spyOn(TestBed.inject(PinsService), 'listThreadPins').mockImplementation((() =>
-      of({ pins: [] })) as unknown as PinsService['listThreadPins']);
-    vi.spyOn(TestBed.inject(ChatsService), 'getChatReactions').mockImplementation((() =>
-      of({ messageIds: [], readThrough: '2026-10-20T00:00:00Z' })) as unknown as ChatsService['getChatReactions']);
-    vi.spyOn(TestBed.inject(ChatsService), 'getChatMentions').mockImplementation((() =>
-      of({ messageIds: [] })) as unknown as ChatsService['getChatMentions']);
-    vi.spyOn(TestBed.inject(ChatsService), 'acknowledgeChatReactions').mockImplementation((() =>
-      of({ unreadReactions: 0 })) as unknown as ChatsService['acknowledgeChatReactions']);
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
     vi.spyOn(TestBed.inject(Router), 'isActive').mockReturnValue(true);
     Object.assign(TestBed.inject(ChatStore), {
       threadReadState: vi.fn().mockReturnValue(undefined),
@@ -195,26 +193,43 @@ describe('ConversationPage', () => {
     TestBed.inject(ChatStore).remember([testChat]);
     fixture = TestBed.createComponent(ConversationPage);
     component = fixture.componentInstance;
-    http = TestBed.inject(HttpTestingController);
     fixture.componentRef.setInput('id', wireChat.id);
     fixture.detectChanges();
-    http
-      .expectOne(`/_api/group/${wireChat.id}`)
+    peer
+      .expect('groups.get', { chatId: wireChat.id })
       .flush({ ...wireChat, myRole: GroupRole.member, speakingMode: 'unrestricted', mySpeakingMode: 'unrestricted' });
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`).flush({
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50 }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [{ ...wireMessage }],
       olderCursor: wireMessage.id,
     });
+    await settleMetadata();
     await fixture.whenStable();
     fixture.detectChanges();
   });
+
   afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-    TestBed.inject(VoicePlayback).active.set(undefined);
-    http.verify();
+    try {
+      TestBed.inject(VoicePlayback).active.set(undefined);
+      peer.verify();
+    } finally {
+      TestBed.resetTestingModule();
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
   });
+
+  async function settleMetadata() {
+    await Promise.resolve();
+    for (const request of peer.match('pins.list')) request.flush({ pins: [] });
+    for (const request of peer.match('pins.listForThread')) request.flush({ pins: [] });
+    for (const request of peer.match('chats.listUnreadReactions'))
+      request.flush({ messageIds: [], readThrough: '2026-10-20T00:00:00Z' });
+    for (const request of peer.match('chats.listMentions')) request.flush({ messageIds: [] });
+    await Promise.resolve();
+    for (const request of peer.match('chats.acknowledgeReactions')) request.flush({ unreadReactions: 0 });
+    for (const request of peer.match('chats.getReadReceipt')) request.flush({});
+  }
 
   it('applies live restrictions without replacing the composer or draft, and resumes after restoration', async () => {
     component['updateDraft']('保留草稿');
@@ -234,7 +249,7 @@ describe('ConversationPage', () => {
     expect(fixture.nativeElement.querySelector('app-message')).toBe(row);
     expect(component['draft']()).toBe('保留草稿');
     await component['sendMessage']();
-    http.expectNone((req) => req.method === 'POST');
+    peer.expectNone('messages.send');
     events.next({
       type: ServerWsMessageType.groupSpeakingModeChanged,
       payload: {
@@ -244,6 +259,64 @@ describe('ConversationPage', () => {
     });
     expect(component['speakingRestriction']()).toBeUndefined();
     expect(component['draft']()).toBe('保留草稿');
+  });
+
+  it('immediately hides revoked messages, pins and composer even during scrolling while retaining the draft', () => {
+    const chats = TestBed.inject(ChatStore);
+    component['updateDraft']('local draft');
+    pinMessage('201');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.pinned-bar')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('app-message')).not.toBeNull();
+    const composer = fixture.nativeElement.querySelector('app-message-composer');
+    component['scrolling'].touchStart();
+    component['scrolling'].scrollStart();
+    chats['acceptReadStates']([
+      {
+        chatId: testChat.id,
+        accessible: false,
+        unreadCount: 0,
+        unreadMentions: 0,
+        unreadReactions: 0,
+      },
+    ]);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.pinned-bar')).toBeNull();
+    expect(fixture.nativeElement.querySelector('app-message')).toBeNull();
+    expect(fixture.nativeElement.querySelector('app-message-composer')).toBe(composer);
+    expect(component['draft']()).toBe('local draft');
+    expect(component['conversation'].error()).toBe(ConversationError.Open);
+  });
+
+  it('discards a held thread root on revocation without affecting a different thread', async () => {
+    const chats = TestBed.inject(ChatStore);
+    const rootId = encodeId('100');
+    fixture.componentRef.setInput('threadId', '100');
+    component['conversation'].reset(testChat.id, rootId);
+    const loading = component['loadThreadRoot']();
+    const held = peer.expect('messages.get', { chatId: wireChat.id, messageId: '100' });
+    const state = {
+      chatId: testChat.id,
+      threadId: encodeId('101'),
+      accessible: false,
+      unreadCount: 0,
+      unreadMentions: 0,
+      unreadReactions: 0,
+    };
+    chats['acceptReadStates']([state]);
+    expect(component['accessible']()).toBe(true);
+    events.next({
+      type: ServerWsMessageType.messageUpdated,
+      payload: { ...testMessage, id: rootId, message: 'protected root' },
+    });
+    expect(component['threadRoot']()?.message).toBe('protected root');
+    chats['acceptReadStates']([{ ...state, threadId: rootId }]);
+    expect(component['threadRoot']()).toBeUndefined();
+    expect(component['canSendMessage']()).toBe(false);
+    held.flush({ ...wireMessage, id: '100', message: 'stale root' });
+    await loading;
+    chats['acceptReadStates']([{ ...state, threadId: rootId, accessible: true }]);
+    expect(component['threadRoot']()).toBeUndefined();
   });
 
   it('distinguishes new threads, existing replies and editing the root under replies-only restrictions', () => {
@@ -323,7 +396,7 @@ describe('ConversationPage', () => {
     expect(component['topicMessageCount']()).toBe(1);
     store.acceptThreads([thread], readVersion, subscriptionVersion);
     expect(component['canSendMessage']()).toBe(false);
-    http.expectNone(() => true);
+    peer.verify();
   });
 
   it.each([false, true])(
@@ -338,7 +411,7 @@ describe('ConversationPage', () => {
         payload: { chatId: testChat.id, speakingMode: SpeakingMode.repliesOnly },
       });
       const loading = component['loadThreadRoot']();
-      const read = http.expectOne(`/_api/chats/${wireChat.id}/messages/100`);
+      const read = peer.expect('messages.get', { chatId: wireChat.id, messageId: '100' });
       const update = (replyCount: number) =>
         events.next({
           type: ServerWsMessageType.threadUpdate,
@@ -357,7 +430,7 @@ describe('ConversationPage', () => {
       expect(component['draft']()).toBe('保留草稿');
       update(1);
       expect(component['canSendMessage']()).toBe(true);
-      http.expectNone(() => true);
+      peer.verify();
     },
   );
 
@@ -370,7 +443,7 @@ describe('ConversationPage', () => {
       type: ServerWsMessageType.messageUpdated,
       payload: { ...testMessage, id: rootId, message: '新内容', threadInfo: { replyCount: 2 } },
     });
-    http.expectOne(`/_api/chats/${wireChat.id}/messages/100`).flush({
+    peer.expect('messages.get', { chatId: wireChat.id, messageId: '100' }).flush({
       ...wireMessage,
       id: '100',
       threadInfo: { replyCount: 1 },
@@ -385,10 +458,10 @@ describe('ConversationPage', () => {
     store.invalidate();
     store.remember([{ ...testChat, kind: GroupKind.dm }]);
     await component['loadChatInfo']();
-    http.expectNone(`/_api/group/${wireChat.id}`);
+    peer.expectNone('groups.get');
     store.remember([testChat]);
     const loading = component['loadChatInfo']();
-    http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...wireChat, speakingMode: SpeakingMode.readOnly });
+    peer.expect('groups.get', { chatId: wireChat.id }).flush({ ...wireChat, speakingMode: SpeakingMode.readOnly });
     await loading;
     expect(component['canSendMessage']()).toBe(false);
   });
@@ -537,27 +610,30 @@ describe('ConversationPage', () => {
     component['draft'].set('附言');
     TestBed.inject(DraftStore).setForward(testChat.id, undefined, [testMessage]);
     fixture.detectChanges();
-    http.expectNone((request) => request.method === 'POST');
+    peer.expectNone('messages.send');
     (fixture.nativeElement.querySelector('.send-button') as HTMLButtonElement).click();
-    const forward = http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}/forward`);
-    http.expectNone(`/_api/chats/${wireChat.id}/messages`);
+    const forward = peer.expect(
+      'messages.forwardOne',
+      (params) => params['chatId'] === wireChat.id && params['messageId'] === wireMessage.id,
+    );
+    peer.expectNone('messages.send');
     expect(component['pendingForward']()).toBeUndefined();
     expect(component['draft']()).toBe('');
     component['draft'].set('next input');
     forward.flush({
       ...wireMessage,
       id: '9007199254741800',
-      clientGeneratedId: forward.request.body.clientGeneratedId,
+      clientGeneratedId: forward.params?.['clientGeneratedId'],
     });
     await Promise.resolve();
     await Promise.resolve();
-    const comment = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
-    expect(comment.request.body.message).toBe('附言');
+    const comment = peer.expect('messages.send', (params) => params['chatId'] === wireChat.id);
+    expect(comment.params?.['message']).toBe('附言');
     comment.flush({
       ...wireMessage,
       id: '9007199254741801',
       message: '附言',
-      clientGeneratedId: comment.request.body.clientGeneratedId,
+      clientGeneratedId: comment.params?.['clientGeneratedId'],
     });
     await fixture.whenStable();
     expect(component['draft']()).toBe('next input');
@@ -623,13 +699,15 @@ describe('ConversationPage', () => {
     expect(button.disabled).toBe(false);
     button.click();
     const item = TestBed.inject(MessageOutbox).items()[0];
-    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}/forward`);
-    expect(request.request.method).toBe('POST');
-    http.expectNone(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}`);
-    request.flush('Source unavailable', { status: 404, statusText: 'Not Found' });
+    const request = peer.expect(
+      'messages.forwardOne',
+      (params) => params['chatId'] === wireChat.id && params['messageId'] === wireMessage.id,
+    );
+    peer.expectNone('messages.get');
+    request.error(RpcErrorCode.NotFound);
     await item.operation;
     expect(item.delivery()).toBe(MessageDelivery.Failed);
-    http.expectNone(`/_api/chats/${wireChat.id}/messages`);
+    peer.expectNone('messages.send');
   });
 
   it('Escape leaves multi-selection without reaching the page-level navigation shortcut', () => {
@@ -679,10 +757,9 @@ describe('ConversationPage', () => {
     component['toggleSelection'](second);
     component['recallSelection']();
     const recall = component['confirmRecallSelection'](new CustomEvent('dismiss', { detail: { role: 'confirm' } }));
-    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages/bulk-delete`);
-    expect(request.request.method).toBe('POST');
-    expect(request.request.body).toEqual({ messageIds: [wireMessage.id, '902'] });
-    http.expectNone((request) => request.method === 'DELETE');
+    const request = peer.expect('messages.deleteMany', (params) => params['chatId'] === wireChat.id);
+    expect(request.params).toEqual({ chatId: wireChat.id, messageIds: [wireMessage.id, '902'] });
+    peer.expectNone('messages.delete');
     request.flush({ chatId: wireChat.id, messageIds: [wireMessage.id, '902'], complete: true, threadRootIds: [] });
     await recall;
     expect(component['recallResult']()).toEqual({ succeeded: 2, failed: 0 });
@@ -695,9 +772,7 @@ describe('ConversationPage', () => {
     component['toggleSelection']({ ...testMessage, id: encodeId('902'), clientGeneratedId: 'second' });
     component['recallSelection']();
     const recall = component['confirmRecallSelection'](new CustomEvent('dismiss', { detail: { role: 'confirm' } }));
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages/bulk-delete`)
-      .flush('Forbidden', { status: 403, statusText: 'Forbidden' });
+    peer.expect('messages.deleteMany', (params) => params['chatId'] === wireChat.id).error(RpcErrorCode.Forbidden);
     await recall;
     expect(component['recallResult']()).toEqual({ succeeded: 0, failed: 2 });
     expect(component['selectedMessages']().size).toBe(2);
@@ -707,7 +782,7 @@ describe('ConversationPage', () => {
     component['beginSelection'](testMessage);
     component['recallSelection']();
     const recall = component['confirmRecallSelection'](new CustomEvent('dismiss', { detail: { role: 'confirm' } }));
-    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages/bulk-delete`);
+    const request = peer.expect('messages.deleteMany', (params) => params['chatId'] === wireChat.id);
     component['cancelSelection']();
     const second = { ...testMessage, id: encodeId('902'), clientGeneratedId: 'second' };
     component['beginSelection'](second);
@@ -724,7 +799,7 @@ describe('ConversationPage', () => {
       attachmentIds: [],
     });
     const response = { ...wireMessage, id: '901', messageType, clientGeneratedId: item.clientGeneratedId };
-    http.expectOne(`/_api/chats/${wireChat.id}/messages`).flush(response);
+    peer.expect('messages.send', (params) => params['chatId'] === wireChat.id).flush(response);
     await item.operation;
     component['beginSelection'](item);
     return { item, response };
@@ -735,9 +810,7 @@ describe('ConversationPage', () => {
     component['recallSelection']();
     const recall = component['confirmRecallSelection'](new CustomEvent('dismiss', { detail: { role: 'confirm' } }));
     await Promise.resolve();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages/bulk-delete`)
-      .flush('Forbidden', { status: 403, statusText: 'Forbidden' });
+    peer.expect('messages.deleteMany', (params) => params['chatId'] === wireChat.id).error(RpcErrorCode.Forbidden);
     await recall;
     expect(component['recallResult']()).toEqual({ succeeded: 0, failed: 1 });
     expect(component['selectedMessages']().size).toBe(1);
@@ -746,8 +819,8 @@ describe('ConversationPage', () => {
     component['recallSelection']();
     const retry = component['confirmRecallSelection'](new CustomEvent('dismiss', { detail: { role: 'confirm' } }));
     await Promise.resolve();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages/bulk-delete`)
+    peer
+      .expect('messages.deleteMany', (params) => params['chatId'] === wireChat.id)
       .flush({ chatId: wireChat.id, messageIds: ['901'], complete: true, threadRootIds: [] });
     await retry;
     expect(component['recallResult']()).toEqual({ succeeded: 1, failed: 0 });
@@ -762,12 +835,16 @@ describe('ConversationPage', () => {
     expect(component['recalling']()).toBe(true);
     expect(component['recallResult']()).toBeUndefined();
     expect(item.cancelled()).toBe(false);
-    http.expectNone((request) => request.url.endsWith('/bulk-delete') || request.method === 'DELETE');
+    peer.expectNone('messages.deleteMany');
+    peer.expectNone('messages.delete');
     incoming.next(item.confirmed()!);
     await Promise.resolve();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages/bulk-delete`)
-      .flush({ chatId: wireChat.id, messageIds: ['901'], complete: true, threadRootIds: [] });
+    (await peer.expectAsync('messages.deleteMany', (params) => params['chatId'] === wireChat.id)).flush({
+      chatId: wireChat.id,
+      messageIds: ['901'],
+      complete: true,
+      threadRootIds: [],
+    });
     await recall;
     expect(component['recallResult']()).toEqual({ succeeded: 1, failed: 0 });
   });
@@ -779,7 +856,8 @@ describe('ConversationPage', () => {
     component['cancelSelection']();
     incoming.next(item.confirmed()!);
     await recall;
-    http.expectNone((request) => request.url.endsWith('/bulk-delete') || request.method === 'DELETE');
+    peer.expectNone('messages.deleteMany');
+    peer.expectNone('messages.delete');
     expect(component['recallResult']()).toBeUndefined();
     expect(item.cancelled()).toBe(false);
   });
@@ -791,12 +869,12 @@ describe('ConversationPage', () => {
     component['toggleSelection'](other);
     component['recallSelection']();
     const recall = component['confirmRecallSelection'](new CustomEvent('dismiss', { detail: { role: 'confirm' } }));
-    http.expectNone((request) => request.url.endsWith('/bulk-delete'));
+    peer.expectNone('messages.deleteMany');
     events.next({ type: ServerWsMessageType.messageDeleted, payload: { ...other, isDeleted: true } });
     incoming.next(item.confirmed()!);
     await Promise.resolve();
-    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages/bulk-delete`);
-    expect(request.request.body).toEqual({ messageIds: ['901', wireMessage.id] });
+    const request = await peer.expectAsync('messages.deleteMany', (params) => params['chatId'] === wireChat.id);
+    expect(request.params).toEqual({ chatId: wireChat.id, messageIds: ['901', wireMessage.id] });
     request.flush({ chatId: wireChat.id, messageIds: ['901', wireMessage.id], complete: true, threadRootIds: [] });
     await recall;
     expect(component['recallResult']()).toEqual({ succeeded: 2, failed: 0 });
@@ -810,8 +888,8 @@ describe('ConversationPage', () => {
     component['recallSelection']();
     const recall = component['confirmRecallSelection'](new CustomEvent('dismiss', { detail: { role: 'confirm' } }));
     await Promise.resolve();
-    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages/bulk-delete`);
-    expect(request.request.body).toEqual({ messageIds: [wireMessage.id] });
+    const request = peer.expect('messages.deleteMany', (params) => params['chatId'] === wireChat.id);
+    expect(request.params).toEqual({ chatId: wireChat.id, messageIds: [wireMessage.id] });
     request.flush({ chatId: wireChat.id, messageIds: [wireMessage.id], complete: true, threadRootIds: [] });
     await recall;
     expect(component['recallResult']()).toEqual({ succeeded: 1, failed: 1 });
@@ -822,12 +900,11 @@ describe('ConversationPage', () => {
   it.each([undefined, wireMessage.id])('ignores DM mention/reply navigation for thread %s', async (threadId) => {
     TestBed.inject(ChatStore).remember([{ ...testChat, kind: GroupKind.dm }]);
     fixture.componentRef.setInput('threadId', threadId);
-    const query = vi.mocked(TestBed.inject(ChatsService).getChatMentions);
-    query.mockClear();
+
     component['mentionJumpIds'].set([testMessage.id]);
     expect(component['canJumpMention']()).toBe(false);
     await component['enterMentionSession']();
-    expect(query).not.toHaveBeenCalled();
+    peer.expectNone('chats.listMentions');
     expect(component['mentionJumpIds']()).toEqual([]);
   });
 
@@ -839,8 +916,8 @@ describe('ConversationPage', () => {
     component = fixture.componentInstance;
     fixture.componentRef.setInput('id', wireChat.id);
     fixture.detectChanges();
-    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`).flush({});
-    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`);
+    peer.expect('chats.getReadReceipt', { chatId: wireChat.id }).flush({});
+    const request = peer.expect('messages.list', { chatId: wireChat.id, max: 50 });
     expect(fixture.nativeElement.querySelector('.message-skeleton')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('.message-skeleton-avatar')).toBeNull();
     request.flush({
@@ -869,6 +946,7 @@ describe('ConversationPage', () => {
 
   it('offers topic forwarding only while the topic holds at most 100 messages', async () => {
     await enterThread();
+    await settleMetadata();
     const forwardButton = () =>
       [...fixture.nativeElement.querySelectorAll('ion-header ion-button')].find(
         (element: HTMLElement) => element.querySelector('ion-icon')?.icon === component['toolbarIcons'].forwardOutline,
@@ -896,13 +974,8 @@ describe('ConversationPage', () => {
 
   it('reads every topic message at send time and explains an oversized topic', async () => {
     await enterThread();
-    const request = () =>
-      http.expectOne(
-        (candidate) =>
-          candidate.url.endsWith(`/chats/${wireChat.id}/messages`) &&
-          candidate.params.get('threadId') === '100' &&
-          candidate.params.get('max') === '100',
-      );
+    await settleMetadata();
+    const request = () => peer.expect('messages.list', { chatId: wireChat.id, threadId: '100', max: 100 });
     const first = component['loadTopicSources']();
     request().flush({
       chatSettings: { showMembershipMessages: true },
@@ -936,7 +1009,7 @@ describe('ConversationPage', () => {
     expect(await oversized).toEqual({ error: ForwardSelectionError.TooMany });
 
     const failed = component['loadTopicSources']();
-    request().flush('failed', { status: 500, statusText: 'Server Error' });
+    request().error(RpcErrorCode.Internal);
     expect(await failed).toEqual({ error: ForwardSelectionError.LoadFailed });
   });
 
@@ -952,6 +1025,7 @@ describe('ConversationPage', () => {
   it('hides the desktop return-to-chat button for a thread opened from the chat list', async () => {
     vi.spyOn(TestBed.inject(Location), 'getState').mockReturnValue({ fromChatList: true });
     await enterThread();
+    await settleMetadata();
     expect(component['showBackToChat']()).toBe(false);
   });
 
@@ -969,6 +1043,7 @@ describe('ConversationPage', () => {
 
   it('returns a directly opened thread to its parent conversation', async () => {
     await enterThread();
+    await settleMetadata();
     vi.mocked(TestBed.inject(IonRouterOutlet).canGoBack).mockReturnValue(false);
     const back = vi.spyOn(TestBed.inject(Location), 'back').mockImplementation(() => {});
     const navigate = vi.spyOn(TestBed.inject(NavController), 'navigateBack').mockResolvedValue(true);
@@ -979,6 +1054,7 @@ describe('ConversationPage', () => {
 
   it('returns a thread to its root message on desktop', async () => {
     await enterThread();
+    await settleMetadata();
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
     component['backToChat']();
     expect(navigate).toHaveBeenCalledWith(['/chats/chat', wireChat.id], {
@@ -1020,8 +1096,8 @@ describe('ConversationPage', () => {
     const muting = component['toggleMute']();
     await component['toggleMute'](); // A second tap while busy must not submit a duplicate.
     await vi.waitFor(() => {
-      const request = http.expectOne({ method: 'PUT', url: `/_api/group/${wireChat.id}/notification-setting` });
-      expect(request.request.body).toEqual({ mode: 'temporarilyMuted', durationSeconds: 3600 });
+      const request = peer.expect('groups.updateNotificationSetting', (params) => params['chatId'] === wireChat.id);
+      expect(request.params).toEqual({ chatId: wireChat.id, mode: 'temporarilyMuted', durationSeconds: 3600 });
       request.flush({ mutedUntil: '9999-12-31T23:59:59Z', archived: false });
     });
     await muting;
@@ -1051,8 +1127,8 @@ describe('ConversationPage', () => {
     });
     const unmuting = fixture.componentInstance['toggleMute']();
     await vi.waitFor(() =>
-      http
-        .expectOne({ method: 'PUT', url: `/_api/group/${wireChat.id}/notification-setting` })
+      peer
+        .expect('groups.updateNotificationSetting', (params) => params['chatId'] === wireChat.id)
         .flush({ mutedUntil: null, muteOverride: false }),
     );
     await unmuting;
@@ -1123,19 +1199,22 @@ describe('ConversationPage', () => {
   async function enterThread(rootId = '100', read: { lastReadMessageId?: string } = { lastReadMessageId: '101' }) {
     fixture.componentRef.setInput('threadId', rootId);
     fixture.detectChanges();
-    http.expectOne(`/_api/chats/${wireChat.id}/messages/${rootId}`).flush({
+    peer.expect('messages.get', { chatId: wireChat.id, messageId: rootId }).flush({
       ...wireMessage,
       id: rootId,
       clientGeneratedId: `root-${rootId}`,
     });
     expect(TestBed.inject(ChatStore).loadSubscription).toHaveBeenCalledWith(testChat.id, encodeId(rootId));
     subscriptions.update((statuses) => new Map(statuses).set(encodeId(rootId), { subscribed: false, archived: false }));
-    http.expectOne(`/_api/chats/${wireChat.id}/threads/${rootId}/read-state`).flush({ ...read });
+    peer.expect('threads.getReadState', { chatId: wireChat.id, threadRootId: rootId }).flush({ ...read });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    http
-      .expectOne(
-        `/_api/chats/${wireChat.id}/messages?max=50&around=${read.lastReadMessageId ?? rootId}&threadId=${rootId}`,
-      )
+    peer
+      .expect('messages.list', {
+        chatId: wireChat.id,
+        max: 50,
+        around: read.lastReadMessageId ?? rootId,
+        threadId: rootId,
+      })
       .flush({
         chatSettings: { showMembershipMessages: true },
         messages: [
@@ -1162,20 +1241,21 @@ describe('ConversationPage', () => {
   async function reenter() {
     component.ionViewWillEnter();
     if (component.threadId())
-      for (const req of http.match(`/_api/chats/${wireChat.id}/messages/${decodeId(component.threadId()!)}`))
-        req.flush({ ...wireMessage, id: decodeId(component.threadId()!) });
+      for (const req of peer.match('messages.get')) req.flush({ ...wireMessage, id: decodeId(component.threadId()!) });
     const threadId = component.threadId();
     if (threadId) {
-      for (const req of http.match(`/_api/chats/${wireChat.id}/messages/${decodeId(threadId)}`))
-        req.flush({ ...wireMessage, id: decodeId(threadId) });
-      http
-        .expectOne(`/_api/chats/${wireChat.id}/threads/${decodeId(threadId)}/read-state`)
+      for (const req of peer.match('messages.get')) req.flush({ ...wireMessage, id: decodeId(threadId) });
+      peer
+        .expect('threads.getReadState', { chatId: wireChat.id, threadRootId: decodeId(threadId) })
         .flush({ lastReadMessageId: '101' });
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
-    http
-      .expectOne(
-        `/_api/chats/${wireChat.id}/messages?max=50${threadId ? `&around=101&threadId=${decodeId(threadId)}` : ''}`,
+    peer
+      .expect(
+        'messages.list',
+        threadId
+          ? { chatId: wireChat.id, max: 50, around: '101', threadId: decodeId(threadId) }
+          : { chatId: wireChat.id, max: 50 },
       )
       .flush({
         chatSettings: { showMembershipMessages: true },
@@ -1193,9 +1273,9 @@ describe('ConversationPage', () => {
       component = fixture.componentInstance;
       fixture.componentRef.setInput('id', wireChat.id);
       fixture.detectChanges();
-      const initial = http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`);
+      const initial = peer.expect('messages.list', { chatId: wireChat.id, max: 50 });
       if (state === 'failed') {
-        initial.flush('', { status: 503, statusText: 'Unavailable' });
+        initial.error(RpcErrorCode.Unavailable);
         await fixture.whenStable();
         expect(component['conversation'].error()).toBe(ConversationError.Open);
       } else {
@@ -1210,9 +1290,8 @@ describe('ConversationPage', () => {
       fixture.detectChanges();
       const item = component['outbox'].items()[0];
       const operation = item.operation;
-      const request = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
-      expect(request.request.method).toBe('POST');
-      expect(request.request.body.message).toBe('页面未加载也能发送');
+      const request = peer.expect('messages.send', (params) => params['chatId'] === wireChat.id);
+      expect(request.params?.['message']).toBe('页面未加载也能发送');
       expect(component['conversation'].page()).toBeUndefined();
       expect(component['draft']()).toBe('');
       expect(component['rows']()).toHaveLength(1);
@@ -1220,11 +1299,12 @@ describe('ConversationPage', () => {
       expect(local.nativeElement.textContent).toContain('页面未加载也能发送');
       expect((local.componentInstance as Message<MessageContent>).delivery()).toBe(MessageDelivery.Sending);
       expect(component['pendingNavigation']()?.type).toBe(ConversationTargetKind.Latest);
-      const latest = http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`);
-      if (state === 'loading') expect(initial.cancelled).toBe(true);
+      const latest = peer.expect('messages.list', { chatId: wireChat.id, max: 50 });
       typeText('继续输入下一条');
       expect((fixture.nativeElement.querySelector('.send-button') as HTMLButtonElement).disabled).toBe(false);
-      latest.flush('', { status: 503, statusText: 'Unavailable' });
+      latest.error(RpcErrorCode.Unavailable);
+      if (state === 'loading')
+        initial.flush({ chatSettings: { showMembershipMessages: true }, messages: [wireMessage] });
       request.flush({
         ...wireMessage,
         id: '9007199254741005',
@@ -1253,7 +1333,7 @@ describe('ConversationPage', () => {
     const loading = component['loadPage'](PageDirection.Older);
     await Promise.resolve();
     const older = { ...testMessage, id: encodeId('9007199254741001'), message: '更早的消息' };
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&before=${wireMessage.id}`).flush({
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, before: wireMessage.id }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [{ ...wireMessage, id: decodeId(older.id), message: older.message }],
       olderCursor: null,
@@ -1268,8 +1348,8 @@ describe('ConversationPage', () => {
     content.dispatchEvent(new Event('ionScrollStart'));
     const loading = component['loadPage'](PageDirection.Older);
     await Promise.resolve();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50&before=${wireMessage.id}`)
+    peer
+      .expect('messages.list', { chatId: wireChat.id, max: 50, before: wireMessage.id })
       .flush({ chatSettings: { showMembershipMessages: true }, messages: [{ ...wireMessage, id: '100' }] });
     await Promise.resolve();
     content.dispatchEvent(new Event('touchend'));
@@ -1283,6 +1363,7 @@ describe('ConversationPage', () => {
   it('prefetches older messages within one and a half viewports', async () => {
     component.ionViewDidEnter();
     await fixture.whenStable();
+    await settleMetadata();
     Object.defineProperties(scroll, {
       clientHeight: { value: 500 },
       scrollHeight: { value: 3000 },
@@ -1290,8 +1371,8 @@ describe('ConversationPage', () => {
     scroll.scrollTop = 700;
     await component['onScroll']();
     await Promise.resolve();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50&before=${wireMessage.id}`)
+    peer
+      .expect('messages.list', { chatId: wireChat.id, max: 50, before: wireMessage.id })
       .flush({ chatSettings: { showMembershipMessages: true }, messages: [{ ...wireMessage, id: '100' }] });
     await fixture.whenStable();
     expect(component['conversation'].items()).toHaveLength(2);
@@ -1350,9 +1431,7 @@ describe('ConversationPage', () => {
     expect(fixture.nativeElement.querySelector('.message-list')).toBe(list);
     expect(component['conversation'].items()).toEqual([testMessage]);
     await component['locatePin']();
-    http
-      .expectOne((req) => req.url.endsWith('/messages') && req.params.get('around') === '100')
-      .flush('', { status: 503, statusText: 'Unavailable' });
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '100' }).error(RpcErrorCode.Unavailable);
     await pending;
     fixture.detectChanges();
     expect(button.disabled).toBe(false);
@@ -1362,7 +1441,7 @@ describe('ConversationPage', () => {
   });
 
   it('shows pins below the title, cycles navigation and removes the bar when unpinned', async () => {
-    expect(TestBed.inject(PinsService).listPins).toHaveBeenCalledWith(testChat.id);
+    peer.expectNone('pins.list');
     expect(fixture.nativeElement.querySelector('.pinned-bar')).toBeNull();
     pinMessage('201');
     const newer = { ...testMessage, id: encodeId('9007199254741010'), message: '较新的置顶' };
@@ -1506,6 +1585,7 @@ describe('ConversationPage', () => {
     await fixture.whenStable();
     expect(fixture.nativeElement.querySelector('.pinned-bar')).toBeNull();
     await enterThread();
+    await settleMetadata();
     expect(fixture.nativeElement.querySelector('.pinned-bar')).toBeNull();
     component['scrolling'].scrollStart();
     pinMessage('202');
@@ -1523,12 +1603,13 @@ describe('ConversationPage', () => {
   it('uses this topic pin collection and resets the selected preview on entry', async () => {
     pinMessage('201');
     await enterThread();
-    expect(TestBed.inject(PinsService).listThreadPins).toHaveBeenCalledWith(testChat.id, encodeId('100'));
+    peer.expect('pins.listForThread', { chatId: wireChat.id, threadRootId: '100' }).flush({ pins: [] });
     expect(component['selectedPin']()).toBeUndefined();
     pinMessage('202');
     await fixture.whenStable();
     const link = fixture.debugElement.query(By.directive(RouterLink)).injector.get(RouterLink).urlTree!;
     expect(TestBed.inject(Router).serializeUrl(link)).toBe(`/chats/chat/${wireChat.id}/thread/100/pins`);
+    await settleMetadata();
   });
 
   it('keeps the fixed button mounted while scrolling across the latest-message threshold', async () => {
@@ -1583,6 +1664,8 @@ describe('ConversationPage', () => {
     const dateRect = vi.spyOn(separator, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 12, 300, 40));
     component.ionViewWillEnter();
     component.ionViewDidEnter();
+    await fixture.whenStable();
+    await settleMetadata();
     component['scrolling'].scrollStart();
     await component['trackScroll']();
     fixture.detectChanges();
@@ -1606,7 +1689,7 @@ describe('ConversationPage', () => {
     component['activate'](testChat.id);
     await fixture.whenStable();
     expect(component['showDownButton']()).toBe(false);
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`).flush({
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50 }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [{ ...wireMessage }],
       olderCursor: wireMessage.id,
@@ -1675,14 +1758,14 @@ describe('ConversationPage', () => {
     expect(data.unreadCount(testChat.id, testMessage.id)).toBe(5);
     expect(data.unreadCount(testChat.id, encodeId('999'))).toBe(0);
     expect(data.unreadCount(testChat.id)).toBe(37);
-    http.expectNone(() => true);
+    peer.verify();
   });
 
   it('returns through nested reply jumps before going to the latest loaded messages', async () => {
     Object.defineProperty(Element.prototype, 'animate', { value: vi.fn(), configurable: true });
     try {
       const opening = component['conversation'].open(encodeId('200'));
-      http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=200`).flush({
+      peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '200' }).flush({
         chatSettings: { showMembershipMessages: true },
         messages: [100, 200, 300].map((id) => ({ ...wireMessage, id: String(id) })),
       });
@@ -1699,7 +1782,7 @@ describe('ConversationPage', () => {
       expect(component['returnMessageIds']()).toEqual([]);
       await component['navigateDown']();
       expect(component['navigatingDown']()).toBe(false);
-      http.expectNone(() => true);
+      peer.verify();
       component.ionViewDidLeave();
       expect(component['returnMessageIds']()).toEqual([]);
     } finally {
@@ -1717,22 +1800,20 @@ describe('ConversationPage', () => {
       messageId: encodeId('300'),
     });
     await component['navigateDown']();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=300`)
-      .flush('', { status: 503, statusText: 'Unavailable' });
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '300' }).error(RpcErrorCode.Unavailable);
     await returning;
     expect(component['navigatingDown']()).toBe(false);
     expect(component['returnMessageIds']()).toEqual([encodeId('300')]);
     const retrying = component['navigateDown']();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=300`)
+    peer
+      .expect('messages.list', { chatId: wireChat.id, max: 50, around: '300' })
       .flush({ chatSettings: { showMembershipMessages: true }, messages: [{ ...wireMessage, id: '299' }] });
     await retrying;
     expect(component['returnMessageIds']()).toEqual([]);
     expect(component['conversation'].error()).toBe(ConversationError.Missing);
     await component['navigateDown']();
     expect(component['conversation'].error()).toBeUndefined();
-    http.expectNone(() => true);
+    peer.verify();
   });
 
   it('forgets return points reached by manual scrolling and on leaving the conversation', async () => {
@@ -1743,6 +1824,8 @@ describe('ConversationPage', () => {
     const later = encodeId('9007199254741999');
     component['returnMessageIds'].set([later, testMessage.id]);
     component.ionViewDidEnter();
+    await fixture.whenStable();
+    await settleMetadata();
     await component['trackScroll']();
     expect(component['returnMessageIds']()).toEqual([later]);
     component.ionViewDidLeave();
@@ -1751,7 +1834,7 @@ describe('ConversationPage', () => {
 
   async function openUnreadHistory() {
     const opening = component['conversation'].open(encodeId('100'));
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=100`).flush({
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [100, 101, 102].map((id) => ({
         ...wireMessage,
@@ -1787,7 +1870,7 @@ describe('ConversationPage', () => {
     await component['positionAndRead']();
     expect(scroll.scrollTop).toBe(900);
     expect(component['navigatingDown']()).toBe(false);
-    http.expectNone(() => true);
+    peer.verify();
   });
 
   it('keeps going to the latest messages when the unread start is already on screen', async () => {
@@ -1797,8 +1880,8 @@ describe('ConversationPage', () => {
     mockUnreadStartAt(100);
     const navigating = component['navigateDown']();
     await vi.waitFor(() =>
-      http
-        .expectOne(`/_api/chats/${wireChat.id}/messages?max=50`)
+      peer
+        .expect('messages.list', { chatId: wireChat.id, max: 50 })
         .flush({ chatSettings: { showMembershipMessages: true }, messages: [{ ...wireMessage }] }),
     );
     await navigating;
@@ -1814,8 +1897,8 @@ describe('ConversationPage', () => {
     expect(component['unreadStartId']()).toBeUndefined();
     const navigating = component['navigateDown']();
     await vi.waitFor(() =>
-      http
-        .expectOne(`/_api/chats/${wireChat.id}/messages?max=50`)
+      peer
+        .expect('messages.list', { chatId: wireChat.id, max: 50 })
         .flush({ chatSettings: { showMembershipMessages: true }, messages: [{ ...wireMessage }] }),
     );
     await navigating;
@@ -1830,7 +1913,7 @@ describe('ConversationPage', () => {
     component['returnMessageIds'].set([encodeId('300')]);
     const navigating = component['navigateDown']();
     await vi.waitFor(() =>
-      http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=300`).flush({
+      peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '300' }).flush({
         chatSettings: { showMembershipMessages: true },
         messages: [{ ...wireMessage, id: '300' }],
       }),
@@ -1867,13 +1950,11 @@ describe('ConversationPage', () => {
       const bottom = message.getBoundingClientRect().bottom;
       const loading = component['loadPage'](PageDirection.Older);
       await Promise.resolve();
-      http
-        .expectOne((req) => req.url.endsWith('/messages') && req.params.has('before'))
-        .flush({
-          chatSettings: { showMembershipMessages: true },
-          messages: [{ ...wireMessage, id: '100', clientGeneratedId: 'older-100' }],
-          olderCursor: '100',
-        });
+      peer.expect('messages.list', { chatId: wireChat.id, max: 50, before: wireMessage.id }).flush({
+        chatSettings: { showMembershipMessages: true },
+        messages: [{ ...wireMessage, id: '100', clientGeneratedId: 'older-100' }],
+        olderCursor: '100',
+      });
       await loading;
       await fixture.whenStable();
       expect(message.querySelector('.sender')).toBeNull();
@@ -1895,7 +1976,7 @@ describe('ConversationPage', () => {
     scroll.scrollTop = 50;
     const loading = component['loadPage'](PageDirection.Older);
     await Promise.resolve();
-    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&before=${wireMessage.id}`);
+    const request = peer.expect('messages.list', { chatId: wireChat.id, max: 50, before: wireMessage.id });
     await fixture.whenStable();
     expect(component['conversation'].pagingDirection()).toBe(PageDirection.Older);
     expect(button.querySelector('ion-icon')).toBeNull();
@@ -1918,7 +1999,7 @@ describe('ConversationPage', () => {
   it('confirms unpin in the normal message menu before removing it', async () => {
     TestBed.inject(ChatStore).invalidate();
     const details = TestBed.inject(ChatStore).ensureDetails(testChat.id);
-    http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...structuredClone(wireChat), myRole: GroupRole.admin });
+    peer.expect('groups.get', { chatId: wireChat.id }).flush({ ...structuredClone(wireChat), myRole: GroupRole.admin });
     const pinId = encodeId('200');
     events.next({
       type: ServerWsMessageType.pinAdded,
@@ -1942,14 +2023,14 @@ describe('ConversationPage', () => {
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('app-message-menu ion-alert').header).toBe('取消置顶');
     expect(fixture.nativeElement.querySelector('app-message-menu ion-alert').isOpen).toBe(true);
-    http.expectNone((request) => request.method === 'DELETE');
+    peer.expectNone('messages.delete');
     await component['menu']()!['confirm'](new CustomEvent('didDismiss', { detail: { role: 'cancel' } }));
     expect(component['pins']().items()).toHaveLength(1);
     select();
     await component['menu']()!['choose'](MessageAction.Pin);
     const removing = component['menu']()!['confirm'](new CustomEvent('didDismiss', { detail: { role: 'confirm' } }));
     await Promise.resolve();
-    http.expectOne(`/_api/chats/${wireChat.id}/pins/200`).flush(null);
+    peer.expect('pins.delete', { chatId: wireChat.id, pinId: '200' }).flush(null);
     await removing;
     expect(component['menu']()!['notice']()).toBe(MessageNotice.Unpinned);
   });
@@ -1957,7 +2038,9 @@ describe('ConversationPage', () => {
   it('blocks pin actions when membership no longer permits them', async () => {
     TestBed.inject(ChatStore).invalidate();
     const details = TestBed.inject(ChatStore).ensureDetails(testChat.id);
-    http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...structuredClone(wireChat), myRole: GroupRole.member });
+    peer
+      .expect('groups.get', { chatId: wireChat.id })
+      .flush({ ...structuredClone(wireChat), myRole: GroupRole.member });
     await details;
     component['menu']()!['selection'].set({
       messageId: testMessage.id,
@@ -1969,7 +2052,7 @@ describe('ConversationPage', () => {
     expect(component['menu']()!['confirmation']()).toBeUndefined();
     component['menu']()!['confirmation'].set({ action: MessageAction.Pin, message: testMessage, pinned: true });
     await component['menu']()!['confirm'](new CustomEvent('didDismiss', { detail: { role: 'confirm' } }));
-    http.expectNone((request) => request.url.includes('/pins'));
+    peer.expectNone('pins.delete');
     component['menu']()!['selection'].set(undefined);
   });
 
@@ -1977,17 +2060,20 @@ describe('ConversationPage', () => {
     component['draft'].set('旧会话草稿');
     const loading = component['loadPage'](PageDirection.Older);
     await Promise.resolve();
-    const oldPage = http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&before=${wireMessage.id}`);
+    const oldPage = peer.expect('messages.list', { chatId: wireChat.id, max: 50, before: wireMessage.id });
     fixture.componentRef.setInput('id', '9007199254740995');
     fixture.detectChanges();
-    http.expectOne('/_api/group/9007199254740995').flush({ ...wireChat, id: '9007199254740995' });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    http
-      .expectOne('/_api/chats/9007199254740995/messages?max=50')
+    peer.expect('groups.get', { chatId: '9007199254740995' }).flush({ ...wireChat, id: '9007199254740995' });
+    const nextTick = deferred<void>();
+    setTimeout(nextTick.resolve, 0);
+    await nextTick.promise;
+    peer
+      .expect('messages.list', { chatId: '9007199254740995', max: 50 })
       .flush({ chatSettings: { showMembershipMessages: true }, messages: [], olderCursor: null });
     await Promise.resolve();
+    await settleMetadata();
     fixture.detectChanges();
-    expect(oldPage.cancelled).toBe(true);
+    oldPage.flush({ chatSettings: { showMembershipMessages: true }, messages: [{ ...wireMessage, id: 'stale-page' }] });
     await loading;
     expect(component['conversation'].items()).toEqual([]);
     expect(component['draft']()).toBe('');
@@ -2020,7 +2106,7 @@ describe('ConversationPage', () => {
     expect(row.querySelector('ion-avatar')).toBe(avatar);
     expect(component['draft']()).toBe('群里的草稿');
     expect(fixture.nativeElement.querySelector('.message-skeleton')).toBeNull();
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&after=${wireMessage.id}`).flush({
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, after: wireMessage.id }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [
         {
@@ -2063,11 +2149,13 @@ describe('ConversationPage', () => {
     expect(write).toHaveBeenCalledOnce();
   });
 
-  it('saves on backgrounding or pagehide, without saving on a visible event or after leaving', () => {
+  it('saves on backgrounding or pagehide, without saving on a visible event or after leaving', async () => {
     const drafts = TestBed.inject(DraftStore);
     const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
     component['updateDraft']('后台保留');
     document.dispatchEvent(new Event('visibilitychange'));
+    await fixture.whenStable();
+    await settleMetadata();
     expect(drafts.get(testChat.id)).toBeUndefined();
     hidden.mockReturnValue(true);
     document.dispatchEvent(new Event('visibilitychange'));
@@ -2124,7 +2212,7 @@ describe('ConversationPage', () => {
       const drafts = TestBed.inject(DraftStore);
       component['updateDraft']('正在发送');
       const sending = component['sendMessage']();
-      const request = http.expectOne((req) => req.method === 'POST' && req.url.endsWith('/messages'));
+      const request = peer.expect('messages.send', (params) => params['chatId'] === wireChat.id);
       expect(component['draft']()).toBe('');
       expect(drafts.get(testChat.id)).toBeUndefined();
       component['updateDraft']('下一条草稿');
@@ -2142,7 +2230,7 @@ describe('ConversationPage', () => {
       request.flush({
         ...wireMessage,
         id: '9007199254741005',
-        clientGeneratedId: request.request.body.clientGeneratedId,
+        clientGeneratedId: request.params?.['clientGeneratedId'],
         message: '正在发送',
       });
       await sending;
@@ -2161,22 +2249,21 @@ describe('ConversationPage', () => {
     component.ionViewDidLeave();
     component.ionViewWillEnter();
     if (component.threadId())
-      for (const req of http.match(`/_api/chats/${wireChat.id}/messages/${decodeId(component.threadId()!)}`))
-        req.flush({ ...wireMessage, id: decodeId(component.threadId()!) });
+      for (const req of peer.match('messages.get')) req.flush({ ...wireMessage, id: decodeId(component.threadId()!) });
     await fixture.whenStable();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50`)
+    peer
+      .expect('messages.list', { chatId: wireChat.id, max: 50 })
       .flush({ chatSettings: { showMembershipMessages: true }, messages: [structuredClone(wireMessage)] });
     await fixture.whenStable();
     expect(component['draft']()).toBe('保留草稿');
     const sending = component['sendMessage']();
     expect(component['draft']()).toBe('');
     expect(TestBed.inject(DraftStore).get(testChat.id)).toBeUndefined();
-    const request = http.expectOne((req) => req.method === 'POST' && req.url.endsWith('/messages'));
+    const request = peer.expect('messages.send', (params) => params['chatId'] === wireChat.id);
     request.flush({
       ...wireMessage,
       id: '9007199254741005',
-      clientGeneratedId: request.request.body.clientGeneratedId,
+      clientGeneratedId: request.params?.['clientGeneratedId'],
       message: '保留草稿',
     });
     await sending;
@@ -2189,12 +2276,11 @@ describe('ConversationPage', () => {
     drafts.save(testChat.id, undefined, '回复草稿', testMessage.id);
     component.ionViewWillEnter();
     if (component.threadId())
-      for (const req of http.match(`/_api/chats/${wireChat.id}/messages/${decodeId(component.threadId()!)}`))
-        req.flush({ ...wireMessage, id: decodeId(component.threadId()!) });
+      for (const req of peer.match('messages.get')) req.flush({ ...wireMessage, id: decodeId(component.threadId()!) });
     await fixture.whenStable();
-    const replyRequest = http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}`);
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50`)
+    const replyRequest = peer.expect('messages.get', { chatId: wireChat.id, messageId: wireMessage.id });
+    peer
+      .expect('messages.list', { chatId: wireChat.id, max: 50 })
       .flush({ chatSettings: { showMembershipMessages: true }, messages: [structuredClone(wireMessage)] });
     component['updateDraft']('继续编辑');
     expect(drafts.get(testChat.id)?.replyTo).toBe(wireMessage.id);
@@ -2213,7 +2299,7 @@ describe('ConversationPage', () => {
     const item = component['outbox'].items()[0];
     expect(component['draft']()).toBe('');
     expect(component['rows']().at(-1)?.outgoing).toBe(item);
-    http.expectOne(`/_api/chats/${wireChat.id}/messages`).flush('', { status: 503, statusText: 'Unavailable' });
+    peer.expect('messages.send', (params) => params['chatId'] === wireChat.id).error(RpcErrorCode.Unavailable);
     await sending;
     fixture.detectChanges();
     const row: HTMLElement = fixture.nativeElement.querySelector('app-message:last-child');
@@ -2233,24 +2319,23 @@ describe('ConversationPage', () => {
     fixture.detectChanges();
     expect(item.delivery()).toBe(MessageDelivery.Sending);
     expect(fixture.nativeElement.querySelector('app-message:last-child .retry-button')).toBeNull();
-    http.expectOne(`/_api/chats/${wireChat.id}/messages`).flush('', { status: 503, statusText: 'Unavailable' });
+    peer.expect('messages.send', (params) => params['chatId'] === wireChat.id).error(RpcErrorCode.Unavailable);
     await retrying;
     await fixture.whenStable();
     expect(item.delivery()).toBe(MessageDelivery.Failed);
     expect(fixture.nativeElement.querySelector('app-message:last-child .retry-button ion-icon')).not.toBeNull();
   });
 
-  it.each(['http', 'websocket'])(
+  it.each(['response', 'notification'])(
     'retries the failed row with the same UUID and renders one confirmation when %s arrives first',
     async (firstAcknowledgement) => {
       component['draft'].set('  新消息  ');
       const sending = component['sendMessage']();
       const item = component['outbox'].items()[0];
-      const first = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
-      expect(first.request.method).toBe('POST');
-      expect(first.request.body.message).toBe('新消息');
-      const body = structuredClone(first.request.body);
-      expect(body.clientGeneratedId).toBe(item.clientGeneratedId);
+      const first = peer.expect('messages.send', (params) => params['chatId'] === wireChat.id);
+      expect(first.params?.['message']).toBe('新消息');
+      const body = structuredClone(first.params);
+      expect(body?.['clientGeneratedId']).toBe(item.clientGeneratedId);
       expect(component['draft']()).toBe('');
       fixture.detectChanges();
       const local = fixture.debugElement.queryAll(By.directive(Message)).at(-1)!;
@@ -2258,7 +2343,7 @@ describe('ConversationPage', () => {
       expect(message.message().id).toBeUndefined();
       expect(message.delivery()).toBe(MessageDelivery.Sending);
       expect(local.nativeElement.textContent).toContain('新消息');
-      first.flush('', { status: 503, statusText: 'Unavailable' });
+      first.error(RpcErrorCode.Unavailable);
       await sending;
       fixture.detectChanges();
       expect(component['draft']()).toBe('');
@@ -2269,24 +2354,23 @@ describe('ConversationPage', () => {
       component['startReply'](testMessage);
       const retrying = component['outbox'].retry(item);
       expect(component['outbox'].retry(item)).toBe(retrying);
-      const retry = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
-      expect(retry.request.body).toEqual(body);
+      const retry = peer.expect('messages.send', (params) => params['chatId'] === wireChat.id);
+      expect(retry.params).toEqual(body);
       const response = {
         ...wireMessage,
         id: '9007199254741005',
-        clientGeneratedId: retry.request.body.clientGeneratedId,
+        clientGeneratedId: item.clientGeneratedId,
         message: '新消息',
       };
       const echoed = { ...response, id: encodeId(response.id), chatId: testChat.id };
-      if (firstAcknowledgement === 'websocket') {
+      if (firstAcknowledgement === 'notification') {
         incoming.next(echoed);
         fixture.detectChanges();
         expect(fixture.debugElement.queryAll(By.directive(Message))).toHaveLength(2);
       }
-      if (firstAcknowledgement === 'websocket') expect(retry.cancelled).toBe(true);
-      else retry.flush(structuredClone(response));
+      retry.flush(structuredClone(response));
       await retrying;
-      if (firstAcknowledgement === 'http') incoming.next(echoed);
+      if (firstAcknowledgement === 'response') incoming.next(echoed);
       await fixture.whenStable();
       expect(component['conversation'].items()).toHaveLength(2);
       expect(component['rows']().filter((row) => row.key === item.clientGeneratedId)).toHaveLength(1);
@@ -2308,7 +2392,7 @@ describe('ConversationPage', () => {
     timestamp.mockReturnValueOnce('2000-01-02T00:00:00Z');
     component['updateDraft']('第一条本地消息');
     const firstSending = component['sendMessage']();
-    const firstRequest = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+    const firstRequest = peer.expect('messages.send', (params) => params['chatId'] === wireChat.id);
     timestamp.mockReturnValueOnce('2000-01-01T00:00:00Z');
     component['updateDraft']('第二条本地消息');
     void component['sendMessage']();
@@ -2316,7 +2400,7 @@ describe('ConversationPage', () => {
     expect(first.clientGeneratedId).not.toBe(second.clientGeneratedId);
     expect(first.message().createdAt).toBe('2000-01-02T00:00:00Z');
     expect(second.message().createdAt).toBe('2000-01-01T00:00:00Z');
-    http.expectNone((req) => req.method === 'POST');
+    peer.expectNone('messages.send');
     incoming.next({
       ...testMessage,
       id: encodeId('9007199254741005'),
@@ -2340,12 +2424,14 @@ describe('ConversationPage', () => {
     firstRequest.flush({
       ...wireMessage,
       id: '9007199254741007',
-      clientGeneratedId: firstRequest.request.body.clientGeneratedId,
+      clientGeneratedId: firstRequest.params?.['clientGeneratedId'],
       message: '第一条本地消息',
     });
     await firstSending;
-    const secondRequest = await vi.waitFor(() => http.expectOne(`/_api/chats/${wireChat.id}/messages`));
-    secondRequest.flush('', { status: 503, statusText: 'Unavailable' });
+    const secondRequest = await vi.waitFor(() =>
+      peer.expect('messages.send', (params) => params['chatId'] === wireChat.id),
+    );
+    secondRequest.error(RpcErrorCode.Unavailable);
     await vi.waitFor(() => expect(second.delivery()).toBe(MessageDelivery.Failed));
     await fixture.whenStable();
     const rows = fixture.debugElement.queryAll(By.directive(Message));
@@ -2362,9 +2448,11 @@ describe('ConversationPage', () => {
     const attachmentItem = component['outbox'].items()[0];
     typeText('先发的文字');
     (fixture.nativeElement.querySelector('.send-button') as HTMLButtonElement).click();
-    const firstText = await vi.waitFor(() => http.expectOne(`/_api/chats/${wireChat.id}/messages`));
-    expect(firstText.request.body.message).toBe('先发的文字');
-    expect(firstText.request.body.attachmentIds).toEqual([]);
+    const firstText = await vi.waitFor(() =>
+      peer.expect('messages.send', (params) => params['chatId'] === wireChat.id),
+    );
+    expect(firstText.params?.['message']).toBe('先发的文字');
+    expect(firstText.params?.['attachmentIds']).toEqual([]);
     typeText('后发的文字');
     (fixture.nativeElement.querySelector('.send-button') as HTMLButtonElement).click();
     const [, firstTextItem, secondTextItem] = component['outbox'].items();
@@ -2372,7 +2460,7 @@ describe('ConversationPage', () => {
     expect(component['rows']()).toHaveLength(4);
     expect(attachmentItem.delivery()).toBe(MessageDelivery.Sending);
     expect(media.upload.state().status).toBe(UploadStatus.Uploading);
-    http.expectNone((request) => request.method === 'POST');
+    peer.expectNone('messages.send');
     typeText('继续保留的草稿');
     firstText.flush({
       ...wireMessage,
@@ -2380,9 +2468,11 @@ describe('ConversationPage', () => {
       clientGeneratedId: firstTextItem.clientGeneratedId,
       message: '先发的文字',
     });
-    const secondText = await vi.waitFor(() => http.expectOne(`/_api/chats/${wireChat.id}/messages`));
-    expect(secondText.request.body.message).toBe('后发的文字');
-    expect(secondText.request.body.clientGeneratedId).toBe(secondTextItem.clientGeneratedId);
+    const secondText = await vi.waitFor(() =>
+      peer.expect('messages.send', (params) => params['chatId'] === wireChat.id),
+    );
+    expect(secondText.params?.['message']).toBe('后发的文字');
+    expect(secondText.params?.['clientGeneratedId']).toBe(secondTextItem.clientGeneratedId);
     secondText.flush({
       ...wireMessage,
       id: '9007199254741007',
@@ -2400,9 +2490,11 @@ describe('ConversationPage', () => {
       '附件消息',
     ]);
     media.finish(encodeId('100'));
-    const attachment = await vi.waitFor(() => http.expectOne(`/_api/chats/${wireChat.id}/messages`));
-    expect(attachment.request.body.message).toBe('附件消息');
-    expect(attachment.request.body.attachmentIds).toEqual(['100']);
+    const attachment = await vi.waitFor(() =>
+      peer.expect('messages.send', (params) => params['chatId'] === wireChat.id),
+    );
+    expect(attachment.params?.['message']).toBe('附件消息');
+    expect(attachment.params?.['attachmentIds']).toEqual(['100']);
     attachment.flush({
       ...wireMessage,
       id: '9007199254741009',
@@ -2429,7 +2521,7 @@ describe('ConversationPage', () => {
   it('retains live messages while older pages load and deduplicates echoed messages', async () => {
     const loading = component['loadPage'](PageDirection.Older);
     await Promise.resolve();
-    const olderRequest = http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&before=${wireMessage.id}`);
+    const olderRequest = peer.expect('messages.list', { chatId: wireChat.id, max: 50, before: wireMessage.id });
     const live = { ...testMessage, id: encodeId('9007199254741007'), message: '实时消息' };
     component['atBottom'].set(false);
     component['position'].set(undefined);
@@ -2464,7 +2556,7 @@ describe('ConversationPage', () => {
       [SystemMessageKind.member_removed, 'removed 小花'],
     ] as const;
     const loading = component['conversation'].load(PageDirection.Older);
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&before=${wireMessage.id}`).flush({
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, before: wireMessage.id }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: actions.map(([systemKind, message], index) => ({
         ...wireMessage,
@@ -2483,8 +2575,8 @@ describe('ConversationPage', () => {
     const original = fixture.nativeElement.querySelector(`[data-message-id="${wireMessage.id}"]`);
     membershipMessages.set(false);
     await fixture.whenStable();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50`)
+    peer
+      .expect('messages.list', { chatId: wireChat.id, max: 50 })
       .flush({ chatSettings: { showMembershipMessages: true }, messages: [{ ...wireMessage }] });
     await fixture.whenStable();
     expect(fixture.nativeElement.querySelectorAll('app-message')).toHaveLength(1);
@@ -2541,18 +2633,18 @@ describe('ConversationPage', () => {
     );
     membershipMessages.set(true);
     await fixture.whenStable();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50`)
+    peer
+      .expect('messages.list', { chatId: wireChat.id, max: 50 })
       .flush({ chatSettings: { showMembershipMessages: true }, messages: history });
     await fixture.whenStable();
     expect(component['rows']()).toHaveLength(16);
-    http.expectNone(() => true);
+    peer.verify();
     membershipMessages.set(false);
     TestBed.inject(ChatStore).remember([{ ...testChat, kind: GroupKind.dm }]);
     await fixture.whenStable();
-    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`).flush({});
+    peer.expect('chats.getReadReceipt', { chatId: wireChat.id }).flush({});
     expect(component['rows']()).toHaveLength(16);
-    http.expectNone(() => true);
+    peer.verify();
   });
 
   it('rebuilds the visible range when a continuation discovers settings from another device', async () => {
@@ -2564,14 +2656,14 @@ describe('ConversationPage', () => {
     await fixture.whenStable();
     const previous = component['conversation'].items();
     const loading = component['conversation'].load(PageDirection.Older);
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&before=${wireMessage.id}`).flush({
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, before: wireMessage.id }).flush({
       chatSettings: { showMembershipMessages: false },
       messages: [{ ...wireMessage, id: '50' }],
     });
     await loading;
     await fixture.whenStable();
     expect(component['conversation'].items()).toEqual(previous);
-    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`);
+    const request = peer.expect('messages.list', { chatId: wireChat.id, max: 50 });
     request.flush({ chatSettings: { showMembershipMessages: false }, messages: [{ ...wireMessage }] });
     await fixture.whenStable();
     expect(component['conversation'].hideMembershipMessages).toBe(true);
@@ -2587,15 +2679,17 @@ describe('ConversationPage', () => {
     });
     vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 200));
     const opening = component['conversation'].open(undefined, false, true);
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`).flush({
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50 }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [{ ...wireMessage, id: '100' }],
     });
     await opening;
     await fixture.whenStable();
+    await settleMetadata();
     const element = fixture.nativeElement.querySelector('app-message') as HTMLElement;
     const rect = vi.spyOn(element, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 220));
     component.ionViewDidEnter();
+    await settleMetadata();
     await component['positionAndRead']();
     const markRead = vi.mocked(TestBed.inject(ChatStore).markRead);
     markRead.mockClear();
@@ -2615,17 +2709,19 @@ describe('ConversationPage', () => {
     membershipMessages.set(false);
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
     const opening = component['conversation'].open(undefined, false, true);
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50`)
+    peer
+      .expect('messages.list', { chatId: wireChat.id, max: 50 })
       .flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
     await opening;
     await fixture.whenStable();
+    await settleMetadata();
     component.ionViewDidEnter();
+    await settleMetadata();
     await component['positionAndRead']();
     expect(fixture.nativeElement.textContent).toContain('暂无可显示的消息');
     expect(fixture.nativeElement.querySelector('.pagination-control')).toBeNull();
     expect(TestBed.inject(ChatStore).markRead).not.toHaveBeenCalled();
-    http.expectNone(() => true);
+    peer.verify();
   });
 
   it('does not send read confirmations for hidden targets or hidden live events', async () => {
@@ -2634,7 +2730,7 @@ describe('ConversationPage', () => {
     Object.defineProperty(scroll, 'clientHeight', { value: 200, configurable: true });
     Object.defineProperty(scroll, 'scrollHeight', { value: 800, configurable: true });
     const loading = component['conversation'].open(encodeId('101'), false, true);
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=101`).flush({
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '101' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [
         {
@@ -2648,7 +2744,9 @@ describe('ConversationPage', () => {
     });
     await loading;
     await fixture.whenStable();
+    await settleMetadata();
     component.ionViewDidEnter();
+    await settleMetadata();
     component['position'].set(undefined);
     const markRead = vi.mocked(TestBed.inject(ChatStore).markRead);
     markRead.mockClear();
@@ -2685,7 +2783,7 @@ describe('ConversationPage', () => {
       });
       vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 200));
       const loading = component['conversation'].open(encodeId('100'), false, true);
-      http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=100`).flush({
+      peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '100' }).flush({
         chatSettings: { showMembershipMessages: true },
         messages: [
           { ...wireMessage, id: '100', clientGeneratedId: 'visible' },
@@ -2704,9 +2802,11 @@ describe('ConversationPage', () => {
       });
       await loading;
       await fixture.whenStable();
+      await settleMetadata();
       const element = fixture.nativeElement.querySelector('app-message') as HTMLElement;
       const rect = vi.spyOn(element, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 220));
       component.ionViewDidEnter();
+      await settleMetadata();
       await component['positionAndRead']();
       const markRead = vi.mocked(TestBed.inject(ChatStore).markRead);
       markRead.mockClear();
@@ -2725,7 +2825,7 @@ describe('ConversationPage', () => {
     async (following) => {
       membershipMessages.set(false);
       const navigating = component['goTo']({ type: ConversationTargetKind.Message, messageId: encodeId('101') });
-      http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=101`).flush({
+      peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '101' }).flush({
         chatSettings: { showMembershipMessages: true },
         messages: [
           { ...wireMessage, id: '100', clientGeneratedId: 'before' },
@@ -2769,7 +2869,7 @@ describe('ConversationPage', () => {
         message: 'joined the chat',
       }));
       const loading = component['conversation'].open(encodeId('101'));
-      http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=101`).flush({
+      peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '101' }).flush({
         chatSettings: { showMembershipMessages: true },
         messages: history,
         olderCursor: '101',
@@ -2777,6 +2877,7 @@ describe('ConversationPage', () => {
       });
       await loading;
       await fixture.whenStable();
+      await settleMetadata();
       const elements = [...fixture.nativeElement.querySelectorAll('app-message')] as HTMLElement[];
       elements.forEach((element, index) =>
         vi.spyOn(element, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, index * 50, 300, 50)),
@@ -2791,15 +2892,17 @@ describe('ConversationPage', () => {
       const reopening = vi.spyOn(component['conversation'], 'open');
       component['active'].set(true);
       await fixture.whenStable();
-      let request = http.expectOne((request) => request.url.endsWith('/messages'));
-      const around = request.request.params.get('around');
+      await settleMetadata();
+      let request = peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '101' });
+      const around = request.params?.['around'];
       if (retry) {
-        request.flush('offline', { status: 503, statusText: 'Unavailable' });
+        request.error(RpcErrorCode.Unavailable, 'Unavailable');
         await fixture.whenStable();
         component.ionViewDidEnter();
         await component['positionAndRead']();
+        await settleMetadata();
         component['retryAction']();
-        request = http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=101`);
+        request = peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '101' });
       }
       const position = vi.spyOn(component['position'], 'set');
       request.flush({
@@ -2818,7 +2921,7 @@ describe('ConversationPage', () => {
       } else {
         expect(scroll.scrollTop).toBe(scroll.scrollHeight);
       }
-      http.expectNone(() => true);
+      peer.verify();
     },
   );
 
@@ -2830,7 +2933,7 @@ describe('ConversationPage', () => {
     });
     vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 200));
     const loading = component['conversation'].open(encodeId('100'));
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=100`).flush({
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [
         { ...wireMessage, id: '100', clientGeneratedId: 'before' },
@@ -2847,6 +2950,7 @@ describe('ConversationPage', () => {
     });
     await loading;
     await fixture.whenStable();
+    await settleMetadata();
     const history = component['conversation']
       .items()
       .map((message) => ({ ...wireMessage, ...message, id: decodeId(message.id), chatId: wireChat.id }));
@@ -2861,6 +2965,7 @@ describe('ConversationPage', () => {
       () => new DOMRect(0, (membershipMessages() ? 480 : 440) - scroll.scrollTop, 300, 100),
     );
     component.ionViewDidEnter();
+    await settleMetadata();
     await component['positionAndRead']();
     scroll.scrollTop = 500;
     await component['trackScroll']();
@@ -2869,12 +2974,14 @@ describe('ConversationPage', () => {
     await fixture.whenStable();
     component['active'].set(true);
     await fixture.whenStable();
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=102`).flush({
+    await settleMetadata();
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '102' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: history.filter((message) => message.id !== '101').map((message) => ({ ...message })),
     });
     await fixture.whenStable();
     component.ionViewDidEnter();
+    await settleMetadata();
     await component['positionAndRead']();
     expect(scroll.scrollTop).toBe(460);
     expect(fixture.nativeElement.querySelector('[data-message-id="102"]')).toBe(elements[2]);
@@ -2883,11 +2990,13 @@ describe('ConversationPage', () => {
     await fixture.whenStable();
     component['active'].set(true);
     await fixture.whenStable();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=102`)
+    peer
+      .expect('messages.list', { chatId: wireChat.id, max: 50, around: '102' })
       .flush({ chatSettings: { showMembershipMessages: true }, messages: history });
     await fixture.whenStable();
+    await settleMetadata();
     component.ionViewDidEnter();
+    await settleMetadata();
     await component['positionAndRead']();
     expect(scroll.scrollTop).toBe(500);
   });
@@ -2897,9 +3006,9 @@ describe('ConversationPage', () => {
     const chatId = '9007199254740995';
     fixture.componentRef.setInput('id', chatId);
     fixture.detectChanges();
-    const metadata = http.expectOne(`/_api/group/${chatId}`);
+    const metadata = peer.expect('groups.get', { chatId });
     await Promise.resolve();
-    http.expectOne(`/_api/chats/${chatId}/messages?max=50`).flush({
+    peer.expect('messages.list', { chatId, max: 50 }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [
         {
@@ -2914,6 +3023,7 @@ describe('ConversationPage', () => {
     await fixture.whenStable();
     expect(fixture.nativeElement.querySelectorAll('app-message')).toHaveLength(0);
     metadata.flush({ ...wireChat, id: chatId });
+    await settleMetadata();
     await fixture.whenStable();
     expect(fixture.nativeElement.querySelectorAll('app-message')).toHaveLength(0);
   });
@@ -2921,7 +3031,7 @@ describe('ConversationPage', () => {
   it('keeps both pagination cursors when an entire page consists of hidden membership messages', async () => {
     membershipMessages.set(false);
     const opening = component['conversation'].open(encodeId('101'), false, true);
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=101`).flush({
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '101' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [
         {
@@ -2942,7 +3052,7 @@ describe('ConversationPage', () => {
     expect(fixture.nativeElement.textContent).not.toContain('暂无可显示的消息');
     const hiddenPage = component['loadPage'](PageDirection.Newer);
     await Promise.resolve();
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&after=101`).flush({
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, after: '101' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [
         {
@@ -2962,7 +3072,7 @@ describe('ConversationPage', () => {
     expect(component['conversation'].page()?.newerCursor).toBe(encodeId('102'));
     const visiblePage = component['loadPage'](PageDirection.Newer);
     await Promise.resolve();
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&after=102`).flush({
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, after: '102' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [{ ...wireMessage, id: '103', clientGeneratedId: 'visible' }],
     });
@@ -2993,13 +3103,14 @@ describe('ConversationPage', () => {
     expect(fixture.nativeElement.querySelector('.reply-context').textContent).toContain('测试用户');
     const sending = component['sendMessage']();
     const item = component['outbox'].items()[0];
-    const first = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
-    expect(first.request.body.replyToId).toBe(wireMessage.id);
+    const first = peer.expect('messages.send');
+    expect(first.params?.['chatId']).toBe(wireChat.id);
+    expect(first.params?.['replyToId']).toBe(wireMessage.id);
     expect(component['draft']()).toBe('');
     expect(component['replyTo']()).toBeUndefined();
     expect(component['savedReplyId']()).toBeUndefined();
     expect(item.message().replyToMessage).toMatchObject(testMessage);
-    first.flush('', { status: 503, statusText: 'Unavailable' });
+    first.error(RpcErrorCode.Unavailable, 'Unavailable');
     await sending;
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.reply-context')).toBeNull();
@@ -3010,12 +3121,12 @@ describe('ConversationPage', () => {
     component['updateDraft']('下一条回复');
     component['startReply'](nextReply);
     const retrying = component['outbox'].retry(item);
-    const retry = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
-    expect(retry.request.body).toEqual(first.request.body);
+    const retry = peer.expect('messages.send');
+    expect(retry.params).toEqual(first.params);
     retry.flush({
       ...wireMessage,
       id: '9007199254741005',
-      clientGeneratedId: retry.request.body.clientGeneratedId,
+      clientGeneratedId: retry.params?.['clientGeneratedId'],
       message: '回复内容',
       replyToMessage: structuredClone(wireMessage),
     });
@@ -3024,10 +3135,10 @@ describe('ConversationPage', () => {
     expect(component['draft']()).toBe('下一条回复');
     expect(component['replyTo']()).toBe(nextReply);
     const nextSending = component['sendMessage']();
-    const next = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
-    expect(next.request.body.clientGeneratedId).not.toBe(item.clientGeneratedId);
-    expect(next.request.body.replyToId).toBe(decodeId(nextReply.id));
-    next.flush('', { status: 503, statusText: 'Unavailable' });
+    const next = peer.expect('messages.send');
+    expect(next.params?.['clientGeneratedId']).not.toBe(item.clientGeneratedId);
+    expect(next.params?.['replyToId']).toBe(decodeId(nextReply.id));
+    next.error(RpcErrorCode.Unavailable, 'Unavailable');
     await nextSending;
     expect(component['replyTo']()).toBeUndefined();
     expect(component['outbox'].items().at(-1)?.message().replyToMessage).toMatchObject(nextReply);
@@ -3045,9 +3156,8 @@ describe('ConversationPage', () => {
     });
     component.ionViewWillEnter();
     if (component.threadId())
-      for (const req of http.match(`/_api/chats/${wireChat.id}/messages/${decodeId(component.threadId()!)}`))
-        req.flush({ ...wireMessage, id: decodeId(component.threadId()!) });
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=100`).flush({
+      for (const req of peer.match('messages.get')) req.flush({ ...wireMessage, id: decodeId(component.threadId()!) });
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [
         { ...wireMessage, id: '100' },
@@ -3068,7 +3178,7 @@ describe('ConversationPage', () => {
     expect(component['entryReadId']()).toBe(encodeId('100'));
     expect(fixture.nativeElement.querySelector('.unread-separator')).not.toBeNull();
     TestBed.inject(ConversationNavigation).goTo(testChat.id, { type: ConversationTargetKind.Latest });
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`).flush({
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50 }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [{ ...wireMessage }],
       olderCursor: wireMessage.id,
@@ -3090,9 +3200,8 @@ describe('ConversationPage', () => {
     });
     component.ionViewWillEnter();
     if (component.threadId())
-      for (const req of http.match(`/_api/chats/${wireChat.id}/messages/${decodeId(component.threadId()!)}`))
-        req.flush({ ...wireMessage, id: decodeId(component.threadId()!) });
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=100`).flush({
+      for (const req of peer.match('messages.get')) req.flush({ ...wireMessage, id: decodeId(component.threadId()!) });
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [
         { ...wireMessage, id: '100' },
@@ -3212,7 +3321,7 @@ describe('ConversationPage', () => {
 
   it('does not pin a historical range to the bottom on resize and releases observation on destroy', async () => {
     const opening = component['conversation'].open(encodeId('100'));
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=100`).flush({
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [{ ...wireMessage }],
       newerCursor: wireMessage.id,
@@ -3228,19 +3337,13 @@ describe('ConversationPage', () => {
     expect(resizes.has(scroll)).toBe(false);
   });
 
-  function useReactionHttp() {
-    const api = TestBed.inject(ChatsService);
-    if (vi.isMockFunction(api.getChatReactions)) vi.mocked(api.getChatReactions).mockRestore();
-    if (vi.isMockFunction(api.acknowledgeChatReactions)) vi.mocked(api.acknowledgeChatReactions).mockRestore();
-  }
-  function useMentionHttp() {
-    vi.mocked(TestBed.inject(ChatsService).getChatMentions).mockRestore();
-  }
   async function notificationSettled() {
     await new Promise((resolve) => setTimeout(resolve, 110));
     for (let i = 0; i < 12; i++) await Promise.resolve();
   }
+
   const reactionBoundary = '2026-10-20T00:00:00Z';
+
   function reactionNotification(id = testMessage.id) {
     events.next({
       type: ServerWsMessageType.notification,
@@ -3264,9 +3367,15 @@ describe('ConversationPage', () => {
       fixture.detectChanges();
     };
     component.ionViewDidEnter();
+    peer
+      .expect('chats.listUnreadReactions', { chatId: wireChat.id })
+      .flush({ messageIds: [], readThrough: reactionBoundary });
+    peer.expect('chats.listMentions', { chatId: wireChat.id }).flush({ messageIds: [] });
+    await notificationSettled();
+    peer
+      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
+      .flush({ unreadReactions: 0 });
     await fixture.whenStable();
-    const api = TestBed.inject(ChatsService);
-    vi.mocked(api.acknowledgeChatReactions).mockClear();
     cover(true);
     fixture.detectChanges();
     reactionNotification();
@@ -3277,7 +3386,7 @@ describe('ConversationPage', () => {
     fixture.detectChanges();
     component.ionViewWillLeave();
     await fixture.whenStable();
-    expect(api.acknowledgeChatReactions).not.toHaveBeenCalled();
+    peer.expectNone('chats.acknowledgeReactions');
   });
 
   it('ignores a snapshot covered in flight and refreshes reactions when the panel closes', async () => {
@@ -3289,32 +3398,30 @@ describe('ConversationPage', () => {
       (router.events as Subject<NavigationEnd>).next(new NavigationEnd(1, path, path));
       fixture.detectChanges();
     };
-    useReactionHttp();
     component.ionViewDidEnter();
-    const pending = http.expectOne(`/_api/chats/${wireChat.id}/reactions`);
+    peer.expect('chats.listMentions', { chatId: wireChat.id }).flush({ messageIds: [] });
+    const pending = peer.expect('chats.listUnreadReactions', { chatId: wireChat.id });
     cover(true);
     fixture.detectChanges();
     pending.flush({ messageIds: ['101'], readThrough: reactionBoundary });
     await fixture.whenStable();
-    http.expectNone(`/_api/chats/${wireChat.id}/reactions/read`);
+    peer.expectNone('chats.acknowledgeReactions');
     reactionNotification(encodeId('102'));
-    http.expectNone(`/_api/chats/${wireChat.id}/reactions`);
+    peer.expectNone('chats.listUnreadReactions');
     cover(false);
     fixture.detectChanges();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/reactions`)
+    peer
+      .expect('chats.listUnreadReactions', { chatId: wireChat.id })
       .flush({ messageIds: ['101', '102'], readThrough: reactionBoundary });
     await Promise.resolve();
     await Promise.resolve();
-    const ack = http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`);
-    expect(ack.request.body.readThrough).toBe(reactionBoundary);
+    const ack = peer.expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary });
     ack.flush({ unreadReactions: 0 });
     await fixture.whenStable();
     expect(component['reactionJumpIds']()).toEqual([encodeId('102'), encodeId('101')]);
   });
 
   it('fetches reaction IDs and acknowledges the conversation on entry', async () => {
-    useReactionHttp();
     const chatInfo = TestBed.inject(ChatStore);
     vi.spyOn(chatInfo, 'unreadReactions').mockReturnValue(2);
     const applied = vi.spyOn(chatInfo, 'applyReactionRead').mockImplementation(() => {});
@@ -3322,13 +3429,13 @@ describe('ConversationPage', () => {
 
     component.ionViewDidEnter();
     await Promise.resolve();
-    const reactions = http.expectOne(`/_api/chats/${wireChat.id}/reactions`);
+    const reactions = peer.expect('chats.listUnreadReactions', { chatId: wireChat.id });
     reactions.flush({ messageIds: ids.map(decodeId), readThrough: reactionBoundary });
+    peer.expect('chats.listMentions', { chatId: wireChat.id }).flush({ messageIds: [] });
     await Promise.resolve();
     await Promise.resolve();
 
-    const ack = http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`);
-    expect(ack.request.body).toEqual({ threadId: undefined, readThrough: reactionBoundary });
+    const ack = peer.expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary });
     ack.flush({ unreadReactions: 0 });
     await Promise.resolve();
 
@@ -3338,56 +3445,54 @@ describe('ConversationPage', () => {
   });
 
   it('fetches mention IDs on entry without acknowledging', async () => {
-    useMentionHttp();
     const chatInfo = TestBed.inject(ChatStore);
     vi.spyOn(chatInfo, 'unreadMentions').mockReturnValue(2);
+    vi.spyOn(chatInfo, 'cachedUnreadReactions').mockReturnValue(0);
     const ids = [encodeId('202'), encodeId('201')];
 
     component.ionViewDidEnter();
     await Promise.resolve();
-    await notificationSettled();
-    http.expectOne(`/_api/chats/${wireChat.id}/mentions`).flush({ messageIds: ids.map(decodeId) });
+    const mentions = peer.expect('chats.listMentions', { chatId: wireChat.id });
+    mentions.flush({ messageIds: ids.map(decodeId) });
     await Promise.resolve();
     await Promise.resolve();
 
     expect(component['mentionJumpIds']()).toEqual(ids);
     expect(component['canJumpMention']()).toBe(true);
-    http.expectNone(`/_api/chats/${wireChat.id}/reactions/read`);
+    peer.expectNone('chats.acknowledgeReactions');
   });
 
   it('shares lifecycle requests and keeps mention targets through healthy foreground restores', async () => {
-    useMentionHttp();
     const first = component['enterMentionSession']();
     const second = component['enterMentionSession']();
     expect(second).toBe(first);
-    const request = http.expectOne(`/_api/chats/${wireChat.id}/mentions`);
-    request.flush({ messageIds: ['201'] });
+    peer.expect('chats.listMentions', { chatId: wireChat.id }).flush({ messageIds: ['201'] });
     await first;
     await component['enterMentionSession']();
+    vi.spyOn(TestBed.inject(ChatStore), 'cachedUnreadReactions').mockReturnValue(0);
     component['visibilityChanged']();
     await notificationSettled();
-    http.expectNone(`/_api/chats/${wireChat.id}/mentions`);
+    peer.expectNone('chats.listMentions');
     expect(component['mentionJumpIds']()).toEqual([encodeId('201')]);
   });
 
   it('skips a confirmed zero but reads unknown counts, cancelling the query when the page leaves', async () => {
-    useMentionHttp();
     const known = vi.spyOn(TestBed.inject(ChatStore), 'cachedUnreadMentions').mockReturnValue(0);
     await component['enterMentionSession']();
-    http.expectNone(`/_api/chats/${wireChat.id}/mentions`);
+    peer.expectNone('chats.listMentions');
     component['resetMentionSession']();
     known.mockReturnValue(undefined);
     const reading = component['enterMentionSession']();
-    const request = http.expectOne(`/_api/chats/${wireChat.id}/mentions`);
+    const request = peer.expect('chats.listMentions', { chatId: wireChat.id });
     component['leave'](true);
-    expect(request.cancelled).toBe(true);
+    request.flush({ messageIds: ['201'] });
     await reading;
+    expect(component['mentionJumpIds']()).toEqual([]);
   });
 
   it('removes withdrawn mention targets before jumping and ignores them in delayed snapshots', async () => {
-    useMentionHttp();
     const reading = component['enterMentionSession']();
-    const request = http.expectOne(`/_api/chats/${wireChat.id}/mentions`);
+    const request = peer.expect('chats.listMentions', { chatId: wireChat.id });
     events.next({
       type: ServerWsMessageType.messagesBulkDeleted,
       payload: { chatId: testChat.id, messageIds: [encodeId('201'), encodeId('202')] },
@@ -3403,7 +3508,6 @@ describe('ConversationPage', () => {
   });
 
   it('refreshes mention IDs on a mention notification while the conversation is active', async () => {
-    useMentionHttp();
     const chatInfo = TestBed.inject(ChatStore);
     vi.spyOn(chatInfo, 'unreadMentions').mockReturnValue(0);
 
@@ -3419,16 +3523,15 @@ describe('ConversationPage', () => {
     });
     await Promise.resolve();
     await notificationSettled();
-    http.expectOne(`/_api/chats/${wireChat.id}/mentions`).flush({ messageIds: [decodeId(testMessage.id)] });
+    peer.expect('chats.listMentions', { chatId: wireChat.id }).flush({ messageIds: [decodeId(testMessage.id)] });
     await Promise.resolve();
     await Promise.resolve();
 
     expect(component['mentionJumpIds']()).toEqual([testMessage.id]);
-    http.expectNone(`/_api/chats/${wireChat.id}/reactions/read`);
+    peer.expectNone('chats.acknowledgeReactions');
   });
 
   it('acknowledges a reaction notification received while the conversation is active', async () => {
-    useReactionHttp();
     const chatInfo = TestBed.inject(ChatStore);
     vi.spyOn(chatInfo, 'applyReactionRead').mockImplementation(() => {});
 
@@ -3443,43 +3546,46 @@ describe('ConversationPage', () => {
       },
     });
     await Promise.resolve();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/reactions`)
+    peer
+      .expect('chats.listUnreadReactions', { chatId: wireChat.id })
       .flush({ messageIds: [decodeId(testMessage.id)], readThrough: reactionBoundary });
     await Promise.resolve();
     await Promise.resolve();
-    http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
+    peer
+      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
+      .flush({ unreadReactions: 0 });
     await Promise.resolve();
 
     expect(component['reactionJumpIds']()).toEqual([testMessage.id]);
   });
 
   it('acknowledges reactions again when leaving the conversation', async () => {
-    useReactionHttp();
     const chatInfo = TestBed.inject(ChatStore);
     vi.spyOn(chatInfo, 'unreadReactions').mockReturnValue(2);
     vi.spyOn(chatInfo, 'applyReactionRead').mockImplementation(() => {});
 
     component.ionViewDidEnter();
     await Promise.resolve();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/reactions`)
+    peer
+      .expect('chats.listUnreadReactions', { chatId: wireChat.id })
       .flush({ messageIds: [decodeId(testMessage.id)], readThrough: reactionBoundary });
+    peer.expect('chats.listMentions', { chatId: wireChat.id }).flush({ messageIds: [] });
     await Promise.resolve();
     await Promise.resolve();
-    http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
+    peer
+      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
+      .flush({ unreadReactions: 0 });
     await Promise.resolve();
 
     component.ionViewWillLeave();
     await Promise.resolve();
-    http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
+    peer.expect('chats.acknowledgeReactions', { chatId: wireChat.id }).flush({ unreadReactions: 0 });
     await Promise.resolve();
   });
 
   it('discards a delayed reaction target cleared by reading, but allows a later reaction on that message', async () => {
-    useReactionHttp();
     reactionNotification(encodeId('101'));
-    const snapshot = http.expectOne(`/_api/chats/${wireChat.id}/reactions`);
+    const snapshot = peer.expect('chats.listUnreadReactions', { chatId: wireChat.id });
     component['reactionJumpIds'].set([encodeId('101')]);
     const changes = TestBed.inject(ChatStore) as unknown as {
       changes: { next: (change: object) => void };
@@ -3488,148 +3594,171 @@ describe('ConversationPage', () => {
     expect(component['reactionJumpIds']()).toEqual([]);
     snapshot.flush({ messageIds: ['101', '102'], readThrough: reactionBoundary });
     await notificationSettled();
-    http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
+    peer
+      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
+      .flush({ unreadReactions: 0 });
     await notificationSettled();
     expect(component['reactionJumpIds']()).toEqual([encodeId('102')]);
 
     reactionNotification(encodeId('101'));
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/reactions`)
+    peer
+      .expect('chats.listUnreadReactions', { chatId: wireChat.id })
       .flush({ messageIds: ['101'], readThrough: reactionBoundary });
     await notificationSettled();
-    http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
+    peer
+      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
+      .flush({ unreadReactions: 0 });
     await notificationSettled();
     expect(component['reactionJumpIds']()).toEqual([encodeId('102'), encodeId('101')]);
   });
 
   it('preserves unvisited reaction targets when another notification arrives', async () => {
-    useReactionHttp();
     reactionNotification(encodeId('101'));
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/reactions`)
+    peer
+      .expect('chats.listUnreadReactions', { chatId: wireChat.id })
       .flush({ messageIds: ['101'], readThrough: reactionBoundary });
     await notificationSettled();
-    http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
+    peer
+      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
+      .flush({ unreadReactions: 0 });
     await notificationSettled();
     reactionNotification(encodeId('102'));
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/reactions`)
+    peer
+      .expect('chats.listUnreadReactions', { chatId: wireChat.id })
       .flush({ messageIds: ['102'], readThrough: reactionBoundary });
     await notificationSettled();
-    http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
+    peer
+      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
+      .flush({ unreadReactions: 0 });
     await notificationSettled();
     expect(component['reactionJumpIds']()).toEqual([encodeId('102'), encodeId('101')]);
   });
 
   it('shares reaction lifecycle refreshes without scheduling a second snapshot', async () => {
-    useReactionHttp();
     component['visibilityChanged']();
     component['visibilityChanged']();
-    const snapshot = http.expectOne(`/_api/chats/${wireChat.id}/reactions`);
+    const snapshot = peer.expect('chats.listUnreadReactions', { chatId: wireChat.id });
+    peer.expect('chats.listMentions', { chatId: wireChat.id }).flush({ messageIds: [] });
     snapshot.flush({ messageIds: ['101'], readThrough: reactionBoundary });
     await notificationSettled();
     component['visibilityChanged']();
-    http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
+    peer
+      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
+      .flush({ unreadReactions: 0 });
     await notificationSettled();
     component['visibilityChanged']();
-    http.expectNone(`/_api/chats/${wireChat.id}/reactions`);
+    peer.expectNone('chats.listUnreadReactions');
     expect(component['reactionJumpIds']()).toEqual([encodeId('101')]);
   });
 
   it('skips a fresh known zero reaction count but still fetches a new notification', async () => {
-    useReactionHttp();
     vi.spyOn(TestBed.inject(ChatStore), 'cachedUnreadReactions').mockReturnValue(0);
     component['visibilityChanged']();
-    http.expectNone(`/_api/chats/${wireChat.id}/reactions`);
+    peer.expect('chats.listMentions', { chatId: wireChat.id }).flush({ messageIds: [] });
+    peer.expectNone('chats.listUnreadReactions');
     reactionNotification();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/reactions`)
+    peer
+      .expect('chats.listUnreadReactions', { chatId: wireChat.id })
       .flush({ messageIds: ['101'], readThrough: reactionBoundary });
     await notificationSettled();
-    http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
+    peer
+      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
+      .flush({ unreadReactions: 0 });
     await notificationSettled();
   });
 
   it('requeries a notification received between the reaction snapshot and its acknowledgement', async () => {
-    useReactionHttp();
     reactionNotification(encodeId('101'));
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/reactions`)
+    peer
+      .expect('chats.listUnreadReactions', { chatId: wireChat.id })
       .flush({ messageIds: ['101'], readThrough: reactionBoundary });
     reactionNotification(encodeId('102'));
     await notificationSettled();
-    const ack = http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`);
-    expect(ack.request.body.readThrough).toBe(reactionBoundary);
+    const ack = peer.expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary });
+    expect(ack.params?.['readThrough']).toBe(reactionBoundary);
     ack.flush({ unreadReactions: 1 });
     await notificationSettled();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/reactions`)
+    peer
+      .expect('chats.listUnreadReactions', { chatId: wireChat.id })
       .flush({ messageIds: ['102'], readThrough: '2026-10-20T00:00:01Z' });
     await notificationSettled();
-    const nextAck = http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`);
-    expect(nextAck.request.body.readThrough).toBe('2026-10-20T00:00:01Z');
+    const nextAck = peer.expect('chats.acknowledgeReactions', {
+      chatId: wireChat.id,
+      readThrough: '2026-10-20T00:00:01Z',
+    });
+    expect(nextAck.params?.['readThrough']).toBe('2026-10-20T00:00:01Z');
     nextAck.flush({ unreadReactions: 0 });
     await notificationSettled();
     expect(component['reactionJumpIds']()).toEqual([encodeId('102'), encodeId('101')]);
   });
 
   it('defers hidden notifications until the page becomes visible', async () => {
-    useReactionHttp();
     const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
     reactionNotification();
-    http.expectNone(`/_api/chats/${wireChat.id}/reactions`);
-    http.expectNone(`/_api/chats/${wireChat.id}/reactions/read`);
+    peer.expectNone('chats.listUnreadReactions');
+    peer.expectNone('chats.acknowledgeReactions');
     hidden.mockReturnValue(false);
     component['visibilityChanged']();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/reactions`)
+    peer
+      .expect('chats.listUnreadReactions', { chatId: wireChat.id })
       .flush({ messageIds: [wireMessage.id], readThrough: reactionBoundary });
+    peer.expect('chats.listMentions', { chatId: wireChat.id }).flush({ messageIds: [] });
     await notificationSettled();
-    http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
+    peer
+      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
+      .flush({ unreadReactions: 0 });
     await notificationSettled();
   });
 
   it('does not acknowledge a snapshot that finishes after the document becomes hidden', async () => {
-    useReactionHttp();
     reactionNotification();
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/reactions`)
+    peer
+      .expect('chats.listUnreadReactions', { chatId: wireChat.id })
       .flush({ messageIds: [wireMessage.id], readThrough: reactionBoundary });
     await notificationSettled();
-    http.expectNone(`/_api/chats/${wireChat.id}/reactions/read`);
+    peer.expectNone('chats.acknowledgeReactions');
   });
 
   it('acknowledges the saved scope after navigation changes the active route', async () => {
-    useReactionHttp();
     reactionNotification();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/reactions`)
+    peer
+      .expect('chats.listUnreadReactions', { chatId: wireChat.id })
       .flush({ messageIds: [wireMessage.id], readThrough: reactionBoundary });
     await notificationSettled();
-    http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
+    peer
+      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
+      .flush({ unreadReactions: 0 });
     await notificationSettled();
     vi.mocked(TestBed.inject(Router).isActive).mockReturnValue(false);
     component.ionViewWillLeave();
-    const ack = http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`);
-    expect(ack.request.body.readThrough).toBeUndefined();
+    const ack = peer.expect('chats.acknowledgeReactions', (params) => params['chatId'] === wireChat.id);
+    expect(ack.params?.['readThrough']).toBeUndefined();
     ack.flush({ unreadReactions: 0 });
     await notificationSettled();
   });
 
   it('loads both notification scopes on direct thread entry without cached counts', async () => {
-    await enterThread();
-    useReactionHttp();
-    useMentionHttp();
+    await enterThread(wireMessage.id);
+    (await peer.expectAsync('pins.listForThread', { chatId: wireChat.id, threadRootId: wireMessage.id })).flush({
+      pins: [],
+    });
     component.ionViewDidEnter();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/reactions?threadId=100`)
-      .flush({ messageIds: ['101'], readThrough: reactionBoundary });
+    (await peer.expectAsync('chats.listUnreadReactions', { chatId: wireChat.id, threadId: wireMessage.id })).flush({
+      messageIds: ['101'],
+      readThrough: reactionBoundary,
+    });
     await notificationSettled();
-    http.expectOne(`/_api/chats/${wireChat.id}/mentions?threadId=100`).flush({ messageIds: ['102'] });
+    (await peer.expectAsync('chats.listMentions', { chatId: wireChat.id, threadId: wireMessage.id })).flush({
+      messageIds: ['102'],
+    });
     await notificationSettled();
-    const ack = http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`);
-    expect(ack.request.body.threadId).toBe('100');
+    const ack = peer.expect('chats.acknowledgeReactions', {
+      chatId: wireChat.id,
+      readThrough: reactionBoundary,
+      threadId: wireMessage.id,
+    });
+    expect(ack.params?.['threadId']).toBe(wireMessage.id);
     ack.flush({ unreadReactions: 0 });
     await notificationSettled();
     expect(component['reactionRemaining']()).toBe(1);
@@ -3637,29 +3766,42 @@ describe('ConversationPage', () => {
   });
 
   it('refreshes a thread on reconnect even when cached notification counts are zero', async () => {
-    await enterThread();
+    await enterThread(wireMessage.id);
+    (await peer.expectAsync('pins.listForThread', { chatId: wireChat.id, threadRootId: wireMessage.id })).flush({
+      pins: [],
+    });
     vi.spyOn(component['conversation'], 'reconnect').mockResolvedValue();
-    useReactionHttp();
-    useMentionHttp();
     resync.next();
-    http.expectOne('/_api/users/me/notification-settings').flush(testUser);
-    http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...wireChat, myRole: GroupRole.member });
-    for (const request of http.match(`/_api/chats/${wireChat.id}/messages/100`)) {
-      request.flush({ ...wireMessage, id: '100' });
+    peer.expect('users.getNotificationSettings').flush(testUser);
+    peer.expect('groups.get', { chatId: wireChat.id }).flush({ ...wireChat, myRole: GroupRole.member });
+    for (const request of peer.match('messages.get')) {
+      expect(request.params).toEqual({ chatId: wireChat.id, messageId: wireMessage.id });
+      request.flush({ ...wireMessage, id: wireMessage.id });
     }
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/reactions?threadId=100`)
-      .flush({ messageIds: ['101'], readThrough: reactionBoundary });
+    (await peer.expectAsync('chats.listUnreadReactions', { chatId: wireChat.id, threadId: wireMessage.id })).flush({
+      messageIds: ['101'],
+      readThrough: reactionBoundary,
+    });
     await notificationSettled();
-    http.expectOne(`/_api/chats/${wireChat.id}/mentions?threadId=100`).flush({ messageIds: [] });
+    (await peer.expectAsync('chats.listMentions', { chatId: wireChat.id, threadId: wireMessage.id })).flush({
+      messageIds: [],
+    });
     await notificationSettled();
-    http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
+    peer
+      .expect('chats.acknowledgeReactions', {
+        chatId: wireChat.id,
+        readThrough: reactionBoundary,
+        threadId: wireMessage.id,
+      })
+      .flush({ unreadReactions: 0 });
     await notificationSettled();
+    (await peer.expectAsync('pins.listForThread', { chatId: wireChat.id, threadRootId: wireMessage.id })).flush({
+      pins: [],
+    });
     expect(component['reactionRemaining']()).toBe(1);
   });
 
   it('coalesces mention notifications during a fetch and retains their targets', async () => {
-    useMentionHttp();
     const notify = () =>
       events.next({
         type: ServerWsMessageType.notification,
@@ -3674,21 +3816,20 @@ describe('ConversationPage', () => {
     notify();
     notify();
     await notificationSettled();
-    const first = http.expectOne(`/_api/chats/${wireChat.id}/mentions`);
+    const first = peer.expect('chats.listMentions', { chatId: wireChat.id });
     notify();
     first.flush({ messageIds: ['101'] });
     await notificationSettled();
-    http.expectOne(`/_api/chats/${wireChat.id}/mentions`).flush({ messageIds: ['102', '101'] });
+    peer.expect('chats.listMentions', { chatId: wireChat.id }).flush({ messageIds: ['102', '101'] });
     await notificationSettled();
     expect(component['mentionJumpIds']()).toEqual([encodeId('102'), encodeId('101')]);
   });
 
   it('keeps the server reaction cursor unchanged when fetching targets fails', async () => {
-    useReactionHttp();
     reactionNotification();
-    http.expectOne(`/_api/chats/${wireChat.id}/reactions`).flush({}, { status: 500, statusText: 'Failed' });
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id }).error(RpcErrorCode.Internal, 'Failed');
     await notificationSettled();
-    http.expectNone(`/_api/chats/${wireChat.id}/reactions/read`);
+    peer.expectNone('chats.acknowledgeReactions');
   });
 
   it('marks only a visible message bottom and stops tracking hidden or departed pages', async () => {
@@ -3696,16 +3837,18 @@ describe('ConversationPage', () => {
     const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
     vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 200));
     const opening = component['conversation'].open(encodeId('101'));
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=101`).flush({
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '101' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [100, 101, 102].map((id) => ({ ...wireMessage, id: String(id) })),
     });
     await opening;
     await fixture.whenStable();
+    await settleMetadata();
     const elements = [...fixture.nativeElement.querySelectorAll('app-message')] as HTMLElement[];
     const rects = [new DOMRect(0, 0, 300, 60), new DOMRect(0, 60, 300, 80), new DOMRect(0, 140, 300, 400)];
     elements.forEach((element, index) => vi.spyOn(element, 'getBoundingClientRect').mockReturnValue(rects[index]));
     component.ionViewDidEnter();
+    await settleMetadata();
     await component['trackScroll']();
     expect(markRead).toHaveBeenLastCalledWith(testChat.id, encodeId('101'));
     vi.mocked(markRead).mockClear();
@@ -3719,6 +3862,7 @@ describe('ConversationPage', () => {
     expect(component['conversation'].items()).toEqual([]);
     expect(fixture.nativeElement.querySelectorAll('app-message')).toHaveLength(0);
     expect(component['rows']()).toEqual([]);
+    await settleMetadata();
   });
 
   it('updates the read boundary when a pending row is confirmed in place and then deleted', async () => {
@@ -3728,11 +3872,13 @@ describe('ConversationPage', () => {
     vi.spyOn(first, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 60));
     typeText('等待确认');
     const sending = component['sendMessage']();
-    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+    const request = peer.expect('messages.send', (params) => params['chatId'] === wireChat.id);
     await fixture.whenStable();
     const local: HTMLElement = fixture.nativeElement.querySelector('.message-list > app-message:last-child');
     vi.spyOn(local, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 60, 300, 60));
+    vi.spyOn(TestBed.inject(ChatStore), 'cachedUnreadReactions').mockReturnValue(0);
     component.ionViewDidEnter();
+    (await peer.expectAsync('chats.listMentions', { chatId: wireChat.id })).flush({ messageIds: [] });
     await fixture.whenStable();
     const markRead = vi.mocked(TestBed.inject(ChatStore).markRead);
     markRead.mockClear();
@@ -3743,7 +3889,7 @@ describe('ConversationPage', () => {
     request.flush({
       ...wireMessage,
       id: decodeId(confirmedId),
-      clientGeneratedId: request.request.body.clientGeneratedId,
+      clientGeneratedId: request.params?.['clientGeneratedId'] as string,
     });
     await sending;
     await fixture.whenStable();
@@ -3762,8 +3908,14 @@ describe('ConversationPage', () => {
   it('keeps live messages and pins on healthy foreground while calibrating group metadata', async () => {
     component.ionViewDidEnter();
     await fixture.whenStable();
-    const pins = vi.mocked(TestBed.inject(PinsService).listPins);
-    pins.mockClear();
+    peer
+      .expect('chats.listUnreadReactions', { chatId: wireChat.id })
+      .flush({ messageIds: [], readThrough: reactionBoundary });
+    peer.expect('chats.listMentions', { chatId: wireChat.id }).flush({ messageIds: [] });
+    await notificationSettled();
+    peer
+      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
+      .flush({ unreadReactions: 0 });
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
     const message = { ...testMessage, id: encodeId('9007199254741004'), clientGeneratedId: 'background' };
     incoming.next(message);
@@ -3771,11 +3923,12 @@ describe('ConversationPage', () => {
     expect(component['conversation'].items()).toContainEqual(message);
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
     resync.next(ResyncReason.Foreground);
-    http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...wireChat, name: '新群名' });
+    peer.expect('groups.get', { chatId: wireChat.id }).flush({ ...wireChat, name: '新群名' });
     await fixture.whenStable();
-    expect(pins).not.toHaveBeenCalled();
+    peer.expectNone('pins.list');
+    peer.expectNone('pins.listForThread');
     expect(TestBed.inject(ChatStore).getReadState).not.toHaveBeenCalled();
-    http.expectNone((request) => request.url.includes('/messages'));
+    peer.expectNone('messages.list');
     expect(fixture.nativeElement.querySelector('ion-title').textContent).toContain('新群名');
   });
 
@@ -3783,20 +3936,27 @@ describe('ConversationPage', () => {
     const dm = { ...testChat, kind: GroupKind.dm };
     TestBed.inject(ChatStore).remember([dm]);
     await fixture.whenStable();
-    const url = `/_api/chats/${wireChat.id}/read-receipt`;
-    http.expectOne(url).flush({ lastReadMessageId: wireMessage.id });
+    peer.expect('chats.getReadReceipt', { chatId: wireChat.id }).flush({ lastReadMessageId: wireMessage.id });
     await fixture.whenStable();
     resync.next(ResyncReason.Foreground);
-    http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...wireChat, kind: GroupKind.dm });
+    peer.expect('groups.get', { chatId: wireChat.id }).flush({ ...wireChat, kind: GroupKind.dm });
+    (await peer.expectAsync('chats.listUnreadReactions', { chatId: wireChat.id })).flush({
+      messageIds: [],
+      readThrough: reactionBoundary,
+    });
+    await notificationSettled();
+    peer
+      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
+      .flush({ unreadReactions: 0 });
     await fixture.whenStable();
-    http.expectNone(url);
+    peer.expectNone('chats.getReadReceipt');
     expect(component['isReadByPeer'](testMessage)).toBe(true);
     events.next({ type: ServerWsMessageType.readReceiptChanged, payload: { chatId: testChat.id, readerUid: 2 } });
-    http.expectOne(url).flush('', { status: 503, statusText: 'Unavailable' });
+    peer.expect('chats.getReadReceipt', { chatId: wireChat.id }).error(RpcErrorCode.Unavailable, 'Unavailable');
     await fixture.whenStable();
     resync.next(ResyncReason.Foreground);
-    http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...wireChat, kind: GroupKind.dm });
-    http.expectOne(url).flush({ lastReadMessageId: wireMessage.id });
+    peer.expect('groups.get', { chatId: wireChat.id }).flush({ ...wireChat, kind: GroupKind.dm });
+    peer.expect('chats.getReadReceipt', { chatId: wireChat.id }).flush({ lastReadMessageId: wireMessage.id });
     await fixture.whenStable();
   });
 
@@ -3809,17 +3969,35 @@ describe('ConversationPage', () => {
     vi.spyOn(message, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 100));
     component.ionViewDidEnter();
     await fixture.whenStable();
+    peer
+      .expect('chats.listUnreadReactions', { chatId: wireChat.id })
+      .flush({ messageIds: [], readThrough: reactionBoundary });
+    peer.expect('chats.listMentions', { chatId: wireChat.id }).flush({ messageIds: [] });
+    await notificationSettled();
+    peer
+      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
+      .flush({ unreadReactions: 0 });
     document.dispatchEvent(new Event('visibilitychange'));
     await fixture.whenStable();
     expect(data.getReadState).not.toHaveBeenCalled();
     vi.mocked(data.markRead).mockClear();
 
     resync.next();
-    http.expectOne('/_api/users/me/notification-settings').flush(testUser);
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50&after=${wireMessage.id}`)
+    peer.expect('users.getNotificationSettings').flush(testUser);
+    peer
+      .expect('messages.list', { chatId: wireChat.id, max: 50, after: wireMessage.id })
       .flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
-    http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...wireChat, name: '重连后的群名称' });
+    peer.expect('groups.get', { chatId: wireChat.id }).flush({ ...wireChat, name: '重连后的群名称' });
+    (await peer.expectAsync('pins.list', { chatId: wireChat.id })).flush({ pins: [] });
+    (await peer.expectAsync('chats.listUnreadReactions', { chatId: wireChat.id })).flush({
+      messageIds: [],
+      readThrough: reactionBoundary,
+    });
+    (await peer.expectAsync('chats.listMentions', { chatId: wireChat.id })).flush({ messageIds: [] });
+    await notificationSettled();
+    peer
+      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
+      .flush({ unreadReactions: 0 });
     await fixture.whenStable();
     expect(data.getReadState).toHaveBeenCalledOnce();
     expect(data.getReadState).toHaveBeenCalledWith(testChat.id);
@@ -3829,14 +4007,17 @@ describe('ConversationPage', () => {
 
   it('refreshes deep-linked topic subscription state on resync without reloading the topic list', async () => {
     await enterThread();
+    await settleMetadata();
     const loadSubscription = TestBed.inject(ChatStore).loadSubscription;
     vi.mocked(loadSubscription).mockClear();
     resync.next();
-    http.expectOne('/_api/users/me/notification-settings').flush(testUser);
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50&after=102&threadId=100`)
-      .flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
-    http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...wireChat });
+    peer.expect('users.getNotificationSettings', {}).flush(testUser);
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, after: '102', threadId: '100' }).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [],
+    });
+    peer.expect('groups.get', { chatId: wireChat.id }).flush({ ...wireChat });
+    await settleMetadata();
     subscriptions.update((statuses) => new Map(statuses).set(encodeId('100'), { subscribed: true, archived: false }));
     await fixture.whenStable();
     expect(component['subscription']()).toEqual({ subscribed: true, archived: false });
@@ -3847,9 +4028,9 @@ describe('ConversationPage', () => {
   it('retries a failed page without reloading the resume position', async () => {
     let loading = component['loadPage'](PageDirection.Older);
     await Promise.resolve();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50&before=${wireMessage.id}`)
-      .flush('', { status: 503, statusText: 'Unavailable' });
+    peer
+      .expect('messages.list', { chatId: wireChat.id, max: 50, before: wireMessage.id })
+      .error(RpcErrorCode.Unavailable, 'Unavailable');
     await loading;
     expect(component['conversation'].error()).toBe(ConversationError.Page);
     fixture.detectChanges();
@@ -3858,7 +4039,7 @@ describe('ConversationPage', () => {
     await component['loadPage'](PageDirection.Newer);
     component['retry']();
     await Promise.resolve();
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&before=${wireMessage.id}`).flush({
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, before: wireMessage.id }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [{ ...wireMessage, id: '9007199254741001' }],
       olderCursor: null,
@@ -3893,6 +4074,7 @@ describe('ConversationPage', () => {
   it('resumes a deep-linked topic at its own read boundary and resets drafts between topics', async () => {
     component['draft'].set('主会话草稿');
     await enterThread();
+    await settleMetadata();
     expect(component.threadId()).toBe(encodeId('100'));
     expect(TestBed.inject(DraftStore).get(testChat.id)?.text).toBe('主会话草稿');
     expect(TestBed.inject(DraftStore).get(testChat.id, encodeId('100'))).toBeUndefined();
@@ -3902,6 +4084,7 @@ describe('ConversationPage', () => {
     expect(component['showBackToChat']()).toBe(true);
     component['draft'].set('话题草稿');
     await enterThread('99', {});
+    await settleMetadata();
     expect(component['draft']()).toBe('');
     expect(component['entryReadId']()).toBe(encodeId('99'));
     expect(component['firstUnreadId']()).toBe(encodeId('101'));
@@ -3910,6 +4093,7 @@ describe('ConversationPage', () => {
 
   it('receives and marks only the active topic without advancing the main chat read position', async () => {
     await enterThread();
+    await settleMetadata();
     incoming.next({ ...testMessage, id: encodeId('103') });
     incoming.next({ ...testMessage, id: encodeId('104'), replyRootId: encodeId('99') });
     incoming.next({ ...testMessage, id: encodeId('105'), replyRootId: encodeId('100') });
@@ -3927,6 +4111,7 @@ describe('ConversationPage', () => {
       vi.spyOn(element, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, index * 50, 300, 50)),
     );
     component.ionViewDidEnter();
+    await settleMetadata();
     await component['trackScroll']();
     expect(TestBed.inject(ChatStore).markThreadRead).toHaveBeenLastCalledWith(
       testChat.id,
@@ -3946,34 +4131,36 @@ describe('ConversationPage', () => {
     readState.mockReturnValue({ lastReadMessageId: encodeId('100') });
     fixture.componentRef.setInput('threadId', '100');
     fixture.detectChanges();
-    for (const req of http.match(`/_api/chats/${wireChat.id}/messages/100`)) req.flush({ ...wireMessage, id: '100' });
-    http.expectNone(`/_api/chats/${wireChat.id}/threads/100/read-state`);
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=100&threadId=100`).flush({
+    peer.match('messages.get').forEach((req) => req.flush({ ...wireMessage, id: '100' }));
+    peer.expectNone('threads.getReadState');
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '100', threadId: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [
         { ...wireMessage, id: '100' },
         { ...wireMessage, id: '101', replyRootId: '100', sender: otherSender },
       ],
     });
+    await settleMetadata();
     await fixture.whenStable();
     expect(component['entryReadId']()).toBe(encodeId('100'));
     component.ionViewDidLeave();
     readState.mockReturnValue(undefined);
     component.ionViewWillEnter();
     if (component.threadId())
-      for (const req of http.match(`/_api/chats/${wireChat.id}/messages/${decodeId(component.threadId()!)}`))
-        req.flush({ ...wireMessage, id: decodeId(component.threadId()!) });
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/threads/100/read-state`)
-      .flush({ lastReadMessageId: '101', unreadCount: 1 });
+      peer.match('messages.get').forEach((req) => req.flush({ ...wireMessage, id: decodeId(component.threadId()!) }));
+    peer.expect('threads.getReadState', { chatId: wireChat.id, threadRootId: '100' }).flush({
+      lastReadMessageId: '101',
+      unreadCount: 1,
+    });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=101&threadId=100`).flush({
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '101', threadId: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [
         { ...wireMessage, id: '101', replyRootId: '100', sender: otherSender },
         { ...wireMessage, id: '102', replyRootId: '100', sender: otherSender },
       ],
     });
+    await settleMetadata();
     await fixture.whenStable();
     expect(readState).toHaveBeenLastCalledWith(testChat.id, encodeId('100'));
     expect(component['entryReadId']()).toBe(encodeId('101'));
@@ -3982,13 +4169,17 @@ describe('ConversationPage', () => {
 
   it('publishes accepted topic replies without turning the sender’s own message into an unread divider', async () => {
     await enterThread('100', { lastReadMessageId: '102' });
+    await settleMetadata();
     expect(component['firstUnreadId']()).toBeUndefined();
     expect(fixture.nativeElement.querySelector('.unread-separator')).toBeNull();
     const accept = vi.spyOn(TestBed.inject(Connection), 'accept');
     component['draft'].set('话题消息');
     const sending = component['sendMessage']();
-    const request = http.expectOne(`/_api/chats/${wireChat.id}/threads/100/messages`);
-    expect(request.request.body.message).toBe('话题消息');
+    const request = peer.expect(
+      'messages.sendInThread',
+      (params) => params['chatId'] === wireChat.id && params['threadId'] === '100' && params['message'] === '话题消息',
+    );
+    expect(request.params!['message']).toBe('话题消息');
     expect(component['draft']()).toBe('');
     expect(component['rows']().at(-1)?.outgoing?.threadId).toBe(encodeId('100'));
     fixture.detectChanges();
@@ -3997,8 +4188,8 @@ describe('ConversationPage', () => {
       ...wireMessage,
       id: '103',
       replyRootId: '100',
-      clientGeneratedId: request.request.body.clientGeneratedId,
-      message: request.request.body.message,
+      clientGeneratedId: request.params!['clientGeneratedId'],
+      message: request.params!['message'],
     });
     await sending;
     await fixture.whenStable();
@@ -4011,6 +4202,7 @@ describe('ConversationPage', () => {
 
   it('uses the inbox subscription as the only state for following, archiving and restoring a topic', async () => {
     await enterThread();
+    await settleMetadata();
     const inbox = TestBed.inject(ChatStore);
     await component['updateThread']();
     expect(inbox.subscribeThread).toHaveBeenCalledWith(testChat.id, encodeId('100'));
@@ -4030,13 +4222,17 @@ describe('ConversationPage', () => {
 
   it('keeps a new topic draft when an earlier topic send finishes after navigation', async () => {
     await enterThread();
+    await settleMetadata();
     component['draft'].set('第一话题消息');
     const sending = component['sendMessage']();
-    const request = http.expectOne(`/_api/chats/${wireChat.id}/threads/100/messages`);
+    const request = peer.expect(
+      'messages.sendInThread',
+      (params) => params['chatId'] === wireChat.id && params['threadId'] === '100',
+    );
     const item = component['outbox'].items()[0];
     expect(component['draft']()).toBe('');
     await enterThread('99');
-    expect(request.cancelled).toBe(false);
+    await settleMetadata();
     expect(component['outbox'].items()).toContain(item);
     expect(component['rows']().some((row) => row.outgoing === item)).toBe(false);
     component['draft'].set('另一个话题草稿');
@@ -4044,8 +4240,8 @@ describe('ConversationPage', () => {
       ...wireMessage,
       id: '103',
       replyRootId: '100',
-      clientGeneratedId: request.request.body.clientGeneratedId,
-      message: request.request.body.message,
+      clientGeneratedId: request.params!['clientGeneratedId'],
+      message: request.params!['message'],
     });
     await sending;
     expect(component['draft']()).toBe('另一个话题草稿');
@@ -4062,6 +4258,7 @@ describe('ConversationPage', () => {
 
   it('shows the subscribe action before the status arrives and acts on what it showed', async () => {
     await enterThread();
+    await settleMetadata();
     subscriptions.set(new Map());
     expect(component['subscription']()).toBeUndefined();
     expect(component['threadAction']()).toMatchObject({ label: 'conversation.actions.subscribeThread' });
@@ -4086,6 +4283,7 @@ describe('ConversationPage', () => {
     chatInfo.remember([{ ...testChat, name: '话题所属群' }]);
     vi.mocked(TestBed.inject(ChatStore).cachedReadState).mockReturnValue(undefined);
     await enterThread();
+    await settleMetadata();
     expect(fixture.nativeElement.querySelector('ion-title').textContent).toContain('测试消息');
     subscriptions.update((statuses) => new Map(statuses).set(encodeId('100'), { subscribed: true, archived: true }));
     await component['updateThread']();
@@ -4098,6 +4296,7 @@ describe('ConversationPage', () => {
 
   it('loads a missing canonical subscription after the owner invalidates it', async () => {
     await enterThread();
+    await settleMetadata();
     const loadSubscription = TestBed.inject(ChatStore).loadSubscription;
     vi.mocked(loadSubscription).mockClear();
     subscriptions.set(new Map());
@@ -4122,10 +4321,9 @@ describe('ConversationPage', () => {
       const accept = vi.spyOn(TestBed.inject(Connection), 'accept');
       component['draft'].set('第一次进入的消息');
       const oldSending = component['sendMessage']();
-      const oldRequest = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+      const oldRequest = peer.expect('messages.send', (params) => params['chatId'] === wireChat.id);
       const oldItem = component['outbox'].items()[0];
       component.ionViewDidLeave();
-      expect(oldRequest.cancelled).toBe(false);
       await reenter();
       expect(component['draft']()).toBe('');
       expect(component['rows']().at(-1)?.outgoing).toBe(oldItem);
@@ -4140,7 +4338,7 @@ describe('ConversationPage', () => {
       ).toEqual([oldItem, newItem]);
       expect(component['draft']()).toBe('');
       expect(component['replyTo']()).toBeUndefined();
-      http.expectNone((req) => req.method === 'POST');
+      peer.expectNone('messages.send');
       component['updateDraft']('第三条尚未发送');
       component['startReply'](testMessage);
       const open = vi.spyOn(component['conversation'], 'open');
@@ -4148,22 +4346,24 @@ describe('ConversationPage', () => {
         oldRequest.flush({
           ...wireMessage,
           id: '9007199254741005',
-          clientGeneratedId: oldRequest.request.body.clientGeneratedId,
-          message: oldRequest.request.body.message,
+          clientGeneratedId: oldRequest.params!['clientGeneratedId'],
+          message: oldRequest.params!['message'],
         });
-      else oldRequest.flush('', { status: 503, statusText: 'Unavailable' });
+      else oldRequest.error(RpcErrorCode.Unavailable, 'Unavailable');
       await oldSending;
       expect(oldItem.delivery()).toBe(result === 'success' ? MessageDelivery.Sent : MessageDelivery.Failed);
-      const newRequest = await vi.waitFor(() => http.expectOne(`/_api/chats/${wireChat.id}/messages`));
-      expect(newRequest.request.body.clientGeneratedId).toBe(newItem.clientGeneratedId);
-      expect(newRequest.request.body.message).toBe('再次进入的消息');
-      expect(newRequest.request.body.replyToId).toBe(wireMessage.id);
+      const newRequest = await vi.waitFor(() =>
+        peer.expect('messages.send', (params) => params['chatId'] === wireChat.id),
+      );
+      expect(newRequest.params!['clientGeneratedId']).toBe(newItem.clientGeneratedId);
+      expect(newRequest.params!['message']).toBe('再次进入的消息');
+      expect(newRequest.params!['replyToId']).toBe(wireMessage.id);
       expect(oldItem.delivery()).toBe(result === 'success' ? MessageDelivery.Sent : MessageDelivery.Failed);
       expect(component['draft']()).toBe('第三条尚未发送');
       expect(component['replyTo']()).toBe(testMessage);
       expect(open).not.toHaveBeenCalled();
       expect(accept).toHaveBeenCalledTimes(result === 'success' ? 1 : 0);
-      newRequest.flush('', { status: 503, statusText: 'Unavailable' });
+      newRequest.error(RpcErrorCode.Unavailable, 'Unavailable');
       await vi.waitFor(() => expect(newItem.delivery()).toBe(MessageDelivery.Failed));
       await fixture.whenStable();
       expect(newItem.delivery()).toBe(MessageDelivery.Failed);
@@ -4175,11 +4375,13 @@ describe('ConversationPage', () => {
 
   it('does not report a subscription failure from an earlier visit to the same topic', async () => {
     await enterThread();
+    await settleMetadata();
     const pending = deferred<void>();
     vi.mocked(TestBed.inject(ChatStore).loadSubscription).mockReturnValueOnce(pending.promise);
     const loading = component['loadSubscription']();
     component.ionViewDidLeave();
     await reenter();
+    await settleMetadata();
     pending.reject(new Error('Previous visit failed'));
     await loading;
     expect(component['threadError']()).toBeUndefined();
@@ -4187,6 +4389,7 @@ describe('ConversationPage', () => {
 
   it('keeps a new topic action busy when a previous visit’s action finishes', async () => {
     await enterThread();
+    await settleMetadata();
     const oldAction = deferred<void>();
     const newAction = deferred<void>();
     vi.mocked(TestBed.inject(ChatStore).subscribeThread)
@@ -4195,6 +4398,7 @@ describe('ConversationPage', () => {
     const oldUpdating = component['updateThread']();
     component.ionViewDidLeave();
     await reenter();
+    await settleMetadata();
     expect(component['threadUpdating']()).toBe(false);
     const newUpdating = component['updateThread']();
     oldAction.reject(new Error('Previous action failed'));
@@ -4215,40 +4419,42 @@ describe('ConversationPage', () => {
     await reenter();
     component.ionViewDidEnter();
     await fixture.whenStable();
+    await settleMetadata();
     const load = vi.spyOn(component['conversation'], 'load');
     scroll.scrollTop = 0;
     pendingScroll.resolve(scroll);
     await scrolling;
     expect(load).not.toHaveBeenCalled();
-    http.expectNone(`/_api/chats/${wireChat.id}/messages?max=50&before=${wireMessage.id}`);
+    peer.expectNone('messages.list');
   });
 
   it('continues queued sends after page destruction and hands confirmations to the next page', async () => {
     const outbox = TestBed.inject(MessageOutbox);
     component['draft'].set('销毁前第一条');
     const firstSending = component['sendMessage']();
-    const firstRequest = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+    const firstRequest = peer.expect('messages.send', (params) => params['chatId'] === wireChat.id);
     component['draft'].set('销毁前第二条');
     void component['sendMessage']();
     const [first, second] = outbox.items();
     const oldConversation = component['conversation'];
     fixture.destroy();
-    expect(firstRequest.cancelled).toBe(false);
     expect(outbox.items()).toEqual([first, second]);
     firstRequest.flush({
       ...wireMessage,
       id: '9007199254741005',
-      clientGeneratedId: firstRequest.request.body.clientGeneratedId,
-      message: firstRequest.request.body.message,
+      clientGeneratedId: firstRequest.params!['clientGeneratedId'],
+      message: firstRequest.params!['message'],
     });
     await firstSending;
-    const secondRequest = await vi.waitFor(() => http.expectOne(`/_api/chats/${wireChat.id}/messages`));
-    expect(secondRequest.request.body.clientGeneratedId).toBe(second.clientGeneratedId);
+    const secondRequest = await vi.waitFor(() =>
+      peer.expect('messages.send', (params) => params['chatId'] === wireChat.id),
+    );
+    expect(secondRequest.params!['clientGeneratedId']).toBe(second.clientGeneratedId);
     secondRequest.flush({
       ...wireMessage,
       id: '9007199254741007',
-      clientGeneratedId: secondRequest.request.body.clientGeneratedId,
-      message: secondRequest.request.body.message,
+      clientGeneratedId: secondRequest.params!['clientGeneratedId'],
+      message: secondRequest.params!['message'],
     });
     await vi.waitFor(() => expect(second.published()).toBe(true));
     expect(first.published()).toBe(true);
@@ -4260,9 +4466,10 @@ describe('ConversationPage', () => {
     component = fixture.componentInstance;
     fixture.componentRef.setInput('id', wireChat.id);
     fixture.detectChanges();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50`)
-      .flush({ chatSettings: { showMembershipMessages: true }, messages: [structuredClone(wireMessage)] });
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50 }).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [structuredClone(wireMessage)],
+    });
     await fixture.whenStable();
     fixture.detectChanges();
     await fixture.whenStable();
@@ -4280,13 +4487,14 @@ describe('ConversationPage', () => {
   it('cancels a topic read-state request when the page is destroyed', async () => {
     fixture.componentRef.setInput('threadId', '100');
     fixture.detectChanges();
-    for (const req of http.match(`/_api/chats/${wireChat.id}/messages/100`)) req.flush({ ...wireMessage, id: '100' });
-    const request = http.expectOne(`/_api/chats/${wireChat.id}/threads/100/read-state`);
+    peer.match('messages.get').forEach((req) => req.flush({ ...wireMessage, id: '100' }));
+    await settleMetadata();
+    const request = peer.expect('threads.getReadState', { chatId: wireChat.id, threadRootId: '100' });
     fixture.destroy();
-    expect(request.cancelled).toBe(true);
+    request.flush({ lastReadMessageId: '101', unreadCount: 1 });
     await Promise.resolve();
     expect(component['conversation'].items()).toEqual([]);
-    http.expectNone(`/_api/chats/${wireChat.id}/messages?max=50&around=100&threadId=100`);
+    peer.expectNone('messages.list');
   });
 
   it.each(['hash', 'query'])(
@@ -4315,7 +4523,7 @@ describe('ConversationPage', () => {
         expect(component['draft']()).toBe('未发送的内容');
         expect(router.url).toBe(url);
       }
-      http.expectNone(() => true);
+      peer.verify();
     },
   );
 
@@ -4346,9 +4554,10 @@ describe('ConversationPage', () => {
     const id = '9007199254741999';
     fixture.componentRef.setInput('message', id);
     fixture.detectChanges();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=${id}`)
-      .flush({ chatSettings: { showMembershipMessages: true }, messages: [{ ...wireMessage, id }] });
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: id }).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [{ ...wireMessage, id }],
+    });
     await fixture.whenStable();
     expect(component['conversation'].items()[0].id).toBe(encodeId(id));
     expect(component['conversation'].error()).toBeUndefined();
@@ -4357,7 +4566,7 @@ describe('ConversationPage', () => {
     fixture.componentRef.setInput('message', 'invalid');
     fixture.detectChanges();
     expect(component.message()).toBeUndefined();
-    http.expectNone(() => true);
+    peer.verify();
     fixture.destroy();
     Reflect.deleteProperty(Element.prototype, 'animate');
   });
@@ -4366,14 +4575,14 @@ describe('ConversationPage', () => {
     component['replyTo'].set(testMessage);
     component['draft'].set('正在回复');
     const sending = component['sendMessage']();
-    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+    const request = peer.expect('messages.send', (params) => params['chatId'] === wireChat.id);
     const item = component['outbox'].items()[0];
     const nextReply = { ...testMessage, id: encodeId('999'), clientGeneratedId: 'next-reply-999' };
     component['startReply'](nextReply);
     expect(component['replyTo']()).toBe(nextReply);
     expect(item.message().replyToMessage).toMatchObject(testMessage);
-    expect(request.request.body.replyToId).toBe(wireMessage.id);
-    request.flush('', { status: 503, statusText: 'Unavailable' });
+    expect(request.params!['replyToId']).toBe(wireMessage.id);
+    request.error(RpcErrorCode.Unavailable, 'Unavailable');
     await sending;
     expect(item.delivery()).toBe(MessageDelivery.Failed);
     expect(component['draft']()).toBe('');
@@ -4390,18 +4599,19 @@ describe('ConversationPage', () => {
     fixture.componentRef.setInput('id', wireChat.id);
     fixture.componentRef.setInput('reply', id);
     fixture.detectChanges();
-    let request = http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=${id}`);
+    let request = peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: id });
     if (retrying) {
-      request.flush('', { status: 503, statusText: 'Unavailable' });
+      request.error(RpcErrorCode.Unavailable, 'Unavailable');
       await vi.waitFor(() => expect(component['conversation'].error()).toBe(ConversationError.Open));
       expect(component['replyTo']()).toBeUndefined();
       component['retry']();
-      request = http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=${id}`);
+      request = peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: id });
     }
     request.flush({
       chatSettings: { showMembershipMessages: true },
       messages: [{ ...structuredClone(wireMessage), id, message: '原会话最新内容' }],
     });
+    await settleMetadata();
     await vi.waitFor(() => expect(component['replyTo']()).toMatchObject({ id: encodeId(id) }));
     await fixture.whenStable();
     expect(component['replyTo']()).toBe(component['conversation'].items()[0]);
@@ -4410,7 +4620,7 @@ describe('ConversationPage', () => {
     fixture.componentRef.setInput('reply', 'invalid');
     fixture.detectChanges();
     expect(component.reply()).toBeUndefined();
-    http.expectNone(() => true);
+    peer.expectNone('messages.list');
     fixture.destroy();
     Reflect.deleteProperty(Element.prototype, 'animate');
   });
@@ -4438,7 +4648,7 @@ describe('ConversationPage', () => {
         messageIds: [encodeId('9007199254741001')],
       },
     });
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&before=${wireMessage.id}`).flush({
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, before: wireMessage.id }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [
         {
@@ -4550,7 +4760,7 @@ describe('ConversationPage', () => {
 
   it('removes a recalled message when the local delete request succeeds', async () => {
     const recalling = component['menu']()!['messageActions'].recall(testMessage);
-    http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}`).flush(null);
+    peer.expect('messages.delete', { chatId: wireChat.id, messageId: wireMessage.id }).flush(null);
     await recalling;
     fixture.detectChanges();
     expect(component['rows']()).toEqual([]);
@@ -4566,8 +4776,9 @@ describe('ConversationPage', () => {
       '🎉',
     );
     expect(component['menu']()!['notice']()).toBe(MessageNotice.ReactionLimit);
-    http.expectNone(() => true);
+    peer.expectNone('reactions.add');
   });
+
   it('passes reactive avatar preferences to message children', () => {
     component['stickySender'].set(testMessage.sender);
     component['stickyRow'].set(0);
@@ -4590,7 +4801,9 @@ describe('ConversationPage', () => {
   it('resolves an ID-only menu selection against the latest message', async () => {
     TestBed.inject(ChatStore).invalidate();
     const details = TestBed.inject(ChatStore).ensureDetails(testChat.id);
-    http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...structuredClone(wireChat), myRole: GroupRole.member });
+    peer
+      .expect('groups.get', { chatId: wireChat.id })
+      .flush({ ...structuredClone(wireChat), myRole: GroupRole.member });
     await details;
     component['menu']()!['selection'].set({
       messageId: testMessage.id,
@@ -4603,6 +4816,7 @@ describe('ConversationPage', () => {
     expect(component['menu']()!['message']()?.message).toBe('编辑后的消息');
     expect(component['menu']()!['selection']()).not.toHaveProperty('message');
   });
+
   it('enqueues an edit and immediately restores the separate unsent draft and reply', async () => {
     component['updateDraft']('未发送的草稿');
     component['startReply'](testMessage);
@@ -4621,10 +4835,13 @@ describe('ConversationPage', () => {
     expect(component['rows']()).toHaveLength(1);
     expect(component['rows']()[0].outgoing).toBe(item);
     expect(component['rows']()[0].message.message).toBe('编辑内容');
-    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}`);
-    expect(request.request.method).toBe('PATCH');
-    expect(request.request.body).toEqual({ message: '编辑内容', attachmentIds: ['100'] });
-    http.expectNone((req) => req.method === 'POST');
+    const request = peer.expect('messages.edit', {
+      chatId: wireChat.id,
+      messageId: wireMessage.id,
+      message: '编辑内容',
+      attachmentIds: ['100'],
+    });
+    peer.expectNone('messages.send');
     request.flush({ ...wireMessage, message: '编辑内容', isEdited: true });
     await sending;
     await fixture.whenStable();
@@ -4648,7 +4865,8 @@ describe('ConversationPage', () => {
     const rowKeys = component['rows']().map((row) => row.key);
     expect(originalRows).toHaveLength(2);
     expect(local.nativeElement.textContent).toContain('原待发消息');
-    http.expectNone((request) => request.method === 'POST' || request.method === 'PATCH');
+    peer.expectNone('messages.send');
+    peer.expectNone('messages.edit');
 
     const edit = vi.spyOn(outbox, 'edit');
     const enqueue = vi.spyOn(outbox, 'enqueue');
@@ -4678,18 +4896,18 @@ describe('ConversationPage', () => {
     );
     expect((local.componentInstance as Message<MessageContent>).message().message).toBe('修改后的待发消息');
     expect(local.nativeElement.textContent).toContain('修改后的待发消息');
-    http.expectNone((request) => request.method === 'POST' || request.method === 'PATCH');
+    peer.expectNone('messages.send');
+    peer.expectNone('messages.edit');
     typeText('编辑退出后继续写草稿');
 
     media.finish(encodeId('100'));
-    const request = await vi.waitFor(() => http.expectOne(`/_api/chats/${wireChat.id}/messages`));
-    expect(request.request.method).toBe('POST');
-    expect(request.request.body.message).toBe('修改后的待发消息');
-    expect(request.request.body.attachmentIds).toEqual(['100']);
+    const request = await vi.waitFor(() => peer.expect('messages.send', (params) => params['chatId'] === wireChat.id));
+    expect(request.params!['message']).toBe('修改后的待发消息');
+    expect(request.params!['attachmentIds']).toEqual(['100']);
     request.flush({
       ...wireMessage,
       id: '9007199254741005',
-      clientGeneratedId: request.request.body.clientGeneratedId,
+      clientGeneratedId: request.params!['clientGeneratedId'] as string,
       message: '修改后的待发消息',
       hasAttachments: true,
       attachments: [{ id: '100', url: media.upload.url, fileName: 'edit.png', kind: 'image/png', size: 5 }],
@@ -4704,7 +4922,8 @@ describe('ConversationPage', () => {
     expect(component['replyTo']()).toBe(testMessage);
     expect(component['composer']()!.text()).toBe('编辑退出后继续写草稿');
     expect(outbox.items()).toEqual([]);
-    http.expectNone((request) => request.method === 'POST' || request.method === 'PATCH');
+    peer.expectNone('messages.send');
+    peer.expectNone('messages.edit');
   });
 
   it('preserves an open outgoing edit through upload changes and create acknowledgement, then PATCHes the released item', async () => {
@@ -4749,10 +4968,9 @@ describe('ConversationPage', () => {
 
     retained.finish(encodeId('100'));
     removed.finish(encodeId('101'));
-    const create = await vi.waitFor(() => http.expectOne(`/_api/chats/${wireChat.id}/messages`));
-    expect(create.request.method).toBe('POST');
-    expect(create.request.body.message).toBe('创建时的正文');
-    expect(create.request.body.attachmentIds).toEqual(['100', '101']);
+    const create = await vi.waitFor(() => peer.expect('messages.send', (params) => params['chatId'] === wireChat.id));
+    expect(create.params!['message']).toBe('创建时的正文');
+    expect(create.params!['attachmentIds']).toEqual(['100', '101']);
     fixture.detectChanges();
     expect(composer.text()).toBe('确认前已经改写的正文');
     expect(composer['selectedUploads']()).toEqual([retained.upload, added.upload]);
@@ -4766,7 +4984,7 @@ describe('ConversationPage', () => {
     const created = {
       ...wireMessage,
       id: '9007199254741005',
-      clientGeneratedId: create.request.body.clientGeneratedId,
+      clientGeneratedId: create.params!['clientGeneratedId'] as string,
       message: '创建时的正文',
       hasAttachments: true,
       attachments: [attachment('100', retained.upload), attachment('101', removed.upload)],
@@ -4810,11 +5028,12 @@ describe('ConversationPage', () => {
     expect(composer.text()).toBe('下一条未发送草稿');
     expect(component['rows']()).toHaveLength(2);
     expect(added.upload.dispose).not.toHaveBeenCalled();
-    http.expectNone((request) => request.method === 'POST');
+    peer.expectNone('messages.send');
     added.finish(encodeId('102'));
-    const patch = await vi.waitFor(() => http.expectOne(`/_api/chats/${wireChat.id}/messages/${created.id}`));
-    expect(patch.request.method).toBe('PATCH');
-    expect(patch.request.body).toEqual({
+    const patch = await vi.waitFor(() => peer.expect('messages.edit'));
+    expect(patch.params).toMatchObject({
+      chatId: wireChat.id,
+      messageId: created.id,
       message: '确认前已经改写的正文，确认后继续补充',
       attachmentIds: ['100', '102'],
     });
@@ -4834,7 +5053,8 @@ describe('ConversationPage', () => {
     expect(component['draft']()).toBe('下一条未发送草稿');
     expect(component['replyTo']()).toBe(testMessage);
     expect(outbox.items()).toEqual([]);
-    http.expectNone((request) => request.method === 'POST' || request.method === 'PATCH');
+    peer.expectNone('messages.send');
+    peer.expectNone('messages.edit');
   });
 
   it('hands off unfinished edit uploads immediately, overlays the original row and PATCHes only after upload', async () => {
@@ -4871,7 +5091,8 @@ describe('ConversationPage', () => {
     expect(component['savedReplyId']()).toBeUndefined();
     expect(composer['uploads']()).toEqual([]);
     expect(media.upload.retry).toHaveBeenCalledOnce();
-    http.expectNone((req) => req.method === 'PATCH' || req.method === 'POST');
+    peer.expectNone('messages.send');
+    peer.expectNone('messages.edit');
     fixture.detectChanges();
     expect(composer.text()).toBe('未发送的草稿');
     expect(media.upload.dispose).not.toHaveBeenCalled();
@@ -4903,9 +5124,14 @@ describe('ConversationPage', () => {
     expect((fixture.nativeElement.querySelector('.send-button') as HTMLButtonElement).disabled).toBe(false);
 
     media.finish(encodeId('100'));
-    const request = await vi.waitFor(() => http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}`));
-    expect(request.request.method).toBe('PATCH');
-    expect(request.request.body).toEqual({ message: '带附件的编辑', attachmentIds: ['100'] });
+    const request = await vi.waitFor(() =>
+      peer.expect('messages.edit', {
+        chatId: wireChat.id,
+        messageId: wireMessage.id,
+        message: '带附件的编辑',
+        attachmentIds: ['100'],
+      }),
+    );
     request.flush({
       ...wireMessage,
       message: '带附件的编辑',
@@ -4934,12 +5160,17 @@ describe('ConversationPage', () => {
     component['updateDraft']('需要重试的编辑');
     const sending = component['sendMessage']();
     const item = component['outbox'].items()[0];
-    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}`);
+    const request = peer.expect('messages.edit', {
+      chatId: wireChat.id,
+      messageId: wireMessage.id,
+      message: '需要重试的编辑',
+      attachmentIds: [],
+    });
     fixture.detectChanges();
     const original = fixture.debugElement.queryAll(By.directive(Message))[0];
     typeText('新的未发送草稿');
     component['startReply'](newer);
-    request.flush('', { status: 503, statusText: 'Unavailable' });
+    request.error(RpcErrorCode.Unavailable, 'Unavailable');
     await sending;
     await fixture.whenStable();
     expect(item.delivery()).toBe(MessageDelivery.Failed);
@@ -4954,9 +5185,8 @@ describe('ConversationPage', () => {
     expect(fixture.nativeElement.querySelectorAll('.retry-button')).toHaveLength(1);
     retry.click();
     const operation = item.operation;
-    const retried = http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}`);
-    expect(retried.request.method).toBe('PATCH');
-    expect(retried.request.body).toEqual(request.request.body);
+    const retried = peer.expect('messages.edit');
+    expect(retried.params).toEqual(request.params);
     expect(component['outbox'].items()).toEqual([item]);
     expect(item.delivery()).toBe(MessageDelivery.Sending);
     fixture.detectChanges();
@@ -4975,7 +5205,7 @@ describe('ConversationPage', () => {
     expect(component['draft']()).toBe('重试期间继续输入');
     expect(component['replyTo']()).toBe(newer);
     expect(component['composer']()!.text()).toBe('重试期间继续输入');
-    http.expectNone((req) => req.method === 'POST');
+    peer.expectNone('messages.send');
   });
 
   it.each(['navigation', 'destroy'])(
@@ -4988,7 +5218,9 @@ describe('ConversationPage', () => {
       component['updateDraft']('离开后完成的编辑');
       const sending = component['sendMessage']();
       const item = outbox.items()[0];
-      const request = http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}`);
+      const request = peer.expect('messages.edit', (params) => {
+        return params['chatId'] === wireChat.id && params['messageId'] === wireMessage.id;
+      });
       const otherChatId = encodeId('9007199254740995');
       const otherMessage = {
         ...testMessage,
@@ -5005,13 +5237,13 @@ describe('ConversationPage', () => {
       }
       fixture.componentRef.setInput('id', decodeId(otherChatId));
       fixture.detectChanges();
-      http.expectOne(`/_api/group/${decodeId(otherChatId)}`).flush({ ...wireChat, id: decodeId(otherChatId) });
-      http.expectOne(`/_api/chats/${decodeId(otherChatId)}/messages?max=50`).flush({
+      peer.expect('groups.get', { chatId: decodeId(otherChatId) }).flush({ ...wireChat, id: decodeId(otherChatId) });
+      peer.expect('messages.list', { chatId: decodeId(otherChatId), max: 50 }).flush({
         chatSettings: { showMembershipMessages: true },
         messages: [{ ...otherMessage, id: decodeId(otherMessage.id), chatId: decodeId(otherChatId) }],
       });
+      await settleMetadata();
       await fixture.whenStable();
-      expect(request.cancelled).toBe(false);
       expect(outbox.items()).toContain(item);
       expect(TestBed.inject(DraftStore).get(testChat.id)?.text).toBe('原会话未发送草稿');
       typeText('另一个会话的新草稿');
@@ -5037,10 +5269,11 @@ describe('ConversationPage', () => {
       fixture.componentRef.setInput('id', wireChat.id);
       fixture.detectChanges();
       // A stale initial GET must not erase a confirmation retained by the shared outbox.
-      http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`).flush({
+      peer.expect('messages.list', { chatId: wireChat.id, max: 50 }).flush({
         chatSettings: { showMembershipMessages: true },
         messages: [structuredClone(wireMessage)],
       });
+      await settleMetadata();
       await fixture.whenStable();
       fixture.detectChanges();
       await fixture.whenStable();
@@ -5066,7 +5299,8 @@ describe('ConversationPage', () => {
       expect(fixture.nativeElement.querySelector('app-message')).toBe(returned);
       expect(component['rows']()).toHaveLength(1);
       expect(outbox.items()).toEqual([]);
-      http.expectNone((req) => req.method === 'PATCH' || req.method === 'POST');
+      peer.expectNone('messages.edit');
+      peer.expectNone('messages.send');
     },
   );
 
@@ -5093,16 +5327,16 @@ describe('ConversationPage', () => {
       const attachmentIds = sticker ? [] : [encodeId('101')];
       const sending = component['sendMessage']({ messageType, attachmentIds, sticker });
       const item = component['outbox'].items()[0];
-      const request = http.expectOne((req) => req.method === 'POST' && req.url.endsWith('/messages'));
-      expect(request.request.body.messageType).toBe(messageType);
-      expect(request.request.body.message).toBeUndefined();
-      expect(request.request.body.attachmentIds).toEqual(sticker ? [] : ['101']);
-      expect(request.request.body.stickerId).toBe(sticker ? '102' : undefined);
-      expect(request.request.body.replyToId).toBe(wireMessage.id);
+      const request = peer.expect('messages.send', (params) => params['chatId'] === wireChat.id);
+      expect(request.params!['messageType']).toBe(messageType);
+      expect(request.params!['message']).toBeUndefined();
+      expect(request.params!['attachmentIds']).toEqual(sticker ? [] : ['101']);
+      expect(request.params!['stickerId']).toBe(sticker ? '102' : undefined);
+      expect(request.params!['replyToId']).toBe(wireMessage.id);
       expect(component['draft']()).toBe('稍后发送的文字');
       expect(component['replyTo']()).toBeUndefined();
       expect(component['rows']().at(-1)?.outgoing).toBe(item);
-      request.flush('', { status: 503, statusText: 'Unavailable' });
+      request.error(RpcErrorCode.Unavailable, 'Unavailable');
       await sending;
       fixture.detectChanges();
       expect(item.delivery()).toBe(MessageDelivery.Failed);
@@ -5110,14 +5344,14 @@ describe('ConversationPage', () => {
       expect(component['replyTo']()).toBeUndefined();
       expect(fixture.nativeElement.querySelector('app-message:last-child .retry-button')).not.toBeNull();
       const retrying = component['outbox'].retry(item);
-      const retry = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
-      expect(retry.request.body).toEqual(request.request.body);
+      const retry = peer.expect('messages.send', (params) => params['chatId'] === wireChat.id);
+      expect(retry.params).toEqual(request.params);
       retry.flush({
         ...wireMessage,
         id: '9007199254741010',
         messageType,
         message: null,
-        clientGeneratedId: retry.request.body.clientGeneratedId,
+        clientGeneratedId: retry.params!['clientGeneratedId'] as string,
       });
       await retrying;
       expect(item.delivery()).toBe(MessageDelivery.Sent);
@@ -5125,13 +5359,14 @@ describe('ConversationPage', () => {
       expect(component['replyTo']()).toBeUndefined();
     },
   );
+
   it('shares the authorized conversation receipt with the cached list preview', async () => {
     const chats = TestBed.inject(ChatStore);
     const dm = { ...testChat, kind: GroupKind.dm };
     chats.acceptChats([dm], chats.snapshot());
     const oldListVersion = chats.snapshot();
     fixture.detectChanges();
-    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`).flush({ lastReadMessageId: wireMessage.id });
+    peer.expect('chats.getReadReceipt', { chatId: wireChat.id }).flush({ lastReadMessageId: wireMessage.id });
     await fixture.whenStable();
     expect(component['isReadByPeer'](testMessage)).toBe(true);
     expect(chats.chat(testChat.id).peerLastReadMessageId).toBe(testMessage.id);
@@ -5142,7 +5377,7 @@ describe('ConversationPage', () => {
   it('keeps an authorized DM receipt through ordinary invalidation and clears it immediately for privacy changes', async () => {
     TestBed.inject(ChatStore).remember([{ ...testChat, kind: GroupKind.dm }]);
     fixture.detectChanges();
-    const initial = http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`);
+    const initial = peer.expect('chats.getReadReceipt', { chatId: wireChat.id });
     initial.flush({ lastReadMessageId: wireMessage.id });
     await fixture.whenStable();
     fixture.detectChanges();
@@ -5151,13 +5386,13 @@ describe('ConversationPage', () => {
 
     events.next({ type: ServerWsMessageType.readReceiptChanged, payload: { chatId: testChat.id } });
     expect(component['readReceiptId']()).toBe(testMessage.id);
-    const ordinary = http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`);
+    const ordinary = peer.expect('chats.getReadReceipt', { chatId: wireChat.id });
     events.next({
       type: ServerWsMessageType.readReceiptChanged,
       payload: { chatId: testChat.id, privacyChanged: true },
     });
     expect(component['readReceiptId']()).toBeUndefined();
-    const privacy = http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`);
+    const privacy = peer.expect('chats.getReadReceipt', { chatId: wireChat.id });
     ordinary.flush({ lastReadMessageId: wireMessage.id });
     privacy.flush({});
     await fixture.whenStable();
@@ -5182,17 +5417,17 @@ describe('ConversationPage', () => {
   it('retains DM read checks while covered and applies local privacy saves without a WebSocket echo', async () => {
     TestBed.inject(ChatStore).remember([{ ...testChat, kind: GroupKind.dm }]);
     fixture.detectChanges();
-    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`).flush({ lastReadMessageId: wireMessage.id });
+    peer.expect('chats.getReadReceipt', { chatId: wireChat.id }).flush({ lastReadMessageId: wireMessage.id });
     await fixture.whenStable();
     component['active'].set(false);
     fixture.detectChanges();
     expect(component['isReadByPeer'](testMessage)).toBe(true);
     TestBed.inject(ChatStore).invalidateReadReceiptPrivacy();
     expect(component['isReadByPeer'](testMessage)).toBe(false);
-    http.expectNone(`/_api/chats/${wireChat.id}/read-receipt`);
+    peer.expectNone('chats.getReadReceipt');
     component['active'].set(true);
     fixture.detectChanges();
-    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`).flush({});
+    peer.expect('chats.getReadReceipt', { chatId: wireChat.id }).flush({});
     await fixture.whenStable();
     expect(component['isReadByPeer'](testMessage)).toBe(false);
   });
@@ -5201,7 +5436,7 @@ describe('ConversationPage', () => {
     TestBed.inject(ChatStore).remember([{ ...testChat, kind: GroupKind.dm }]);
     fixture.detectChanges();
     component['invalidateReadReceipt']();
-    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`).flush({});
+    peer.expect('chats.getReadReceipt', { chatId: wireChat.id }).flush({});
     await fixture.whenStable();
     events.next({
       type: ServerWsMessageType.readReceiptChanged,
@@ -5211,21 +5446,23 @@ describe('ConversationPage', () => {
       type: ServerWsMessageType.readReceiptChanged,
       payload: { chatId: testChat.id, readerUid: 2, threadRootId: encodeId('99') },
     });
-    http.expectNone(() => true);
+    expect(() => peer.expect('chats.getReadReceipt', { chatId: wireChat.id })).toThrow();
+    expect(() => peer.expect('chats.getReadReceipt', { chatId: wireChat.id, threadId: '99' })).toThrow();
     const entering = enterThread();
-    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt?threadId=100`).flush({});
-    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`).flush({});
+    (await peer.expectAsync('pins.listForThread', { chatId: wireChat.id, threadRootId: '100' })).flush({ pins: [] });
+    peer.expect('chats.getReadReceipt', { chatId: wireChat.id, threadId: '100' }).flush({});
+    peer.expect('chats.getReadReceipt', { chatId: wireChat.id }).flush({});
     await entering;
     events.next({
       type: ServerWsMessageType.readReceiptChanged,
       payload: { chatId: testChat.id, readerUid: 2, threadRootId: encodeId('100') },
     });
-    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt?threadId=100`).flush({ lastReadMessageId: '102' });
-    http.expectNone(`/_api/chats/${wireChat.id}/read-receipt`);
+    peer.expect('chats.getReadReceipt', { chatId: wireChat.id, threadId: '100' }).flush({ lastReadMessageId: '102' });
+    expect(() => peer.expect('chats.getReadReceipt', { chatId: wireChat.id })).toThrow();
     await fixture.whenStable();
     events.next({ type: ServerWsMessageType.readReceiptChanged, payload: { chatId: testChat.id, readerUid: 2 } });
-    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`).flush({ lastReadMessageId: '100' });
-    http.expectNone(`/_api/chats/${wireChat.id}/read-receipt?threadId=100`);
+    peer.expect('chats.getReadReceipt', { chatId: wireChat.id }).flush({ lastReadMessageId: '100' });
+    expect(() => peer.expect('chats.getReadReceipt', { chatId: wireChat.id, threadId: '100' })).toThrow();
     await fixture.whenStable();
   });
 
@@ -5233,11 +5470,12 @@ describe('ConversationPage', () => {
     const chats = TestBed.inject(ChatStore);
     chats.acceptChats([{ ...testChat, kind: GroupKind.dm }], chats.snapshot());
     fixture.detectChanges();
-    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`).flush({ lastReadMessageId: wireMessage.id });
+    peer.expect('chats.getReadReceipt', { chatId: wireChat.id }).flush({ lastReadMessageId: wireMessage.id });
     await fixture.whenStable();
     const entering = enterThread();
-    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt?threadId=100`).flush({ lastReadMessageId: '102' });
-    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`).flush({ lastReadMessageId: '99' });
+    (await peer.expectAsync('pins.listForThread', { chatId: wireChat.id, threadRootId: '100' })).flush({ pins: [] });
+    peer.expect('chats.getReadReceipt', { chatId: wireChat.id, threadId: '100' }).flush({ lastReadMessageId: '102' });
+    peer.expect('chats.getReadReceipt', { chatId: wireChat.id }).flush({ lastReadMessageId: '99' });
     await entering;
     expect(chats.chat(testChat.id).peerLastReadMessageId).toBe(encodeId('99'));
     expect(component['isReadByPeer']({ ...testMessage, id: encodeId('101'), replyRootId: encodeId('100') })).toBe(true);
@@ -5262,8 +5500,8 @@ describe('ConversationPage', () => {
       chats.subscriptionSnapshot(),
     );
     events.next({ type: ServerWsMessageType.readReceiptChanged, payload: { chatId: testChat.id } });
-    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt?threadId=100`).flush({ lastReadMessageId: '102' });
-    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`).flush({ lastReadMessageId: '100' });
+    peer.expect('chats.getReadReceipt', { chatId: wireChat.id, threadId: '100' }).flush({ lastReadMessageId: '102' });
+    peer.expect('chats.getReadReceipt', { chatId: wireChat.id }).flush({ lastReadMessageId: '100' });
     await fixture.whenStable();
     expect(component['isReadByPeer']({ ...testMessage, id: encodeId('100') })).toBe(true);
     expect(chats.chat(testChat.id).peerLastReadMessageId).toBe(encodeId('100'));

@@ -1,21 +1,18 @@
 import { DestroyRef, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { provideHttpClient, withInterceptors } from '@angular/common/http';
-import { provideHttpClientTesting, HttpTestingController } from '@angular/common/http/testing';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
 import {
   ServerWsMessageType,
   type ConversationState,
-  type ServerWsMessage,
   type MeResponse,
+  type ServerWsMessage,
 } from '../../generated/models';
-import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
 import { Connection } from '../api/connection';
-import { SessionStore } from '../session/session-store';
-import { mockRealtime, testUser, testChat, testMessage, wireChat, wireMessage } from '../api/testing';
-import { jsonInterceptor } from '../api/json.interceptor';
+import { RpcTestPeer, provideRpcTesting } from '../api/rpc-testing';
 import { encodeId } from '../api/snowflake-id';
+import { mockRealtime, testChat, testMessage, testUser, wireChat, wireMessage } from '../api/testing';
+import { SessionStore } from '../session/session-store';
 import { ChatListStore } from './chat-list-store';
 import { ChatStore } from './chat-store';
 import { conversationStates } from './conversation-states';
@@ -25,7 +22,7 @@ describe('explicit conversation state watches', () => {
   const user = signal<MeResponse | undefined>(testUser);
   const connected = signal(true);
   let events: Subject<ServerWsMessage>;
-  let http: HttpTestingController;
+  let peer: RpcTestPeer;
   const row = (count = 1): ConversationState => ({
     chatId: testChat.id,
     accessible: true,
@@ -47,9 +44,7 @@ describe('explicit conversation state watches', () => {
     events = new Subject();
     TestBed.configureTestingModule({
       providers: [
-        provideHttpClient(withInterceptors([jsonInterceptor])),
-        provideHttpClientTesting(),
-        provideChahuaBaseUrl('/_api'),
+        ...provideRpcTesting(),
         {
           provide: Connection,
           useValue: { ...mockRealtime({ events$: events, connected }), watchConversationStates: watch },
@@ -64,10 +59,11 @@ describe('explicit conversation state watches', () => {
         },
       ],
     });
-    http = TestBed.inject(HttpTestingController);
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
   });
   afterEach(() => {
-    http.verify();
+    peer.verify();
     vi.useRealTimers();
   });
 
@@ -104,7 +100,7 @@ describe('explicit conversation state watches', () => {
     expect(watch.mock.calls.at(-1)![1]).toEqual([]);
   });
 
-  it('limits the shared scope set and leaves overflow eligible for HTTP', () => {
+  it('limits the shared scope set and leaves overflow eligible for a direct RPC read', () => {
     const state = TestBed.runInInjectionContext(() =>
       conversationStates(TestBed.inject(Connection), TestBed.inject(SessionStore), TestBed.inject(DestroyRef), vi.fn()),
     );
@@ -113,12 +109,12 @@ describe('explicit conversation state watches', () => {
     expect(watch.mock.calls.at(-1)![1]).toHaveLength(512);
   });
 
-  it('updates a loaded row from WS without a per-message unread GET and removes revoked membership', async () => {
+  it('updates a loaded row from WS without a per-message unread RPC and removes revoked membership', async () => {
     const lists = TestBed.inject(ChatListStore);
     const query = lists.chats(false);
     query.activate();
-    http
-      .expectOne('/_api/chats?limit=50')
+    peer
+      .expect('chats.list', { limit: 50 })
       .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     publish([row(2)]);
@@ -127,7 +123,7 @@ describe('explicit conversation state watches', () => {
       payload: { ...testMessage, sender: { ...testMessage.sender, uid: 2 } },
     });
     await new Promise((resolve) => setTimeout(resolve, 120));
-    http.expectNone(() => true);
+    peer.expectNone('chats.getUnreadCount');
     publish([row(3)], false);
     expect(query.items()[0].unreadCount).toBe(3);
     publish([{ ...row(0), accessible: false }], false);
@@ -142,7 +138,7 @@ describe('explicit conversation state watches', () => {
     publish([{ ...row(4), threadId }]);
     store.invalidateThreadReads([threadId]);
     expect((await store.getThreadReadState(testChat.id, threadId)).unreadCount).toBe(4);
-    http.expectNone(() => true);
+    peer.expectNone('threads.getReadState');
   });
 
   it('uses a new watch barrier after local reads so a late snapshot cannot undo them', async () => {
@@ -154,14 +150,17 @@ describe('explicit conversation state watches', () => {
     const old = requestId();
     const reading = store.markRead(testChat.id, testMessage.id);
     await vi.advanceTimersByTimeAsync(1000);
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/read`)
-      .flush({ lastReadMessageId: wireMessage.id, unreadCount: 0, unreadMentions: 0, unreadReactions: 0 });
+    peer.expect('chats.markAsRead', { chatId: wireChat.id, messageId: wireMessage.id }).flush({
+      lastReadMessageId: wireMessage.id,
+      unreadCount: 0,
+      unreadMentions: 0,
+      unreadReactions: 0,
+    });
     await reading;
     expect(requestId()).not.toBe(old);
     publish([row(3)], false, old);
     expect(store.unreadCount(testChat.id)).toBe(0);
     publish([{ ...row(0), lastReadMessageId: testMessage.id }]);
-    http.expectNone(() => true);
+    peer.expectNone('chats.getUnreadCount');
   });
 });

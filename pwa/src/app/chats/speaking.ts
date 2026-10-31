@@ -1,4 +1,4 @@
-import { HttpErrorResponse } from '@angular/common/http';
+import { RpcError, RpcErrorCode } from '../api/rpc-error';
 import { GroupRole, SpeakingMode } from '../../generated/models';
 
 export enum SpeakingAction {
@@ -33,14 +33,12 @@ export function effectiveSpeakingMode(
 }
 
 export function speakingErrorMode(error: unknown): SpeakingMode | undefined {
-  if (!(error instanceof HttpErrorResponse) || error.status !== 403) return undefined;
-  const body: unknown = error.error;
-  return body != null &&
-    typeof body === 'object' &&
-    'code' in body &&
-    body.code === 'speakingRestricted' &&
-    'effectiveSpeakingMode' in body &&
-    Object.values(SpeakingMode).includes(body.effectiveSpeakingMode as SpeakingMode)
-    ? (body.effectiveSpeakingMode as SpeakingMode)
+  if (!(error instanceof RpcError) || error.code !== RpcErrorCode.SpeakingRestricted) return undefined;
+  const data = error.data;
+  return data != null &&
+    typeof data === 'object' &&
+    'effectiveSpeakingMode' in data &&
+    Object.values(SpeakingMode).includes(data.effectiveSpeakingMode as SpeakingMode)
+    ? (data.effectiveSpeakingMode as SpeakingMode)
     : undefined;
 }

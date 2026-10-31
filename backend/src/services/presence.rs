@@ -21,6 +21,7 @@ use moka::future::Cache;
 use crate::dto::ws::{
     GroupPresenceResponse, LastSeenBucket, PresenceSnapshotPayload, UserPresenceResponse,
 };
+use crate::errors::AppError;
 use crate::models::{GroupKind, PresenceVisibility};
 use crate::schema::{group_membership, groups, user_extra};
 use crate::services::client_tracking::LastSeen;
@@ -30,6 +31,102 @@ use crate::state::DbPool;
 
 const GROUP_COUNTS_CACHE_TTL: Duration = Duration::from_secs(15);
 const MAX_CACHED_GROUPS: u64 = 128;
+
+pub const MAX_WATCHED_USERS: usize = 100;
+pub const MAX_WATCHED_GROUPS: usize = 4;
+
+/// Transport-neutral scope for a privacy-filtered presence subscription.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PresenceWatch {
+    pub request_id: Option<u64>,
+    pub user_ids: Vec<i32>,
+    pub chat_ids: Vec<i64>,
+}
+
+/// Validates RPC presence controls without silently narrowing a requested scope.
+///
+/// Legacy controls intentionally use [`parse_legacy_presence_watch`] instead because
+/// deployed clients expect malformed chat IDs to be ignored.
+pub fn validate_presence_watch(
+    request_id: Option<u64>,
+    user_ids: Option<Vec<i32>>,
+    chat_ids: Option<Vec<String>>,
+) -> Result<Option<PresenceWatch>, AppError> {
+    let user_ids = user_ids.unwrap_or_default();
+    let chat_ids = chat_ids.unwrap_or_default();
+    if user_ids.len() > MAX_WATCHED_USERS || chat_ids.len() > MAX_WATCHED_GROUPS {
+        return Err(AppError::BadRequest("Invalid presence watch"));
+    }
+
+    let mut parsed_chat_ids = Vec::with_capacity(chat_ids.len());
+    for chat_id in chat_ids {
+        let chat_id = chat_id
+            .parse::<i64>()
+            .ok()
+            .filter(|chat_id| *chat_id > 0)
+            .ok_or(AppError::BadRequest("Invalid presence watch"))?;
+        parsed_chat_ids.push(chat_id);
+    }
+
+    Ok(
+        (!user_ids.is_empty() || !parsed_chat_ids.is_empty()).then_some(PresenceWatch {
+            request_id,
+            user_ids,
+            chat_ids: parsed_chat_ids,
+        }),
+    )
+}
+
+/// Preserves legacy control semantics by ignoring malformed chat IDs.
+pub fn parse_legacy_presence_watch(
+    request_id: Option<u64>,
+    user_ids: Option<Vec<i32>>,
+    chat_ids: Option<Vec<String>>,
+) -> Option<Option<PresenceWatch>> {
+    let user_ids = user_ids.unwrap_or_default();
+    let chat_ids = chat_ids.unwrap_or_default();
+    if user_ids.len() > MAX_WATCHED_USERS || chat_ids.len() > MAX_WATCHED_GROUPS {
+        return None;
+    }
+
+    let chat_ids = chat_ids
+        .into_iter()
+        .filter_map(|chat_id| chat_id.parse::<i64>().ok())
+        .filter(|chat_id| *chat_id > 0)
+        .collect::<Vec<_>>();
+    Some(
+        (!user_ids.is_empty() || !chat_ids.is_empty()).then_some(PresenceWatch {
+            request_id,
+            user_ids,
+            chat_ids,
+        }),
+    )
+}
+
+/// Loads a snapshot only after draining relevant changes, retrying if a policy
+/// changed while the authorization query was in flight.
+pub async fn snapshot_after_pending_changes(
+    service: &PresenceSnapshotService,
+    changes: &mut PresenceChanges,
+    viewer_uid: i32,
+    watch: &PresenceWatch,
+) -> Result<PresenceSnapshotPayload, Arc<PresenceSnapshotError>> {
+    loop {
+        take_pending_changes(changes, viewer_uid, &watch.user_ids);
+        let snapshot = service
+            .snapshot(
+                viewer_uid,
+                watch.request_id,
+                watch.user_ids.clone(),
+                watch.chat_ids.clone(),
+            )
+            .await;
+        if take_pending_changes(changes, viewer_uid, &watch.user_ids) {
+            continue;
+        }
+        return snapshot;
+    }
+}
 
 #[derive(Clone, Copy)]
 struct GroupCounts {
@@ -639,5 +736,24 @@ mod tests {
             PresenceVisibility::Nobody,
             None,
         ));
+    }
+    #[test]
+    fn rpc_presence_watch_rejects_malformed_scope_without_narrowing_it() {
+        assert!(matches!(
+            validate_presence_watch(Some(2), Some(vec![3]), Some(vec!["not-an-id".into()])),
+            Err(AppError::BadRequest("Invalid presence watch"))
+        ));
+        assert!(matches!(
+            validate_presence_watch(None, Some((0..101).collect()), None),
+            Err(AppError::BadRequest("Invalid presence watch"))
+        ));
+        assert_eq!(
+            parse_legacy_presence_watch(Some(2), Some(vec![3]), Some(vec!["not-an-id".into()])),
+            Some(Some(PresenceWatch {
+                request_id: Some(2),
+                user_ids: vec![3],
+                chat_ids: vec![],
+            }))
+        );
     }
 }

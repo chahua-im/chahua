@@ -1,7 +1,7 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
-import { Connection } from '../api/connection';
+import { Connection, ResyncReason } from '../api/connection';
 import { encodeId } from '../api/snowflake-id';
 import { SessionStore } from '../session/session-store';
 import { lastSeenDisplay, LastSeenKind } from './presence-display';
@@ -9,7 +9,7 @@ import { Presence } from './presence';
 
 function createPresenceHarness() {
   const events = new Subject<unknown>();
-  const resync = new Subject<void>();
+  const resync = new Subject<ResyncReason | void>();
   const connected = signal(true);
   const watchPresence = vi.fn();
   const user = signal<{ uid: number } | undefined>({ uid: 1 });
@@ -336,7 +336,7 @@ describe('presence', () => {
 
   it('retains known presence across document visibility changes but clears it after disconnect or account change', () => {
     const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
-    const { presence, events, connected, watchPresence, user } = createPresenceHarness();
+    const { presence, events, resync, connected, watchPresence, user } = createPresenceHarness();
     const leave = presence.watch({ userIds: [2] });
     TestBed.tick();
     const firstRequestId = watchPresence.mock.calls.at(-1)![0] as number;
@@ -357,8 +357,11 @@ describe('presence', () => {
     connected.set(false);
     TestBed.tick();
     expect(presence.user(2)).toBeUndefined();
+    const requestsBeforeReconnect = watchPresence.mock.calls.length;
     connected.set(true);
+    resync.next(ResyncReason.Connected);
     TestBed.tick();
+    expect(watchPresence).toHaveBeenCalledTimes(requestsBeforeReconnect + 1);
     expect(presence.user(2)).toBeUndefined();
     expect(presence.userLoading(2)).toBe(true);
     events.next({

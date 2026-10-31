@@ -1,37 +1,39 @@
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { AlertController } from '@ionic/angular';
-import { of, Subject, throwError } from 'rxjs';
 import { vi } from 'vitest';
-import { StickersService } from '../../../generated/endpoints/stickers/stickers.service';
-import type { StickerPackSummary } from '../../../generated/models';
-import { encodeId, type SnowflakeID } from '../../api/snowflake-id';
+import { StickerPackVisibility, type StickerPackSummary } from '../../../generated/models';
+import { provideRpcTesting, RpcTestPeer } from '../../api/rpc-testing';
+import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { PanelNavigation } from '../../navigation/panel-navigation';
+import { Preferences } from '../preferences';
 import { StickerPreferences } from '../sticker-preferences';
 import { StickerSettings } from './sticker-settings';
 
+const ownedPack: StickerPackSummary = {
+  id: encodeId('201'),
+  name: '我的包',
+  createdAt: '2026-09-08T00:00:00Z',
+  updatedAt: '2026-09-08T00:00:00Z',
+  ownerUid: 1,
+  isSubscribed: true,
+  visibility: StickerPackVisibility.public,
+  stickerCount: 3,
+};
+const subscribed: StickerPackSummary = { ...ownedPack, id: encodeId('202'), name: '订阅包', ownerUid: 2 };
+const other: StickerPackSummary = { ...ownedPack, id: encodeId('203'), name: '另一个包', ownerUid: 3 };
+const wirePack = (pack: StickerPackSummary) => ({
+  ...pack,
+  id: decodeId(pack.id),
+  previewSticker: pack.previewSticker && {
+    ...pack.previewSticker,
+    id: decodeId(pack.previewSticker.id),
+    media: { ...pack.previewSticker.media, id: decodeId(pack.previewSticker.media.id) },
+  },
+});
+
 describe('StickerSettings', () => {
-  const ownedPack: StickerPackSummary = {
-    id: encodeId('201'),
-    name: '我的包',
-    createdAt: '2026-09-08T00:00:00Z',
-    updatedAt: '2026-09-08T00:00:00Z',
-    ownerUid: 1,
-    isSubscribed: true,
-    stickerCount: 3,
-  };
-  const subscribed: StickerPackSummary = {
-    ...ownedPack,
-    id: encodeId('202'),
-    name: '订阅包',
-    ownerUid: 2,
-  };
-  const other: StickerPackSummary = { ...ownedPack, id: encodeId('203'), name: '另一个包', ownerUid: 3 };
-  const api = {
-    getMyOwnedPacks: vi.fn(() => of({ packs: [ownedPack] })),
-    getMySubscribedPacks: vi.fn(() => of({ packs: [subscribed, other] })),
-    postPack: vi.fn(() => of({ ...ownedPack, id: encodeId('301'), name: '新包', stickers: [] })),
-  };
   const preferences = {
     autoSortPacksEnabled: vi.fn(() => false),
     autoSortFavoritesEnabled: vi.fn(() => false),
@@ -39,13 +41,13 @@ describe('StickerSettings', () => {
     upsertPackOrderItem: vi.fn(),
     syncPackOrder: vi.fn(async () => true),
   };
-  const alerts = {
-    create: vi.fn(async () => ({
-      present: async () => {},
-      onDidDismiss: async () => ({ role: 'confirm', data: { values: { name: ' 新包 ' } } }),
-    })),
+  const pinnedReactions = signal<string[]>([]);
+  const reactions = {
+    pinnedReactions,
+    setPinnedReactions: vi.fn((reactions: string[]) => pinnedReactions.set(reactions)),
   };
   const navigate = vi.fn(async () => true);
+  let peer: RpcTestPeer;
 
   beforeEach(() => {
     const values = new Map<string, string>();
@@ -54,53 +56,76 @@ describe('StickerSettings', () => {
       setItem: (key: string, value: string) => values.set(key, value),
     });
     vi.clearAllMocks();
-    api.getMyOwnedPacks.mockReturnValue(of({ packs: [ownedPack] }));
-    api.getMySubscribedPacks.mockReturnValue(of({ packs: [subscribed, other] }));
+    pinnedReactions.set([]);
+    preferences.autoSortPacksEnabled.mockReturnValue(false);
+    preferences.autoSortFavoritesEnabled.mockReturnValue(false);
+    preferences.packOrder.mockReturnValue([]);
+    preferences.syncPackOrder.mockResolvedValue(true);
     TestBed.configureTestingModule({
       providers: [
-        { provide: StickersService, useValue: api },
+        provideRpcTesting(),
         { provide: StickerPreferences, useValue: preferences },
+        { provide: Preferences, useValue: reactions },
         { provide: PanelNavigation, useValue: { back: vi.fn() } },
-        { provide: AlertController, useValue: alerts },
+        { provide: AlertController, useValue: { create: vi.fn() } },
         { provide: Router, useValue: { navigate } },
       ],
     });
+    peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
-    TestBed.resetTestingModule();
+    try {
+      peer.verify();
+    } finally {
+      try {
+        TestBed.resetTestingModule();
+      } finally {
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+      }
+    }
   });
 
+  function replyPacks() {
+    peer.expect('stickers.listOwnedPacks').flush({ packs: [wirePack(ownedPack)] });
+    peer.expect('stickers.listSubscribedPacks').flush({ packs: [wirePack(subscribed), wirePack(other)] });
+  }
+
   function page() {
-    return TestBed.createComponent(StickerSettings).componentInstance as StickerSettings;
+    const fixture = TestBed.createComponent(StickerSettings);
+    fixture.detectChanges();
+    return fixture;
   }
 
   async function loaded() {
-    const component = page();
-    await vi.waitFor(() => expect(component['loading']()).toBe(false));
-    return component;
+    const fixture = page();
+    replyPacks();
+    await vi.waitFor(() => expect(fixture.componentInstance['loading']()).toBe(false));
+    return fixture;
   }
 
   it('keeps loaded rows and their DOM during a failed resume refresh and retry', async () => {
-    const fixture = TestBed.createComponent(StickerSettings);
-    fixture.detectChanges();
-    await vi.waitFor(() => expect(fixture.componentInstance['loading']()).toBe(false));
+    const fixture = await loaded();
     fixture.detectChanges();
     const list = fixture.nativeElement.querySelector('ion-reorder-group');
     const row = list.querySelector('ion-item');
-    const response = new Subject<{ packs: StickerPackSummary[] }>();
-    api.getMyOwnedPacks.mockReturnValueOnce(response);
     fixture.componentInstance.panelResume();
     fixture.detectChanges();
+    const owned = peer.expect('stickers.listOwnedPacks');
+    const subscriptions = peer.expect('stickers.listSubscribedPacks');
     expect(fixture.nativeElement.querySelector('ion-reorder-group')).toBe(list);
-    response.error(new Error('offline'));
+    owned.error(1503);
+    subscriptions.error(1503);
     await vi.waitFor(() => expect(fixture.componentInstance['loadError']()).toBe(true));
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('ion-reorder-group')).toBe(list);
     expect(list.querySelector('ion-item')).toBe(row);
     expect(fixture.nativeElement.querySelector('app-load-error')).not.toBeNull();
-    await fixture.componentInstance['load']();
+    const retry = fixture.componentInstance['load']();
+    replyPacks();
+    await retry;
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('ion-reorder-group')).toBe(list);
     expect(list.querySelector('ion-item')).toBe(row);
@@ -112,15 +137,18 @@ describe('StickerSettings', () => {
       { stickerPackId: other.id, lastUsedOn: 100 },
       { stickerPackId: ownedPack.id, lastUsedOn: 50 },
     ]);
-    const component = await loaded();
+    const component = (await loaded()).componentInstance;
     expect(component['ownedIds']()).toEqual(new Set([ownedPack.id]));
     expect(component['orderedPacks']().map((pack) => pack.id)).toEqual([other.id, ownedPack.id, subscribed.id]);
   });
 
   it('creates a pack from the alert name, records its order and opens the detail page', async () => {
-    const component = await loaded();
-    await component['savePack']({ name: ' 新包 ', emoji: '' });
-    expect(api.postPack).toHaveBeenCalledWith({ name: '新包' });
+    const component = (await loaded()).componentInstance;
+    const saving = component['savePack']({ name: ' 新包 ', emoji: '' });
+    peer
+      .expect('stickers.createPack', { name: '新包' })
+      .flush(wirePack({ ...ownedPack, id: encodeId('301'), name: '新包' }));
+    await saving;
     expect(preferences.upsertPackOrderItem).toHaveBeenCalledWith({
       stickerPackId: encodeId('301'),
       lastUsedOn: expect.any(Number),
@@ -130,25 +158,20 @@ describe('StickerSettings', () => {
   });
 
   it('prevents duplicate creation while the request is pending', async () => {
-    const response = new Subject<
-      ReturnType<typeof api.postPack> extends import('rxjs').Observable<infer T> ? T : never
-    >();
-    api.postPack.mockReturnValueOnce(response);
-    const component = await loaded();
+    const component = (await loaded()).componentInstance;
     const pending = component['savePack']({ name: ' 新包 ', emoji: '' });
-    await vi.waitFor(() => expect(api.postPack).toHaveBeenCalledOnce());
+    const request = peer.expect('stickers.createPack', { name: '新包' });
     expect(component['creating']()).toBe(true);
     await component['savePack']({ name: ' 新包 ', emoji: '' });
-    expect(api.postPack).toHaveBeenCalledOnce();
-    response.next({ ...ownedPack, id: encodeId('301'), name: '新包', stickers: [] });
-    response.complete();
+    peer.expectNone('stickers.createPack');
+    request.flush(wirePack({ ...ownedPack, id: encodeId('301'), name: '新包' }));
     await pending;
     expect(component['creating']()).toBe(false);
   });
 
   it('exposes a failed reorder and retries the same intended order', async () => {
     preferences.syncPackOrder.mockResolvedValueOnce(false);
-    const component = await loaded();
+    const component = (await loaded()).componentInstance;
     await component['reorder']({
       detail: { to: 0, complete: () => [other, ownedPack, subscribed] },
     } as unknown as CustomEvent);
@@ -161,9 +184,10 @@ describe('StickerSettings', () => {
   });
 
   it('keeps the creation form open when saving fails', async () => {
-    api.postPack.mockReturnValueOnce(throwError(() => new Error('offline')));
-    const component = await loaded();
-    await component['savePack']({ name: ' 新包 ', emoji: '' });
+    const component = (await loaded()).componentInstance;
+    const saving = component['savePack']({ name: ' 新包 ', emoji: '' });
+    peer.expect('stickers.createPack', { name: '新包' }).error(1503);
+    await saving;
     expect(navigate).not.toHaveBeenCalled();
     expect(component['createError']()).toBe('创建贴纸包失败');
   });
@@ -173,51 +197,44 @@ describe('StickerSettings', () => {
       { stickerPackId: ownedPack.id, lastUsedOn: 100 },
       { stickerPackId: subscribed.id, lastUsedOn: 50 },
     ]);
-    const component = await loaded();
+    const component = (await loaded()).componentInstance;
     const order = (items: StickerPackSummary[], to: number) =>
       component['reorder']({ detail: { to, complete: () => items } } as unknown as CustomEvent);
     await order([ownedPack, other, subscribed], 1);
     expect(preferences.upsertPackOrderItem).toHaveBeenLastCalledWith({ stickerPackId: other.id, lastUsedOn: 75 });
     expect(preferences.syncPackOrder).toHaveBeenLastCalledWith([{ stickerPackId: other.id, lastUsedOn: 75 }]);
-
     preferences.packOrder.mockReturnValue([
       { stickerPackId: ownedPack.id, lastUsedOn: 100 },
       { stickerPackId: subscribed.id, lastUsedOn: 100 },
     ]);
     await order([ownedPack, other, subscribed], 1);
     expect(preferences.upsertPackOrderItem).toHaveBeenLastCalledWith({ stickerPackId: other.id, lastUsedOn: -9900 });
-
     await order([ownedPack, subscribed, other], 2);
     expect(preferences.upsertPackOrderItem).toHaveBeenLastCalledWith({ stickerPackId: other.id, lastUsedOn: -9900 });
-
     await order([other, ownedPack, subscribed], 0);
     expect(preferences.upsertPackOrderItem).toHaveBeenLastCalledWith({ stickerPackId: other.id, lastUsedOn: 10100 });
   });
 
   it('blocks accidental taps right after a reorder but opens the detail page afterwards', async () => {
     vi.useFakeTimers();
-    try {
-      vi.setSystemTime(0);
-      const component = await loaded();
-      component['lastReorder'] = Date.now();
-      component['openPack'](subscribed);
-      expect(navigate).not.toHaveBeenCalled();
-      vi.advanceTimersByTime(301);
-      component['openPack'](subscribed);
-      expect(navigate).toHaveBeenCalledWith(['/settings/stickers', '202']);
-    } finally {
-      vi.useRealTimers();
-    }
+    vi.setSystemTime(0);
+    const component = (await loaded()).componentInstance;
+    component['lastReorder'] = Date.now();
+    component['openPack'](subscribed);
+    expect(navigate).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(301);
+    component['openPack'](subscribed);
+    expect(navigate).toHaveBeenCalledWith(['/settings/stickers', '202']);
   });
 
-  it('removes individual pinned emoji and caps unique additions at five', () => {
-    const component = page();
-    component['reactions'].setPinnedReactions(['👍', '❤️']);
+  it('removes individual pinned emoji and caps unique additions at five', async () => {
+    const component = (await loaded()).componentInstance;
+    pinnedReactions.set(['👍', '❤️']);
     component['addPinned']('👍');
-    expect(component['reactions'].pinnedReactions()).toEqual(['👍', '❤️']);
+    expect(pinnedReactions()).toEqual(['👍', '❤️']);
     for (const emoji of ['😂', '🍵', '🎉', '😮']) component['addPinned'](emoji);
-    expect(component['reactions'].pinnedReactions()).toEqual(['👍', '❤️', '😂', '🍵', '🎉']);
+    expect(pinnedReactions()).toEqual(['👍', '❤️', '😂', '🍵', '🎉']);
     component['removePinned']('❤️');
-    expect(component['reactions'].pinnedReactions()).toEqual(['👍', '😂', '🍵', '🎉']);
+    expect(pinnedReactions()).toEqual(['👍', '😂', '🍵', '🎉']);
   });
 });

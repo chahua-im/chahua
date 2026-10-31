@@ -70,7 +70,7 @@
         </ion-button>
       </ion-buttons>
     </ion-toolbar>
-  } @else if (pinsFailed()) {
+  } @else if (accessible() && pinsFailed()) {
     <ion-toolbar>
       @if (pins().loading()) {
         <ion-spinner></ion-spinner>
@@ -281,7 +281,7 @@
     </ion-fab>
   }
 </ion-content>
-<ion-footer #composerFooter>
+<ion-footer #composerFooter [class.ion-display-none]="!accessible()">
   @if (selecting()) {
     <ion-toolbar>
       <div class="selection-actions">

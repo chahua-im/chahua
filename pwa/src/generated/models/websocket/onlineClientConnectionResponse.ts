@@ -11,14 +11,14 @@ import type { OnlineClientStatus } from './onlineClientStatus';
  * A current WebSocket connection belonging to the authenticated user.
  */
 export interface OnlineClientConnectionResponse {
-  /** Authenticated client identifier carried by the WebSocket ticket. */
+  /** Authenticated client identifier retained by this connection. */
   clientId: string;
   /**
    * Server-assigned identifier unique to this connection.
    * @minimum 0
    */
   connectionId: number;
-  /** Most recently recorded HTTP application version for this client, when known. */
+  /** Most recently recorded application version for this client, when known. */
   lastAppVersion?: string;
   /** Current app-presence state reported by this connection. */
   status: OnlineClientStatus;

@@ -73,8 +73,7 @@ import {
   trashOutline,
 } from 'ionicons/icons';
 import { firstValueFrom, forkJoin, of, Subject, takeUntil, timer } from 'rxjs';
-import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
-import { ThreadsService } from '../../../generated/endpoints/threads/threads.service';
+import { RpcApi } from '../../../generated/rpc-api';
 import {
   GroupKind,
   GroupRole,
@@ -519,8 +518,7 @@ export class ConversationPage {
 
   private readonly destroyRef = inject(DestroyRef);
   private readonly changeDetector = inject(ChangeDetectorRef);
-  private readonly api = inject(ChatsService);
-  private readonly threadsApi = inject(ThreadsService);
+  private readonly api = inject(RpcApi);
   protected readonly realtime = inject(Connection);
   private readonly navigation = inject(ConversationNavigation);
   protected readonly document = inject(DOCUMENT);
@@ -554,6 +552,7 @@ export class ConversationPage {
     threadId: this.threadId(),
     version: this.entryVersion(),
   }));
+  protected readonly accessible = computed(() => this.chatInfo.isAccessible(this.id(), this.threadId()));
   protected readonly chatTitle = computed(() => {
     const chat = this.chatInfo.get(this.id());
     const isDm = chat?.kind === GroupKind.dm;
@@ -575,7 +574,9 @@ export class ConversationPage {
     computation: (): MessageResponse | undefined => undefined,
   });
   private threadRootUpdate?: ThreadUpdatePayload;
+  private threadRootVersion = 0;
   protected readonly threadRoot = computed(() => {
+    if (!this.accessible()) return undefined;
     const rootId = this.threadId();
     return rootId
       ? (this.conversation.items().find((message) => message.id === rootId) ??
@@ -585,6 +586,7 @@ export class ConversationPage {
   });
   /** Root plus replies; a root without threadInfo has no live replies. */
   private readonly topicMessageCount = computed(() => {
+    if (!this.accessible()) return undefined;
     const rootId = this.threadId();
     if (!rootId) return undefined;
     const root = this.threadRoot();
@@ -594,6 +596,7 @@ export class ConversationPage {
     return root ? 1 : undefined;
   });
   protected readonly canSendMessage = computed(() => {
+    if (!this.accessible()) return false;
     const threadId = this.threadId();
     const root = this.threadRoot();
     const existing =
@@ -625,8 +628,8 @@ export class ConversationPage {
     if (!threadId) return { error: ForwardSelectionError.TopicUnavailable };
     try {
       const page = await firstValueFrom(
-        this.api
-          .getMessages(this.id(), { threadId, max: MAX_FORWARD_MESSAGES })
+        this.api.messages
+          .list({ chatId: this.id(), threadId, max: MAX_FORWARD_MESSAGES })
           .pipe(takeUntilDestroyed(this.destroyRef)),
       );
       return page.olderCursor
@@ -638,13 +641,21 @@ export class ConversationPage {
   };
   private async loadThreadRoot() {
     const entry = this.entryKey();
-    if (!entry.threadId || this.threadRoot()) return;
+    if (!entry.threadId || !this.accessible() || this.threadRoot()) return;
     const previousUpdate = this.threadRootUpdate;
+    const version = this.threadRootVersion;
     try {
       const root = await firstValueFrom(
-        this.api.getMessage(entry.chatId, entry.threadId).pipe(takeUntilDestroyed(this.destroyRef)),
+        this.api.messages
+          .get({ chatId: entry.chatId, messageId: entry.threadId })
+          .pipe(takeUntilDestroyed(this.destroyRef)),
       );
-      if (this.isCurrent(entry) && !this.loadedThreadRoot()) {
+      if (
+        version === this.threadRootVersion &&
+        this.isCurrent(entry) &&
+        this.accessible() &&
+        !this.loadedThreadRoot()
+      ) {
         const update = this.threadRootUpdate;
         this.loadedThreadRoot.set(
           update && update !== previousUpdate
@@ -770,9 +781,13 @@ export class ConversationPage {
           forkJoin({
             scope:
               requested & 1
-                ? this.api.getChatReadReceipt(scope.chatId, scope.threadId ? { threadId: scope.threadId } : undefined)
+                ? this.api.chats.getReadReceipt({
+                    chatId: scope.chatId,
+                    ...(scope.threadId ? { threadId: scope.threadId } : {}),
+                  })
                 : of(undefined),
-            root: requested & 2 && scope.threadId ? this.api.getChatReadReceipt(scope.chatId) : of(undefined),
+            root:
+              requested & 2 && scope.threadId ? this.api.chats.getReadReceipt({ chatId: scope.chatId }) : of(undefined),
           }).pipe(takeUntilDestroyed(this.destroyRef)),
         );
         const current = this.receiptScope();
@@ -814,6 +829,7 @@ export class ConversationPage {
       (!this.preferences.showMembershipMessages() || this.chatInfo.membershipPolicy(this.id())?.canView === false),
   );
   protected readonly rows = computed(() => {
+    if (!this.accessible()) return [];
     const messages = this.conversation.items();
     const hideMembershipMessages = this.hideMembershipMessages();
     const known = new Set(messages.map((message) => message.clientGeneratedId));
@@ -954,17 +970,20 @@ export class ConversationPage {
   protected readonly visiblePins = linkedSignal({
     source: () => ({
       entry: this.entryKey(),
+      accessible: this.accessible(),
       idle: this.scrolling.idle(),
       pins: this.pins()
         .items()
         .filter((pin) => isVisibleMessage(pin.message))
         .sort((a, b) => b.message.id - a.message.id),
     }),
-    computation: ({ entry, idle, pins }, previous): PinResponse[] =>
-      // Only adding/removing the bar changes the viewport during native scrolling.
-      !previous || entry !== previous.source.entry || idle || !!pins.length === !!previous.value.length
-        ? pins
-        : previous.value,
+    computation: ({ entry, accessible, idle, pins }, previous): PinResponse[] =>
+      // Revocation takes precedence over the scroll-time visibility deferral.
+      !accessible
+        ? []
+        : !previous || entry !== previous.source.entry || idle || !!pins.length === !!previous.value.length
+          ? pins
+          : previous.value,
   });
   protected readonly selectedPinId = linkedSignal({
     source: this.visiblePins,
@@ -1068,6 +1087,18 @@ export class ConversationPage {
         onCleanup(this.chatInfo.watchReadStates([{ chatId: this.id(), threadId: this.threadId() }]));
     });
     this.chatInfo.changes$.pipe(takeUntilDestroyed()).subscribe(({ kind, chatId, threadId, readThrough }) => {
+      if (
+        kind === ChatChangeKind.Removed &&
+        chatId === this.id() &&
+        (threadId == null || threadId === this.threadId())
+      ) {
+        this.threadRootVersion++;
+        this.threadRootUpdate = undefined;
+        this.loadedThreadRoot.set(undefined);
+        this.navigationVersion++;
+        this.pendingNavigation.set(undefined);
+        this.position.set(undefined);
+      }
       if (chatId !== this.id() || (threadId ?? undefined) !== (this.threadId() ?? undefined)) return;
       if (kind === ChatChangeKind.Read) {
         if (readThrough != null) this.dismissReadThrough(readThrough);
@@ -1133,6 +1164,7 @@ export class ConversationPage {
       )
         this.invalidateReactions();
       if (
+        this.accessible() &&
         event.type === ServerWsMessageType.threadUpdate &&
         event.payload.chatId === this.id() &&
         event.payload.threadRootId === this.threadId()
@@ -1141,7 +1173,7 @@ export class ConversationPage {
         const threadInfo = event.payload.replyCount > 0 ? { replyCount: event.payload.replyCount } : undefined;
         this.loadedThreadRoot.update((root) => root && { ...root, threadInfo });
       }
-      if (!this.isCurrent()) return;
+      if (!this.isCurrent() || !this.accessible()) return;
       if (event.type === ServerWsMessageType.messageUpdated && event.payload.id === this.threadId())
         this.loadedThreadRoot.set(event.payload);
       if (
@@ -1407,7 +1439,9 @@ export class ConversationPage {
           const read =
             this.chatInfo.threadReadState(chatId, threadId) ??
             (await firstValueFrom(
-              this.threadsApi.getThreadReadStateInChat(chatId, threadId).pipe(takeUntilDestroyed(this.destroyRef)),
+              this.api.threads
+                .getReadState({ chatId, threadRootId: threadId })
+                .pipe(takeUntilDestroyed(this.destroyRef)),
             ).catch(() => undefined));
           around = read?.lastReadMessageId ?? threadId;
         } else {
@@ -1564,7 +1598,7 @@ export class ConversationPage {
         request.again = false;
         request.readThrough = undefined;
         const response = await firstValueFrom(
-          this.api.getChatReactions(chatId, { threadId }).pipe(takeUntilDestroyed(this.destroyRef)),
+          this.api.chats.listUnreadReactions({ chatId, threadId }).pipe(takeUntilDestroyed(this.destroyRef)),
         );
         if (this.reactionRequest !== request || !this.isCurrent(entry) || this.document.hidden || this.panels.covered())
           return;
@@ -1596,7 +1630,7 @@ export class ConversationPage {
     readThrough?: string,
   ) {
     try {
-      const response = await firstValueFrom(this.api.acknowledgeChatReactions(chatId, { threadId, readThrough }));
+      const response = await firstValueFrom(this.api.chats.acknowledgeReactions({ chatId, threadId, readThrough }));
       if (entry === this.entryKey()) this.chatInfo.applyReactionRead(chatId, threadId, response.unreadReactions);
       return response.unreadReactions;
     } catch {
@@ -1687,8 +1721,8 @@ export class ConversationPage {
           this.mentionDirty = false;
           this.mentionChanged = false;
           const response = await firstValueFrom(
-            this.api
-              .getChatMentions(chatId, { threadId })
+            this.api.chats
+              .listMentions({ chatId, threadId })
               .pipe(takeUntil(request.cancel), takeUntilDestroyed(this.destroyRef)),
           );
           if (this.mentionRequest !== request || !this.isCurrent(entry) || this.document.hidden) return;
@@ -2015,7 +2049,7 @@ export class ConversationPage {
     const entry = this.entryKey();
     try {
       const message = await firstValueFrom(
-        this.api.getMessage(entry.chatId, messageId).pipe(takeUntilDestroyed(this.destroyRef)),
+        this.api.messages.get({ chatId: entry.chatId, messageId }).pipe(takeUntilDestroyed(this.destroyRef)),
       );
       if (this.isCurrent(entry) && this.savedReplyId() === messageId && !this.replyTo()) {
         if (message.isDeleted) {
