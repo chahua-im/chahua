@@ -1,4 +1,3 @@
-use dashmap::{DashMap, DashSet};
 use prometheus::{
     register_int_counter_vec_with_registry, register_int_counter_with_registry,
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, IntCounter,
@@ -43,9 +42,7 @@ pub struct ClientTrackingMetrics {
     today_client_rebinds: IntGauge,
     today_stale_clients_purged: IntGauge,
     today_legacy_subscriptions_purged: IntGauge,
-    app_version_requests_total: IntCounterVec,
-    app_version_unique_clients: IntGaugeVec,
-    app_version_clients: DashMap<String, DashSet<String>>,
+    app_version_active_clients: IntGaugeVec,
 }
 
 impl ClientTrackingMetrics {
@@ -126,20 +123,13 @@ impl ClientTrackingMetrics {
             registry
         )
         .expect("activity_today_legacy_subscriptions_purged registration should succeed");
-        let app_version_requests_total = register_int_counter_vec_with_registry!(
-            "app_version_requests_total",
-            "Total number of HTTP requests by app version",
+        let app_version_active_clients = register_int_gauge_vec_with_registry!(
+            "app_version_active_clients",
+            "Clients active in the last 24 hours by latest persisted app version",
             &["version"],
             registry
         )
-        .expect("app_version_requests_total registration should succeed");
-        let app_version_unique_clients = register_int_gauge_vec_with_registry!(
-            "app_version_unique_clients",
-            "Number of unique client IDs observed per app version",
-            &["version"],
-            registry
-        )
-        .expect("app_version_unique_clients registration should succeed");
+        .expect("app_version_active_clients registration should succeed");
 
         Self {
             activity_writes_total,
@@ -154,9 +144,7 @@ impl ClientTrackingMetrics {
             today_client_rebinds,
             today_stale_clients_purged,
             today_legacy_subscriptions_purged,
-            app_version_requests_total,
-            app_version_unique_clients,
-            app_version_clients: DashMap::new(),
+            app_version_active_clients,
         }
     }
 
@@ -186,20 +174,15 @@ impl ClientTrackingMetrics {
             .inc();
     }
 
-    pub fn record_app_version_request(&self, version: &str, client_id: Option<&str>) {
-        self.app_version_requests_total
-            .with_label_values(&[version])
-            .inc();
-        if let Some(cid) = client_id {
-            let set = self
-                .app_version_clients
-                .entry(version.to_owned())
-                .or_default();
-            if set.insert(cid.to_owned()) {
-                self.app_version_unique_clients
-                    .with_label_values(&[version])
-                    .set(set.len() as i64);
-            }
+    pub(crate) fn set_app_version_active_clients(
+        &self,
+        snapshot: &std::collections::HashMap<String, i64>,
+    ) {
+        self.app_version_active_clients.reset();
+        for (version, count) in snapshot {
+            self.app_version_active_clients
+                .with_label_values(&[version])
+                .set(*count);
         }
     }
 
@@ -238,9 +221,6 @@ mod tests {
             stale_clients_purged: 0,
             legacy_subscriptions_purged: 0,
         });
-        metrics.record_app_version_request("v1.0", Some("c1"));
-        metrics.record_app_version_request("v1.0", Some("c2"));
-        metrics.record_app_version_request("v2.0", None);
 
         let rendered = crate::metrics::encode(&registry).expect("metrics should render");
         assert!(rendered.contains("client_activity_writes_total{result=\"success\"} 1"));
@@ -253,33 +233,5 @@ mod tests {
         assert!(rendered.contains("activity_today_active_clients 6"));
         assert!(rendered.contains("activity_today_new_clients 3"));
         assert!(rendered.contains("activity_today_client_rebinds 1"));
-        assert!(rendered.contains("app_version_requests_total{version=\"v1.0\"} 2"));
-        assert!(rendered.contains("app_version_requests_total{version=\"v2.0\"} 1"));
-        assert!(rendered.contains("app_version_unique_clients{version=\"v1.0\"} 2"));
-    }
-
-    #[test]
-    fn app_version_tracks_unique_clients_per_version() {
-        let registry = Registry::new();
-        let metrics = ClientTrackingMetrics::new(&registry);
-
-        // Two requests from same client on same version — unique count stays 1
-        metrics.record_app_version_request("abc1234", Some("client-a"));
-        metrics.record_app_version_request("abc1234", Some("client-a"));
-        let rendered = crate::metrics::encode(&registry).expect("metrics should render");
-        assert!(rendered.contains("app_version_requests_total{version=\"abc1234\"} 2"));
-        assert!(rendered.contains("app_version_unique_clients{version=\"abc1234\"} 1"));
-
-        // Different client on same version — unique count becomes 2
-        metrics.record_app_version_request("abc1234", Some("client-b"));
-        let rendered = crate::metrics::encode(&registry).expect("metrics should render");
-        assert!(rendered.contains("app_version_requests_total{version=\"abc1234\"} 3"));
-        assert!(rendered.contains("app_version_unique_clients{version=\"abc1234\"} 2"));
-
-        // Request without client_id — request counter increments, unique count unchanged
-        metrics.record_app_version_request("abc1234", None);
-        let rendered = crate::metrics::encode(&registry).expect("metrics should render");
-        assert!(rendered.contains("app_version_requests_total{version=\"abc1234\"} 4"));
-        assert!(rendered.contains("app_version_unique_clients{version=\"abc1234\"} 2"));
     }
 }

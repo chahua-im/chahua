@@ -146,7 +146,10 @@ mod tests {
             });
         metrics
             .client_tracking
-            .record_app_version_request("abc1234", Some("client-a"));
+            .set_app_version_active_clients(&std::collections::HashMap::from([(
+                "abc1234".to_owned(),
+                1,
+            )]));
         metrics
             .message_search
             .record_index_operation("upsert", "success");
@@ -207,8 +210,7 @@ mod tests {
         assert!(body.contains("activity_today_client_rebinds"));
         assert!(body.contains("activity_today_stale_clients_purged"));
         assert!(body.contains("activity_today_legacy_subscriptions_purged"));
-        assert!(body.contains("app_version_requests_total"));
-        assert!(body.contains("app_version_unique_clients"));
+        assert!(body.contains("app_version_active_clients"));
         assert!(body.contains("message_search_index_operations_total"));
         assert!(body.contains("message_search_queries_total"));
         assert!(body.contains("message_search_query_duration_seconds"));

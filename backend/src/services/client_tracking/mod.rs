@@ -33,6 +33,7 @@ use crate::services::service_tokens;
 use crate::utils::auth::{bearer_token, extract_auth_context, X_APP_VERSION, X_ON_BEHALF_OF};
 
 const ACTIVITY_WRITE_THROTTLE: Duration = Duration::from_secs(5 * 60);
+const APP_VERSION_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 const PURGE_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 const PURGE_RESTART_DELAY: Duration = Duration::from_secs(1);
 const PURGE_BATCH_SIZE: i64 = 500;
@@ -89,6 +90,38 @@ struct PurgeBatch {
     today_metrics: Option<ActivityTodaySnapshot>,
 }
 
+/// Loads a shared database snapshot using a caller-supplied clock for a stable cutoff.
+pub(crate) fn active_app_version_snapshot(
+    conn: &mut PgConnection,
+    now: NaiveDateTime,
+) -> QueryResult<HashMap<String, i64>> {
+    let rows = clients::table
+        .filter(clients::last_active.ge(now - chrono::Duration::hours(24)))
+        .group_by(clients::last_app_version)
+        .select((clients::last_app_version, diesel::dsl::count_star()))
+        .load::<(Option<String>, i64)>(conn)?;
+    let mut snapshot = HashMap::new();
+    for (version, count) in rows {
+        let version = version
+            .as_deref()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or("unknown");
+        *snapshot.entry(version.to_owned()).or_insert(0) += count;
+    }
+    Ok(snapshot)
+}
+
+/// Publish only after the query succeeds, preserving the previous snapshot on failure.
+pub(crate) fn refresh_app_version_snapshot(
+    conn: &mut PgConnection,
+    metrics: &ClientTrackingMetrics,
+    now: NaiveDateTime,
+) -> QueryResult<()> {
+    let snapshot = active_app_version_snapshot(conn, now)?;
+    metrics.set_app_version_active_clients(&snapshot);
+    Ok(())
+}
+
 pub struct ClientTrackingService {
     db: Pool<ConnectionManager<PgConnection>>,
     metrics: Arc<ClientTrackingMetrics>,
@@ -122,6 +155,38 @@ impl ClientTrackingService {
                     "client tracking: activity gauge initialization worker failed: {}",
                     error
                 ),
+            }
+        });
+        let version_db = db.clone();
+        let version_metrics = metrics.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(APP_VERSION_REFRESH_INTERVAL);
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                interval.tick().await;
+                let db = version_db.clone();
+                let metrics = version_metrics.clone();
+                match tokio::task::spawn_blocking(move || {
+                    let mut conn = db.get().map_err(|error| error.to_string())?;
+                    refresh_app_version_snapshot(&mut conn, &metrics, Utc::now().naive_utc())
+                        .map_err(|error| error.to_string())
+                })
+                .await
+                {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => {
+                        warn!(
+                            "client tracking: app version snapshot refresh failed: {}",
+                            error
+                        )
+                    }
+                    Err(error) => {
+                        warn!(
+                            "client tracking: app version snapshot worker failed: {}",
+                            error
+                        )
+                    }
+                }
             }
         });
 
@@ -609,32 +674,19 @@ pub async fn track_client_activity(
     request: Request<axum::body::Body>,
     next: Next,
 ) -> Response {
-    let record_app_version = should_record_app_version_request(request.uri().path());
     let app_version = app_version_from_headers(request.headers());
-
-    let mut resolved_client_id: Option<String> = None;
     if !is_websocket_upgrade_request(request.method(), request.uri().path(), request.headers())
         && should_record_client_activity(request.headers())
     {
         if let Ok(auth) = extract_auth_context(request.headers(), &state) {
-            let client_id = auth.client_id;
-            resolved_client_id = Some(client_id.clone());
-            if let Err(error) =
-                state
-                    .client_tracking
-                    .record_activity(auth.uid, &client_id, app_version.as_deref())
-            {
+            if let Err(error) = state.client_tracking.record_activity(
+                auth.uid,
+                &auth.client_id,
+                app_version.as_deref(),
+            ) {
                 return error.into_response();
             }
         }
-    }
-
-    if record_app_version {
-        let version = app_version.as_deref().unwrap_or("unknown");
-        state
-            .metrics
-            .client_tracking
-            .record_app_version_request(version, resolved_client_id.as_deref());
     }
 
     next.run(request).await
@@ -680,10 +732,6 @@ fn app_version_from_headers(headers: &HeaderMap) -> Option<String> {
         .map(str::trim)
         .filter(|version| !version.is_empty())
         .map(str::to_owned)
-}
-
-fn should_record_app_version_request(path: &str) -> bool {
-    !WS_UPGRADE_PATHS.contains(&path)
 }
 
 #[cfg(test)]
@@ -760,14 +808,6 @@ mod tests {
             legacy_subscriptions_purged: 0,
         }
         .is_zero());
-    }
-
-    #[test]
-    fn app_version_tracking_excludes_websocket_upgrade_path() {
-        assert!(!should_record_app_version_request("/ws"));
-        assert!(!should_record_app_version_request("/ws/"));
-        assert!(should_record_app_version_request("/ws/ticket"));
-        assert!(should_record_app_version_request("/chats"));
     }
 
     #[test]
@@ -873,6 +913,82 @@ mod tests {
 
         headers.insert(X_APP_VERSION, axum::http::HeaderValue::from_static("   "));
         assert_eq!(app_version_from_headers(&headers), None);
+    }
+
+    #[test]
+    fn app_version_snapshot_tracks_active_clients_and_preserves_last_success() {
+        use diesel::connection::SimpleConnection;
+
+        let url = match std::env::var("WETTY_TEST_DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+                return;
+            }
+        };
+        let pool = Pool::builder()
+            .max_size(1)
+            .connection_customizer(Box::new(diesel::r2d2::TestCustomizer))
+            .build(ConnectionManager::<PgConnection>::new(url))
+            .expect("create test database pool");
+        let mut conn = pool.get().expect("test connection");
+        // Shadow the real table, so unrelated test data cannot affect the snapshot.
+        conn.batch_execute(
+            "CREATE TEMP TABLE clients (
+                client_id varchar(64) PRIMARY KEY,
+                last_active timestamp NOT NULL,
+                last_active_uid integer NOT NULL,
+                last_app_version text
+            );
+            INSERT INTO clients VALUES
+                ('moving', '2026-03-21 12:00:00', 1, 'old'),
+                ('boundary', '2026-03-20 12:00:00', 1, 'boundary'),
+                ('expired', '2026-03-20 11:59:59.999999', 1, 'expired'),
+                ('null', '2026-03-21 12:00:00', 1, NULL),
+                ('empty', '2026-03-21 12:00:00', 1, ''),
+                ('blank', '2026-03-21 12:00:00', 1, '   '),
+                ('literal', '2026-03-21 12:00:00', 1, 'unknown');",
+        )
+        .expect("create isolated fixtures");
+        let now = NaiveDate::from_ymd_opt(2026, 3, 21)
+            .unwrap()
+            .and_hms_opt(12, 0, 0)
+            .unwrap();
+        let registry = prometheus::Registry::new();
+        let metrics = ClientTrackingMetrics::new(&registry);
+        refresh_app_version_snapshot(&mut conn, &metrics, now).unwrap();
+        let initial = active_app_version_snapshot(&mut conn, now).unwrap();
+        assert_eq!(initial.get("unknown"), Some(&4));
+        assert_eq!(initial.get("boundary"), Some(&1));
+        assert_eq!(initial.get("old"), Some(&1));
+        assert!(!initial.contains_key("expired"));
+
+        // Repeated activity and a rebind update the same row; an upgrade moves it.
+        conn.batch_execute(
+            "UPDATE clients SET last_active_uid = 2, last_app_version = 'new'
+             WHERE client_id = 'moving';
+             UPDATE clients SET last_active = '2026-03-21 12:00:00'
+             WHERE client_id = 'moving';",
+        )
+        .unwrap();
+        refresh_app_version_snapshot(&mut conn, &metrics, now).unwrap();
+        let rendered = crate::metrics::encode(&registry).unwrap();
+        assert!(rendered.contains("app_version_active_clients{version=\"new\"} 1"));
+        assert!(!rendered.contains("app_version_active_clients{version=\"old\"}"));
+        assert!(rendered.contains("app_version_active_clients{version=\"unknown\"} 4"));
+
+        // Advancing the clock removes expired series, including the last one.
+        refresh_app_version_snapshot(&mut conn, &metrics, now + chrono::Duration::hours(25))
+            .unwrap();
+        assert!(!crate::metrics::encode(&registry)
+            .unwrap()
+            .contains("app_version_active_clients"));
+        refresh_app_version_snapshot(&mut conn, &metrics, now).unwrap();
+        let before_failure = crate::metrics::encode(&registry).unwrap();
+        conn.batch_execute("ALTER TABLE clients RENAME COLUMN last_active TO unavailable")
+            .unwrap();
+        assert!(refresh_app_version_snapshot(&mut conn, &metrics, now).is_err());
+        assert_eq!(crate::metrics::encode(&registry).unwrap(), before_failure);
     }
 
     /// Requires a migrated test database (`WETTY_TEST_DATABASE_URL`); skipped

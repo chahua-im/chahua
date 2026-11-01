@@ -275,8 +275,29 @@ client-rebind or client-bookkeeping rollup metrics.
 | `activity_today_client_rebinds` | Gauge | Exact client-rebind count for today mirrored from the daily rollup. | No labels. |
 | `activity_today_stale_clients_purged` | Gauge | Exact stale-client purge count for today mirrored from the daily rollup. | No labels. |
 | `activity_today_legacy_subscriptions_purged` | Gauge | Exact legacy-subscription purge count for today mirrored from the daily rollup. | No labels. |
-| `app_version_requests_total` | Counter; `version` | Non-WebSocket-upgrade HTTP requests observed by client tracking, grouped by the request app-version header or `unknown`. | Version values are client supplied and can grow without bound; monitor and constrain this label operationally. |
-| `app_version_unique_clients` | Gauge; `version` | Unique client IDs observed per app version in the current process. Requests without a resolved client ID increment the request counter but do not change this gauge. | Per-version series only, but the `version` label has the same unbounded client-supplied cardinality risk. |
+| `app_version_active_clients` | Gauge; `version` | Unique authenticated client IDs active in the rolling last 24 hours, grouped by their latest persisted app version across HTTP and RPC. | Version values are client supplied and can grow without bound; monitor and constrain this label operationally. |
+
+Each client record contributes once, regardless of request volume, connections,
+reconnects, account rebinds, upgrades, or server restarts. HTTP records versions
+from its app-version header; an authenticated RPC `session.open` alone records
+client usage and its version. Later activity preserves the recorded version. Missing,
+empty, and whitespace-only persisted versions are reported as `unknown`, merged
+with a literal `unknown` version. Anonymous sessions and excluded service-token
+or on-behalf-of requests do not contribute client bookkeeping.
+
+Each instance refreshes this shared database snapshot asynchronously at startup
+and every 60 seconds, retaining the last successful snapshot if refresh fails.
+Persisted activity is subject to the existing five-minute client bookkeeping
+throttle, so the snapshot can lag activity by that throttle plus the refresh
+interval. Each successful refresh removes expired clients and versions with no
+remaining clients. The gauge has no series for an empty population; this is
+healthy no-data, not a zero-filled distribution.
+
+Snapshots are replicas, not instance-local counts: use
+`max by (version) (app_version_active_clients{job="wetty-chat-backend"})`
+across instances, never sum replicas or apply `rate`/`increase`. Divide that
+per-version result by its sum for the client distribution; do not weight it by
+request volume. See the [Grafana dashboard](../../docs/grafana.json).
 
 ## Message search
 

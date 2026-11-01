@@ -207,7 +207,8 @@ migrated local PostgreSQL database. Their fixtures are rolled back.
 Prometheus endpoint behavior and the complete metric catalog are in
 [docs/metrics.md](docs/metrics.md). The checked-in
 [Grafana dashboard](../docs/grafana.json) shows unified HTTP and RPC API traffic,
-successful latency and outcomes alongside domain metrics.
+successful latency and outcomes, domain metrics, and the rolling 24-hour
+authenticated-client distribution by latest app version.
 
 ## OpenAPI contract
 
@@ -571,9 +572,8 @@ rollups. Legacy WebSockets retain this exclusion from their upgrade request for
 subsequent active reports; their auth frame still requires a valid user ticket.
 Excluded legacy sockets can still report presence and advance user last seen.
 RPC ignores upgrade headers and records its first-frame verified user/client.
-Existing client records are not removed. App-version request counters count HTTP
-requests only; excluded HTTP requests contribute no resolved client ID to
-unique-client version gauges.
+Existing client records are not removed. The [metrics catalog](docs/metrics.md#client-tracking-and-daily-activity)
+defines app-version distribution accounting and its freshness and aggregation semantics.
 
 User discoverability is limited to self, friends, or current shared regular-group membership.
 An existing DM without friendship or a shared regular group does not grant presence access.
