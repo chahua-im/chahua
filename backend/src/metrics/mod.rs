@@ -100,7 +100,9 @@ mod tests {
         metrics
             .api
             .record("rpc", "messages.list", StatusCode::FORBIDDEN, "1003", 0.05);
-        metrics.chat.record_message(42);
+        metrics
+            .chat
+            .record_message(42, crate::models::GroupKind::Group);
         metrics.push.record_notification("web_push", true);
         metrics.push.record_job("success", 0.002);
         metrics.push.record_suppressed();
@@ -176,6 +178,7 @@ mod tests {
         assert!(body.contains("api_requests_total"));
         assert!(body.contains("api_request_duration_seconds"));
         assert!(body.contains("messages_total"));
+        assert!(body.contains("messages_by_chat_kind_total{chat_kind=\"group\"} 1"));
         assert!(body.contains("push_notifications_total"));
         assert!(body.contains("push_notification_jobs_total"));
         assert!(body.contains("push_notification_job_duration_seconds"));

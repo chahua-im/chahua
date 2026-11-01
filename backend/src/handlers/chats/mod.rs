@@ -152,8 +152,6 @@ async fn get_chat_read_receipt(
     crate::services::api::chats::get_chat_read_receipt(uid, chat_id, query, &mut conn).map(Json)
 }
 
-/// Optional body for the unread endpoint — allows resetting read position to a specific message.
-
 /// POST /chats/:chat_id/unread — Mark a chat as unread by rewinding the read pointer.
 #[utoipa::path(
     post,

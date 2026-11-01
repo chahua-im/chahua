@@ -172,7 +172,34 @@ the business-traffic filter above on both sides of any filtered ratio.
 
 | Family | Type / labels | Meaning and recording boundary | Buckets / cardinality |
 | --- | --- | --- | --- |
-| `messages_total` | Counter; `chat_id` | Successfully persisted messages. It increments once after persistence for all sender/message kinds; duplicate retries that return early are not counted. | `chat_id` is an unbounded per-chat label. Use aggregation/retention deliberately; do not add further per-entity labels. |
+| `messages_total` | Counter; `chat_id` | Incremented once after message insertion and preparation for all sender and message kinds, including invite, pin and member system messages. Duplicate retries that return early are not counted. The increment can occur inside a surrounding transaction, before commit, so a later rollback does not undo it. | `chat_id` is an unbounded per-chat label. Use aggregation/retention deliberately; do not add further per-entity labels. |
+| `messages_by_chat_kind_total` | Counter; `chat_kind` | Incremented at the same boundary and under the same rules as `messages_total`. | `chat_kind` is the destination `GroupKind`, bounded to `dm` or `group`; threads inherit their destination chat kind, and forwards use the destination kind. Both counter children start at zero. |
+
+**Message share by destination chat kind over the selected dashboard range**
+
+```promql
+(
+  sum by (chat_kind) (
+    increase(messages_by_chat_kind_total{job="wetty-chat-backend",chat_kind=~"dm|group"}[$__range])
+  )
+  /
+  scalar(sum(
+    increase(messages_by_chat_kind_total{job="wetty-chat-backend",chat_kind=~"dm|group"}[$__range])
+  ))
+) >= 0
+```
+
+Evaluate at the end of the selected range; the result is a fraction formatted as
+a percentage. Counters from instances are additive, so calculate `increase` per
+series before summing. If only one kind has observations, it represents the
+whole distribution; zero or absent total traffic has no defined share. The
+comparison filters undefined fractions without removing valid zero shares.
+
+The aggregate family is available only after deployment; historical messages
+are not backfilled. Its two fixed counter children avoid per-chat first-sample
+loss when new chats are created. Prometheus `increase` still requires sufficient
+samples per series and extrapolates, so it may not reflect every individual
+message.
 
 ## WebSocket registry
 

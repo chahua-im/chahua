@@ -8,7 +8,7 @@ use diesel::prelude::*;
 use crate::{
     dto::messages::{ForwardMessageBody, ForwardedFromInfo},
     errors::AppError,
-    models::{Attachment, Message, MessageType, NewAttachment, TranscodeStatus},
+    models::{Attachment, GroupKind, Message, MessageType, NewAttachment, TranscodeStatus},
     schema::{attachments, messages},
     services::{
         forwarding::{acquire_forward_retry_lock, check_source_membership, source_placeholder},
@@ -55,6 +55,7 @@ pub(crate) async fn prepare_single_forward(
     id_gen: &IdGen,
     uid: i32,
     destination_chat_id: i64,
+    destination_kind: GroupKind,
     source_message_id: i64,
     body: &ForwardMessageBody,
 ) -> Result<PreparedSingleForward, AppError> {
@@ -103,6 +104,7 @@ pub(crate) async fn prepare_single_forward(
         return Ok(PreparedSingleForward::New(Box::new(PreparedMessageSend {
             system_kind: None,
             chat_id: destination_chat_id,
+            chat_kind: destination_kind,
             sender_uid: uid,
             message: Some(reason.as_str().to_owned()),
             message_type: MessageType::Placeholder,
@@ -156,6 +158,7 @@ pub(crate) async fn prepare_single_forward(
     Ok(PreparedSingleForward::New(Box::new(PreparedMessageSend {
         system_kind: None,
         chat_id: destination_chat_id,
+        chat_kind: destination_kind,
         sender_uid: uid,
         message: source.message,
         message_type: source.message_type,
@@ -541,11 +544,17 @@ mod tests {
             client_generated_id: "single-forward-retry-test".into(),
             thread_id: None,
         };
-        let PreparedSingleForward::New(prepared) =
-            prepare_single_forward(&mut conn, id_gen, 76000, -76000, -76001, &body)
-                .await
-                .unwrap()
-        else {
+        let PreparedSingleForward::New(prepared) = prepare_single_forward(
+            &mut conn,
+            id_gen,
+            76000,
+            -76000,
+            GroupKind::Group,
+            -76001,
+            &body,
+        )
+        .await
+        .unwrap() else {
             panic!("first attempt must prepare a new copy")
         };
         assert_eq!(prepared.attachment_ids.len(), 2);
@@ -582,11 +591,17 @@ mod tests {
             .count()
             .get_result::<i64>(&mut conn)
             .unwrap();
-        let PreparedSingleForward::Existing(existing) =
-            prepare_single_forward(&mut conn, id_gen, 76000, -76000, -76001, &body)
-                .await
-                .unwrap()
-        else {
+        let PreparedSingleForward::Existing(existing) = prepare_single_forward(
+            &mut conn,
+            id_gen,
+            76000,
+            -76000,
+            GroupKind::Group,
+            -76001,
+            &body,
+        )
+        .await
+        .unwrap() else {
             panic!("retry must reuse the existing message")
         };
         assert_eq!(existing.id, -76005);
@@ -601,7 +616,16 @@ mod tests {
         conn.batch_execute("UPDATE messages SET deleted_at=NOW() WHERE id=-76001;")
             .unwrap();
         assert!(matches!(
-            prepare_single_forward(&mut conn, id_gen, 76000, -76000, -76001, &body,).await,
+            prepare_single_forward(
+                &mut conn,
+                id_gen,
+                76000,
+                -76000,
+                GroupKind::Group,
+                -76001,
+                &body,
+            )
+            .await,
             Err(AppError::NotFound(_))
         ));
         conn.batch_execute(
@@ -610,7 +634,16 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            prepare_single_forward(&mut conn, id_gen, 76000, -76000, -76001, &body,).await,
+            prepare_single_forward(
+                &mut conn,
+                id_gen,
+                76000,
+                -76000,
+                GroupKind::Group,
+                -76001,
+                &body,
+            )
+            .await,
             Err(AppError::Forbidden(_))
         ));
         conn.batch_execute("ROLLBACK").unwrap();
@@ -671,6 +704,7 @@ mod tests {
                 id_gen,
                 76200,
                 -76200,
+                GroupKind::Group,
                 &ForwardMessagesBody {
                     allow_placeholders: false,
                     source_chat_id: -76200,
@@ -693,11 +727,17 @@ mod tests {
                 client_generated_id: format!("bundle-single-{source_id}"),
                 thread_id: Some(-76211),
             };
-            let PreparedSingleForward::New(prepared) =
-                prepare_single_forward(&mut conn, id_gen, 76200, -76210, source_id, &body)
-                    .await
-                    .unwrap()
-            else {
+            let PreparedSingleForward::New(prepared) = prepare_single_forward(
+                &mut conn,
+                id_gen,
+                76200,
+                -76210,
+                GroupKind::Group,
+                source_id,
+                &body,
+            )
+            .await
+            .unwrap() else {
                 panic!("expected a new bundle copy")
             };
             assert_eq!(prepared.message_type, MessageType::Forwarded);
@@ -708,11 +748,17 @@ mod tests {
             assert!(prepared.attachment_ids.is_empty());
             let copy_id = source_id - 10;
             persist(&mut conn, copy_id, &prepared);
-            let PreparedSingleForward::Existing(existing) =
-                prepare_single_forward(&mut conn, id_gen, 76200, -76210, source_id, &body)
-                    .await
-                    .unwrap()
-            else {
+            let PreparedSingleForward::Existing(existing) = prepare_single_forward(
+                &mut conn,
+                id_gen,
+                76200,
+                -76210,
+                GroupKind::Group,
+                source_id,
+                &body,
+            )
+            .await
+            .unwrap() else {
                 panic!("retry must reuse the existing copy")
             };
             assert_eq!(existing.id, copy_id);
@@ -742,7 +788,16 @@ mod tests {
             }
             assert!(load_chat_forwarded_bundle_id(&mut conn, -76210, copy_id, 76201).is_err());
             assert!(matches!(
-                prepare_single_forward(&mut conn, id_gen, 76200, -76210, source_id, &body).await,
+                prepare_single_forward(
+                    &mut conn,
+                    id_gen,
+                    76200,
+                    -76210,
+                    GroupKind::Group,
+                    source_id,
+                    &body
+                )
+                .await,
                 Err(AppError::NotFound(_))
             ));
 
@@ -753,6 +808,7 @@ mod tests {
                 id_gen,
                 76200,
                 -76210,
+                GroupKind::Group,
                 copy_id,
                 &ForwardMessageBody {
                     allow_placeholders: false,
@@ -831,11 +887,17 @@ mod tests {
             client_generated_id: "forward-lock-copy".into(),
             thread_id: None,
         };
-        let PreparedSingleForward::New(prepared) =
-            prepare_single_forward(&mut conn, id_gen, 76100, -76100, -76101, &body)
-                .await
-                .unwrap()
-        else {
+        let PreparedSingleForward::New(prepared) = prepare_single_forward(
+            &mut conn,
+            id_gen,
+            76100,
+            -76100,
+            GroupKind::Group,
+            -76101,
+            &body,
+        )
+        .await
+        .unwrap() else {
             panic!("expected a new copy");
         };
         // Match patch_message's lock-before-replacing-attachments protocol.
@@ -864,11 +926,17 @@ mod tests {
         // next copy sees the complete new version.
         editor.batch_execute(edit).unwrap();
         conn.batch_execute("BEGIN").unwrap();
-        let PreparedSingleForward::New(prepared) =
-            prepare_single_forward(&mut conn, id_gen, 76100, -76100, -76101, &body)
-                .await
-                .unwrap()
-        else {
+        let PreparedSingleForward::New(prepared) = prepare_single_forward(
+            &mut conn,
+            id_gen,
+            76100,
+            -76100,
+            GroupKind::Group,
+            -76101,
+            &body,
+        )
+        .await
+        .unwrap() else {
             panic!("expected a new copy");
         };
         let copied_file = attachments::table

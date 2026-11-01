@@ -194,6 +194,14 @@ impl From<AuthenticatedServiceToken> for ServiceTokenPrincipal {
     }
 }
 
+pub fn is_valid_client_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|b| matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_'))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,11 +237,4 @@ mod tests {
             ))
         ));
     }
-}
-pub fn is_valid_client_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 64
-        && value
-            .bytes()
-            .all(|b| matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_'))
 }

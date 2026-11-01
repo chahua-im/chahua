@@ -207,8 +207,11 @@ migrated local PostgreSQL database. Their fixtures are rolled back.
 Prometheus endpoint behavior and the complete metric catalog are in
 [docs/metrics.md](docs/metrics.md). The checked-in
 [Grafana dashboard](../docs/grafana.json) shows unified HTTP and RPC API traffic,
-successful latency and outcomes, domain metrics, and the rolling 24-hour
-authenticated-client distribution by latest app version.
+successful latency and outcomes, domain metrics including message share by DM or
+group over the selected range, and the rolling 24-hour authenticated-client
+distribution by latest app version. The message share uses classified samples
+from deployment onward, with no historical backfill; see the catalog for its
+counting and no-traffic semantics.
 
 ## OpenAPI contract
 

@@ -200,7 +200,7 @@ pub async fn post_group(
     let name = body
         .name
         .filter(|name| !name.trim().is_empty())
-        .unwrap_or_else(String::new);
+        .unwrap_or_default();
 
     diesel::insert_into(groups::table)
         .values(&NewGroup {

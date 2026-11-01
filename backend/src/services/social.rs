@@ -375,15 +375,15 @@ pub fn check_can_dm(
 /// generated before entering the transaction because ID generation is
 /// asynchronous.
 ///
-/// Returns the DM chat id whether freshly created or reused, so callers can
-/// announce the (re-)friendship in it.
+/// Returns the DM chat id and kind whether freshly created or reused, so callers
+/// can classify and announce the (re-)friendship in it.
 fn create_dm_for_friendship(
     conn: &mut PgConnection,
     id: i64,
     user_a: i32,
     user_b: i32,
     now: chrono::DateTime<Utc>,
-) -> Result<i64, AppError> {
+) -> Result<(i64, GroupKind), AppError> {
     let (u1, u2) = canonical_pair(user_a, user_b);
     let pair_filter = groups::kind
         .eq(GroupKind::Dm)
@@ -413,14 +413,16 @@ fn create_dm_for_friendship(
             dm_uid2: Some(u2),
         })
         .on_conflict_do_nothing()
-        .execute(conn)?;
-    if inserted == 0 {
+        .returning((groups::id, groups::kind))
+        .get_result::<(i64, GroupKind)>(conn)
+        .optional()?;
+    let Some(inserted) = inserted else {
         return groups::table
             .filter(pair_filter)
-            .select(groups::id)
-            .first::<i64>(conn)
+            .select((groups::id, groups::kind))
+            .first::<(i64, GroupKind)>(conn)
             .map_err(|_| AppError::Internal("Concurrent DM disappeared"));
-    }
+    };
 
     diesel::insert_into(group_membership::table)
         .values(&[
@@ -444,7 +446,7 @@ fn create_dm_for_friendship(
             },
         ])
         .execute(conn)?;
-    Ok(id)
+    Ok(inserted)
 }
 
 /// Best-effort system message announcing the accepted friend request. Sender
@@ -456,6 +458,7 @@ async fn send_friendship_accepted_message(
     sender_uid: i32,
     peer_uid: i32,
     chat_id: i64,
+    chat_kind: GroupKind,
 ) {
     let peer_username = load_username_by_uid(conn, peer_uid)
         .unwrap_or_default()
@@ -473,6 +476,7 @@ async fn send_friendship_accepted_message(
                 system_kind: Some(crate::models::SystemMessageKind::FriendRequestAccepted),
                 forwarded_from_message_id: None,
                 chat_id,
+                chat_kind,
                 sender_uid,
                 message: Some(super::system_messages::with_user(
                     format!("accepted {peer_username}'s friend request"),
@@ -924,8 +928,8 @@ pub async fn create_friend_request(
             tracing::error!("failed to generate dm group id: {:?}", err);
             AppError::Internal("Failed to generate id")
         })?;
-        let (request, dm_chat_id) =
-            conn.transaction::<(FriendRequest, i64), AppError, _>(|conn| {
+        let (request, (dm_chat_id, chat_kind)) = conn
+            .transaction::<(FriendRequest, (i64, GroupKind)), AppError, _>(|conn| {
                 let updated = diesel::update(
                     friend_requests::table
                         .filter(friend_requests::id.eq(existing.id))
@@ -947,7 +951,7 @@ pub async fn create_friend_request(
             })?;
         deps.presence_service.pair_policy_changed(from, to);
         // The auto-accepter (`from`) just reciprocated the pending request.
-        send_friendship_accepted_message(conn, deps, from, to, dm_chat_id).await;
+        send_friendship_accepted_message(conn, deps, from, to, dm_chat_id, chat_kind).await;
         return Ok(CreateRequestOutcome::AutoAccepted { request });
     }
 
@@ -1020,8 +1024,8 @@ pub async fn resolve_friend_request(
         None
     };
     let now = Utc::now();
-    let (outcome, dm_chat_id) =
-        conn.transaction::<(ResolveOutcome, Option<i64>), AppError, _>(|conn| {
+    let (outcome, dm_chat_id) = conn
+        .transaction::<(ResolveOutcome, Option<(i64, GroupKind)>), AppError, _>(|conn| {
             let new_status = if accept {
                 FriendRequestStatus::Accepted
             } else {
@@ -1078,7 +1082,7 @@ pub async fn resolve_friend_request(
             }
             Ok((ResolveOutcome::Resolved(request), None))
         })?;
-    if let Some(chat_id) = dm_chat_id {
+    if let Some((chat_id, chat_kind)) = dm_chat_id {
         deps.presence_service
             .pair_policy_changed(outcome.request().from_uid, outcome.request().to_uid);
         send_friendship_accepted_message(
@@ -1087,6 +1091,7 @@ pub async fn resolve_friend_request(
             resolver_uid,
             outcome.request().from_uid,
             chat_id,
+            chat_kind,
         )
         .await;
     }

@@ -236,17 +236,22 @@ async fn list_pins_in_scope(
 /// Who may pin/unpin: DM participants may manage shared pins themselves;
 /// group chats stay admin-only. DM members are all `Member` (no admin exists),
 /// so this replaces the previous unconditional admin requirement.
-fn require_pin_permission(conn: &mut PgConnection, chat_id: i64, uid: i32) -> Result<(), AppError> {
+fn require_pin_permission(
+    conn: &mut PgConnection,
+    chat_id: i64,
+    uid: i32,
+) -> Result<GroupKind, AppError> {
     let kind: GroupKind = groups::table
         .find(chat_id)
         .select(groups::kind)
         .first(conn)?;
     if kind == GroupKind::Dm {
         check_membership(conn, chat_id, uid)?;
-        crate::services::social::require_chat_writable(conn, chat_id, uid)
+        crate::services::social::require_chat_writable(conn, chat_id, uid)?;
     } else {
-        require_admin_role(conn, chat_id, uid)
+        require_admin_role(conn, chat_id, uid)?;
     }
+    Ok(kind)
 }
 
 async fn create_pin_in_scope(
@@ -257,7 +262,7 @@ async fn create_pin_in_scope(
     conn: &mut PgConnection,
     deps: CreatePinDeps<'_>,
 ) -> Result<PinResponse, AppError> {
-    require_pin_permission(conn, chat_id, uid)?;
+    let chat_kind = require_pin_permission(conn, chat_id, uid)?;
 
     // Verify message exists in this chat and is not deleted
     let msg: Message = messages::table
@@ -353,11 +358,14 @@ async fn create_pin_in_scope(
     };
 
     send_pin_system_message(
-        uid,
-        chat_id,
-        scope,
-        PinAction::Pinned,
-        message_id,
+        PinSystemMessage {
+            uid,
+            chat_id,
+            chat_kind,
+            scope,
+            action: PinAction::Pinned,
+            message_id,
+        },
         conn,
         SendPreparedMessageDeps {
             id_gen: deps.id_gen,
@@ -406,7 +414,7 @@ async fn delete_pin_in_scope(
     conn: &mut PgConnection,
     deps: DeletePinDeps<'_>,
 ) -> Result<(), AppError> {
-    require_pin_permission(conn, chat_id, uid)?;
+    let chat_kind = require_pin_permission(conn, chat_id, uid)?;
 
     let pin: PinnedMessage = pinned_messages::table
         .filter(
@@ -422,11 +430,14 @@ async fn delete_pin_in_scope(
     diesel::delete(pinned_messages::table.filter(pinned_messages::id.eq(pin_id))).execute(conn)?;
 
     send_pin_system_message(
-        uid,
-        chat_id,
-        scope,
-        PinAction::Unpinned,
-        pin.message_id,
+        PinSystemMessage {
+            uid,
+            chat_id,
+            chat_kind,
+            scope,
+            action: PinAction::Unpinned,
+            message_id: pin.message_id,
+        },
         conn,
         SendPreparedMessageDeps {
             id_gen: deps.id_gen,
@@ -475,19 +486,32 @@ enum PinAction {
     Unpinned,
 }
 
-/// Best-effort system message announcing the pin change. Thread pins announce
-/// inside the thread so the change is visible in the thread transcript.
-async fn send_pin_system_message(
+struct PinSystemMessage {
     uid: i32,
     chat_id: i64,
+    chat_kind: GroupKind,
     scope: PinScope,
     action: PinAction,
     message_id: i64,
+}
+
+/// Best-effort system message announcing the pin change. Thread pins announce
+/// inside the thread so the change is visible in the thread transcript.
+async fn send_pin_system_message(
+    event: PinSystemMessage,
     conn: &mut PgConnection,
     send_message_deps: SendPreparedMessageDeps<'_>,
     ws_registry: &Arc<ConnectionRegistry>,
     push_service: &Arc<PushService>,
 ) {
+    let PinSystemMessage {
+        uid,
+        chat_id,
+        chat_kind,
+        scope,
+        action,
+        message_id,
+    } = event;
     let (system_kind, text) = match (scope, action) {
         (PinScope::Chat, PinAction::Pinned) => {
             (SystemMessageKind::MessagePinned, "pinned a message")
@@ -514,6 +538,7 @@ async fn send_pin_system_message(
                 system_kind: Some(system_kind),
                 forwarded_from_message_id: None,
                 chat_id,
+                chat_kind,
                 sender_uid: uid,
                 message: Some(crate::services::system_messages::with_message(
                     text, message_id,

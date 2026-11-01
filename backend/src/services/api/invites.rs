@@ -67,7 +67,7 @@ enum PreviewEligibility {
 }
 
 enum RedeemInviteOutcome {
-    Joined(i64),
+    Joined(i64, crate::models::GroupKind),
     AlreadyMember,
 }
 
@@ -231,7 +231,7 @@ pub async fn post_send_invite_message(
         let mut transaction = AsyncTransaction::begin(conn)?;
         let conn = transaction.connection();
         let result = async {
-            authorize_message_send(conn, body.destination_chat_id, None, uid)?;
+            let target = authorize_message_send(conn, body.destination_chat_id, None, uid)?;
 
             let now = Utc::now();
             let invite = if let Some(invite_id) = body.invite_id {
@@ -260,15 +260,16 @@ pub async fn post_send_invite_message(
             let send_result = send_prepared_message(
                 conn,
                 SendPreparedMessageDeps {
-                    id_gen: id_gen,
-                    media: media,
-                    avatars: avatars,
-                    metrics: metrics,
+                    id_gen,
+                    media,
+                    avatars,
+                    metrics,
                 },
                 PreparedMessageSend {
                     system_kind: None,
                     forwarded_from_message_id: None,
                     chat_id: body.destination_chat_id,
+                    chat_kind: target.kind,
                     sender_uid: uid,
                     message: Some(invite.code.clone()),
                     message_type: MessageType::Invite,
@@ -485,12 +486,14 @@ pub async fn post_redeem_invite(
                 }
             }
 
-            let last_message_id: Option<i64> = crate::schema::groups::table
-                .filter(crate::schema::groups::id.eq(invite.chat_id))
-                .select(crate::schema::groups::last_message_id)
-                .first(conn)
-                .optional()?
-                .flatten();
+            let (last_message_id, chat_kind): (Option<i64>, crate::models::GroupKind) =
+                crate::schema::groups::table
+                    .filter(crate::schema::groups::id.eq(invite.chat_id))
+                    .select((
+                        crate::schema::groups::last_message_id,
+                        crate::schema::groups::kind,
+                    ))
+                    .first(conn)?;
             match diesel::insert_into(group_membership::table)
                 .values(&NewGroupMembership {
                     chat_id: invite.chat_id,
@@ -530,7 +533,7 @@ pub async fn post_redeem_invite(
                 }
             }
 
-            Ok(RedeemInviteOutcome::Joined(invite.chat_id))
+            Ok(RedeemInviteOutcome::Joined(invite.chat_id, chat_kind))
         })
         .map_err(|error| match error {
             RedeemInviteError::InvalidCode => AppError::BadRequest(INVALID_INVITE_CODE_MESSAGE),
@@ -540,8 +543,8 @@ pub async fn post_redeem_invite(
             }
         })?;
 
-    let chat_id = match outcome {
-        RedeemInviteOutcome::Joined(chat_id) => chat_id,
+    let (chat_id, chat_kind) = match outcome {
+        RedeemInviteOutcome::Joined(chat_id, chat_kind) => (chat_id, chat_kind),
         RedeemInviteOutcome::AlreadyMember => {
             return Err(AppError::Conflict("Already a member of this chat"));
         }
@@ -551,15 +554,16 @@ pub async fn post_redeem_invite(
         crate::services::messages::send_prepared_message(
             conn,
             crate::services::messages::SendPreparedMessageDeps {
-                id_gen: id_gen,
-                media: media,
-                avatars: avatars,
-                metrics: metrics,
+                id_gen,
+                media,
+                avatars,
+                metrics,
             },
             crate::services::messages::PreparedMessageSend {
                 system_kind: Some(crate::models::SystemMessageKind::MemberJoined),
                 forwarded_from_message_id: None,
                 chat_id,
+                chat_kind,
                 sender_uid: uid,
                 message: Some("joined the chat".to_string()),
                 message_type: crate::models::MessageType::System,

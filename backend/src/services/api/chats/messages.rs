@@ -593,7 +593,7 @@ pub async fn post_message(
         let mut transaction = AsyncTransaction::begin(conn)?;
         let conn = transaction.connection();
         let result = async {
-            authorize_message_send(conn, chat_id, None, uid)?;
+            let target = authorize_message_send(conn, chat_id, None, uid)?;
             let send_result = send_prepared_message(
                 conn,
                 SendPreparedMessageDeps {
@@ -606,6 +606,7 @@ pub async fn post_message(
                     system_kind: None,
                     forwarded_from_message_id: None,
                     chat_id,
+                    chat_kind: target.kind,
                     sender_uid: uid,
                     message: body.message,
                     message_type: body.message_type,
@@ -687,9 +688,15 @@ pub async fn forward_messages(
         let conn = transaction.connection();
         let result = async {
             let target = authorize_message_send(conn, dest_chat_id, body.thread_id, uid)?;
-            let prepared =
-                prepare_forward_message(conn, deps.id_gen.as_ref(), uid, dest_chat_id, &body)
-                    .await?;
+            let prepared = prepare_forward_message(
+                conn,
+                deps.id_gen.as_ref(),
+                uid,
+                dest_chat_id,
+                target.kind,
+                &body,
+            )
+            .await?;
             let send_result = send_prepared_message(
                 conn,
                 SendPreparedMessageDeps {
@@ -769,9 +776,11 @@ pub async fn forward_messages(
         }
         broadcast_thread_send_updates(
             conn,
-            deps.media,
-            deps.avatars,
-            deps.ws_registry,
+            ThreadSendUpdateDeps {
+                media: deps.media,
+                avatars: deps.avatars,
+                ws_registry: deps.ws_registry,
+            },
             dest_chat_id,
             thread_id,
             &created.member_uids,
@@ -795,9 +804,16 @@ pub async fn forward_message(
         let conn = transaction.connection();
         let result = async {
             let target = authorize_message_send(conn, chat_id, body.thread_id, uid)?;
-            let prepared =
-                prepare_single_forward(conn, deps.id_gen.as_ref(), uid, chat_id, message_id, &body)
-                    .await?;
+            let prepared = prepare_single_forward(
+                conn,
+                deps.id_gen.as_ref(),
+                uid,
+                chat_id,
+                target.kind,
+                message_id,
+                &body,
+            )
+            .await?;
             let send_result = match prepared {
                 PreparedSingleForward::Existing(existing) => {
                     let response =
@@ -891,9 +907,11 @@ pub async fn forward_message(
         }
         broadcast_thread_send_updates(
             conn,
-            deps.media,
-            deps.avatars,
-            deps.ws_registry,
+            ThreadSendUpdateDeps {
+                media: deps.media,
+                avatars: deps.avatars,
+                ws_registry: deps.ws_registry,
+            },
             chat_id,
             thread_id,
             &created.member_uids,
@@ -919,11 +937,10 @@ pub async fn post_thread_message(
         let mut transaction = AsyncTransaction::begin(conn)?;
         let conn = transaction.connection();
         let result = async {
-            let root_msg = authorize_message_send(conn, chat_id, Some(thread_id), uid)?
-                .thread_root
-                .ok_or(AppError::Internal(
-                    "Thread authorization did not return a thread root",
-                ))?;
+            let target = authorize_message_send(conn, chat_id, Some(thread_id), uid)?;
+            let root_msg = target.thread_root.ok_or(AppError::Internal(
+                "Thread authorization did not return a thread root",
+            ))?;
             let send_result = send_prepared_message(
                 conn,
                 SendPreparedMessageDeps {
@@ -936,6 +953,7 @@ pub async fn post_thread_message(
                     system_kind: None,
                     forwarded_from_message_id: None,
                     chat_id,
+                    chat_kind: target.kind,
                     sender_uid: uid,
                     message: body.message,
                     message_type: body.message_type,
@@ -1013,9 +1031,11 @@ pub async fn post_thread_message(
     if publish_immediately {
         broadcast_thread_send_updates(
             conn,
-            deps.media,
-            deps.avatars,
-            deps.ws_registry,
+            ThreadSendUpdateDeps {
+                media: deps.media,
+                avatars: deps.avatars,
+                ws_registry: deps.ws_registry,
+            },
             chat_id,
             thread_id,
             &member_uids,
@@ -1026,11 +1046,15 @@ pub async fn post_thread_message(
     Ok(response)
 }
 
+struct ThreadSendUpdateDeps<'a> {
+    media: &'a MediaStore,
+    avatars: &'a Arc<AvatarService>,
+    ws_registry: &'a Arc<ConnectionRegistry>,
+}
+
 async fn broadcast_thread_send_updates(
     conn: &mut PgConnection,
-    media: &MediaStore,
-    avatars: &Arc<AvatarService>,
-    ws_registry: &Arc<ConnectionRegistry>,
+    deps: ThreadSendUpdateDeps<'_>,
     chat_id: i64,
     thread_id: i64,
     member_uids: &[i32],
@@ -1042,12 +1066,13 @@ async fn broadcast_thread_send_updates(
         .first::<Message>(conn)
         .ok();
     if let Some(root) = root {
-        if let Some(root_response) = attach_metadata(conn, vec![root], media, avatars, uid)
-            .await
-            .into_iter()
-            .next()
+        if let Some(root_response) =
+            attach_metadata(conn, vec![root], deps.media, deps.avatars, uid)
+                .await
+                .into_iter()
+                .next()
         {
-            ws_registry.broadcast_to_uids(
+            deps.ws_registry.broadcast_to_uids(
                 member_uids,
                 Arc::new(ServerWsMessage::MessageUpdated(root_response)),
             );
@@ -1055,7 +1080,7 @@ async fn broadcast_thread_send_updates(
     }
     if let Err(error) = crate::services::threads::broadcast_thread_update_to_subscribers(
         conn,
-        ws_registry,
+        deps.ws_registry,
         chat_id,
         thread_id,
     ) {

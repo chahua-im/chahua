@@ -218,6 +218,7 @@ pub async fn post_add_member(
                 system_kind: Some(SystemMessageKind::MemberAdded),
                 forwarded_from_message_id: None,
                 chat_id,
+                chat_kind: kind,
                 sender_uid: uid,
                 message: Some(crate::services::system_messages::with_user(
                     format!("added {}", target_username),
@@ -267,7 +268,7 @@ pub async fn delete_remove_member(
     deps: DeleteRemoveMemberDeps<'_>,
 ) -> Result<(), AppError> {
     let is_admin_removing_other = uid != target_uid;
-    let target_username = conn.transaction::<_, AppError, _>(|conn| {
+    let (target_username, kind) = conn.transaction::<_, AppError, _>(|conn| {
         crate::services::speaking::lock_chat(conn, chat_id, true)?;
         if is_admin_removing_other {
             require_admin_role(conn, chat_id, uid)?;
@@ -321,7 +322,7 @@ pub async fn delete_remove_member(
         )
         .execute(conn)?;
         crate::services::threads::unsubscribe_user_from_chat(conn, chat_id, target_uid)?;
-        Ok(target_username)
+        Ok((target_username, kind))
     })?;
 
     deps.ws_registry.invalidate_unread(&[target_uid]);
@@ -354,6 +355,7 @@ pub async fn delete_remove_member(
                 system_kind: Some(system_kind),
                 forwarded_from_message_id: None,
                 chat_id,
+                chat_kind: kind,
                 sender_uid,
                 message: Some(message),
                 message_type: crate::models::MessageType::System,

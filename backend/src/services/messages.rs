@@ -96,6 +96,7 @@ pub struct PreparedMessageSend {
     pub system_kind: Option<crate::models::SystemMessageKind>,
     pub forwarded_from_message_id: Option<i64>,
     pub chat_id: i64,
+    pub chat_kind: GroupKind,
     pub sender_uid: i32,
     pub message: Option<String>,
     pub message_type: MessageType,
@@ -164,6 +165,7 @@ impl From<MessageSendAuthorizationError> for AppError {
 
 /// Target context established by [`authorize_message_send`].
 pub struct AuthorizedMessageTarget {
+    pub kind: GroupKind,
     pub thread_root: Option<Message>,
 }
 
@@ -1848,7 +1850,7 @@ pub fn authorize_message_send(
     if kind == GroupKind::Group && !speaking::allows(mode, action) {
         return Err(MessageSendAuthorizationError::SpeakingRestricted(mode));
     }
-    Ok(AuthorizedMessageTarget { thread_root })
+    Ok(AuthorizedMessageTarget { kind, thread_root })
 }
 
 // ---------------------------------------------------------------------------
@@ -2072,7 +2074,9 @@ pub async fn send_prepared_message(
     // Counted once here so every sender - chat messages, invites, pins, member
     // system messages - increments the same counter. Duplicate retries return
     // early above and are not counted.
-    deps.metrics.chat.record_message(prepared.chat_id);
+    deps.metrics
+        .chat
+        .record_message(prepared.chat_id, prepared.chat_kind);
 
     Ok(SendMessageOutcome::Created(Box::new(SendMessageResult {
         inserted_message: inserted_msg,
@@ -2640,7 +2644,7 @@ mod tests {
         config::MediaConfig,
         dto::{attachments::AttachmentResponse, users::User},
         errors::AppError,
-        models::{Attachment, Message, MessageType, TranscodeStatus},
+        models::{Attachment, GroupKind, Message, MessageType, TranscodeStatus},
         services::{media::MediaStore, social::DmSendAuthorizationError},
     };
     use axum::{http::StatusCode, response::IntoResponse};
@@ -3312,6 +3316,7 @@ mod tests {
             system_kind: None,
             forwarded_from_message_id: None,
             chat_id: 42,
+            chat_kind: GroupKind::Group,
             forwarded_bundle_id: None,
             forwarded_preview_total: None,
             forwarded_preview_contains_forwarded_messages: None,

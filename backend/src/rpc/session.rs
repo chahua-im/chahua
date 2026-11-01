@@ -455,9 +455,8 @@ impl RpcOutputSink {
             self.state.close();
             return Err(RpcIoError::FrameTooLarge);
         }
-        let lease = self.budget.reserve(text.len()).map_err(|error| {
+        let lease = self.budget.reserve(text.len()).inspect_err(|_| {
             self.state.close();
-            error
         })?;
         self.send_prepared(PreparedFrame { text, lease }).await
     }
@@ -1641,21 +1640,32 @@ fn record_rejection(
     prepare_recorded(services, api, started, response, Some(code), budget)
 }
 
+struct SessionExecution<'a> {
+    shared: &'a Arc<SessionShared>,
+    services: &'a RpcServices,
+    controls: &'a mpsc::Sender<RpcControlCommand>,
+    guard_failures: &'a mpsc::UnboundedSender<RpcLifecycleFailure>,
+    results: &'a mpsc::Sender<WorkResult>,
+    admission: &'a SessionAdmission,
+    budget: &'a RpcByteBudget,
+}
+
 async fn schedule_call(
     call: RpcCall,
     started: Instant,
     destination: ResultDestination,
     close_after_error: bool,
-    shared: Arc<SessionShared>,
-    services: RpcServices,
-    controls: mpsc::Sender<RpcControlCommand>,
-    guard_failures: mpsc::UnboundedSender<RpcLifecycleFailure>,
-    results: mpsc::Sender<WorkResult>,
+    execution: &SessionExecution<'_>,
     outstanding: &mut HashSet<RpcId>,
-    admission: &SessionAdmission,
-    budget: RpcByteBudget,
     input_lease: Option<RpcFrameLease>,
 ) -> ScheduledCall {
+    let shared = execution.shared.clone();
+    let services = execution.services.clone();
+    let controls = execution.controls.clone();
+    let guard_failures = execution.guard_failures.clone();
+    let results = execution.results.clone();
+    let admission = execution.admission;
+    let budget = execution.budget.clone();
     let api = methods::registered_name(&call.method);
     let id = call.id.clone();
     if let Some(id) = &id {
@@ -1950,6 +1960,15 @@ pub async fn serve_rpc_session(
     let mut next_batch = 0_u64;
     let mut batches = HashMap::<u64, BatchAssembly>::new();
     let mut outstanding = HashSet::<RpcId>::new();
+    let execution = SessionExecution {
+        shared: &shared,
+        services: &services,
+        controls: &controls_tx,
+        guard_failures: &guard_tx,
+        results: &results_tx,
+        admission: &admission,
+        budget: &dependencies.budget,
+    };
 
     'session: loop {
         if dependencies.state.is_closed() {
@@ -2139,11 +2158,8 @@ pub async fn serve_rpc_session(
                         })) if method == "session.open"
                     );
                     if !valid_open {
-                        match record_rejection(&services, "unknown", started, Some(RpcResponse::invalid_request()), RpcErrorCode::InvalidRequest, &dependencies.budget) {
-                            Ok(Some(response)) => {
-                                let _ = sink.send_prepared(response.frame).await;
-                            }
-                            _ => {}
+                        if let Ok(Some(response)) = record_rejection(&services, "unknown", started, Some(RpcResponse::invalid_request()), RpcErrorCode::InvalidRequest, &dependencies.budget) {
+                            let _ = sink.send_prepared(response.frame).await;
                         }
                         dependencies.state.close();
                         break;
@@ -2176,14 +2192,8 @@ pub async fn serve_rpc_session(
                             started,
                             ResultDestination::Single,
                             close_after_error,
-                            shared.clone(),
-                            services.clone(),
-                            controls_tx.clone(),
-                            guard_tx.clone(),
-                            results_tx.clone(),
+                            &execution,
                             &mut outstanding,
-                            &admission,
-                            dependencies.budget.clone(),
                             Some(input_lease),
                         ).await {
                             ScheduledCall::Pending => {}
@@ -2236,14 +2246,8 @@ pub async fn serve_rpc_session(
                                         started,
                                         ResultDestination::Batch(batch_id),
                                         false,
-                                        shared.clone(),
-                                        services.clone(),
-                                        controls_tx.clone(),
-                                        guard_tx.clone(),
-                                        results_tx.clone(),
+                                        &execution,
                                         &mut outstanding,
-                                        &admission,
-                                        dependencies.budget.clone(),
                                         Some(input_lease.retain_for_dispatch()),
                                     ).await {
                                         ScheduledCall::Pending => {}

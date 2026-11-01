@@ -2,9 +2,13 @@ use chrono::Utc;
 use diesel::prelude::*;
 
 use crate::{
-    dto::messages::{ForwardMessagesBody, ForwardedBundlePayloadItem},
+    dto::messages::{
+        ForwardMessagesBody, ForwardedBundlePayloadItem, ForwardedMessagesPreviewSnapshot,
+    },
     errors::AppError,
-    models::{ForwardPlaceholder, Message, MessageType, NewForwardedBundle, TranscodeStatus},
+    models::{
+        ForwardPlaceholder, GroupKind, Message, MessageType, NewForwardedBundle, TranscodeStatus,
+    },
     schema::{forwarded_bundles, group_membership, messages, messages::dsl},
     services::messages::{
         build_forwarded_preview_items, build_forwarded_preview_payload,
@@ -172,19 +176,19 @@ fn forwarded_wrapper_text(message_count: usize) -> String {
 
 fn prepared_forward_message(
     chat_id: i64,
+    chat_kind: GroupKind,
     sender_uid: i32,
     body: &ForwardMessagesBody,
     bundle_id: i64,
-    message_count: usize,
-    contains_forwarded_messages: bool,
-    preview_items: Vec<crate::dto::messages::ForwardedMessagePreviewSnapshot>,
+    preview: ForwardedMessagesPreviewSnapshot,
 ) -> PreparedMessageSend {
     PreparedMessageSend {
         system_kind: None,
         forwarded_from_message_id: None,
         chat_id,
+        chat_kind,
         sender_uid,
-        message: Some(forwarded_wrapper_text(message_count)),
+        message: Some(forwarded_wrapper_text(preview.total)),
         message_type: MessageType::Forwarded,
         sticker_id: None,
         reply_to_id: None,
@@ -193,9 +197,9 @@ fn prepared_forward_message(
         attachment_ids: Vec::new(),
         publish_immediately: true,
         forwarded_bundle_id: Some(bundle_id),
-        forwarded_preview_total: Some(message_count),
-        forwarded_preview_contains_forwarded_messages: Some(contains_forwarded_messages),
-        forwarded_preview_items: Some(preview_items),
+        forwarded_preview_total: Some(preview.total),
+        forwarded_preview_contains_forwarded_messages: Some(preview.contains_forwarded_messages),
+        forwarded_preview_items: Some(preview.messages),
     }
 }
 
@@ -204,6 +208,7 @@ pub async fn prepare_forward_message(
     id_gen: &IdGen,
     uid: i32,
     destination_chat_id: i64,
+    destination_kind: GroupKind,
     body: &ForwardMessagesBody,
 ) -> Result<PreparedMessageSend, AppError> {
     let canonical_message_ids = canonical_forward_message_ids(&body.message_ids)?;
@@ -239,12 +244,15 @@ pub async fn prepare_forward_message(
 
         return Ok(prepared_forward_message(
             destination_chat_id,
+            destination_kind,
             uid,
             body,
             bundle_id,
-            message_count,
-            contains_forwarded_messages,
-            build_forwarded_preview_items(&items),
+            ForwardedMessagesPreviewSnapshot {
+                total: message_count,
+                contains_forwarded_messages,
+                messages: build_forwarded_preview_items(&items),
+            },
         ));
     }
 
@@ -298,12 +306,15 @@ pub async fn prepare_forward_message(
 
     Ok(prepared_forward_message(
         destination_chat_id,
+        destination_kind,
         uid,
         body,
         bundle_id,
-        message_count,
-        contains_forwarded_messages,
-        preview_items,
+        ForwardedMessagesPreviewSnapshot {
+            total: message_count,
+            contains_forwarded_messages,
+            messages: preview_items,
+        },
     ))
 }
 
@@ -318,7 +329,7 @@ mod tests {
             ForwardedBundlePayloadItem, ForwardedBundleRefSnapshot, ForwardedMessageSnapshot,
             ForwardedMessagesPreviewSnapshot,
         },
-        models::{MessageType, TranscodeStatus},
+        models::{GroupKind, MessageType, TranscodeStatus},
     };
     use chrono::Utc;
 
@@ -479,9 +490,10 @@ mod tests {
                 client_generated_id: format!("merged-thread-copy-{message_id}"),
                 thread_id,
             };
-            let prepared = prepare_forward_message(&mut conn, &id_gen, 76300, -76310, &body)
-                .await
-                .unwrap();
+            let prepared =
+                prepare_forward_message(&mut conn, &id_gen, 76300, -76310, GroupKind::Group, &body)
+                    .await
+                    .unwrap();
             assert_eq!(prepared.reply_root_id, thread_id);
             assert_eq!(prepared.forwarded_preview_total, Some(2));
             diesel::insert_into(messages::table)
@@ -511,9 +523,10 @@ mod tests {
                 )
                 .unwrap();
             }
-            let retry = prepare_forward_message(&mut conn, &id_gen, 76300, -76310, &body)
-                .await
-                .unwrap();
+            let retry =
+                prepare_forward_message(&mut conn, &id_gen, 76300, -76310, GroupKind::Group, &body)
+                    .await
+                    .unwrap();
             assert_eq!(retry.reply_root_id, thread_id);
             assert_eq!(retry.forwarded_bundle_id, prepared.forwarded_bundle_id);
             for other_thread in [None, Some(-76311), Some(-76312)] {
@@ -522,7 +535,15 @@ mod tests {
                 }
                 body.thread_id = other_thread;
                 assert!(matches!(
-                    prepare_forward_message(&mut conn, &id_gen, 76300, -76310, &body).await,
+                    prepare_forward_message(
+                        &mut conn,
+                        &id_gen,
+                        76300,
+                        -76310,
+                        GroupKind::Group,
+                        &body
+                    )
+                    .await,
                     Err(AppError::Conflict(_))
                 ));
             }
