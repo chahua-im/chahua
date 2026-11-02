@@ -196,10 +196,14 @@
       "title": "贴纸包",
       "unsubscribe": "取消订阅",
       "removeHint": "点按贴纸可将其从贴纸包中移除。",
-      "renameTitle": "重命名贴纸包",
+      "renameTitle": "编辑贴纸包",
       "namePlaceholder": "贴纸包名称",
       "renamed": "贴纸包已重命名",
-      "renameFailed": "重命名失败，请重试",
+      "renameFailed": "保存贴纸包失败，请重试",
+      "visibility": "可见性",
+      "public": "公开",
+      "private": "私有",
+      "visibilityHint": "设为私有会移除其他用户的订阅。",
       "deleteTitle": "删除贴纸包",
       "deleteMessage": "删除这个贴纸包吗？贴纸本身会保留，但这个贴纸包以及其中的收录关系将被移除。",
       "deleteFailed": "删除失败，请重试",
@@ -644,6 +648,7 @@
     "invalidUploadMessage": "请选择 10 MB 以内的图片或 WebM 视频。",
     "addTitle": "添加贴纸",
     "emojiPlaceholder": "对应表情，例如 🙂",
+    "emojiExample": "例如 🙂",
     "optionalName": "名称（选填）",
     "loadFailed": "加载失败。",
     "empty": "暂无贴纸",
@@ -662,7 +667,6 @@
     "createPack": "创建贴纸包",
     "createFailed": "创建贴纸包失败",
     "emojiLabel": "对应表情",
-    "emojiHint": "请输入 1–4 个表情，不含文字或空格。",
     "fromMessage": {
       "action": "存为贴纸",
       "title": "添加到贴纸包",
@@ -672,11 +676,27 @@
       "missing": "源消息或贴纸包已不存在。",
       "changed": "源图片已变化，请关闭后重新选择图片。",
       "uncertain": "未能确认保存结果，请先查看贴纸包，避免重复添加。",
-      "noOwnedPacks": "暂无可用的自有贴纸包。"
-    }
+      "noOwnedPacks": "暂无自有贴纸包，请先创建一个。"
+    },
+    "discovery": {
+      "search": "搜索贴纸包",
+      "trending": "近期热门",
+      "popular": "最多订阅",
+      "subscribers": "{{count}} 人订阅",
+      "recentSubscribers": "近 {{days}} 天 {{count}} 人订阅",
+      "empty": "没有找到贴纸包",
+      "viewPack": "查看全部",
+      "noPacks": "暂无可订阅的公开贴纸包",
+      "clearSearch": "清除搜索",
+      "title": "添加贴纸包",
+      "subscribe": "订阅",
+      "subscribed": "已订阅",
+      "subscribeFailed": "订阅贴纸包失败，请重试"
+    },
+    "description": "简介："
   },
   "emojiPicker": {
-    "loadFailed": "表情加载失败，请关闭后重试。"
+    "loadFailed": "表情加载失败，请刷新页面后重试。"
   },
   "pwa": {
     "notificationPrompt": {

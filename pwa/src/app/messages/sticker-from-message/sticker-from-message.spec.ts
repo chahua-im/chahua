@@ -73,11 +73,12 @@ describe('StickerFromMessage', () => {
     createPack: vi.fn(() => of(pack)),
     createFromMessage: vi.fn(() => of(sticker)),
   };
-  const preferences = { packOrder: signal<StickerPackOrderItem[]>([]) };
+  const preferences = { packOrder: signal<StickerPackOrderItem[]>([]), upsertPackOrderItem: vi.fn() };
 
   beforeEach(() => {
     user.set(testUser);
     preferences.packOrder.set([]);
+    preferences.upsertPackOrderItem.mockClear();
     api.listOwnedPacks.mockReset().mockReturnValue(of({ packs: [pack] }));
     api.createPack.mockReset().mockReturnValue(of(pack));
     api.createFromMessage.mockReset().mockReturnValue(of(sticker));
@@ -112,7 +113,9 @@ describe('StickerFromMessage', () => {
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('img.preview').getAttribute('src')).toBe(image.url);
     expect(fixture.nativeElement.querySelectorAll('ion-select-option')).toHaveLength(2);
-    expect(fixture.nativeElement.textContent).not.toContain('创建贴纸包');
+    expect(
+      fixture.nativeElement.querySelector('ion-select').closest('ion-item').querySelector('ion-button'),
+    ).not.toBeNull();
     fixture.nativeElement
       .querySelector('ion-select')
       .dispatchEvent(new CustomEvent('ionChange', { detail: { value: other.id } }));
@@ -148,6 +151,87 @@ describe('StickerFromMessage', () => {
       emoji: '🍵',
     });
     expect(api.listOwnedPacks).not.toHaveBeenCalled();
+  });
+
+  it.each([{ packs: [] }, { packs: [pack] }])(
+    'creates and selects a new pack while preserving sticker inputs (initial packs: %j)',
+    async ({ packs }) => {
+      const { fixture, component, editor } = await render(packs);
+      const created = { ...pack, id: encodeId('9007199254741005'), name: 'New', isSubscribed: true };
+      const values = { emoji: '🍵', name: 'Tea' };
+      editor['value'].set(values);
+      expect(component['saveDisabled']()).toBe(!packs.length);
+      component['createPack']();
+      fixture.detectChanges();
+      const packEditor = component['packEditor']()!;
+      const response = new Subject<StickerPackSummary>();
+      api.createPack.mockReturnValueOnce(response);
+      const changed = vi.spyOn(TestBed.inject(StickerUpdates).changed, 'next');
+      const saving = component['savePack']({ name: ' New ', emoji: '' });
+      await component['savePack']({ name: ' New ', emoji: '' });
+      fixture.detectChanges();
+      expect(api.createPack).toHaveBeenCalledExactlyOnceWith({ name: 'New' });
+      expect(packEditor.busy()).toBe(true);
+      expect(editor.busy()).toBe(true);
+      response.next(created);
+      await saving;
+      fixture.detectChanges();
+      expect(component['createOpen']()).toBe(false);
+      expect(component['packId']()).toBe(created.id);
+      expect(component['orderedPacks']()).toContainEqual(created);
+      expect(component['saveDisabled']()).toBe(false);
+      expect(editor['value']()).toEqual(values);
+      expect(fixture.debugElement.query(By.directive(StickerEditor)).componentInstance).toBe(editor);
+      expect(changed).toHaveBeenCalledExactlyOnceWith({ ...created, stickers: [] });
+      expect(preferences.upsertPackOrderItem).toHaveBeenCalledWith(
+        expect.objectContaining({ stickerPackId: created.id }),
+      );
+      await component['save'](values);
+      expect(api.createFromMessage).toHaveBeenCalledExactlyOnceWith({
+        packId: created.id,
+        chatId: source.chatId,
+        messageId: source.id,
+        ...values,
+      });
+      expect(api.listOwnedPacks).not.toHaveBeenCalled();
+    },
+  );
+
+  it('preserves both forms on pack creation failure and keeps the old selection when cancelled', async () => {
+    const { fixture, component, editor } = await render();
+    editor['value'].set({ emoji: '🍵', name: 'Tea' });
+    component['createPack']();
+    fixture.detectChanges();
+    const packEditor = component['packEditor']()!;
+    packEditor['value'].set({ name: 'New', emoji: '' });
+    api.createPack.mockReturnValueOnce(throwError(() => new Error('offline')));
+    await component['savePack']({ name: 'New', emoji: '' });
+    fixture.detectChanges();
+    expect(component['createFailed']()).toBe(true);
+    expect(component['createOpen']()).toBe(true);
+    expect(packEditor.busy()).toBe(false);
+    expect(packEditor['value']().name).toBe('New');
+    expect(editor['value']()).toEqual({ emoji: '🍵', name: 'Tea' });
+    expect(component['packId']()).toBe(pack.id);
+    packEditor.closed.emit();
+    fixture.detectChanges();
+    expect(component['createOpen']()).toBe(false);
+    expect(component['saveDisabled']()).toBe(false);
+    expect(editor['value']()).toEqual({ emoji: '🍵', name: 'Tea' });
+  });
+
+  it.each(['destroy', 'account'])('ignores a late new-pack result after %s changes', async (change) => {
+    const { fixture, component } = await render([]);
+    const response = new Subject<StickerPackSummary>();
+    api.createPack.mockReturnValueOnce(response);
+    const changed = vi.spyOn(TestBed.inject(StickerUpdates).changed, 'next');
+    const pending = component['savePack']({ name: 'New', emoji: '' });
+    if (change === 'destroy') fixture.destroy();
+    else user.set({ ...testUser, uid: testUser.uid + 1 });
+    response.next(pack);
+    await pending;
+    expect(changed).not.toHaveBeenCalled();
+    expect(preferences.upsertPackOrderItem).not.toHaveBeenCalled();
   });
 
   it('submits only source IDs and metadata, prevents duplicate clicks and reports success on dismissal', async () => {

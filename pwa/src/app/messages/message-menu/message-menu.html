@@ -8,25 +8,17 @@
     @if (selection(); as selection) {
       @if (message(); as message) {
         <div class="menu-surface" (click)="dismissBackdrop($event)">
-          @if (choosingEmoji() && serverMessage(); as serverMessage) {
-            <div #emojiPanel class="emoji-panel">
-              <div class="picker-header">
-                <button type="button" class="picker-back" (click)="choosingEmoji.set(false)">
-                  <ion-icon [icon]="icons.chevronBackOutline"></ion-icon>
-                </button>
-                <span>{{ 'messages.menu.addReaction' | transloco }}</span>
-              </div>
-              @defer {
-                <app-emoji-picker (chosen)="reactTo(serverMessage, $event)"></app-emoji-picker>
-              } @loading (after 100ms) {
-                <div class="loading-status">
-                  <ion-spinner></ion-spinner>
-                </div>
-              } @error {
-                <p>{{ 'emojiPicker.loadFailed' | transloco }}</p>
-              }
-            </div>
-          } @else {
+          @if (emojiAnchor() && serverMessage(); as serverMessage) {
+            <app-emoji-panel
+              [class.ion-hide]="!choosingEmoji()"
+              [active]="choosingEmoji()"
+              [title]="'messages.menu.addReaction' | transloco"
+              [anchor]="emojiAnchor()"
+              (chosen)="reactTo(serverMessage, $event)"
+              (back)="choosingEmoji.set(false)"
+              (dismissed)="close()" />
+          }
+          @if (!choosingEmoji()) {
             <div #stack class="menu-stack" [style.visibility]="placed() ? null : 'hidden'" [class.own]="selection.own">
               @if (canReact() && serverMessage(); as serverMessage) {
                 <div #reactionBar class="reactions panel">
@@ -152,27 +144,25 @@
   [duration]="2500"
   (didDismiss)="notice.set(undefined)"
   [message]="
-    notice() === Notice.NoOwnedStickerPacks
-      ? ('stickers.fromMessage.noOwnedPacks' | transloco)
-      : notice() === Notice.StickerAdded
-        ? ('stickers.added' | transloco)
-        : notice() === Notice.Copied
-          ? ('messages.menu.notice.copied' | transloco)
-          : notice() === Notice.Saved
-            ? ('messages.menu.notice.saved' | transloco)
-            : notice() === Notice.Unsaved
-              ? ('messages.menu.notice.unsaved' | transloco)
-              : notice() === Notice.Pinned
-                ? ('messages.menu.notice.pinned' | transloco)
-                : notice() === Notice.Unpinned
-                  ? ('messages.menu.notice.unpinned' | transloco)
-                  : notice() === Notice.Recalled
-                    ? ('messages.menu.notice.recalled' | transloco)
-                    : notice() === Notice.ReactionLimit
-                      ? ('messages.menu.notice.reactionLimit' | transloco)
-                      : notice() === Notice.MetadataFailed
-                        ? ('messages.menu.notice.metadataFailed' | transloco)
-                        : ('messages.menu.notice.failed' | transloco)
+    notice() === Notice.StickerAdded
+      ? ('stickers.added' | transloco)
+      : notice() === Notice.Copied
+        ? ('messages.menu.notice.copied' | transloco)
+        : notice() === Notice.Saved
+          ? ('messages.menu.notice.saved' | transloco)
+          : notice() === Notice.Unsaved
+            ? ('messages.menu.notice.unsaved' | transloco)
+            : notice() === Notice.Pinned
+              ? ('messages.menu.notice.pinned' | transloco)
+              : notice() === Notice.Unpinned
+                ? ('messages.menu.notice.unpinned' | transloco)
+                : notice() === Notice.Recalled
+                  ? ('messages.menu.notice.recalled' | transloco)
+                  : notice() === Notice.ReactionLimit
+                    ? ('messages.menu.notice.reactionLimit' | transloco)
+                    : notice() === Notice.MetadataFailed
+                      ? ('messages.menu.notice.metadataFailed' | transloco)
+                      : ('messages.menu.notice.failed' | transloco)
   "></ion-toast>
 
 @if (forwarding().length) {

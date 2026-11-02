@@ -1,19 +1,25 @@
 import { NgTemplateOutlet } from '@angular/common';
-import { Component, computed, input, linkedSignal, output, TemplateRef, viewChild } from '@angular/core';
+import { Component, computed, input, linkedSignal, output, signal, TemplateRef, viewChild } from '@angular/core';
 import { applyWhen, disabled, form, FormField, pattern, required } from '@angular/forms/signals';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { TranslocoPipe } from '@jsverse/transloco';
+import { addOutline } from 'ionicons/icons';
+import { EmojiPanel, emojiPanelAnimation } from '../../messages/emoji-panel/emoji-panel';
 import { extractEmojiSequences } from '../emoji-sequences';
+import { StickerPackVisibility } from '../../../generated/models';
 import {
   IonButton,
   IonButtons,
   IonContent,
   IonHeader,
+  IonIcon,
   IonInput,
   IonItem,
   IonList,
   IonModal,
   IonNote,
+  IonSelect,
+  IonSelectOption,
   IonSpinner,
   IonTitle,
   IonToolbar,
@@ -22,12 +28,14 @@ import {
 export interface StickerEditorValue {
   name: string;
   emoji: string;
+  visibility?: StickerPackVisibility;
 }
 
 @Component({
   selector: 'app-sticker-editor',
   imports: [
     ContentScrollbars,
+    EmojiPanel,
     NgTemplateOutlet,
     FormField,
     TranslocoPipe,
@@ -35,11 +43,14 @@ export interface StickerEditorValue {
     IonButtons,
     IonContent,
     IonHeader,
+    IonIcon,
     IonInput,
     IonItem,
     IonList,
     IonModal,
     IonNote,
+    IonSelect,
+    IonSelectOption,
     IonSpinner,
     IonTitle,
     IonToolbar,
@@ -68,24 +79,49 @@ export interface StickerEditorValue {
           </ion-toolbar></ion-header
         >
         <ion-content appScrollbars color="light">
-          <ng-container [ngTemplateOutlet]="content() ?? null" />
           <ion-list [inset]="true">
+            <ng-container [ngTemplateOutlet]="content() ?? null" />
             @if (withEmoji()) {
-              <ion-item
-                ><ion-input
+              <ion-item>
+                <ion-input
                   [label]="'stickers.emojiLabel' | transloco"
-                  [placeholder]="'stickers.emojiPlaceholder' | transloco"
+                  [placeholder]="'stickers.emojiExample' | transloco"
                   [formField]="fields.emoji"
-              /></ion-item>
-              <ion-item lines="none"
-                ><ion-note>{{ 'stickers.emojiHint' | transloco }}</ion-note></ion-item
-              >
+                />
+                <ion-button slot="end" fill="clear" [disabled]="busy()" (click)="openEmojiPicker()">
+                  <ion-icon slot="icon-only" [icon]="emojiIcon" />
+                </ion-button>
+              </ion-item>
             }
             <ion-item lines="none"
               ><ion-input
                 [label]="(withEmoji() ? 'stickers.optionalName' : 'common.name') | transloco"
                 [formField]="fields.name"
             /></ion-item>
+            @if (initialVisibility() != null) {
+              <ion-item>
+                <ion-select
+                  [label]="'settings.stickerPack.visibility' | transloco"
+                  [value]="value().visibility"
+                  [disabled]="busy()"
+                  [cancelText]="'common.cancel' | transloco"
+                  [okText]="'common.confirm' | transloco"
+                  (ionChange)="setVisibility($event.detail.value)"
+                >
+                  <ion-select-option [value]="Visibility.public">{{
+                    'settings.stickerPack.public' | transloco
+                  }}</ion-select-option>
+                  <ion-select-option [value]="Visibility.private">{{
+                    'settings.stickerPack.private' | transloco
+                  }}</ion-select-option>
+                </ion-select>
+              </ion-item>
+              @if (value().visibility === Visibility.private) {
+                <ion-item lines="none">
+                  <ion-note color="danger">{{ 'settings.stickerPack.visibilityHint' | transloco }}</ion-note>
+                </ion-item>
+              }
+            }
             @if (error()) {
               <ion-item lines="none"
                 ><ion-note color="danger">{{ error() }}</ion-note></ion-item
@@ -95,11 +131,30 @@ export interface StickerEditorValue {
         </ion-content>
       </ng-template>
     </ion-modal>
+    <ion-modal
+      [enterAnimation]="enterEmojiAnimation"
+      [leaveAnimation]="leaveEmojiAnimation"
+      class="emoji-panel-modal"
+      [keepContentsMounted]="true"
+      [isOpen]="choosingEmoji()"
+      (didDismiss)="choosingEmoji.set(false)"
+    >
+      <ng-template>
+        <app-emoji-panel
+          [active]="choosingEmoji()"
+          [title]="'stickers.emojiLabel' | transloco"
+          (chosen)="chooseEmoji($event)"
+          (back)="choosingEmoji.set(false)"
+          (dismissed)="choosingEmoji.set(false)"
+        />
+      </ng-template>
+    </ion-modal>
   `,
 })
 export class StickerEditor {
   readonly title = input.required<string>();
   readonly initialName = input('');
+  readonly initialVisibility = input<StickerPackVisibility>();
   readonly withEmoji = input(false);
   readonly busy = input(false);
   readonly error = input<string>();
@@ -115,7 +170,27 @@ export class StickerEditor {
     return this.modal().dismiss(undefined, 'saved');
   }
 
-  protected readonly value = linkedSignal(() => ({ name: this.initialName(), emoji: '' }));
+  protected readonly choosingEmoji = signal(false);
+  protected readonly enterEmojiAnimation = (element: HTMLElement) => emojiPanelAnimation(element, true);
+  protected readonly leaveEmojiAnimation = (element: HTMLElement) => emojiPanelAnimation(element, false);
+  protected readonly emojiIcon = addOutline;
+  protected openEmojiPicker() {
+    if (!this.busy()) this.choosingEmoji.set(true);
+  }
+  protected chooseEmoji(emoji: string) {
+    this.value.update((value) => ({ ...value, emoji: value.emoji + emoji }));
+    this.choosingEmoji.set(false);
+  }
+
+  protected readonly Visibility = StickerPackVisibility;
+  protected readonly value = linkedSignal<StickerEditorValue>(() => ({
+    name: this.initialName(),
+    emoji: '',
+    ...(this.initialVisibility() != null ? { visibility: this.initialVisibility() } : {}),
+  }));
+  protected setVisibility(visibility: StickerPackVisibility) {
+    this.value.update((value) => ({ ...value, visibility }));
+  }
   protected readonly validEmoji = computed(() => {
     if (!this.withEmoji()) return true;
     const value = this.value().emoji.trim();
@@ -142,7 +217,12 @@ export class StickerEditor {
     );
   });
   protected unchanged() {
-    return !this.withEmoji() && !!this.initialName() && this.value().name.trim() === this.initialName();
+    return (
+      !this.withEmoji() &&
+      !!this.initialName() &&
+      this.value().name.trim() === this.initialName() &&
+      this.value().visibility === this.initialVisibility()
+    );
   }
   protected submit() {
     if (
@@ -153,6 +233,6 @@ export class StickerEditor {
       !this.validEmoji()
     )
       return;
-    this.confirmed.emit({ name: this.value().name.trim(), emoji: this.value().emoji.trim() });
+    this.confirmed.emit({ ...this.value(), name: this.value().name.trim(), emoji: this.value().emoji.trim() });
   }
 }

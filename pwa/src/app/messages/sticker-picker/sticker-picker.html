@@ -1,6 +1,13 @@
 @if (!embedded()) {
   <ion-header>
     <ion-toolbar>
+      @if (!selectable() && panels.paths().length > 1) {
+        <ion-buttons slot="start">
+          <ion-button (click)="panels.back()">
+            <ion-icon slot="icon-only" [icon]="icons.chevronBackOutline" />
+          </ion-button>
+        </ion-buttons>
+      }
       <ion-title>
         {{ pack()?.name || ('stickers.title' | transloco) }}
         @if (!selectable() && pack(); as pack) {
@@ -45,6 +52,9 @@
   <ng-container [ngTemplateOutlet]="library" />
 }
 <ng-template #library>
+  @if (!selectable() && pack()?.description; as description) {
+    <p class="pack-description">{{ 'stickers.description' | transloco }}{{ description }}</p>
+  }
   @if (selectable() && !embedded() && pack(); as pack) {
     <ion-button fill="clear" [disabled]="busy()" (click)="subscribe()">
       {{ (pack.isSubscribed ? 'stickers.removePack' : 'stickers.addPack') | transloco }}
@@ -135,54 +145,62 @@
     }
   </div>
   @if (selectable() || packs().length > 1) {
-    <div appScrollbars class="pack-bar">
+    <div class="pack-bar">
+      <div appScrollbars class="pack-tabs">
+        @if (selectable()) {
+          <button
+            #packTab
+            type="button"
+            class="pack-tab"
+            [class.selected]="activeId() == null"
+            [disabled]="busy() && !grouped()"
+            (click)="selectFavorites()">
+            <ion-icon [icon]="icons.heart" />
+          </button>
+        }
+        @for (item of packs(); track item.id) {
+          <button
+            #packTab
+            type="button"
+            class="pack-tab"
+            [class.selected]="activeId() === item.id"
+            [disabled]="busy() && !grouped()"
+            (click)="selectPack(item.id)"
+            [title]="item.name">
+            @if (item.previewSticker?.media?.contentType?.startsWith('image/')) {
+              <img [src]="item.previewSticker!.media.url" />
+            } @else if (item.previewSticker?.media?.contentType?.startsWith('video/')) {
+              <video
+                [src]="item.previewSticker!.media.url"
+                autoplay
+                loop
+                [muted]="true"
+                playsinline
+                preload="metadata"></video>
+            } @else {
+              <ion-icon [icon]="icons.cubeOutline" />
+            }
+          </button>
+        }
+      </div>
       @if (selectable()) {
-        <button
-          #packTab
-          type="button"
-          class="pack-tab"
-          [class.selected]="activeId() == null"
-          [disabled]="busy() && !grouped()"
-          (click)="selectFavorites()">
-          <ion-icon [icon]="icons.heart" />
-        </button>
-      }
-      @for (item of packs(); track item.id) {
-        <button
-          #packTab
-          type="button"
-          class="pack-tab"
-          [class.selected]="activeId() === item.id"
-          [disabled]="busy() && !grouped()"
-          (click)="selectPack(item.id)"
-          [title]="item.name">
-          @if (item.previewSticker?.media?.contentType?.startsWith('image/')) {
-            <img [src]="item.previewSticker!.media.url" />
-          } @else if (item.previewSticker?.media?.contentType?.startsWith('video/')) {
-            <video
-              [src]="item.previewSticker!.media.url"
-              autoplay
-              loop
-              [muted]="true"
-              playsinline
-              preload="metadata"></video>
-          } @else {
-            <ion-icon [icon]="icons.cubeOutline" />
-          }
-        </button>
-      }
-      @if (selectable()) {
-        <button type="button" class="pack-tab" [disabled]="busy()" (click)="createPack()">
-          <ion-icon [icon]="icons.addOutline" />
-        </button>
-        <button
-          type="button"
-          class="pack-tab"
-          [title]="'settings.menu.stickers' | transloco"
-          [disabled]="busy()"
-          routerLink="/settings/stickers">
-          <ion-icon [icon]="icons.settingsOutline" />
-        </button>
+        <div class="pack-actions">
+          <button
+            type="button"
+            class="pack-tab"
+            [title]="'stickers.discovery.title' | transloco"
+            routerLink="/sticker-discovery">
+            <ion-icon [icon]="icons.addOutline" />
+          </button>
+          <button
+            type="button"
+            class="pack-tab"
+            [title]="'settings.menu.stickers' | transloco"
+            [disabled]="busy()"
+            routerLink="/settings/stickers">
+            <ion-icon [icon]="icons.settingsOutline" />
+          </button>
+        </div>
       }
     </div>
   }
@@ -203,3 +221,12 @@
   [message]="'stickers.favoriteFailed' | transloco"
   [duration]="2500"
   (didDismiss)="favoriteFailed.set(false)" />
+@if (pendingUpload()) {
+  <app-sticker-editor
+    [title]="'stickers.addTitle' | transloco"
+    [withEmoji]="true"
+    [busy]="busy()"
+    [error]="uploadError()"
+    (confirmed)="saveUpload($event)"
+    (closed)="pendingUpload.set(undefined)" />
+}

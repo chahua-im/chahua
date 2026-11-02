@@ -191,6 +191,7 @@ ion-action-sheet.ios .action-sheet-button {
 }
 
 ion-modal.message-menu-modal,
+ion-modal.emoji-panel-modal,
 ion-modal.media-viewer-overlay {
   --width: 100%;
   --height: 100%;
@@ -199,11 +200,13 @@ ion-modal.media-viewer-overlay {
   --border-radius: 0;
 }
 
-ion-modal.message-menu-modal {
+ion-modal.message-menu-modal,
+ion-modal.emoji-panel-modal {
   --backdrop-opacity: 1;
 }
 
-ion-modal.message-menu-modal::part(backdrop) {
+ion-modal.message-menu-modal::part(backdrop),
+ion-modal.emoji-panel-modal::part(backdrop) {
   background: rgba(var(--ion-color-dark-rgb), 0.25);
   opacity: 1;
   backdrop-filter: blur(10px);

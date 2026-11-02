@@ -52,13 +52,24 @@
   pointer-events: none;
 }
 .pack-bar {
-  position: relative;
   display: flex;
-  overflow-x: auto;
-  gap: 4px;
-  padding: 0 12px;
   border-top: 1px solid var(--ion-background-color-step-200, var(--ion-color-light-shade));
   flex-shrink: 0;
+}
+.pack-tabs {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  gap: 4px;
+  padding: 0 8px;
+}
+.pack-actions {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  padding: 0 8px;
 }
 .pack-tab {
   width: 44px;
@@ -164,4 +175,10 @@
 }
 .upload-error {
   color: var(--ion-color-danger);
+}
+.pack-description {
+  margin: 12px 16px;
+  color: var(--ion-color-medium);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
 }

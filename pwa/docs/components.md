@@ -48,7 +48,9 @@ flowchart TD
   MSG --> INVITE[InviteCard]
   ATTACH --> VOICE
   MENU --> REACTORS[ReactionDetails]
-  MENU --> EMOJI[EmojiPicker]
+  MENU --> EMOJIPANEL[EmojiPanel]
+  STICKERSET --> EMOJIPANEL
+  EMOJIPANEL --> EMOJI[EmojiPicker]
   STICKERSET --> EMOJI
   DETAILS --> TOPICS[ChatThreads]
   DETAILS --> MEMBERS[ChatMembers]
@@ -119,7 +121,8 @@ scrollActivity.moving 控制浮动日期，idle 同时要求没有触摸与惯�
 | InviteCard         | code；preview、loading、failed；卡片自己维护固定几何与预览请求                                                                                                                                                                                           |
 | MessageMenu        | messages、chatId、threadId、canReply → reply、edit、editQueued、openThread；公开 open、reset、reactTo、busy、busyMessageId                                                                                                                               |
 | ReactionDetails    | chatId、messageId；完整表态名单、选中表情、loading/error                                                                                                                                                                                                 |
-| EmojiPicker        | chosen 输出 Unicode 字符串；封装 @nicematic/emoji-picker 的尺寸与中英文语言映射，局部提供 PickerData、PickerSearch、PickerFlags，使用组件自带最近记录服务                                                                                                |
+| EmojiPanel         | title、anchor、active → chosen、back、dismissed；消息表态与置顶设置共用标题栏、面板样式、安全区定位与延迟加载反馈；无 anchor 时居中，有 anchor 时桌面锚定点击位置、移动端居中；置顶设置不传 anchor，通过 keepContentsMounted 保留实例；active 控制首次网格渲染与定位，消息菜单内返回时隐藏并保留实例，调用方处理选中与关闭 |
+| EmojiPicker        | chosen 输出 Unicode 字符串；封装 @nicematic/emoji-picker 的尺寸与中英文语言映射，局部提供 PickerData、PickerSearch、PickerFlags，使用组件自带最近记录服务；安装时通过固定版本补丁将分类与搜索网格改为按行渲染视口及前后各 2 行，保留分类标题与等高占位                                                                                                |
 
 `picker-emojis.generated.json` 由 `npm run emoji:picker:generate` 从固定版本 `emojibase-data` 生成并提交，包含英文名称、英/简中/繁中搜索关键词、分类和准确的肤色序列。PickerData 与 PickerSearch 通过组件局部 provider 替换库内各自独立的数据源，网格、搜索、肤色浮层使用同一份数据；普通肤色查表转换，混合肤色作为独立条目保持原序列。搜索忽略大小写，空白分隔词取交集，完整表情精确匹配优先并容忍省略 VS16，输出使用与输入校验一致的 Unicode 17 RGI 序列，避免额外 VS16 将相同表态拆成不同键。生成器校验覆盖全部 RGI 序列。数据及索引只随 EmojiPicker 的延迟代码加载，静态索引在模块内复用，每个选择器的查询状态独立。
 
@@ -158,6 +161,7 @@ ForwardPlaceholder 枚举定义后端原因代码，placeholderLabel 返回翻�
 | UploadProgress  | value（0–1）                                                                                                                                 | 输入栏和消息附件共用的固定尺寸 SVG 进度环，只负责呈现                                                                                                               |
 | VoicePlayer     | src、dock；playing、loading、failed、elapsed、duration、波形状态                                                                             | 挂载时创建 Audio 和 WaveSurfer 并读取波形；同一时间播放一条；带 dock 的消息语音把播放状态交给吸顶播放条，销毁时由 VoicePlayback 接管音频继续播放                    |
 | VoiceBar        | 无输入，读取 VoicePlayback；toggle/dismiss/speed 经活跃语音执行，locate 经 ConversationNavigation 打开消息所属会话                           | 只负责呈现吸顶播放条，挂在主栏 header 底部：会话页、聊天列表移动端页与桌面空态页各挂一个，桌面侧栏列表实例不挂                                                      |
+| StickerDiscovery | query、sort、packs、cursor、loading/loaded/error、adding、createOpen/creating/createFailed | 热门包搜索与分页、整包预览入口和订阅，复用 StickerEditor 创建包；持有当前结果的查询条件、局部请求版本与订阅覆盖状态，通过 StickerUpdates.subscribed 同步库摘要 |
 | StickerPicker   | embedded、grouped、selectable、packId、stickerId → selected；contents、activeId、libraryPacks、packs、busy/error、分组加载与上传错误状态、长按菜单                                                     | contents 按包 ID 缓存内容（空键为收藏），activeId 选择当前包，content、pack 和 stickers 从中派生；grouped 启用连续分组；局部 StickerLibraryScroll 负责接近视口的渲染窗口、包图标定位、滚动高亮与尺寸/内容变化时的锚点恢复；详情选中项按 ID 从当前列表派生，不复制包内贴纸；packs 从 libraryPacks 与用户贴纸包顺序派生，排序更新保留当前包和网格节点；发送贴纸时按开关记录包使用顺序 |
 | MediaViewer     | media、initial；index、scale、加载状态与拖动坐标                                                                                             | 当前消息的媒体集合与本地画布，不写入聊天状态                                                                                                                        |
 
@@ -165,7 +169,7 @@ ForwardPlaceholder 枚举定义后端原因代码，placeholderLabel 返回翻�
 
 上传任务提交后归 MessageOutbox，编辑只借用任务引用。输入区可以继续输入和录音。VoicePlayer 不显示原生音频控制条，挂载即下载音频并解码波形，波形读取失败时仍保留可用播放。消息语音的播放由根服务 VoicePlayback 独占：播放中的语音在离开或切换会话后继续播放，VoiceBar 吸顶播放条随语音出现在会话页和聊天列表页的 header 底部，接管播放/暂停、跳转原消息、已播时长与倍速，关闭或播完即收起；倍速由 VoicePlayback 全局记忆，跨语音保持；录音预览与待发送预览不进吸顶条。
 
-创建贴纸包使用创建返回的摘要与空 stickers 列表构成详情，不额外补读；更新包元数据时保留同一包的已知贴纸，并追加到包列表；贴纸库上传新贴纸后重读该包，设置中创建包、重命名、移除贴纸和上传成功后，通过 StickerUpdates 原位同步已挂载的贴纸选择器；包详情页上传复用新增贴纸通知。收藏状态同步写回所有已加载分组，并即时增删已加载收藏列表的成员；失败恢复原状态与原收藏顺序。独立贴纸详情保留正在浏览的贴纸，不作为收藏列表处理。面板内的收藏变更覆盖迟到包响应及收藏列表响应中的旧值；随后订阅更新不会恢复过期的收藏值。收藏失败通过独立 Toast 提示，不混入分组加载错误。发送时按被点击的分组记录使用顺序，不使用当前滚动高亮包推断来源。
+添加贴纸包面板中的创建操作直接使用创建返回的摘要与空 stickers 列表构成的详情，同步贴纸库；贴纸库上传新贴纸后重读该包，创建包及设置中重命名、移除贴纸和上传成功后，通过 StickerUpdates 原位同步已挂载的贴纸选择器；包详情页上传复用新增贴纸通知。收藏状态同步写回所有已加载分组，并即时增删已加载收藏列表的成员；失败恢复原状态与原收藏顺序。独立贴纸详情保留正在浏览的贴纸，不作为收藏列表处理。面板内的收藏变更覆盖迟到包响应及收藏列表响应中的旧值；随后订阅更新不会恢复过期的收藏值。收藏失败通过独立 Toast 提示，不混入分组加载错误。发送时按被点击的分组记录使用顺序，不使用当前滚动高亮包推断来源。
 
 ## 资料、搜索与管理
 
@@ -203,8 +207,8 @@ ChatDetails 和 ConversationPage 激活同一个好友关系查询。用户资�
 | ReadReceiptSettings         | 全局回执开关、读取/自动保存状态；FriendsService 读取/保存，成功后通过 ChatStore 失效回执隐私                                                               |
 | BlockedUsers                | 拉黑用户列表、空状态和加载失败重试；点击用户路由打开资料页                                                                                                 |
 | PresenceSettings            | 全局 visibility、loading/saving、读取/保存失败与成功反馈；FriendsService 读取/保存，成功后通过 Presence 失效个人状态                                       |
-| StickerSettings             | 置顶表态编辑（输入过滤与表情选择器）、自动整理开关、创建贴纸包、贴纸包重排列表                                                                             | StickersService、StickerPreferences、Preferences；重排写入中点使用时间并同步服务器 |
-| StickerPackDetail           | packId；包详情、owned 状态、重命名/删除/退订与添加、点按移除贴纸                                                                                           | StickersService、StickerPreferences；删除与退订移除顺序条目并关闭弹窗              |
+| StickerSettings             | 置顶表态编辑（输入过滤与表情选择器）、自动整理开关、添加贴纸包面板入口、贴纸包重排列表                                                                             | RpcApi、StickerPreferences、Preferences；重排写入中点使用时间并同步服务器 |
+| StickerPackDetail           | packId；包详情、owned 状态、名称与可见性编辑、删除/退订与添加、点按移除贴纸                                                                                           | RpcApi、StickerPreferences；删除与退订移除顺序条目并关闭弹窗              |
 | AppInstall                  | 启动时捕获浏览器安装事件，available 控制菜单入口；点击消费事件并调用安装提示，安装完成时清除事件                                                           |
 | Landing                     | 检测平台与选中平台；公开安装指引                                                                                                                           |
 
@@ -224,8 +228,10 @@ SpeakingModeSelect 由 ChatDetails 与 ChatMembers 复用，输入 label、disab
 
 PrivacyExceptions 接收 PrivacyExceptionKind，持有例外列表、好友选择器、搜索、保存与清空状态；FriendsService 提供批量读取和单项覆盖写入，ChatStore.privacyOverrides$ 通知已挂载资料同步。PresenceSettings、ReadReceiptSettings 各自保留已保存值和失败待重试值，选择控件始终可回退到真实状态。
 
-StickerEditor 接收标题、初始名称、是否填写对应表情、busy、error、附加内容模板 content 和 saveDisabled，输出 confirmed（名称、表情）及 closed。Signal Form 保留未提交输入并验证必填字段，表情使用现有 Unicode emoji 序列集合校验；父页面持有文件和 API 写入状态，保存成功后先等待编辑器 dismiss 完成，再销毁编辑器或跳转。编辑器和隐私好友选择器在保存期间阻止用户取消，但允许已获准的路由离开及父容器移除清理子弹窗。
+StickerEditor 接收标题、初始名称、可选的初始可见性、是否填写对应表情、busy、error、附加内容模板 content 和 saveDisabled，输出 confirmed（名称、表情和可选的可见性）及 closed；仅管理页编辑包传入初始可见性，创建与上传表单不显示该字段。Signal Form 保留未提交输入并验证必填字段，表情可手动输入，也可通过输入框右侧按钮打开统一表情面板追加，使用现有 Unicode emoji 序列集合校验；父页面持有文件和 API 写入状态，保存成功后先等待编辑器 dismiss 完成，再销毁编辑器或跳转。编辑器和隐私好友选择器在保存期间阻止用户取消，但允许已获准的路由离开及父容器移除清理子弹窗。
 
-StickerFromMessage 接收来源 message 和已读取的自有包列表 packs，持有目标包 ID 和提交状态，输出 saved 与 closed；通过 StickerEditor 的 content 模板展示来源图片和选包表单。MessageMenu 在打开保存弹窗前读取自有包；空列表或读取失败只显示 Toast，有包时保存来源与包列表并打开弹窗，reset 时清理并使迟到回包失效。StickerUpdates 传递本地新增结果，并在包读取期间暂存新增项以避免迟到回包覆盖；不持久缓存包内容。具体入口与字段规则见[需求](requirements.md#通知静音与设置)，请求时机见[数据流](data-flow.md)。
+StickerFromMessage 接收来源 message 和已读取的自有包列表 packs，持有目标包 ID、局部新建包与两个表单的提交状态，输出 saved 与 closed；通过 StickerEditor 的 content 模板展示来源图片和选包表单，独立 StickerEditor 创建新包并保留原贴纸表单实例。MessageMenu 在打开保存弹窗前读取自有包；读取失败只显示 Toast，成功后无论列表是否为空都保存来源与包列表并打开弹窗，reset 时清理并使迟到回包失效。StickerUpdates 传递本地新增结果，并在包读取期间暂存新增项以避免迟到回包覆盖；不持久缓存包内容。具体入口与字段规则见[需求](requirements.md#通知静音与设置)，请求时机见[数据流](data-flow.md)。
 
 ChatDetails 的 view 输入由面板路径派生（DetailView 与媒体类别），切换资料、隐私、群管理、邀请及图片/视频/文件；宽屏信息栏和 modal 复用同一组件实例。资料首页的 ion-content 隐藏时保留当前内容组件，返回恢复滚动；二级页切换重建各自的滚动容器；媒体页创建 ChatAttachments，退出时销毁并取消未完成读取。页面与返回位置随聊天/用户/话题范围重置；权限撤销关闭相应内部页。好友和管理员操作直接展示，破坏性操作沿用确认，并拒绝切换对象前遗留的确认。
+
+`npm run postinstall` 依次隔离表情库样式并应用 `scripts/virtualize-emoji-picker.mjs`；仅支持 @nicematic/emoji-picker 2.3.6，升级时必须复核模板与滚动逻辑。补丁校验替换次数，重复运行不重复修改。

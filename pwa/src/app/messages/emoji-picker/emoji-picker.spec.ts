@@ -49,7 +49,12 @@ describe('EmojiPicker data integration', () => {
   it('opens without requestIdleCallback and leaves flag loading to lazy image elements', () => {
     const fixture = TestBed.createComponent(EmojiPicker);
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelectorAll('nicematic-cell').length).toBeGreaterThan(2000);
+    expect(fixture.nativeElement.querySelectorAll('nicematic-cell').length).toBeGreaterThan(40);
+    expect(fixture.nativeElement.querySelectorAll('nicematic-cell').length).toBeLessThan(200);
+    const child = fixture.debugElement.query(By.directive(EmojiPickerComponent));
+    expect(child.injector.get(EmojiDataService).allEmojis().length).toBeGreaterThan(2000);
+    child.componentInstance.onSearch('🇨🇳');
+    fixture.detectChanges();
     const images = [...fixture.nativeElement.querySelectorAll('nicematic-cell img')] as HTMLImageElement[];
     expect(images.length).toBeGreaterThan(0);
     expect(images.every((image) => image.getAttribute('loading') === 'lazy')).toBe(true);
@@ -58,12 +63,40 @@ describe('EmojiPicker data integration', () => {
     const image = vi.fn();
     vi.stubGlobal('requestIdleCallback', idle);
     vi.stubGlobal('Image', image);
-    const child = fixture.debugElement.query(By.directive(EmojiPickerComponent));
     const flags = child.injector.get(EmojiFlagCacheService);
     flags.preloadFlags(['🇨🇳', '🇺🇸']);
     expect(idle).not.toHaveBeenCalled();
     expect(image).not.toHaveBeenCalled();
     expect(flags.getFlag('1f1e8-1f1f3')).toContain('1f1e8-1f1f3.png');
+  });
+
+  it('windows scrolling and broad search results, and resets scroll when the query changes', () => {
+    const fixture = TestBed.createComponent(EmojiPicker);
+    fixture.detectChanges();
+    const picker = fixture.debugElement.query(By.directive(EmojiPickerComponent))
+      .componentInstance as EmojiPickerComponent;
+    const viewport = picker.grid.scrollContainerRef.nativeElement;
+    const first = fixture.nativeElement.querySelector('nicematic-cell');
+    viewport.scrollTop = 36;
+    viewport.dispatchEvent(new Event('scroll'));
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('nicematic-cell')).toBe(first);
+    viewport.scrollTop = 4000;
+    viewport.dispatchEvent(new Event('scroll'));
+    fixture.detectChanges();
+    expect(fixture.nativeElement.contains(first)).toBe(false);
+    expect(fixture.nativeElement.querySelectorAll('nicematic-cell').length).toBeLessThan(200);
+    picker.onSearch('人');
+    fixture.detectChanges();
+    expect(viewport.scrollTop).toBe(0);
+    expect(picker.displayedEmojis().length).toBeGreaterThan(200);
+    expect(fixture.nativeElement.querySelectorAll('nicematic-cell').length).toBeLessThan(200);
+    picker.onSearch('🫱🏻‍🫲🏿');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('nicematic-cell')).toHaveLength(1);
+    picker.onSearch('');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('nicematic-cell').length).toBeGreaterThan(40);
   });
 
   it('uses the complete data for the real grid, search, skin popover, output and persisted recents', () => {
@@ -108,5 +141,25 @@ describe('EmojiPicker data integration', () => {
     fixture.detectChanges();
     picker.onEmojiSelect(picker.displayedEmojis()[0]);
     expect(chosen).toHaveBeenLastCalledWith('🫱🏻‍🫲🏿');
+  });
+
+  it('closes the floating skin selector when hidden while retaining the search and picker instance', () => {
+    const fixture = TestBed.createComponent(EmojiPicker);
+    fixture.detectChanges();
+    const picker = fixture.debugElement.query(By.directive(EmojiPickerComponent))
+      .componentInstance as EmojiPickerComponent;
+    picker.onSearch('宇航员');
+    fixture.detectChanges();
+    const astronaut = picker.grid.emojis().find((emoji) => emoji.char === '🧑‍🚀')!;
+    picker.grid.onLongPress(astronaut, new DOMRect(50, 200, 36, 36));
+    fixture.detectChanges();
+    expect(picker.grid.skinToneEmoji()).toBe(astronaut);
+    fixture.componentRef.setInput('active', false);
+    fixture.detectChanges();
+    expect(picker.grid.skinToneEmoji()).toBeNull();
+    fixture.componentRef.setInput('active', true);
+    fixture.detectChanges();
+    expect(fixture.debugElement.query(By.directive(EmojiPickerComponent)).componentInstance).toBe(picker);
+    expect(picker.searchQuery()).toBe('宇航员');
   });
 });

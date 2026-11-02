@@ -157,6 +157,99 @@ describe('StickerPackDetail', () => {
     expect(component['pack']()?.stickers).toEqual([sticker, added]);
   });
 
+  it.each([StickerPackVisibility.private, StickerPackVisibility.public])(
+    'saves visibility as %s without replacing sticker content or duplicating writes',
+    async (visibility) => {
+      const initial =
+        visibility === StickerPackVisibility.public ? StickerPackVisibility.private : StickerPackVisibility.public;
+      const fixture = TestBed.createComponent(StickerPackDetail);
+      fixture.componentRef.setInput('packId', pack.id);
+      fixture.detectChanges();
+      peer.expect('stickers.getPack').flush({ ...wirePack, visibility: initial });
+      await fixture.whenStable();
+      fixture.detectChanges();
+      const component = fixture.componentInstance;
+      const image = fixture.nativeElement.querySelector('.cell img');
+      expect(fixture.nativeElement.querySelector('ion-select')).toBeNull();
+      component['rename']();
+      fixture.detectChanges();
+      const changed = vi.spyOn(TestBed.inject(StickerUpdates).changed, 'next');
+      const saving = component['saveName']({ name: pack.name, emoji: '', visibility });
+      await component['saveName']({ name: pack.name, emoji: '', visibility });
+      fixture.detectChanges();
+      const response = peer.expect('stickers.updatePack', { packId: '201', visibility });
+      peer.expectNone('stickers.updatePack');
+      expect(component['editor']()!.busy()).toBe(true);
+      expect(component['pack']()?.visibility).toBe(initial);
+      expect(fixture.nativeElement.querySelector('.cell img')).toBe(image);
+      const added = { ...sticker, id: encodeId('110') };
+      TestBed.inject(StickerUpdates).added.next({ pack, sticker: added });
+      response.flush(wireSummary({ ...pack, visibility }));
+      await saving;
+      fixture.detectChanges();
+      expect(component['pack']()?.visibility).toBe(visibility);
+      expect(component['pack']()?.stickers).toEqual([sticker, added]);
+      expect(component['pack']()?.stickerCount).toBe(2);
+      expect(fixture.nativeElement.querySelector('.cell img')).toBe(image);
+      expect(changed).toHaveBeenCalledExactlyOnceWith(component['pack']());
+    },
+  );
+
+  it('keeps the editor open and saved visibility unchanged on failure, then allows retry', async () => {
+    const component = (await loaded()).componentInstance;
+    const changed = vi.spyOn(TestBed.inject(StickerUpdates).changed, 'next');
+    component['rename']();
+    const failing = component['saveName']({ name: pack.name, emoji: '', visibility: StickerPackVisibility.private });
+    peer.expect('stickers.updatePack').error(1503);
+    await failing;
+    expect(component['renaming']()).toBe(true);
+    expect(component['pack']()?.visibility).toBe(StickerPackVisibility.public);
+    expect(component['editorError']()).toBeTruthy();
+    expect(component['busy']()).toBe(false);
+    expect(changed).not.toHaveBeenCalled();
+    const retry = component['saveName']({ name: pack.name, emoji: '', visibility: StickerPackVisibility.private });
+    peer.expect('stickers.updatePack').flush(wireSummary({ ...pack, visibility: StickerPackVisibility.private }));
+    await retry;
+    expect(component['pack']()?.visibility).toBe(StickerPackVisibility.private);
+    expect(component['renaming']()).toBe(false);
+  });
+
+  it('does not expose visibility editing for another user’s pack', async () => {
+    const fixture = TestBed.createComponent(StickerPackDetail);
+    fixture.componentRef.setInput('packId', pack.id);
+    fixture.detectChanges();
+    peer.expect('stickers.getPack').flush({ ...wirePack, ownerUid: 2 });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.componentInstance['pack']()?.ownerUid).toBe(2);
+    expect(fixture.nativeElement.querySelector('ion-select')).toBeNull();
+    await fixture.componentInstance['saveName']({
+      name: pack.name,
+      emoji: '',
+      visibility: StickerPackVisibility.private,
+    });
+    peer.expectNone('stickers.updatePack');
+  });
+
+  it.each(['account', 'destroy', 'pack'])('ignores a delayed visibility response after %s changes', async (change) => {
+    const fixture = TestBed.createComponent(StickerPackDetail);
+    fixture.componentRef.setInput('packId', pack.id);
+    fixture.detectChanges();
+    peer.expect('stickers.getPack').flush(wirePack);
+    await fixture.whenStable();
+    const component = fixture.componentInstance;
+    const changed = vi.spyOn(TestBed.inject(StickerUpdates).changed, 'next');
+    const pending = component['saveName']({ name: pack.name, emoji: '', visibility: StickerPackVisibility.private });
+    const response = peer.expect('stickers.updatePack');
+    if (change === 'account') TestBed.inject(SessionStore).user.set({ ...testUser, uid: 2 });
+    else if (change === 'destroy') fixture.destroy();
+    else fixture.componentRef.setInput('packId', encodeId('202'));
+    response.flush(wireSummary({ ...pack, visibility: StickerPackVisibility.private }));
+    await pending;
+    expect(changed).not.toHaveBeenCalled();
+    expect(component['pack']()?.visibility).toBe(StickerPackVisibility.public);
+  });
+
   it('removes a sticker from an owned pack after confirmation', async () => {
     const changed = vi.spyOn(TestBed.inject(StickerUpdates).stickerRemoved, 'next');
     const component = (await loaded()).componentInstance;

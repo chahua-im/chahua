@@ -6,6 +6,7 @@ import { StartChat } from './chats/start-chat/start-chat';
 import { MediaViewer } from './messages/media-viewer/media-viewer';
 import { ReactionDetails } from './messages/reaction-details/reaction-details';
 import { StickerPicker } from './messages/sticker-picker/sticker-picker';
+import { StickerDiscovery } from './messages/sticker-discovery/sticker-discovery';
 import { PanelContent, panelDefinitions } from './navigation/panel-definitions';
 import { BlockedUsers } from './settings/blocked-users/blocked-users';
 import { FriendVerificationSettings } from './settings/friend-verification-settings/friend-verification-settings';
@@ -25,6 +26,7 @@ export const panelComponents: Record<PanelContent, Type<unknown>> = {
   [PanelContent.Reactions]: ReactionDetails,
   [PanelContent.Profile]: ChatDetails,
   [PanelContent.StickerPicker]: StickerPicker,
+  [PanelContent.StickerDiscovery]: StickerDiscovery,
   [PanelContent.StartChat]: StartChat,
   [PanelContent.Settings]: Settings,
   [PanelContent.Notifications]: NotificationSettings,

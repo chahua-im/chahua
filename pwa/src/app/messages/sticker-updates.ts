@@ -16,6 +16,8 @@ export class StickerUpdates {
   readonly added = new Subject<{ pack: StickerPackSummary; sticker: StickerSummary }>();
   /** A confirmed creation or edit supplies the current pack without another read. */
   readonly changed = new Subject<StickerPackDetailResponse>();
+  /** Discovery already has a summary; load members only when the library needs them. */
+  readonly subscribed = new Subject<StickerPackSummary>();
   /** Remove membership from the current pack, without replacing newer content or favorites. */
   readonly stickerRemoved = new Subject<{ pack: StickerPackDetailResponse; stickerId: SnowflakeID }>();
   /** A deleted or unsubscribed pack must leave open libraries, including pending reads. */

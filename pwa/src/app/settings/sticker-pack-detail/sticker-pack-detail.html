@@ -70,6 +70,7 @@
   <app-sticker-editor
     [title]="'settings.stickerPack.renameTitle' | transloco"
     [initialName]="pack()!.name"
+    [initialVisibility]="pack()!.visibility"
     [busy]="busy()"
     [error]="editorError()"
     (confirmed)="saveName($event)"

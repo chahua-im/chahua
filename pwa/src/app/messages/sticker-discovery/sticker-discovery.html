@@ -1,0 +1,159 @@
+<ion-header>
+  <ion-toolbar>
+    @if (panels.paths().length > 1) {
+      <ion-buttons slot="start">
+        <ion-button (click)="panels.back()"><ion-icon slot="icon-only" [icon]="backIcon" /></ion-button>
+      </ion-buttons>
+    }
+    <ion-title>{{ 'stickers.discovery.title' | transloco }}</ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="panels.close()">{{ 'common.done' | transloco }}</ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+  <ion-toolbar>
+    <ion-searchbar
+      [placeholder]="'stickers.discovery.search' | transloco"
+      [debounce]="300"
+      [value]="query()"
+      maxlength="255"
+      (ionInput)="query.set($event.detail.value ?? '')" />
+    <ion-buttons slot="end">
+      <ion-button
+        fill="solid"
+        color="primary"
+        [title]="'stickers.createPack' | transloco"
+        [disabled]="creating()"
+        (click)="createPack()">
+        {{ 'common.create' | transloco }}
+      </ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+  <ion-toolbar>
+    <ion-segment
+      [value]="sort()"
+      (ionChange)="sort.set($event.detail.value === Sort.subscribers ? Sort.subscribers : Sort.trending)">
+      <ion-segment-button [value]="Sort.trending">
+        <ion-label>{{ 'stickers.discovery.trending' | transloco }}</ion-label>
+      </ion-segment-button>
+      <ion-segment-button [value]="Sort.subscribers">
+        <ion-label>{{ 'stickers.discovery.popular' | transloco }}</ion-label>
+      </ion-segment-button>
+    </ion-segment>
+    @if (loading() && loaded() && !pageRequest()) {
+      <ion-progress-bar type="indeterminate" />
+    }
+  </ion-toolbar>
+</ion-header>
+<ion-content appScrollbars>
+  @if (loading() && !loaded()) {
+    @for (slot of [0, 1, 2, 3]; track slot) {
+      <section class="pack pack-skeleton">
+        <div class="pack-heading">
+          <div class="pack-info skeleton-block heading-skeleton"></div>
+          <div class="pack-actions">
+            <div class="skeleton-block button-skeleton"></div>
+            <div class="skeleton-block button-skeleton"></div>
+          </div>
+        </div>
+        <div class="previews">
+          @for (preview of [0, 1, 2, 3]; track preview) {
+            <div class="preview skeleton-block"></div>
+          }
+        </div>
+      </section>
+    }
+  }
+  @if (error() && !pageRequest()) {
+    <app-load-error [compact]="loaded()" [message]="'stickers.loadFailed' | transloco" (retry)="retry()" />
+  }
+  @for (pack of packs(); track pack.id) {
+    <section class="pack">
+      <div class="pack-heading">
+        <div class="pack-info">
+          <h2>
+            <button class="pack-name" [routerLink]="['/stickers', decodeId(pack.id)]" [title]="pack.name">
+              {{ pack.name }}
+            </button>
+          </h2>
+        </div>
+        <div class="pack-actions">
+          <ion-button size="small" fill="clear" [routerLink]="['/stickers', decodeId(pack.id)]">
+            {{ 'stickers.discovery.viewPack' | transloco }}
+          </ion-button>
+          <ion-button
+            class="subscribe-button"
+            size="small"
+            [fill]="pack.isSubscribed ? 'outline' : 'solid'"
+            [disabled]="pack.isSubscribed || adding().has(pack.id)"
+            (click)="add(pack)">
+            @if (adding().has(pack.id)) {
+              <ion-spinner name="crescent" />
+            } @else {
+              {{ (pack.isSubscribed ? 'stickers.discovery.subscribed' : 'stickers.discovery.subscribe') | transloco }}
+            }
+          </ion-button>
+        </div>
+      </div>
+      <p>
+        {{ 'stickers.count' | transloco: { count: pack.stickerCount } }} ·
+        @if (sort() === Sort.trending) {
+          {{
+            'stickers.discovery.recentSubscribers'
+              | transloco: { count: pack.recentSubscriberCount, days: recentWindowDays() }
+          }}
+        } @else {
+          {{ 'stickers.discovery.subscribers' | transloco: { count: pack.subscriberCount } }}
+        }
+      </p>
+      <button class="pack-preview" [routerLink]="['/stickers', decodeId(pack.id)]">
+        <span class="previews">
+          @for (sticker of pack.previewStickers; track sticker.id) {
+            <span class="preview">
+              <span class="preview-skeleton skeleton-block"></span>
+              @if (sticker.media.contentType.startsWith('video/')) {
+                <video
+                  appMediaLoaded
+                  [src]="sticker.media.url"
+                  autoplay
+                  loop
+                  [muted]="true"
+                  playsinline
+                  preload="metadata"></video>
+              } @else {
+                <img appMediaLoaded [src]="sticker.media.url" loading="lazy" decoding="async" />
+              }
+            </span>
+          }
+        </span>
+      </button>
+    </section>
+  }
+  @if (error() && pageRequest()) {
+    <app-load-error [compact]="loaded()" [message]="'stickers.loadFailed' | transloco" (retry)="retry()" />
+  } @else if (!error() && loaded() && !loading() && !packs().length) {
+    <div class="ion-padding ion-text-center">
+      <p>{{ (query().trim() ? 'stickers.discovery.empty' : 'stickers.discovery.noPacks') | transloco }}</p>
+      @if (query().trim()) {
+        <ion-button fill="clear" (click)="query.set('')">{{ 'stickers.discovery.clearSearch' | transloco }}</ion-button>
+      }
+    </div>
+  }
+  @if (cursor() != null && !error()) {
+    <ion-infinite-scroll threshold="100px" (ionInfinite)="more($event)">
+      <ion-infinite-scroll-content />
+    </ion-infinite-scroll>
+  }
+</ion-content>
+@if (createOpen()) {
+  <app-sticker-editor
+    [title]="'stickers.createPack' | transloco"
+    [busy]="creating()"
+    [error]="createFailed() ? ('stickers.createFailed' | transloco) : undefined"
+    (confirmed)="savePack($event)"
+    (closed)="createOpen.set(false)" />
+}
+<ion-toast
+  [isOpen]="addFailed()"
+  [message]="'stickers.discovery.subscribeFailed' | transloco"
+  [duration]="2500"
+  (didDismiss)="addFailed.set(false)" />

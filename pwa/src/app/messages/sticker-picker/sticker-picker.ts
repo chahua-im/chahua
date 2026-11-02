@@ -38,7 +38,7 @@ import {
   ModalController,
 } from '@ionic/angular';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { addOutline, cubeOutline, heart, settingsOutline } from 'ionicons/icons';
+import { addOutline, chevronBackOutline, cubeOutline, heart, settingsOutline } from 'ionicons/icons';
 import { filter, firstValueFrom, type Observable, takeUntil } from 'rxjs';
 import { CHAHUA_BASE_URL } from '../../../generated/endpoints/chahua.base-url';
 import { RpcApi } from '../../../generated/rpc-api';
@@ -59,6 +59,7 @@ import {
   StickerPreferences,
 } from '../../settings/sticker-preferences';
 import { MediaLoaded } from '../media-loaded';
+import { StickerEditor, type StickerEditorValue } from '../../settings/sticker-editor/sticker-editor';
 import { StickerLibraryScroll } from './sticker-library-scroll';
 import { appendSticker, removePackSticker, StickerUpdates } from '../sticker-updates';
 import { detectFileMimeType, isHeicLikeMedia, withDetectedMimeType } from '../media-processing/file-type';
@@ -85,6 +86,7 @@ type StickerContent = StickerPackDetailResponse | { stickers: StickerSummary[] }
     RouterLink,
     ContentScrollbars,
     MediaLoaded,
+    StickerEditor,
     IonIcon,
     IonPopover,
     TranslocoPipe,
@@ -111,7 +113,7 @@ export class StickerPicker {
   readonly embedded = input(false);
   readonly grouped = input(false);
   readonly selected = output<StickerSummary>();
-  protected readonly icons = { heart, cubeOutline, addOutline, settingsOutline };
+  protected readonly icons = { heart, cubeOutline, addOutline, settingsOutline, chevronBackOutline };
   protected readonly session = inject(SessionStore);
   private readonly preferences = inject(StickerPreferences);
   private readonly alerts = inject(AlertController);
@@ -204,6 +206,9 @@ export class StickerPicker {
   );
   private retryPackId?: SnowflakeID;
   private readonly operationBusy = signal(false);
+  protected readonly pendingUpload = signal<{ file: File; packId: SnowflakeID } | undefined>(undefined);
+  protected readonly uploadError = signal<string | undefined>(undefined);
+  private readonly editor = viewChild(StickerEditor);
   protected readonly busy = computed(() => this.operationBusy() || this.selectingPack());
   protected readonly error = signal(false);
   protected readonly favoriteFailed = signal(false);
@@ -228,6 +233,14 @@ export class StickerPicker {
         menu?.sticker.id === sticker.id
           ? { ...menu, sticker: { ...menu.sticker, isFavorited: sticker.isFavorited } }
           : menu,
+      );
+    });
+    this.updates.subscribed.pipe(takeUntilDestroyed()).subscribe((pack) => {
+      if (this.packId() || this.stickerId()) return;
+      this.libraryPacks.update((packs) =>
+        packs.some((item) => item.id === pack.id)
+          ? packs.map((item) => (item.id === pack.id ? pack : item))
+          : [...packs, pack],
       );
     });
     this.updates.removed.pipe(takeUntilDestroyed()).subscribe(({ id, deleted }) => {
@@ -389,34 +402,6 @@ export class StickerPicker {
     if (!this.grouped()) return this.retry();
     return group.id != null ? this.loadGroup(group.id, true) : this.load();
   }
-  protected async createPack() {
-    const alert = await this.alerts.create({
-      header: this.transloco.translate('stickers.createPack'),
-      inputs: [{ name: 'name', placeholder: this.transloco.translate('common.name') }],
-      buttons: [
-        { text: this.transloco.translate('common.cancel'), role: 'cancel' },
-        { text: this.transloco.translate('common.create'), role: 'confirm' },
-      ],
-    });
-    await alert.present();
-    const result = await alert.onDidDismiss<{ values: { name: string } }>();
-    const name = result.data?.values.name.trim();
-    if (result.role !== 'confirm' || !name) return;
-    this.operationBusy.set(true);
-    this.error.set(false);
-    try {
-      const pack = await firstValueFrom(this.api.stickers.createPack({ name }));
-      this.beginSelection();
-      this.setContent({ ...pack, stickers: [] });
-      this.libraryPacks.update((packs) => [...packs, pack]);
-      this.preferences.upsertPackOrderItem({ stickerPackId: pack.id, lastUsedOn: Date.now() });
-      if (this.grouped()) this.jumpToGroup(pack.id);
-    } catch {
-      this.error.set(true);
-    } finally {
-      this.operationBusy.set(false);
-    }
-  }
   protected async upload(event: Event, packId = this.pack()?.id) {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
@@ -424,7 +409,6 @@ export class StickerPicker {
     if (!file || packId == null || this.busy()) return;
     const pack = this.contents().get(packId);
     if (!pack || !('id' in pack)) return;
-    const uid = this.session.user()?.uid;
     const mimeType = await detectFileMimeType(file);
     if (
       (!mimeType.startsWith('image/') && mimeType !== 'video/webm') ||
@@ -439,46 +423,40 @@ export class StickerPicker {
       await alert.present();
       return;
     }
-    const alert = await this.alerts.create({
-      header: this.transloco.translate('stickers.addTitle'),
-      inputs: [
-        { name: 'emoji', placeholder: this.transloco.translate('stickers.emojiPlaceholder') },
-        { name: 'name', placeholder: this.transloco.translate('stickers.optionalName') },
-      ],
-      buttons: [
-        { text: this.transloco.translate('common.cancel'), role: 'cancel' },
-        { text: this.transloco.translate('common.upload'), role: 'confirm' },
-      ],
-    });
-    await alert.present();
-    const result = await alert.onDidDismiss<{ values: { emoji: string; name: string } }>();
-    const values = result.data?.values;
-    if (
-      result.role !== 'confirm' ||
-      !values?.emoji.trim() ||
-      this.destroyRef.destroyed ||
-      this.session.user()?.uid !== uid
-    )
-      return;
+    this.uploadError.set(undefined);
+    this.pendingUpload.set({ file: withDetectedMimeType(file, mimeType), packId });
+  }
+
+  protected async saveUpload(values: StickerEditorValue) {
+    const pending = this.pendingUpload();
+    if (!pending || this.busy() || !values.emoji.trim()) return;
+    const pack = this.contents().get(pending.packId);
+    if (!pack || !('id' in pack)) return;
+    const uid = this.session.user()?.uid;
     this.operationBusy.set(true);
+    this.uploadError.set(undefined);
     this.uploadErrors.update((ids) => {
       const next = new Set(ids);
-      next.delete(packId);
+      next.delete(pending.packId);
       return next;
     });
     try {
       const body = new FormData();
-      body.append('file', withDetectedMimeType(file, mimeType), file.name);
+      body.append('file', pending.file, pending.file.name);
       body.append('emoji', values.emoji.trim());
       if (values.name.trim()) body.append('name', values.name.trim());
       const sticker = await firstValueFrom(
-        this.http.post<StickerSummary>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}/stickers`, body),
+        this.http.post<StickerSummary>(`${this.baseUrl}/stickers/packs/${decodeId(pending.packId)}/stickers`, body),
       );
-      if (this.session.user()?.uid === uid) this.updates.added.next({ pack, sticker });
+      if (this.session.user()?.uid !== uid) return;
+      this.updates.added.next({ pack, sticker });
+      await this.editor()?.dismiss();
     } catch {
-      this.uploadErrors.update((ids) => new Set(ids).add(packId));
+      if (this.session.user()?.uid !== uid) return;
+      this.uploadErrors.update((ids) => new Set(ids).add(pending.packId));
+      this.uploadError.set(this.transloco.translate('stickers.addFailed'));
     } finally {
-      this.operationBusy.set(false);
+      if (this.session.user()?.uid === uid) this.operationBusy.set(false);
     }
   }
   protected async load() {
@@ -508,6 +486,12 @@ export class StickerPicker {
       });
     });
     subscription.add(this.updates.changed.subscribe((pack) => changes.set(pack.id, pack)));
+    subscription.add(
+      this.updates.subscribed.subscribe((pack) => {
+        changes.set(pack.id, pack);
+        removals.delete(pack.id);
+      }),
+    );
     subscription.add(
       this.updates.stickerRemoved.subscribe(({ pack, stickerId }) => {
         const ids = removedPreviews.get(pack.id) ?? new Set<SnowflakeID>();
@@ -675,14 +659,18 @@ export class StickerPicker {
   protected async subscribe() {
     const pack = this.pack();
     if (!pack) return;
+    const uid = this.session.user()?.uid;
     const saved = await this.updateContent(
       { ...pack, isSubscribed: !pack.isSubscribed },
       pack.isSubscribed
         ? this.api.stickers.unsubscribeFromPack({ packId: pack.id })
         : this.api.stickers.subscribeToPack({ packId: pack.id }),
     );
-    if (saved && pack.isSubscribed && pack.ownerUid !== this.session.user()?.uid)
-      this.updates.removed.next({ id: pack.id, deleted: false });
+    if (!saved || this.session.user()?.uid !== uid) return;
+    if (!pack.isSubscribed) {
+      this.preferences.upsertPackOrderItem({ stickerPackId: pack.id, lastUsedOn: Date.now() });
+      this.updates.subscribed.next({ ...pack, isSubscribed: true });
+    } else if (pack.ownerUid !== uid) this.updates.removed.next({ id: pack.id, deleted: false });
   }
   private async updateContent(optimistic: StickerContent, request: Observable<unknown>) {
     if (this.busy()) return false;

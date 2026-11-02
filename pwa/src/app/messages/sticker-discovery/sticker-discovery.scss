@@ -1,0 +1,96 @@
+.pack {
+  padding: 16px;
+  border-bottom: 1px solid var(--ion-color-light-shade);
+  &:last-of-type {
+    border-bottom: 0;
+  }
+}
+.pack-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.pack-info {
+  flex: 1;
+  min-width: 0;
+}
+h2 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+p {
+  margin: 4px 0;
+  color: var(--ion-color-medium);
+  font-size: 0.85rem;
+}
+.pack-name,
+.pack-preview {
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+}
+.pack-name {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pack-preview {
+  display: block;
+  width: 100%;
+}
+.pack-actions {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 4px;
+}
+.pack-actions ion-button {
+  margin: 0;
+}
+ion-button {
+  min-width: 64px;
+  flex-shrink: 0;
+}
+ion-spinner {
+  width: 20px;
+  height: 20px;
+}
+ion-progress-bar {
+  position: absolute;
+  bottom: 0;
+}
+.previews {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+.preview {
+  position: relative;
+  height: 72px;
+}
+.preview img,
+.preview video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.preview-skeleton {
+  position: absolute;
+  inset: 6px;
+  border-radius: 8px;
+}
+.preview:has(.loaded) .preview-skeleton {
+  display: none;
+}
+.heading-skeleton {
+  height: 40px;
+}
+.button-skeleton {
+  width: 64px;
+  height: 25px;
+}

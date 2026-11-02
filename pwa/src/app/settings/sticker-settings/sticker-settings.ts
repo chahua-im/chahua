@@ -1,4 +1,4 @@
-import { Component, computed, DestroyRef, inject, signal, viewChild } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import type { ItemReorderEventDetail } from '@ionic/angular';
 import {
@@ -13,7 +13,7 @@ import {
   IonLabel,
   IonList,
   IonNote,
-  IonPopover,
+  IonModal,
   IonReorder,
   IonReorderGroup,
   IonSpinner,
@@ -21,19 +21,17 @@ import {
   IonToggle,
   IonToolbar,
 } from '@ionic/angular';
-import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { addOutline, chevronBackOutline, closeCircleOutline, cubeOutline, happyOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { RpcApi } from '../../../generated/rpc-api';
 import type { StickerPackSummary, UpdateStickerPackOrderItem } from '../../../generated/models';
 import { decodeId } from '../../api/snowflake-id';
-import { EmojiPicker } from '../../messages/emoji-picker/emoji-picker';
-import { StickerUpdates } from '../../messages/sticker-updates';
+import { EmojiPanel, emojiPanelAnimation } from '../../messages/emoji-panel/emoji-panel';
 import { PanelNavigation } from '../../navigation/panel-navigation';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { LoadError } from '../../ui/load-error/load-error';
 import { Preferences } from '../preferences';
-import { StickerEditor, type StickerEditorValue } from '../sticker-editor/sticker-editor';
 import { AUTO_SORT_LIMIT, sortStickerPacksByPreference, StickerPreferences } from '../sticker-preferences';
 
 @Component({
@@ -41,9 +39,8 @@ import { AUTO_SORT_LIMIT, sortStickerPacksByPreference, StickerPreferences } fro
   templateUrl: './sticker-settings.html',
   styleUrl: '../settings/settings.scss',
   imports: [
-    StickerEditor,
     ContentScrollbars,
-    EmojiPicker,
+    EmojiPanel,
     LoadError,
     IonChip,
     IonBadge,
@@ -56,7 +53,7 @@ import { AUTO_SORT_LIMIT, sortStickerPacksByPreference, StickerPreferences } fro
     IonLabel,
     IonList,
     IonNote,
-    IonPopover,
+    IonModal,
     IonReorder,
     IonReorderGroup,
     IonSpinner,
@@ -121,11 +118,7 @@ import { AUTO_SORT_LIMIT, sortStickerPacksByPreference, StickerPreferences } fro
   `,
 })
 export class StickerSettings {
-  private readonly destroy = inject(DestroyRef);
-  private readonly editor = viewChild(StickerEditor);
   private readonly api = inject(RpcApi);
-  private readonly updates = inject(StickerUpdates);
-  private readonly transloco = inject(TranslocoService);
   private readonly router = inject(Router);
   protected readonly panels = inject(PanelNavigation);
   protected readonly preferences = inject(StickerPreferences);
@@ -137,15 +130,14 @@ export class StickerSettings {
   protected readonly loaded = signal(false);
   protected readonly loadError = signal(false);
   protected readonly choosingPinned = signal(false);
+  protected readonly enterEmojiAnimation = (element: HTMLElement) => emojiPanelAnimation(element, true);
+  protected readonly leaveEmojiAnimation = (element: HTMLElement) => emojiPanelAnimation(element, false);
   private readonly owned = signal<StickerPackSummary[]>([]);
   private readonly packs = signal<StickerPackSummary[]>([]);
   protected readonly ownedIds = computed(() => new Set(this.owned().map((pack) => pack.id)));
   protected readonly orderedPacks = computed(() =>
     sortStickerPacksByPreference(this.packs(), this.preferences.packOrder()),
   );
-  protected readonly creating = signal(false);
-  protected readonly createOpen = signal(false);
-  protected readonly createError = signal<string | undefined>(undefined);
   protected readonly savingOrder = signal(false);
   protected readonly orderFailed = signal(false);
   private pendingOrder?: UpdateStickerPackOrderItem;
@@ -187,31 +179,8 @@ export class StickerSettings {
     if (this.reactions.pinnedReactions().length === 5) this.choosingPinned.set(false);
   }
 
-  protected createPack() {
-    this.createError.set(undefined);
-    this.createOpen.set(true);
-  }
-
-  protected async savePack({ name }: StickerEditorValue) {
-    if (this.creating() || !name.trim()) return;
-    this.creating.set(true);
-    this.createError.set(undefined);
-    try {
-      const pack = await firstValueFrom(this.api.stickers.createPack({ name: name.trim() }));
-      if (this.destroy.destroyed) return;
-      this.owned.update((owned) => [...owned, pack]);
-      this.packs.update((packs) => [pack, ...packs]);
-      this.updates.changed.next({ ...pack, stickers: [] });
-      this.preferences.upsertPackOrderItem({ stickerPackId: pack.id, lastUsedOn: Date.now() });
-      await this.editor()?.dismiss();
-      if (this.destroy.destroyed) return;
-      this.createOpen.set(false);
-      await this.router.navigate(['/settings/stickers', decodeId(pack.id)]);
-    } catch {
-      this.createError.set(this.transloco.translate('stickers.createFailed'));
-    } finally {
-      this.creating.set(false);
-    }
+  protected addPacks() {
+    return this.router.navigate(['/sticker-discovery']);
   }
 
   protected openPack(pack: StickerPackSummary) {

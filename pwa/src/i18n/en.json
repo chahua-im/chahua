@@ -196,10 +196,14 @@
       "title": "Sticker Pack",
       "unsubscribe": "Unsubscribe",
       "removeHint": "Tap a sticker to remove it from this pack.",
-      "renameTitle": "Rename Sticker Pack",
+      "renameTitle": "Edit Sticker Pack",
       "namePlaceholder": "Sticker pack name",
       "renamed": "Sticker pack renamed",
-      "renameFailed": "Rename failed. Please try again.",
+      "renameFailed": "Could not save the sticker pack. Please try again.",
+      "visibility": "Visibility",
+      "public": "Public",
+      "private": "Private",
+      "visibilityHint": "Making a pack private removes other users’ subscriptions.",
       "deleteTitle": "Delete Sticker Pack",
       "deleteMessage": "Delete this sticker pack? Stickers will stay available elsewhere, but this pack and its contents list will be removed.",
       "deleteFailed": "Delete failed. Please try again.",
@@ -644,6 +648,7 @@
     "invalidUploadMessage": "Choose an image or WebM video under 10 MB.",
     "addTitle": "Add sticker",
     "emojiPlaceholder": "Emoji, e.g. 🙂",
+    "emojiExample": "e.g. 🙂",
     "optionalName": "Name (optional)",
     "loadFailed": "Failed to load.",
     "empty": "No stickers yet",
@@ -662,7 +667,6 @@
     "createPack": "Create sticker pack",
     "createFailed": "Failed to create sticker pack",
     "emojiLabel": "Emoji",
-    "emojiHint": "Enter 1–4 emoji without text or spaces.",
     "fromMessage": {
       "action": "Save as sticker",
       "title": "Add to sticker pack",
@@ -672,11 +676,27 @@
       "missing": "The source message or sticker pack no longer exists.",
       "changed": "The source image changed. Close this dialog and select the image again.",
       "uncertain": "The save result could not be confirmed. Check the pack before trying again to avoid duplicates.",
-      "noOwnedPacks": "You have no sticker packs of your own."
-    }
+      "noOwnedPacks": "You have no sticker packs of your own. Create one to continue."
+    },
+    "discovery": {
+      "search": "Search sticker packs",
+      "trending": "Trending",
+      "popular": "Most subscribed",
+      "subscribers": "{{count}} subscribers",
+      "recentSubscribers": "{{count}} subscribed in the last {{days}} days",
+      "empty": "No sticker packs found",
+      "viewPack": "View all",
+      "noPacks": "No public sticker packs available yet",
+      "clearSearch": "Clear search",
+      "title": "Add sticker packs",
+      "subscribe": "Subscribe",
+      "subscribed": "Subscribed",
+      "subscribeFailed": "Could not subscribe to sticker pack. Please try again."
+    },
+    "description": "Description: "
   },
   "emojiPicker": {
-    "loadFailed": "Failed to load emojis. Close and try again."
+    "loadFailed": "Failed to load emojis. Refresh the page and try again."
   },
   "pwa": {
     "notificationPrompt": {
