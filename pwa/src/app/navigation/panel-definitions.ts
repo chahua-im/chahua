@@ -11,6 +11,7 @@ export enum PanelKind {
   Invites = 'invites',
   Reactions = 'reactions',
   Stickers = 'stickers',
+  StickerDiscovery = 'sticker-discovery',
   Sticker = 'sticker',
   Create = 'create',
   AddFriend = 'add-friend',
@@ -23,6 +24,7 @@ export enum PanelContent {
   Reactions,
   Profile,
   StickerPicker,
+  StickerDiscovery,
   StartChat,
   Settings,
   Notifications,
@@ -59,6 +61,7 @@ export interface PanelDefinition {
 
 // Pure protocol data: importing it from navigation never imports page components.
 export const panelDefinitions: readonly PanelDefinition[] = [
+  { path: 'sticker-discovery', kind: PanelKind.StickerDiscovery, content: PanelContent.StickerDiscovery },
   { path: 'media', kind: PanelKind.Media, content: PanelContent.Media },
   {
     path: 'chats/chat/:id/message/:messageId/reactions',

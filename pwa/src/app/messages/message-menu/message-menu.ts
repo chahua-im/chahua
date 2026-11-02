@@ -15,7 +15,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { createAnimation, IonAlert, IonIcon, IonModal, IonSpinner, IonToast, isPlatform } from '@ionic/angular';
+import { createAnimation, IonAlert, IonIcon, IonModal, IonToast } from '@ionic/angular';
 import {
   addOutline,
   arrowUndoOutline,
@@ -24,7 +24,6 @@ import {
   bookmark,
   bookmarkOutline,
   chatbubblesOutline,
-  chevronBackOutline,
   chevronDown,
   chevronUp,
   copyOutline,
@@ -52,7 +51,7 @@ import { ChatStore } from '../../chats/chat-store';
 import { SpeakingAction } from '../../chats/speaking';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
-import { EmojiPicker } from '../emoji-picker/emoji-picker';
+import { EmojiPanel, emojiPanelAnchor, emojiPanelAnimation, type EmojiPanelAnchor } from '../emoji-panel/emoji-panel';
 import { ForwardPicker } from '../forward-picker/forward-picker';
 import { canForward, canSelect, type ForwardSource } from '../forwarding';
 import { messageLink } from '../message-link';
@@ -108,11 +107,10 @@ export function pageSlots(actions: readonly MenuSlot[], page: number): readonly 
     StickerFromMessage,
     ForwardPicker,
     Message,
-    EmojiPicker,
+    EmojiPanel,
     IonAlert,
     IonIcon,
     IonModal,
-    IonSpinner,
     IonToast,
     TranslocoPipe,
   ],
@@ -212,7 +210,7 @@ export class MessageMenu {
     return sender.name ?? String(sender.uid);
   });
   protected readonly Action = MessageAction;
-  protected readonly icons = { addOutline, chevronBackOutline, chevronDown, chevronUp };
+  protected readonly icons = { addOutline, chevronDown, chevronUp };
   protected readonly actionIcons = computed<Record<MessageAction, string>>(() => ({
     [MessageAction.Forward]: arrowRedoOutline,
     [MessageAction.Select]: checkboxOutline,
@@ -229,8 +227,7 @@ export class MessageMenu {
     [MessageAction.Reactions]: peopleOutline,
   }));
   protected readonly choosingEmoji = signal(false);
-  private readonly emojiAnchor = signal<{ x: number; y: number } | undefined>(undefined);
-  private readonly emojiPanel = viewChild<ElementRef<HTMLElement>>('emojiPanel');
+  protected readonly emojiAnchor = signal<EmojiPanelAnchor | undefined>(undefined);
   protected readonly placed = signal(false);
   private readonly stack = viewChild<ElementRef<HTMLElement>>('stack');
   private readonly reactionBar = viewChild<ElementRef<HTMLElement>>('reactionBar');
@@ -348,28 +345,6 @@ export class MessageMenu {
 
   constructor() {
     inject(DestroyRef).onDestroy(() => this.reset());
-    afterRenderEffect((onCleanup) => {
-      const panel = this.emojiPanel()?.nativeElement;
-      const anchor = this.emojiAnchor();
-      if (!panel || !anchor) return;
-      const surface = panel.parentElement!;
-      const place = () => {
-        const bounds = surface.getBoundingClientRect();
-        const style = getComputedStyle(surface);
-        const left = parseFloat(style.paddingLeft) + 12;
-        const top = parseFloat(style.paddingTop) + 12;
-        const right = bounds.width - parseFloat(style.paddingRight) - 12;
-        const bottom = bounds.height - parseFloat(style.paddingBottom) - 12;
-        panel.style.left = `${Math.max(left, Math.min(anchor.x - bounds.left, right - panel.offsetWidth))}px`;
-        panel.style.top = `${Math.max(top, Math.min(anchor.y - bounds.top + 8, bottom - panel.offsetHeight))}px`;
-        panel.style.transform = 'none';
-      };
-      const observer = new ResizeObserver(place);
-      observer.observe(surface);
-      observer.observe(panel);
-      place();
-      onCleanup(() => observer.disconnect());
-    });
     effect(() => {
       if (this.queued() || !this.serverMessage()) return;
       untracked(() => {
@@ -507,17 +482,9 @@ export class MessageMenu {
   protected readonly leaveAnimation = (element: HTMLElement) => this.animate(element, false);
 
   private animate(element: HTMLElement, entering: boolean) {
-    const from = entering ? '0' : '1';
-    const to = entering ? '1' : '0';
-    const animation = createAnimation()
+    const animation = emojiPanelAnimation(element, entering)
       .duration(entering ? 180 : 120)
-      .easing('cubic-bezier(0.16, 1, 0.3, 1)')
       .addAnimation([
-        createAnimation().addElement(element.shadowRoot!.querySelector('ion-backdrop')!).fromTo('opacity', from, to),
-        createAnimation()
-          .addElement(element.shadowRoot!.querySelector('.modal-wrapper')!)
-          .beforeStyles({ transform: 'none' })
-          .fromTo('opacity', from, to),
         createAnimation()
           .addElement(element.querySelectorAll('.panel, .preview'))
           .fromTo('transform', `scale(${entering ? 0.92 : 1})`, `scale(${entering ? 1 : 0.92})`),
@@ -545,14 +512,7 @@ export class MessageMenu {
   }
 
   protected openEmojiPicker(event: MouseEvent) {
-    const button = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    this.emojiAnchor.set(
-      isPlatform('ios') || isPlatform('android')
-        ? undefined
-        : event.detail
-          ? { x: event.clientX, y: event.clientY }
-          : { x: button.x + button.width / 2, y: button.y + button.height / 2 },
-    );
+    this.emojiAnchor.set(emojiPanelAnchor(event));
     this.choosingEmoji.set(true);
   }
 
@@ -561,6 +521,7 @@ export class MessageMenu {
     const focused = this.document.activeElement;
     if (focused instanceof HTMLElement) focused.blur();
     this.choosingEmoji.set(false);
+    this.emojiAnchor.set(undefined);
     this.placed.set(false);
     this.page.set(0);
     this.selection.set(selection);
@@ -740,8 +701,7 @@ export class MessageMenu {
     try {
       const { packs } = await firstValueFrom(this.stickers.stickers.listOwnedPacks().pipe(timeout(30000)));
       if (!active()) return;
-      if (packs.length) this.stickerSource.set({ message, packs });
-      else this.notice.set(MessageNotice.NoOwnedStickerPacks);
+      this.stickerSource.set({ message, packs });
     } catch {
       if (active()) this.notice.set(MessageNotice.Failed);
     } finally {

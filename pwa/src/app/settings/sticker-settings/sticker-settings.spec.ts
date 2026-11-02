@@ -1,5 +1,7 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
+import { IonModal } from '@ionic/angular';
 import { Router } from '@angular/router';
 import { AlertController } from '@ionic/angular';
 import { vi } from 'vitest';
@@ -8,9 +10,9 @@ import { provideRpcTesting, RpcTestPeer } from '../../api/rpc-testing';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { PanelNavigation } from '../../navigation/panel-navigation';
 import { Preferences } from '../preferences';
+import { EmojiPanel } from '../../messages/emoji-panel/emoji-panel';
 import { StickerPreferences } from '../sticker-preferences';
 import { StickerSettings } from './sticker-settings';
-import { StickerUpdates } from '../../messages/sticker-updates';
 
 const ownedPack: StickerPackSummary = {
   id: encodeId('201'),
@@ -143,33 +145,27 @@ describe('StickerSettings', () => {
     expect(component['orderedPacks']().map((pack) => pack.id)).toEqual([other.id, ownedPack.id, subscribed.id]);
   });
 
-  it('creates a pack from the alert name, records its order and opens the detail page', async () => {
-    const changed = vi.spyOn(TestBed.inject(StickerUpdates).changed, 'next');
-    const component = (await loaded()).componentInstance;
-    const saving = component['savePack']({ name: ' 新包 ', emoji: '' });
-    peer
-      .expect('stickers.createPack', { name: '新包' })
-      .flush(wirePack({ ...ownedPack, id: encodeId('301'), name: '新包' }));
-    await saving;
-    expect(changed).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: encodeId('301'), stickers: [] }));
-    expect(preferences.upsertPackOrderItem).toHaveBeenCalledWith({
-      stickerPackId: encodeId('301'),
-      lastUsedOn: expect.any(Number),
-    });
-    expect(navigate).toHaveBeenCalledWith(['/settings/stickers', '301']);
-    expect(component['packs']()[0].name).toBe('新包');
+  it('opens the shared add-packs panel from the settings entry', async () => {
+    const fixture = await loaded();
+    fixture.detectChanges();
+    const root: HTMLElement = fixture.nativeElement;
+    const label = root.querySelector('ion-label[color="primary"]');
+    expect(label).not.toBeNull();
+    label!.closest('ion-item')!.click();
+    expect(navigate).toHaveBeenCalledExactlyOnceWith(['/sticker-discovery']);
+    peer.expectNone('stickers.createPack');
+    expect(fixture.nativeElement.querySelector('app-sticker-editor')).toBeNull();
   });
 
-  it('prevents duplicate creation while the request is pending', async () => {
+  it('includes newly subscribed packs when returning from discovery', async () => {
     const component = (await loaded()).componentInstance;
-    const pending = component['savePack']({ name: ' 新包 ', emoji: '' });
-    const request = peer.expect('stickers.createPack', { name: '新包' });
-    expect(component['creating']()).toBe(true);
-    await component['savePack']({ name: ' 新包 ', emoji: '' });
-    peer.expectNone('stickers.createPack');
-    request.flush(wirePack({ ...ownedPack, id: encodeId('301'), name: '新包' }));
-    await pending;
-    expect(component['creating']()).toBe(false);
+    const added = { ...subscribed, id: encodeId('301'), name: '新订阅包' };
+    component.panelResume();
+    expect(component['orderedPacks']()).toHaveLength(3);
+    peer.expect('stickers.listOwnedPacks').flush({ packs: [wirePack(ownedPack)] });
+    peer.expect('stickers.listSubscribedPacks').flush({ packs: [subscribed, other, added].map(wirePack) });
+    await vi.waitFor(() => expect(component['loading']()).toBe(false));
+    expect(component['orderedPacks']().map((pack) => pack.id)).toContain(added.id);
   });
 
   it('exposes a failed reorder and retries the same intended order', async () => {
@@ -184,15 +180,6 @@ describe('StickerSettings', () => {
     expect(preferences.syncPackOrder.mock.calls[1]).toEqual(original);
     expect(component['orderFailed']()).toBe(false);
     expect(component['savingOrder']()).toBe(false);
-  });
-
-  it('keeps the creation form open when saving fails', async () => {
-    const component = (await loaded()).componentInstance;
-    const saving = component['savePack']({ name: ' 新包 ', emoji: '' });
-    peer.expect('stickers.createPack', { name: '新包' }).error(1503);
-    await saving;
-    expect(navigate).not.toHaveBeenCalled();
-    expect(component['createError']()).toBe('创建贴纸包失败');
   });
 
   it('computes midpoint order values when packs are reordered', async () => {
@@ -239,5 +226,30 @@ describe('StickerSettings', () => {
     expect(pinnedReactions()).toEqual(['👍', '❤️', '😂', '🍵', '🎉']);
     component['removePinned']('❤️');
     expect(pinnedReactions()).toEqual(['👍', '😂', '🍵', '🎉']);
+  });
+
+  it('uses the shared panel to add pinned reactions and handles back and backdrop dismissal', () => {
+    vi.spyOn(IonModal.prototype, 'isOpen', 'set').mockImplementation(() => {});
+    const fixture = TestBed.createComponent(StickerSettings);
+    const component = fixture.componentInstance;
+    component['reactions'].setPinnedReactions(['👍']);
+    component['choosingPinned'].set(true);
+    fixture.detectChanges();
+    replyPacks();
+    fixture.debugElement.query(By.directive(IonModal)).nativeElement.dispatchEvent(new CustomEvent('ionMount'));
+    fixture.detectChanges();
+    const panel = fixture.debugElement.query(By.directive(EmojiPanel)).componentInstance as EmojiPanel;
+    panel.chosen.emit('🍵');
+    expect(component['reactions'].pinnedReactions()).toEqual(['👍', '🍵']);
+    expect(component['choosingPinned']()).toBe(true);
+    panel.back.emit();
+    expect(component['choosingPinned']()).toBe(false);
+    component['choosingPinned'].set(true);
+    panel.dismissed.emit();
+    expect(component['choosingPinned']()).toBe(false);
+    component['choosingPinned'].set(true);
+    for (const emoji of ['😂', '❤️', '🎉']) panel.chosen.emit(emoji);
+    expect(component['choosingPinned']()).toBe(false);
+    expect(component['reactions'].pinnedReactions()).toHaveLength(5);
   });
 });

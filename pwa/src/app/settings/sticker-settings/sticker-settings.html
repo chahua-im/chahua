@@ -21,17 +21,6 @@
         (click)="choosingPinned.set(true)">
         <ion-icon slot="icon-only" [icon]="icons.addOutline" />
       </ion-button>
-      <ion-popover [isOpen]="choosingPinned()" (didDismiss)="choosingPinned.set(false)">
-        <ng-template>
-          @defer {
-            <app-emoji-picker (chosen)="addPinned($event)" />
-          } @loading (after 100ms) {
-            <div class="loading-status"><ion-spinner /></div>
-          } @error {
-            <p class="ion-padding">{{ 'stickers.emojiLoadFailed' | transloco }}</p>
-          }
-        </ng-template>
-      </ion-popover>
     </ion-item>
     <div class="ion-padding-horizontal ion-padding-bottom">
       @for (emoji of reactions.pinnedReactions(); track emoji) {
@@ -57,12 +46,9 @@
         {{ 'settings.stickers.autoSortFavorites' | transloco }}
       </ion-toggle>
     </ion-item>
-    <ion-item [button]="true" [detail]="false" [disabled]="creating()" (click)="createPack()">
+    <ion-item [button]="true" [detail]="false" (click)="addPacks()">
       <ion-icon slot="start" [icon]="icons.addOutline" color="primary"></ion-icon>
-      <ion-label color="primary">{{ 'stickers.createPack' | transloco }}</ion-label>
-      @if (creating()) {
-        <ion-spinner slot="end" />
-      }
+      <ion-label color="primary">{{ 'stickers.discovery.title' | transloco }}</ion-label>
     </ion-item>
   </ion-list>
   <ion-list [inset]="true">
@@ -126,11 +112,19 @@
   </ion-list>
 </ion-content>
 
-@if (createOpen()) {
-  <app-sticker-editor
-    [title]="'stickers.createPack' | transloco"
-    [busy]="creating()"
-    [error]="createError()"
-    (confirmed)="savePack($event)"
-    (closed)="createOpen.set(false)" />
-}
+<ion-modal
+  [enterAnimation]="enterEmojiAnimation"
+  [leaveAnimation]="leaveEmojiAnimation"
+  class="emoji-panel-modal"
+  [keepContentsMounted]="true"
+  [isOpen]="choosingPinned()"
+  (didDismiss)="choosingPinned.set(false)">
+  <ng-template>
+    <app-emoji-panel
+      [active]="choosingPinned()"
+      [title]="'settings.stickers.pinnedReactions' | transloco: { count: reactions.pinnedReactions().length }"
+      (chosen)="addPinned($event)"
+      (back)="choosingPinned.set(false)"
+      (dismissed)="choosingPinned.set(false)" />
+  </ng-template>
+</ion-modal>

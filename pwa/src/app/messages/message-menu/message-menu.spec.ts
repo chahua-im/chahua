@@ -15,6 +15,7 @@ import { allowsSpeaking, SpeakingAction } from '../../chats/speaking';
 import { ChatStore } from '../../chats/chat-store';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
+import { StickerPreferences } from '../../settings/sticker-preferences';
 import { MessageActions } from '../message-actions';
 import { MessageDelivery } from '../message-delivery';
 import { MessageNotice } from '../message-notice';
@@ -132,6 +133,7 @@ describe('MessageMenu', () => {
       const style = computedStyle(element);
       return new Proxy(style, {
         get(target, property) {
+          if (element.matches('app-emoji-panel') && String(property).startsWith('padding')) return '0px';
           if (element.matches('.sender') && property === 'width') return `${authorWidth}px`;
           if (element.matches('.bubble-surface') && (property === 'paddingLeft' || property === 'paddingRight'))
             return '11px';
@@ -168,6 +170,7 @@ describe('MessageMenu', () => {
           provide: RpcApi,
           useValue: { stickers, invites: { getByCode: () => throwError(() => new Error('unavailable')) } },
         },
+        { provide: StickerPreferences, useValue: { packOrder: signal([]) } },
         {
           provide: Preferences,
           useValue: {
@@ -219,7 +222,7 @@ describe('MessageMenu', () => {
     vi.restoreAllMocks();
   });
 
-  it('shows only a toast when the owned-pack list is empty, including while the read is pending', async () => {
+  it('opens the sticker form even without owned packs, after the read completes', async () => {
     setMessages([imageMessage]);
     const response = new Subject<StickerPackListResponse>();
     stickers.listOwnedPacks.mockReturnValueOnce(response);
@@ -233,9 +236,9 @@ describe('MessageMenu', () => {
     await choosing;
     fixture.detectChanges();
     expect(menu.busy()).toBe(false);
-    expect(menu['notice']()).toBe(MessageNotice.NoOwnedStickerPacks);
-    expect(fixture.nativeElement.querySelector('ion-toast').message).toBe('暂无可用的自有贴纸包。');
-    expect(fixture.nativeElement.querySelector('app-sticker-from-message')).toBeNull();
+    expect(menu['notice']()).toBeUndefined();
+    expect(menu['stickerSource']()).toEqual({ message: imageMessage, packs: [] });
+    expect(fixture.nativeElement.querySelector('app-sticker-from-message')).not.toBeNull();
   });
 
   it('shows a toast on pack-read failure and permits retrying from the menu', async () => {
@@ -297,8 +300,10 @@ describe('MessageMenu', () => {
     const original = [...platforms];
     platforms.splice(0, platforms.length, 'desktop');
     try {
-      const surface = fixture.nativeElement.querySelector('.menu-surface') as HTMLElement;
-      vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 1280, 900));
+      const getBounds = HTMLElement.prototype.getBoundingClientRect;
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+        return this.matches('app-emoji-panel') ? new DOMRect(0, 0, 1280, 900) : getBounds.call(this);
+      });
       vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(350);
       vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(444);
       fixture.nativeElement
@@ -312,6 +317,22 @@ describe('MessageMenu', () => {
     } finally {
       platforms.splice(0, platforms.length, ...original);
     }
+  });
+
+  it('retains the same emoji panel when returning to the message menu and reopening it', () => {
+    const open = () => {
+      fixture.nativeElement.querySelector('.reactions button:last-child').click();
+      fixture.detectChanges();
+    };
+    open();
+    const panel = fixture.nativeElement.querySelector('app-emoji-panel');
+    panel.querySelector('.picker-back').click();
+    fixture.detectChanges();
+    expect(panel.isConnected).toBe(true);
+    expect(panel.classList.contains('ion-hide')).toBe(true);
+    open();
+    expect(fixture.nativeElement.querySelector('app-emoji-panel')).toBe(panel);
+    expect(panel.classList.contains('ion-hide')).toBe(false);
   });
 
   it.each(['ios', 'android'] as const)('keeps the picker centered on %s', (platform) => {

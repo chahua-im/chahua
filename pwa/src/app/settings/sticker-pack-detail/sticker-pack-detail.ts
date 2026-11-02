@@ -173,29 +173,47 @@ export class StickerPackDetail {
   }
 
   protected rename() {
-    if (!this.pack() || this.busy()) return;
+    if (!this.pack() || !this.owned() || this.busy()) return;
     this.editorError.set(undefined);
     this.renaming.set(true);
   }
 
-  protected async saveName({ name }: StickerEditorValue) {
+  protected async saveName({ name, visibility }: StickerEditorValue) {
     const pack = this.pack();
-    if (!pack || this.busy() || !name.trim() || name.trim() === pack.name) return;
+    if (!pack || !this.owned() || this.busy() || !name.trim()) return;
+    const changes = {
+      ...(name.trim() !== pack.name ? { name: name.trim() } : {}),
+      ...(visibility != null && visibility !== pack.visibility ? { visibility } : {}),
+    };
+    if (!Object.keys(changes).length) return;
     const uid = this.session.user()?.uid;
     const epoch = this.epoch;
+    const active = () =>
+      !this.destroyRef.destroyed &&
+      this.session.user()?.uid === uid &&
+      this.packId() === pack.id &&
+      this.epoch === epoch;
     this.busy.set(true);
     this.editorError.set(undefined);
     try {
-      const updated = await firstValueFrom(this.api.stickers.updatePack({ packId: pack.id, name: name.trim() }));
-      if (this.destroyRef.destroyed || this.session.user()?.uid !== uid || this.epoch !== epoch || this.pack()?.id !== pack.id) return;
-      this.pack.update((current) => (current?.id === updated.id ? { ...current, ...updated } : current));
+      const updated = await firstValueFrom(this.api.stickers.updatePack({ packId: pack.id, ...changes }));
+      if (!active()) return;
+      this.pack.update(
+        (current) =>
+          current && {
+            ...current,
+            name: updated.name,
+            visibility: updated.visibility,
+            updatedAt: updated.updatedAt,
+          },
+      );
       this.updates.changed.next(this.pack()!);
       await this.editor()?.dismiss();
-      this.renaming.set(false);
+      if (active()) this.renaming.set(false);
     } catch {
-      this.editorError.set(this.transloco.translate('settings.stickerPack.renameFailed'));
+      if (active()) this.editorError.set(this.transloco.translate('settings.stickerPack.renameFailed'));
     } finally {
-      this.busy.set(false);
+      if (active()) this.busy.set(false);
     }
   }
 

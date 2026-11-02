@@ -1,6 +1,6 @@
 import { RpcError, RpcErrorCode, RpcTransportError } from '../../api/rpc-error';
 import { Component, computed, DestroyRef, inject, input, linkedSignal, output, signal, viewChild } from '@angular/core';
-import { IonItem, IonList, IonSelect, IonSelectOption } from '@ionic/angular';
+import { IonButton, IonItem, IonNote, IonSelect, IonSelectOption } from '@ionic/angular';
 import { TranslocoPipe, translateSignal } from '@jsverse/transloco';
 import { firstValueFrom, TimeoutError, timeout } from 'rxjs';
 import { RpcApi } from '../../../generated/rpc-api';
@@ -15,14 +15,14 @@ import { canCreateSticker } from './eligibility';
 @Component({
   selector: 'app-sticker-from-message',
   templateUrl: './sticker-from-message.html',
-  imports: [StickerEditor, TranslocoPipe, IonItem, IonList, IonSelect, IonSelectOption],
+  imports: [StickerEditor, TranslocoPipe, IonButton, IonItem, IonNote, IonSelect, IonSelectOption],
   styles: `
     .preview {
       display: block;
       width: 160px;
       height: 160px;
       object-fit: contain;
-      margin: 16px auto;
+      margin: 8px auto;
     }
   `,
 })
@@ -37,10 +37,12 @@ export class StickerFromMessage {
   private readonly session = inject(SessionStore);
   private readonly uid = this.session.user()?.uid;
   private readonly destroy = inject(DestroyRef);
-  private readonly editor = viewChild.required(StickerEditor);
+  private readonly editor = viewChild.required<StickerEditor>('stickerEditor');
+  private readonly packEditor = viewChild<StickerEditor>('packEditor');
+  private readonly createdPacks = signal<StickerPackSummary[]>([]);
   private completed = false;
   protected readonly orderedPacks = computed(() =>
-    sortStickerPacksByPreference(this.packs(), this.preferences.packOrder()),
+    sortStickerPacksByPreference([...this.packs(), ...this.createdPacks()], this.preferences.packOrder()),
   );
   protected readonly packId = linkedSignal<StickerPackSummary[], SnowflakeID | undefined>({
     source: this.orderedPacks,
@@ -50,9 +52,41 @@ export class StickerFromMessage {
     },
   });
   protected readonly busy = signal(false);
+  protected readonly createOpen = signal(false);
+  protected readonly creatingPack = signal(false);
+  protected readonly createFailed = signal(false);
   protected readonly errorKey = signal<string | undefined>(undefined);
   protected readonly errorText = translateSignal(computed(() => this.errorKey() ?? 'stickers.addFailed'));
-  protected readonly saveDisabled = computed(() => !canCreateSticker(this.message()) || !this.packId());
+  protected readonly saveDisabled = computed(
+    () => this.createOpen() || !canCreateSticker(this.message()) || !this.packId(),
+  );
+
+  protected createPack() {
+    if (this.busy() || !this.active()) return;
+    this.createFailed.set(false);
+    this.createOpen.set(true);
+  }
+
+  protected async savePack({ name }: StickerEditorValue) {
+    if (this.creatingPack() || !name.trim() || !this.active()) return;
+    this.creatingPack.set(true);
+    this.createFailed.set(false);
+    try {
+      const pack = await firstValueFrom(this.api.stickers.createPack({ name: name.trim() }));
+      if (!this.active()) return;
+      this.createdPacks.update((packs) => [...packs, pack]);
+      this.updates.changed.next({ ...pack, stickers: [] });
+      this.preferences.upsertPackOrderItem({ stickerPackId: pack.id, lastUsedOn: Date.now() });
+      this.packId.set(pack.id);
+      this.errorKey.set(undefined);
+      await this.packEditor()?.dismiss();
+      if (this.active()) this.createOpen.set(false);
+    } catch {
+      if (this.active()) this.createFailed.set(true);
+    } finally {
+      if (this.active()) this.creatingPack.set(false);
+    }
+  }
 
   private active() {
     return !this.destroy.destroyed && this.session.user()?.uid === this.uid;
@@ -65,7 +99,7 @@ export class StickerFromMessage {
 
   protected async save(values: StickerEditorValue) {
     if (this.busy() || this.saveDisabled() || !this.active()) return;
-    const pack = this.packs().find((item) => item.id === this.packId());
+    const pack = this.orderedPacks().find((item) => item.id === this.packId());
     if (!pack) return;
     this.busy.set(true);
     this.errorKey.set(undefined);

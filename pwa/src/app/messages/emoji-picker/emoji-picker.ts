@@ -6,6 +6,7 @@ import {
   DestroyRef,
   ElementRef,
   inject,
+  input,
   output,
   signal,
   viewChild,
@@ -50,6 +51,7 @@ import { PickerFlags } from './picker-flags';
   `,
 })
 export class EmojiPicker {
+  readonly active = input(true);
   readonly chosen = output<string>();
   private readonly localization = inject(Localization);
   private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
@@ -72,6 +74,10 @@ export class EmojiPicker {
       });
     });
     afterRenderEffect(() => {
+      if (!this.active()) {
+        this.picker()?.grid?.skinToneEmoji.set(null);
+        return;
+      }
       if (!this.picker()?.grid?.skinToneEmoji()) return;
       // The library positions this element in viewport coordinates. The top layer
       // keeps those coordinates valid inside transformed/clipped Ionic overlays.
@@ -81,7 +87,9 @@ export class EmojiPicker {
       popover.showPopover();
     });
     afterNextRender(() => {
-      const observer = new ResizeObserver(([entry]) => this.height.set(entry.contentRect.height));
+      const observer = new ResizeObserver(([entry]) => {
+        if (entry.contentRect.height > 0) this.height.set(entry.contentRect.height);
+      });
       observer.observe(this.element.nativeElement);
       this.destroyRef.onDestroy(() => observer.disconnect());
     });

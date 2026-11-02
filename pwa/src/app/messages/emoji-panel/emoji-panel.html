@@ -1,0 +1,15 @@
+<div #panel class="emoji-panel">
+  <div class="picker-header">
+    <button type="button" class="picker-back" (click)="back.emit()">
+      <ion-icon [icon]="backIcon" />
+    </button>
+    <span>{{ title() }}</span>
+  </div>
+  @defer (when contentReady(); prefetch on idle) {
+    <app-emoji-picker [active]="active()" (chosen)="chosen.emit($event)" />
+  } @loading (after 100ms) {
+    <div class="loading-status"><ion-spinner /></div>
+  } @error {
+    <p class="ion-padding">{{ 'emojiPicker.loadFailed' | transloco }}</p>
+  }
+</div>

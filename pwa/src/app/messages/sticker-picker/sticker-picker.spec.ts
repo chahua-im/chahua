@@ -41,7 +41,7 @@ const pack: StickerPackDetailResponse = {
 describe('StickerPicker selection during requests', () => {
   const intersections = new Map<Element, (visible?: boolean) => void>();
   const api = {
-    deletePackSticker: vi.fn(() => of(undefined)),
+    deletePackSticker: vi.fn((_packId: SnowflakeID, _stickerId: SnowflakeID) => of(undefined)),
     postPack: vi.fn(() => of({ ...pack, stickers: [] })),
     getMyFavorites: vi.fn(() => of({ stickers: [sticker] })),
     getMySubscribedPacks: vi.fn(() => of({ packs: [pack] })),
@@ -107,6 +107,8 @@ describe('StickerPicker selection during requests', () => {
           useValue: {
             stickers: {
               createPack: api.postPack,
+              removeFromPack: ({ packId, stickerId }: { packId: SnowflakeID; stickerId: SnowflakeID }) =>
+                api.deletePackSticker(packId, stickerId),
               listFavorites: api.getMyFavorites,
               listSubscribedPacks: api.getMySubscribedPacks,
               listOwnedPacks: api.getMyOwnedPacks,
@@ -249,7 +251,7 @@ describe('StickerPicker selection during requests', () => {
       const event = {
         target: { files: [new File(['png'], 'tea.png', { type: 'image/png' })], value: '' },
       } as unknown as Event;
-      const uploading = picker['upload'](event, pack.id);
+      const uploading = picker['upload'](event, pack.id).then(() => picker['saveUpload']({ name: 'Tea', emoji: '🍵' }));
       await vi.waitFor(() => expect(post).toHaveBeenCalledOnce());
       const reads = api.getPack.mock.calls.length;
       if (closed) fixture.destroy();
@@ -1130,6 +1132,7 @@ describe('StickerPicker selection during requests', () => {
       target: { files: [new File(['png'], 'tea.png', { type: 'image/png' })], value: '' },
     } as unknown as Event;
     await picker['upload'](event, pack.id);
+    await picker['saveUpload']({ name: 'Tea', emoji: '🍵' });
     fixture.detectChanges();
     const sections = fixture.nativeElement.querySelectorAll('.sticker-group');
     expect(sections[0].querySelector('.upload-error')).toBeNull();
@@ -1139,6 +1142,7 @@ describe('StickerPicker selection during requests', () => {
     expect(picker['activeId']()).toBe(secondPack.id);
     post.mockReturnValueOnce(of({ ...sticker, id: encodeId('999') }));
     await picker['upload'](event, pack.id);
+    await picker['saveUpload']({ name: 'Tea', emoji: '🍵' });
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.upload-error')).toBeNull();
     expect(picker['activeId']()).toBe(secondPack.id);
@@ -1316,19 +1320,36 @@ describe('StickerPicker selection during requests', () => {
     expect(selected).toHaveBeenLastCalledWith({ ...item, isFavorited: !isFavorited });
   });
 
-  it('opens a newly created pack directly from the create response', async () => {
+  it('adds a discovered pack without refreshing the library or losing current tiles', async () => {
     const { fixture } = await render();
-    api.getMyFavorites.mockClear();
+    const picker = fixture.componentInstance;
+    await picker['selectPack'](pack.id);
+    fixture.detectChanges();
+    const tile = fixture.nativeElement.querySelector('.sticker-item');
+    api.getPack.mockClear();
     api.getMySubscribedPacks.mockClear();
-    api.getMyOwnedPacks.mockClear();
-    await fixture.componentInstance['createPack']();
-    expect(api.postPack).toHaveBeenCalledWith({ name: 'Tea' });
-    expect(fixture.componentInstance['pack']()?.id).toBe(pack.id);
-    expect(fixture.componentInstance['stickers']()).toEqual([]);
+    const added = { ...pack, id: encodeId('999'), isSubscribed: true };
+    TestBed.inject(StickerUpdates).subscribed.next(added);
+    fixture.detectChanges();
+    expect(picker['packs']().map((pack) => pack.id)).toContain(added.id);
+    expect(picker['activeId']()).toBe(pack.id);
+    expect(fixture.nativeElement.querySelector('.sticker-item')).toBe(tile);
     expect(api.getPack).not.toHaveBeenCalled();
-    expect(api.getMyFavorites).not.toHaveBeenCalled();
     expect(api.getMySubscribedPacks).not.toHaveBeenCalled();
-    expect(api.getMyOwnedPacks).not.toHaveBeenCalled();
+    expect(fixture.nativeElement.querySelector('button[routerLink="/sticker-discovery"]')).not.toBeNull();
+    expect(api.postPack).not.toHaveBeenCalled();
+  });
+
+  it('preserves an added pack when an older library response arrives', async () => {
+    const { fixture } = await render();
+    const response = new Subject<{ packs: StickerPackDetailResponse[] }>();
+    api.getMySubscribedPacks.mockReturnValueOnce(response);
+    const loading = fixture.componentInstance['load']();
+    const added = { ...pack, id: encodeId('999'), isSubscribed: true };
+    TestBed.inject(StickerUpdates).subscribed.next(added);
+    response.next({ packs: [pack] });
+    await loading;
+    expect(fixture.componentInstance['packs']().map((pack) => pack.id)).toContain(added.id);
   });
 
   it('keeps favorite state in the pack itself when a later subscription updates its metadata', async () => {
@@ -1341,6 +1362,17 @@ describe('StickerPicker selection during requests', () => {
     await picker['subscribe']();
     expect(picker['pack']()?.isSubscribed).toBe(true);
     expect(picker['stickers']()[0].isFavorited).toBe(true);
+  });
+
+  it('publishes subscriptions from full-pack previews to the discovery list and library', async () => {
+    const { fixture } = await render(false);
+    const picker = fixture.componentInstance;
+    await picker['openPack'](pack.id);
+    const subscribed = vi.fn();
+    TestBed.inject(StickerUpdates).subscribed.subscribe(subscribed);
+    await picker['subscribe']();
+    expect(subscribed).toHaveBeenCalledExactlyOnceWith({ ...pack, isSubscribed: true });
+    expect(preferences.upsertPackOrderItem).toHaveBeenCalledWith(expect.objectContaining({ stickerPackId: pack.id }));
   });
 
   it('sends while subscribing to a pack', async () => {

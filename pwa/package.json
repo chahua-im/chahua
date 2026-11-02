@@ -2,7 +2,7 @@
   "name": "chahua-pwa",
   "version": "0.0.0",
   "scripts": {
-    "postinstall": "node scripts/scope-emoji-picker.mjs",
+    "postinstall": "node scripts/scope-emoji-picker.mjs && node scripts/virtualize-emoji-picker.mjs",
     "ng": "ng",
     "api:generate": "orval --config orval.config.ts",
     "emoji:generate": "node scripts/generate-emoji-regex.mjs",

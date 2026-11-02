@@ -9,5 +9,4 @@ export enum MessageNotice {
   ReactionLimit,
   MetadataFailed,
   StickerAdded,
-  NoOwnedStickerPacks,
 }

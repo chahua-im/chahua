@@ -353,20 +353,6 @@ describe('StickerPicker selection during RPC requests', () => {
     expect(selected).toHaveBeenLastCalledWith({ ...item, isFavorited: !isFavorited });
   });
 
-  it('opens a newly created pack directly from the create response', async () => {
-    const { fixture, rpc } = await render();
-    const { stickers: _stickers, ...summary } = pack;
-    const create = fixture.componentInstance['createPack']();
-    (await rpc.expectAsync('stickers.createPack', { name: 'Tea' })).flush(wireSummary(summary));
-    await create;
-    expect(fixture.componentInstance['pack']()?.id).toBe(pack.id);
-    expect(fixture.componentInstance['stickers']()).toEqual([]);
-    rpc.expectNone('stickers.getPack');
-    rpc.expectNone('stickers.listFavorites');
-    rpc.expectNone('stickers.listSubscribedPacks');
-    rpc.expectNone('stickers.listOwnedPacks');
-  });
-
   it('keeps favorite state in the pack itself when a later subscription updates its metadata', async () => {
     const { fixture, rpc } = await render(false);
     const picker = fixture.componentInstance;
