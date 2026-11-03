@@ -1840,7 +1840,11 @@ describe('ConversationPage', () => {
       const opening = component['conversation'].open(encodeId('200'));
       peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '200' }).flush({
         chatSettings: { showMembershipMessages: true },
-        messages: [100, 200, 300].map((id) => ({ ...wireMessage, id: String(id) })),
+        messages: [100, 200, 300].map((id) => ({
+          ...wireMessage,
+          id: String(id),
+          clientGeneratedId: `message-${id}`,
+        })),
       });
       await opening;
       await fixture.whenStable();
@@ -1998,7 +2002,11 @@ describe('ConversationPage', () => {
   it('refreshes an offscreen conversation count on incoming messages without jumping down', async () => {
     const data = TestBed.inject(ChatStore);
     component['atBottom'].set(false);
-    incoming.next({ ...testMessage, id: encodeId('9007199254741999') });
+    incoming.next({
+      ...testMessage,
+      id: encodeId('9007199254741999'),
+      clientGeneratedId: 'incoming-9007199254741999',
+    });
     await notificationSettled();
     expect(data.getReadState).toHaveBeenCalledWith(testChat.id);
     expect(component['position']()).toBeUndefined();
@@ -3233,8 +3241,8 @@ describe('ConversationPage', () => {
     peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [
-        { ...wireMessage, id: '100' },
-        { ...wireMessage, id: '101', sender: otherSender },
+        { ...wireMessage, id: '100', clientGeneratedId: 'message-100' },
+        { ...wireMessage, id: '101', clientGeneratedId: 'message-101', sender: otherSender },
       ],
       olderCursor: '100',
       newerCursor: '101',
@@ -3277,8 +3285,8 @@ describe('ConversationPage', () => {
     peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [
-        { ...wireMessage, id: '100' },
-        { ...wireMessage, id: '101', sender: otherSender },
+        { ...wireMessage, id: '100', clientGeneratedId: 'message-100' },
+        { ...wireMessage, id: '101', clientGeneratedId: 'message-101', sender: otherSender },
       ],
     });
     Object.defineProperties(scroll, {
