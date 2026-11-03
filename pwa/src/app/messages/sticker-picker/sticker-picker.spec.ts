@@ -66,6 +66,7 @@ describe('StickerPicker selection during requests', () => {
 
   beforeEach(() => {
     intersections.clear();
+    vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: false }));
     vi.stubGlobal(
       'ResizeObserver',
       class {
