@@ -156,6 +156,10 @@ The server applies pending embedded Diesel migrations at startup in version orde
 New migrations must sort after the latest migration on `main`; preserve dependency
 order when re-dating an unmerged branch's migrations.
 
+Application tables, including unread revisions, use the `search_path` configured
+in `DATABASE_URL`; they are not required to live in `public`. Migrations and
+message-writing sessions must use the same application search path as the server.
+
 The reactor-sampling index `idx_message_reactions_sample` is created inside the
 migration transaction during startup. Its build can block writes to
 `message_reactions`; the API waits for the migration to commit before serving.
