@@ -65,6 +65,51 @@ describe('MarkdownBody presentation', () => {
     expect(code.textContent).toBe('const value = 42;\n');
   });
 
+  it('copies only the chosen block verbatim without opening the message menu', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    const code = '\tconst html = "<b>raw</b>";  \n\n// **literal** @[uid:2]\n';
+    const fixture = render('```js\n' + code + '```\n```\nsecond\n```');
+    const host = fixture.nativeElement as HTMLElement;
+    const outerClick = vi.fn();
+    const outerPointer = vi.fn();
+    host.addEventListener('click', outerClick);
+    host.addEventListener('pointerdown', outerPointer);
+    const buttons = host.querySelectorAll<HTMLButtonElement>('.code-copy');
+    buttons[0].dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+    buttons[0].click();
+    expect(writeText).toHaveBeenCalledWith(code);
+    await vi.waitFor(() => expect(buttons[0].disabled).toBe(false));
+    buttons[1].click();
+    expect(writeText).toHaveBeenLastCalledWith('second\n');
+    expect(outerClick).not.toHaveBeenCalled();
+    expect(outerPointer).not.toHaveBeenCalled();
+  });
+
+  it('allows retry after clipboard failure and confirms only a successful write', async () => {
+    const writeText = vi.fn().mockRejectedValueOnce(new Error('denied')).mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    const fixture = render('```text\nretry\n```');
+    const button = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('.code-copy')!;
+    button.click();
+    await vi.waitFor(() => expect(button.disabled).toBe(false));
+    const failureIcon = button.querySelector('path')!.getAttribute('d');
+    button.click();
+    await vi.waitFor(() => expect(button.disabled).toBe(false));
+    expect(writeText).toHaveBeenCalledTimes(2);
+    expect(button.querySelector('path')!.getAttribute('d')).not.toBe(failureIcon);
+  });
+
+  it('does not copy from an inactive preview', () => {
+    const writeText = vi.fn();
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    const fixture = render('```js\ncode\n```');
+    fixture.componentRef.setInput('copyEnabled', false);
+    fixture.detectChanges();
+    const button = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('.code-copy')!;
+    button.click();
+    expect(writeText).not.toHaveBeenCalled();
+  });
   it('keeps inline code plain', () => {
     const fixture = render('`const value = 42;`');
     expect((fixture.nativeElement as HTMLElement).querySelector('.hljs')).toBeNull();
