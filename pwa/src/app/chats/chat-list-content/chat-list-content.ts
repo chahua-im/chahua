@@ -262,7 +262,7 @@ export class ChatListContent {
         const preview = pendingPreview?.message ?? last;
         const latestAt = preview?.createdAt ?? thread.lastReplyAt;
         const isDm = thread.chatKind === GroupKind.dm;
-        const peer = isDm ? thread.participants.find((user) => user.uid !== this.session.user()?.uid) : undefined;
+        const peer = isDm ? thread.peer : undefined;
         return {
           kind: ListRowKind.Thread as const,
           key: root.id,
@@ -282,7 +282,7 @@ export class ChatListContent {
               isDm ? thread.peerLastReadMessageId : undefined,
             ),
             avatarName: isDm
-              ? (chat?.peer?.username ?? peer?.name ?? thread.chatName)
+              ? (chat?.peer?.username ?? peer?.username ?? thread.chatName)
               : (chat?.name ?? thread.chatName),
             avatar: isDm ? (chat?.peer?.avatarUrl ?? peer?.avatarUrl) : (chat?.avatar ?? thread.chatAvatar),
             badgeName: !isDm ? (root.sender.name ?? String(root.sender.uid)) : undefined,

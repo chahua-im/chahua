@@ -9,7 +9,7 @@ use crate::constants::MAX_UNREAD_COUNT;
 use crate::dto::{
     messages::{MessagePreview, MessagePreviewAttachment},
     threads::{ListThreadsResponse, ThreadListItem},
-    users::User,
+    users::{MemberSummary, User},
     ws::{ServerWsMessage, ThreadMembershipChangedPayload, ThreadUpdatePayload},
 };
 use crate::models::{Attachment, GroupKind, Message};
@@ -647,6 +647,10 @@ pub struct ThreadListRow {
     pub chat_id: i64,
     #[diesel(sql_type = crate::schema::sql_types::GroupKind)]
     pub chat_kind: GroupKind,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Integer>)]
+    pub dm_uid1: Option<i32>,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Integer>)]
+    pub dm_uid2: Option<i32>,
     #[diesel(sql_type = diesel::sql_types::BigInt)]
     pub thread_root_id: i64,
     #[diesel(sql_type = diesel::sql_types::Text)]
@@ -684,6 +688,8 @@ pub fn get_user_threads(
         "SELECT
             ts.chat_id,
             g.kind AS chat_kind,
+            g.dm_uid1,
+            g.dm_uid2,
             ts.thread_root_id,
             g.name AS chat_name,
             avatar_media.storage_key AS chat_avatar_key,
@@ -834,16 +840,7 @@ fn attachment_preview_map(atts: Vec<Attachment>) -> HashMap<i64, Vec<MessagePrev
     map
 }
 
-// Raw row types for batch queries
-#[derive(QueryableByName)]
-struct ParticipantRow {
-    #[diesel(sql_type = diesel::sql_types::BigInt)]
-    reply_root_id: i64,
-    #[diesel(sql_type = diesel::sql_types::Integer)]
-    sender_uid: i32,
-}
-
-/// Enrich a list of thread rows with participants, latest replies, user profiles,
+/// Enrich a list of thread rows with DM peers, latest replies, user profiles,
 /// and assemble the final `ListThreadsResponse`.
 ///
 /// `rows` — the thread subscription rows (already trimmed to the page size).
@@ -975,27 +972,6 @@ pub fn enrich_thread_list(
         .map(|r| (r.thread_root_id, r.reaction_count.min(MAX_UNREAD_COUNT)))
         .collect();
 
-    // 1. Batch query: distinct participants per thread (replies + root message author)
-    let participant_rows: Vec<ParticipantRow> = sql_query(
-        "SELECT DISTINCT reply_root_id, sender_uid FROM (
-            SELECT m.reply_root_id, m.sender_uid
-            FROM messages m
-            WHERE m.reply_root_id = ANY($1)
-              AND m.deleted_at IS NULL
-              AND m.is_published = TRUE
-            UNION ALL
-            SELECT root.id AS reply_root_id, root.sender_uid
-            FROM messages root
-            WHERE root.id = ANY($1)
-              AND root.reply_root_id IS NULL
-              AND root.has_thread = TRUE
-              AND root.is_published = TRUE
-         ) combined
-         ORDER BY reply_root_id, sender_uid",
-    )
-    .bind::<diesel::sql_types::Array<diesel::sql_types::BigInt>, _>(&root_ids)
-    .load(conn)?;
-
     // 2. Batch query: latest reply per thread (DISTINCT ON)
     let latest_reply_rows = messages::table
         .filter(messages::reply_root_id.eq_any(&root_ids))
@@ -1010,8 +986,19 @@ pub fn enrich_thread_list(
         root_messages.iter().chain(latest_reply_rows.iter()),
     )?;
 
-    // 3. Collect ALL UIDs that need profile/avatar lookup in one pass
-    let mut all_uids: Vec<i32> = participant_rows.iter().map(|r| r.sender_uid).collect();
+    // Collect preview and DM peer UIDs for one profile/avatar lookup.
+    let mut all_uids: Vec<i32> = rows
+        .iter()
+        .filter_map(|row| {
+            if row.chat_kind != GroupKind::Dm {
+                None
+            } else if row.dm_uid1 == Some(uid) {
+                row.dm_uid2
+            } else {
+                row.dm_uid1
+            }
+        })
+        .collect();
     for lr in &latest_reply_rows {
         all_uids.push(lr.sender_uid);
     }
@@ -1052,15 +1039,6 @@ pub fn enrich_thread_list(
     let user_avatars = avatars.lookup(&all_uids);
 
     let make_sender = |uid: i32| -> User { build_sender(uid, &user_avatars, &user_profiles) };
-
-    // 4. Build participants map: thread_root_id -> Vec<User>
-    let mut participants_map: HashMap<i64, Vec<User>> = HashMap::new();
-    for row in &participant_rows {
-        participants_map
-            .entry(row.reply_root_id)
-            .or_default()
-            .push(make_sender(row.sender_uid));
-    }
 
     // 5. Load sticker emoji for root messages and latest replies
     let sticker_ids: Vec<i64> = latest_reply_rows
@@ -1207,9 +1185,24 @@ pub fn enrich_thread_list(
                     .as_deref()
                     .map(|key| media.public_url(key)),
                 thread_root_message: root_preview,
-                participants: participants_map
-                    .remove(&row.thread_root_id)
-                    .unwrap_or_default(),
+                peer: if row.chat_kind == GroupKind::Dm {
+                    let peer_uid = if row.dm_uid1 == Some(uid) {
+                        row.dm_uid2
+                    } else {
+                        row.dm_uid1
+                    };
+                    peer_uid.and_then(|peer_uid| {
+                        user_profiles.get(&peer_uid).map(|profile| MemberSummary {
+                            uid: peer_uid,
+                            username: profile.username.clone(),
+                            avatar_url: user_avatars.get(&peer_uid).cloned().flatten(),
+                            gender: profile.gender,
+                            user_group: profile.user_group.clone(),
+                        })
+                    })
+                } else {
+                    None
+                },
                 last_reply: latest_reply_map.remove(&row.thread_root_id),
                 reply_count: row.reply_count,
                 last_reply_at: row.last_reply_at,
@@ -1462,6 +1455,10 @@ mod tests {
                 .remove(0)
         };
         let thread = load(&mut conn);
+        assert!(thread.peer.is_none());
+        let serialized = serde_json::to_value(&thread).unwrap();
+        assert!(serialized.get("participants").is_none());
+        assert!(serialized["peer"].is_null());
         assert_eq!(
             thread.thread_root_message.forwarded_from_name.as_deref(),
             Some("root author")
@@ -1470,6 +1467,20 @@ mod tests {
             thread.last_reply.unwrap().forwarded_from_name.as_deref(),
             Some("reply author")
         );
+
+        // The DM peer is the other chat member even if they never authored a thread message.
+        conn.batch_execute(
+            "UPDATE groups SET kind = 'dm', dm_uid1 = 76200, dm_uid2 = 76201 WHERE id = 76200;",
+        )
+        .unwrap();
+        let thread = load(&mut conn);
+        let peer = thread.peer.unwrap();
+        assert_eq!(peer.uid, 76201);
+        assert_eq!(peer.username.as_deref(), Some("root author"));
+        conn.batch_execute(
+            "UPDATE groups SET kind = 'group', dm_uid1 = NULL, dm_uid2 = NULL WHERE id = 76200;",
+        )
+        .unwrap();
 
         // Attribution survives source deletion, and never changes the copy's sender.
         conn.batch_execute("UPDATE messages SET deleted_at = NOW() WHERE chat_id = 76300;")

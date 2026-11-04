@@ -1,0 +1,1 @@
+DROP INDEX idx_message_reactions_sample;

@@ -1151,7 +1151,7 @@ export const rpcSchemas: Record<string, JsonCodec> = {
     chatKind: 'GroupKind',
     lastReadMessageId: 1,
     lastReply: 'MessagePreview',
-    participants: ['User'],
+    peer: 'MemberSummary',
     peerLastReadMessageId: 1,
     threadRootMessage: 'MessagePreview',
   },

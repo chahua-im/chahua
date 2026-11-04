@@ -79,33 +79,16 @@ async fn run_push_worker(
 
         #[cfg(test)]
         maybe_panic_for_test(&job);
+        let message_id = job.message_id;
 
-        let pool = db.clone();
-        let conn = match tokio::task::spawn_blocking(move || {
-            pool.get().map_err(|error| error.to_string())
-        })
-        .await
-        .map_err(|error| error.to_string())
-        .and_then(|result| result)
-        {
-            Ok(conn) => conn,
-            Err(error) => {
-                error!("Push worker: failed to get DB connection: {error}");
-                service
-                    .metrics
-                    .record_job("failure", started_at.elapsed().as_secs_f64());
-                continue;
-            }
-        };
-
-        match process_push_job(service, conn, ws_registry, &job).await {
+        match process_push_job(service, db, ws_registry, job).await {
             Ok(()) => service
                 .metrics
                 .record_job("success", started_at.elapsed().as_secs_f64()),
             Err(e) => {
                 error!(
                     "Push worker: job failed for message_id={}: {}",
-                    job.message_id, e
+                    message_id, e
                 );
                 service
                     .metrics
@@ -113,6 +96,12 @@ async fn run_push_worker(
             }
         }
     }
+}
+
+struct PreparedPush {
+    subscriptions: Vec<PushSubscription>,
+    unread_counts: std::collections::HashMap<i32, i64>,
+    is_dm: bool,
 }
 
 #[derive(Debug)]
@@ -264,24 +253,115 @@ fn load_recipient_candidates(
     Ok(candidates.into_values().collect())
 }
 
-/// Process a single push job: load subscriptions, filter online users, send, cleanup.
+/// Process a single push job without holding a database connection during delivery.
 async fn process_push_job(
     service: &Arc<PushService>,
-    mut conn: diesel::r2d2::PooledConnection<ConnectionManager<PgConnection>>,
+    db: &Pool<ConnectionManager<PgConnection>>,
+    ws_registry: &Arc<ConnectionRegistry>,
+    job: PushJob,
+) -> Result<(), String> {
+    let pool = db.clone();
+    let metrics = service.metrics.clone();
+    let unread_service = service.unread_service.clone();
+    let registry = ws_registry.clone();
+    let (job, prepared) = tokio::task::spawn_blocking(move || {
+        let mut conn = pool
+            .get()
+            .map_err(|error| format!("Failed to get DB connection: {error}"))?;
+        let prepared = prepare_push_job(&mut conn, &metrics, &unread_service, &registry, &job)?;
+        Ok::<_, String>((job, prepared))
+    })
+    .await
+    .map_err(|error| format!("Push preparation task failed: {error}"))??;
+
+    let Some(PreparedPush {
+        subscriptions: subs,
+        unread_counts,
+        is_dm,
+    }) = prepared
+    else {
+        return Ok(());
+    };
+
+    // Send concurrently with bounded parallelism, after the connection is returned.
+    let delivery_results: Vec<DeliveryAttemptResult> = stream::iter(subs)
+        .map(|sub| {
+            let service = service.clone();
+
+            let unread = unread_counts.get(&sub.user_id).copied().unwrap_or(0);
+            let body_text = match payload_type_for(&job, sub.user_id) {
+                PushPayloadType::Reply => {
+                    format_reply_push_body(&job.sender_username, job.body_preview.as_deref())
+                }
+                PushPayloadType::Mention | PushPayloadType::NewMessage => {
+                    format_push_body(&job.sender_username, job.body_preview.as_deref())
+                }
+            };
+            let mut web_payload = build_push_payload(&job, unread, &body_text, sub.user_id);
+            if is_dm {
+                web_payload.ordinary_message_body = Some(format_push_body(
+                    &job.sender_username,
+                    job.body_preview.as_deref(),
+                ));
+            }
+            let web_payload = serde_json::to_vec(&web_payload).unwrap_or_default();
+            let apns_notification = build_apns_notification(&job, unread, sub.user_id);
+
+            async move {
+                match service
+                    .send_to_subscription(&sub, &web_payload, &apns_notification)
+                    .await
+                {
+                    Ok(()) => DeliveryAttemptResult::Success {
+                        subscription_id: sub.id,
+                        should_reset_failure_state: sub.delivery_failure_count != 0
+                            || sub.last_delivery_error.is_some()
+                            || sub.last_delivery_error_at.is_some(),
+                    },
+                    Err(failure) => DeliveryAttemptResult::Failure {
+                        failure,
+                        next_failure_count: sub.delivery_failure_count.saturating_add(1),
+                    },
+                }
+            }
+        })
+        .buffer_unordered(PUSH_CONCURRENCY)
+        .collect()
+        .await;
+
+    let changes = collect_delivery_changes(&service.metrics, delivery_results);
+    if changes.is_empty() {
+        return Ok(());
+    }
+    let pool = db.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut conn = pool
+            .get()
+            .map_err(|error| format!("Failed to get DB connection: {error}"))?;
+        apply_delivery_changes(&mut conn, changes)
+    })
+    .await
+    .map_err(|error| format!("Push cleanup task failed: {error}"))?
+}
+
+fn prepare_push_job(
+    conn: &mut PgConnection,
+    metrics: &super::metrics::PushMetrics,
+    unread_service: &crate::services::unread::UnreadService,
     ws_registry: &ConnectionRegistry,
     job: &PushJob,
-) -> Result<(), String> {
+) -> Result<Option<PreparedPush>, String> {
     let now = chrono::Utc::now();
 
-    let candidates = load_recipient_candidates(&mut conn, job)?;
+    let candidates = load_recipient_candidates(conn, job)?;
     let kind = crate::schema::groups::table
         .find(job.chat_id)
         .select(crate::schema::groups::kind)
-        .first::<GroupKind>(&mut conn)
+        .first::<GroupKind>(conn)
         .map_err(|e| format!("Failed to load push chat kind: {:?}", e))?;
     let is_dm = kind == GroupKind::Dm;
     let defaults = load_notification_defaults_for_users(
-        &mut conn,
+        conn,
         &candidates
             .iter()
             .map(|candidate| candidate.uid)
@@ -322,7 +402,7 @@ async fn process_push_job(
             match should_send_push(&context, now) {
                 PushDecision::Send | PushDecision::SendOneOffMention => Some(candidate.uid),
                 PushDecision::Skip(PushSkipReason::ActivePresence) => {
-                    service.metrics.record_suppressed();
+                    metrics.record_suppressed();
                     None
                 }
                 PushDecision::Skip(_) => None,
@@ -335,14 +415,14 @@ async fn process_push_job(
             "Push job: no offline recipients for message_id={}",
             job.message_id
         );
-        return Ok(());
+        return Ok(None);
     }
 
     // 3. Load push subscriptions for the target users.
     let mut subs: Vec<PushSubscription> = push_subscriptions::table
         .filter(push_subscriptions::dsl::user_id.eq_any(&target_uids))
         .select(PushSubscription::as_select())
-        .load(&mut conn)
+        .load(conn)
         .map_err(|e| format!("Failed to load push subscriptions: {:?}", e))?;
 
     // Do not send silent Push events: browsers require a visible notification.
@@ -358,7 +438,7 @@ async fn process_push_job(
             "Push job: no subscriptions for message_id={}",
             job.message_id
         );
-        return Ok(());
+        return Ok(None);
     }
 
     debug!(
@@ -374,83 +454,39 @@ async fn process_push_job(
             .filter_map(|s| seen.insert(s.user_id).then_some(s.user_id))
             .collect()
     };
-    let unread_service = service.unread_service.clone();
-    let (mut conn, unread_counts) = tokio::task::spawn_blocking(move || {
-        let counts = unread_service.count_users_unread_totals(&mut conn, &sub_uids);
-        (conn, counts)
-    })
-    .await
-    .map_err(|error| {
-        tracing::error!(?error, "push unread count task failed");
-        "Push unread count task failed".to_string()
-    })?;
-    let unread_counts = unread_counts.unwrap_or_else(|error| {
-        warn!("Failed to load unread counts for push job: {error}");
-        std::collections::HashMap::new()
-    });
+    let unread_counts = unread_service
+        .count_users_unread_totals(conn, &sub_uids)
+        .unwrap_or_else(|error| {
+            warn!("Failed to load unread counts for push job: {error}");
+            std::collections::HashMap::new()
+        });
 
-    // 4. Send concurrently with bounded parallelism.
-    let delivery_results: Vec<DeliveryAttemptResult> = stream::iter(subs)
-        .map(|sub| {
-            let service = service.clone();
-
-            let unread = unread_counts.get(&sub.user_id).copied().unwrap_or(0);
-            // Reply targets get their own body copy; mentions and generic
-            // messages share the standard one.
-            let body_text = match payload_type_for(job, sub.user_id) {
-                PushPayloadType::Reply => {
-                    format_reply_push_body(&job.sender_username, job.body_preview.as_deref())
-                }
-                PushPayloadType::Mention | PushPayloadType::NewMessage => {
-                    format_push_body(&job.sender_username, job.body_preview.as_deref())
-                }
-            };
-            let mut web_payload = build_push_payload(job, unread, &body_text, sub.user_id);
-            if is_dm {
-                web_payload.ordinary_message_body = Some(format_push_body(
-                    &job.sender_username,
-                    job.body_preview.as_deref(),
-                ));
-            }
-            let web_payload = serde_json::to_vec(&web_payload).unwrap_or_default();
-            let apns_notification = build_apns_notification(job, unread, sub.user_id);
-
-            async move {
-                match service
-                    .send_to_subscription(&sub, &web_payload, &apns_notification)
-                    .await
-                {
-                    Ok(()) => DeliveryAttemptResult::Success {
-                        subscription_id: sub.id,
-                        should_reset_failure_state: sub.delivery_failure_count != 0
-                            || sub.last_delivery_error.is_some()
-                            || sub.last_delivery_error_at.is_some(),
-                    },
-                    Err(failure) => DeliveryAttemptResult::Failure {
-                        failure,
-                        next_failure_count: sub.delivery_failure_count.saturating_add(1),
-                    },
-                }
-            }
-        })
-        .buffer_unordered(PUSH_CONCURRENCY)
-        .collect()
-        .await;
-
-    apply_delivery_results(service, &mut conn, delivery_results)?;
-
-    Ok(())
+    Ok(Some(PreparedPush {
+        subscriptions: subs,
+        unread_counts,
+        is_dm,
+    }))
 }
 
-fn apply_delivery_results(
-    service: &PushService,
-    conn: &mut PgConnection,
+struct DeliveryChanges {
+    reset_ids: Vec<i64>,
+    prune_ids: Vec<i64>,
+    counted_failures: Vec<(DeliveryFailure, i32)>,
+}
+
+impl DeliveryChanges {
+    fn is_empty(&self) -> bool {
+        self.reset_ids.is_empty() && self.prune_ids.is_empty() && self.counted_failures.is_empty()
+    }
+}
+
+fn collect_delivery_changes(
+    metrics: &super::metrics::PushMetrics,
     results: Vec<DeliveryAttemptResult>,
-) -> Result<(), String> {
+) -> DeliveryChanges {
     let mut reset_ids = Vec::new();
     let mut prune_ids = Vec::new();
     let mut counted_failures = Vec::new();
-    let now = chrono::Utc::now();
 
     for result in results {
         match result {
@@ -466,7 +502,7 @@ fn apply_delivery_results(
                 failure,
                 next_failure_count,
             } => {
-                service.metrics.record_delivery_failure(
+                metrics.record_delivery_failure(
                     failure.provider.as_metrics_label(),
                     failure.class.as_metrics_label(),
                 );
@@ -483,7 +519,7 @@ fn apply_delivery_results(
                             action = "prune",
                             "pruning push subscription after immediate delivery failure"
                         );
-                        service.metrics.record_subscription_prune(
+                        metrics.record_subscription_prune(
                             failure.provider.as_metrics_label(),
                             failure.reason.as_str(),
                         );
@@ -503,7 +539,7 @@ fn apply_delivery_results(
                             action = "prune",
                             "pruning push subscription after repeated delivery failures"
                         );
-                        service.metrics.record_subscription_prune(
+                        metrics.record_subscription_prune(
                             failure.provider.as_metrics_label(),
                             failure.reason.as_str(),
                         );
@@ -527,7 +563,20 @@ fn apply_delivery_results(
             }
         }
     }
+    DeliveryChanges {
+        reset_ids,
+        prune_ids,
+        counted_failures,
+    }
+}
 
+fn apply_delivery_changes(conn: &mut PgConnection, changes: DeliveryChanges) -> Result<(), String> {
+    let DeliveryChanges {
+        reset_ids,
+        prune_ids,
+        counted_failures,
+    } = changes;
+    let now = chrono::Utc::now();
     if !reset_ids.is_empty() {
         diesel::update(
             push_subscriptions::table.filter(push_subscriptions::dsl::id.eq_any(&reset_ids)),
@@ -578,6 +627,107 @@ static TEST_PANIC_MESSAGE_ID: std::sync::atomic::AtomicI64 =
 #[cfg(test)]
 mod tests {
     use super::{counted_failure_persistence_action, CountedFailurePersistenceAction};
+
+    #[test]
+    fn delivery_changes_only_require_a_connection_for_persistence() {
+        use super::*;
+        use crate::services::push::delivery::DeliveryFailureClass;
+
+        let metrics = super::super::metrics::PushMetrics::new(&prometheus::Registry::new());
+        let success = DeliveryAttemptResult::Success {
+            subscription_id: 1,
+            should_reset_failure_state: false,
+        };
+        let ignored_failure = DeliveryAttemptResult::Failure {
+            failure: DeliveryFailure {
+                subscription_id: 2,
+                user_id: 7,
+                provider: PushProvider::WebPush,
+                class: DeliveryFailureClass::BackendConfig,
+                reason: "config".into(),
+                action: DeliveryFailureAction::None,
+            },
+            next_failure_count: 1,
+        };
+        assert!(collect_delivery_changes(&metrics, vec![success, ignored_failure]).is_empty());
+        assert!(!collect_delivery_changes(
+            &metrics,
+            vec![DeliveryAttemptResult::Success {
+                subscription_id: 1,
+                should_reset_failure_state: true,
+            }],
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn database_delivery_cleanup_resets_records_and_prunes() {
+        use super::*;
+        use crate::services::push::delivery::DeliveryFailureClass;
+        use diesel::connection::SimpleConnection;
+
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            return;
+        };
+        let mut conn = PgConnection::establish(&url).unwrap();
+        conn.batch_execute(
+            "CREATE TEMP TABLE push_subscriptions (id BIGINT PRIMARY KEY, delivery_failure_count INTEGER NOT NULL, last_delivery_error TEXT, last_delivery_error_at TIMESTAMPTZ);
+             INSERT INTO push_subscriptions VALUES (1, 2, 'old', now()), (2, 0, NULL, NULL), (3, 2, 'old', now()), (4, 0, NULL, NULL);",
+        ).unwrap();
+        let failure = |id, action| DeliveryFailure {
+            subscription_id: id,
+            user_id: 7,
+            provider: PushProvider::WebPush,
+            class: DeliveryFailureClass::ProviderRejected,
+            reason: "rejected".into(),
+            action,
+        };
+        let metrics = super::super::metrics::PushMetrics::new(&prometheus::Registry::new());
+        let changes = collect_delivery_changes(
+            &metrics,
+            vec![
+                DeliveryAttemptResult::Success {
+                    subscription_id: 1,
+                    should_reset_failure_state: true,
+                },
+                DeliveryAttemptResult::Failure {
+                    failure: failure(2, DeliveryFailureAction::Counted),
+                    next_failure_count: 1,
+                },
+                DeliveryAttemptResult::Failure {
+                    failure: failure(3, DeliveryFailureAction::Counted),
+                    next_failure_count: 3,
+                },
+                DeliveryAttemptResult::Failure {
+                    failure: failure(4, DeliveryFailureAction::PruneImmediate),
+                    next_failure_count: 1,
+                },
+            ],
+        );
+        apply_delivery_changes(&mut conn, changes).unwrap();
+        let rows = push_subscriptions::table
+            .select((
+                push_subscriptions::id,
+                push_subscriptions::delivery_failure_count,
+                push_subscriptions::last_delivery_error,
+                push_subscriptions::last_delivery_error_at,
+            ))
+            .order(push_subscriptions::id)
+            .load::<(
+                i64,
+                i32,
+                Option<String>,
+                Option<chrono::DateTime<chrono::Utc>>,
+            )>(&mut conn)
+            .unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0], (1, 0, None, None));
+        assert_eq!(
+            (rows[1].0, rows[1].1, rows[1].2.as_deref()),
+            (2, 1, Some("rejected"))
+        );
+        assert!(rows[1].3.is_some());
+    }
 
     #[test]
     fn database_push_candidates_keep_preferences_and_thread_membership_boundaries() {

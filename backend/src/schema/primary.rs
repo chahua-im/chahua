@@ -2,14 +2,6 @@
 
 pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "sticker_pack_visibility"))]
-    pub struct StickerPackVisibility;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "membership_message_visibility"))]
-    pub struct MembershipMessageVisibility;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "friend_add_verification_mode"))]
     pub struct FriendAddVerificationMode;
 
@@ -40,6 +32,10 @@ pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "media_purpose"))]
     pub struct MediaPurpose;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "membership_message_visibility"))]
+    pub struct MembershipMessageVisibility;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "mention_kind"))]
@@ -74,12 +70,16 @@ pub mod sql_types {
     pub struct ReadReceiptVisibility;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "system_message_kind"))]
-    pub struct SystemMessageKind;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "speaking_mode"))]
     pub struct SpeakingMode;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "sticker_pack_visibility"))]
+    pub struct StickerPackVisibility;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "system_message_kind"))]
+    pub struct SystemMessageKind;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "transcode_status"))]
@@ -124,6 +124,13 @@ diesel::table! {
         blocker_uid -> Int4,
         blocked_uid -> Int4,
         created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    chat_unread_revisions (chat_id) {
+        chat_id -> Int8,
+        revision -> Int8,
     }
 }
 
@@ -207,7 +214,6 @@ diesel::table! {
     use super::sql_types::GroupVisibility;
     use super::sql_types::GroupKind;
     use super::sql_types::SpeakingMode;
-
     use super::sql_types::MembershipMessageVisibility;
 
     groups (id) {
@@ -223,8 +229,8 @@ diesel::table! {
         kind -> GroupKind,
         dm_uid1 -> Nullable<Int4>,
         dm_uid2 -> Nullable<Int4>,
-        membership_message_visibility -> MembershipMessageVisibility,
         speaking_mode -> SpeakingMode,
+        membership_message_visibility -> MembershipMessageVisibility,
     }
 }
 
@@ -298,8 +304,8 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use super::sql_types::MessageType;
-    use super::sql_types::SystemMessageKind;
     use super::sql_types::TranscodeStatus;
+    use super::sql_types::SystemMessageKind;
 
     messages (id) {
         id -> Int8,
@@ -546,6 +552,7 @@ diesel::table! {
 }
 
 diesel::joinable!(attachments -> messages (message_id));
+diesel::joinable!(chat_unread_revisions -> groups (chat_id));
 diesel::joinable!(group_membership -> groups (chat_id));
 diesel::joinable!(groups -> media (avatar_image_id));
 diesel::joinable!(message_mentions -> groups (chat_id));
@@ -572,6 +579,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     activity_daily_metrics,
     attachments,
     blocks,
+    chat_unread_revisions,
     clients,
     forwarded_bundles,
     friend_requests,

@@ -626,7 +626,6 @@ describe('ConversationStore', () => {
         threadRootMessage: { ...message('90'), mentions: [] },
         lastReply: { ...latest, mentions: [] },
         lastReplyAt: latest.createdAt,
-        participants: [],
         replyCount: 2,
         unreadCount: 0,
         unreadMentions: 0,

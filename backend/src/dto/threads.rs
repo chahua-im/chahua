@@ -1,7 +1,10 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::dto::{messages::MessagePreview, users::User};
+use crate::dto::{
+    messages::MessagePreview,
+    users::{MemberSummary, User},
+};
 use crate::models::GroupKind;
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -14,7 +17,8 @@ pub struct ThreadListItem {
     pub chat_name: String,
     pub chat_avatar: Option<String>,
     pub thread_root_message: MessagePreview,
-    pub participants: Vec<User>,
+    /// The other participant, for DM chats; `None` for regular groups.
+    pub peer: Option<MemberSummary>,
     pub last_reply: Option<MessagePreview>,
     pub reply_count: i64,
     pub last_reply_at: DateTime<Utc>,

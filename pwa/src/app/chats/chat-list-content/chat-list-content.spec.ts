@@ -52,10 +52,6 @@ const thread: ThreadData = {
   chatName: '测试群',
   chatAvatar: 'https://example.com/thread-group.jpg',
   lastReplyAt: testMessage.createdAt,
-  participants: [
-    { uid: 1, name: '自己', gender: 0 },
-    { uid: 2, name: '小花', gender: 0, avatarUrl: 'https://example.com/participant.jpg' },
-  ],
   replyCount: 3,
   subscribedAt: testMessage.createdAt,
   threadRootMessage: {
@@ -1097,7 +1093,13 @@ describe('ChatListContent', () => {
     });
 
     it('uses the verified DM peer avatar and topic icon without a sender prefix', () => {
-      threads.items.set([{ ...thread, chatKind: GroupKind.dm }]);
+      threads.items.set([
+        {
+          ...thread,
+          chatKind: GroupKind.dm,
+          peer: { uid: 2, username: '列表对方', gender: 0, avatarUrl: 'https://example.com/peer-fallback.jpg' },
+        },
+      ]);
       chatInfo.set({
         ...testChat,
         kind: GroupKind.dm,
@@ -1114,9 +1116,12 @@ describe('ChatListContent', () => {
       const element: HTMLElement = threadRow().nativeElement;
       expect(element.querySelector('ion-label p')?.textContent?.trim()).toBe('最新回复');
       expect(element.querySelector('.avatar-badge ion-icon')).not.toBeNull();
-      chatInfo.set({ ...testChat, kind: GroupKind.dm, peer: undefined });
+      chatInfo.set(undefined);
       fixture.detectChanges();
-      expect(threadEntry().avatar).toBe('https://example.com/participant.jpg');
+      expect(threadEntry()).toMatchObject({
+        avatarName: '列表对方',
+        avatar: 'https://example.com/peer-fallback.jpg',
+      });
     });
 
     it('uses the supplied group kind before metadata arrives and formats non-text or deleted previews', () => {
@@ -1130,6 +1135,7 @@ describe('ChatListContent', () => {
       ]);
       fixture.detectChanges();
       expect(threadEntry()).toMatchObject({
+        avatarName: thread.chatName,
         avatar: thread.chatAvatar,
         sender: '小花',
       });

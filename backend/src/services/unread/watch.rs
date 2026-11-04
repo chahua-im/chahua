@@ -239,19 +239,9 @@ async fn load_snapshot(
             .select(diesel::dsl::min(group_membership::muted_until))
             .first::<Option<DateTime<Utc>>>(&mut conn)
             .map_err(|e| e.to_string())?;
-        let summaries = service
-            .conversation_summaries(&mut conn, uid, &watch.views)
+        let (summaries, badge) = service
+            .conversation_summaries_and_badge(&mut conn, uid, &watch.views, watch.app_badge)
             .map_err(|e| e.to_string())?;
-        let badge = if watch.app_badge {
-            Some(
-                service
-                    .count_user_unread_summary(&mut conn, uid)
-                    .map_err(|e| e.to_string())?
-                    .unread_count,
-            )
-        } else {
-            None
-        };
         Ok((summaries, badge, expiry))
     })
     .await

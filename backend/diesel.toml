@@ -1,6 +1,8 @@
 [print_schema]
 file = "src/schema/primary.rs"
 custom_type_derives = ["diesel::query_builder::QueryId"]
+# Bundle child IDs are always non-null; retain the existing Rust Vec<i64> contract.
+patch_file = "src/schema/primary.patch"
 
 [print_schema.discuz]
 schema = "discuz"

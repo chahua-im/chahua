@@ -639,7 +639,6 @@ describe('ChatListStore', () => {
           chatKind: GroupKind.dm,
           chatName: 'DM',
           threadRootMessage: { ...wireMessage, id: rootId, mentions: [] },
-          participants: [],
           replyCount: 1,
           lastReplyAt: wireMessage.createdAt,
           subscribedAt: wireMessage.createdAt,

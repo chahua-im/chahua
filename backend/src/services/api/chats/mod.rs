@@ -75,8 +75,10 @@ pub async fn get_chats(
         })
         .collect::<Vec<_>>();
     let unread_counts = unread_service.count_membership_unreads(conn, &memberships)?;
-    let mention_counts = unread_service.count_user_chat_unread_mentions(conn, uid)?;
-    let reaction_counts = unread_service.count_user_chat_unread_reactions(conn, uid)?;
+    let mention_counts =
+        unread_service.count_chat_unread_mentions_for_memberships(conn, uid, &memberships)?;
+    let reaction_counts =
+        unread_service.count_chat_unread_reactions_for_memberships(conn, uid, &memberships)?;
 
     let messages_to_process = items_to_process
         .iter_mut()

@@ -2121,6 +2121,103 @@ fn validate_idempotent_message_payload(
     ))
 }
 
+struct ReactionDetails {
+    message_id: i64,
+    emoji: String,
+    count: i64,
+    reacted_by_me: bool,
+    reactor_uids: Vec<i32>,
+}
+
+#[derive(diesel::QueryableByName)]
+struct SampledReactor {
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    pair_ordinal: i64,
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    user_uid: i32,
+}
+
+fn load_reaction_details(
+    conn: &mut PgConnection,
+    message_ids: &[i64],
+    current_user_uid: i32,
+) -> Vec<ReactionDetails> {
+    if message_ids.is_empty() {
+        return Vec::new();
+    }
+
+    let counts: Vec<(i64, String, i64)> = message_reactions::table
+        .filter(message_reactions::message_id.eq_any(message_ids))
+        .group_by((message_reactions::message_id, message_reactions::emoji))
+        .select((
+            message_reactions::message_id,
+            message_reactions::emoji,
+            diesel::dsl::count_star(),
+        ))
+        .order((
+            message_reactions::message_id.asc(),
+            diesel::dsl::count_star().desc(),
+            diesel::dsl::min(message_reactions::created_at).asc(),
+            message_reactions::emoji.asc(),
+        ))
+        .load(conn)
+        .unwrap_or_default();
+
+    if counts.is_empty() {
+        return Vec::new();
+    }
+
+    let mut my_reactions: std::collections::HashSet<(i64, String)> = message_reactions::table
+        .filter(message_reactions::message_id.eq_any(message_ids))
+        .filter(message_reactions::user_uid.eq(current_user_uid))
+        .select((message_reactions::message_id, message_reactions::emoji))
+        .load::<(i64, String)>(conn)
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+
+    // LATERAL lets each pair use the ordered (message_id, emoji, created_at,
+    // user_uid) index and stop after five rows rather than ranking all reactors.
+    let pair_message_ids: Vec<i64> = counts.iter().map(|(id, _, _)| *id).collect();
+    let pair_emojis: Vec<&str> = counts.iter().map(|(_, emoji, _)| emoji.as_str()).collect();
+    let samples: Vec<SampledReactor> = diesel::sql_query(
+        "SELECT pairs.ordinality AS pair_ordinal, sample.user_uid
+         FROM unnest($1::bigint[], $2::text[]) WITH ORDINALITY AS pairs(message_id, emoji, ordinality)
+         CROSS JOIN LATERAL (
+             SELECT r.user_uid, r.created_at
+             FROM message_reactions r
+             WHERE r.message_id = pairs.message_id AND r.emoji = pairs.emoji
+             ORDER BY r.created_at ASC, r.user_uid ASC
+             LIMIT 5
+         ) sample
+         ORDER BY pairs.ordinality, sample.created_at ASC, sample.user_uid ASC",
+    )
+    .bind::<diesel::sql_types::Array<diesel::sql_types::BigInt>, _>(&pair_message_ids)
+    .bind::<diesel::sql_types::Array<diesel::sql_types::Text>, _>(&pair_emojis)
+    .load(conn)
+    .unwrap_or_default();
+
+    let mut details: Vec<ReactionDetails> = counts
+        .into_iter()
+        .map(|(message_id, emoji, count)| {
+            let reacted_by_me = my_reactions.remove(&(message_id, emoji.clone()));
+            ReactionDetails {
+                message_id,
+                emoji,
+                count,
+                reacted_by_me,
+                reactor_uids: Vec::new(),
+            }
+        })
+        .collect();
+    for sample in samples {
+        details[(sample.pair_ordinal - 1) as usize]
+            .reactor_uids
+            .push(sample.user_uid);
+    }
+    details
+}
+
 // ---------------------------------------------------------------------------
 // attach_metadata (shared by messages, threads, pins)
 // ---------------------------------------------------------------------------
@@ -2312,89 +2409,48 @@ pub async fn attach_metadata(
         .filter(|m| m.has_reactions)
         .map(|m| m.id)
         .collect();
-    if !reacted_message_ids.is_empty() {
-        let counts: Vec<(i64, String, i64)> = message_reactions::table
-            .filter(message_reactions::message_id.eq_any(&reacted_message_ids))
-            .group_by((message_reactions::message_id, message_reactions::emoji))
-            .select((
-                message_reactions::message_id,
-                message_reactions::emoji,
-                diesel::dsl::count_star(),
-            ))
-            .order((
-                message_reactions::message_id.asc(),
-                diesel::dsl::count_star().desc(),
-                diesel::dsl::min(message_reactions::created_at).asc(),
-                message_reactions::emoji.asc(),
-            ))
-            .load(conn)
-            .unwrap_or_default();
+    let reaction_details = load_reaction_details(conn, &reacted_message_ids, current_user_uid);
+    let all_reactor_uids: Vec<i32> = reaction_details
+        .iter()
+        .flat_map(|detail| detail.reactor_uids.iter().copied())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    let (reactor_names, reactor_avatars) = if all_reactor_uids.is_empty() {
+        (Default::default(), Default::default())
+    } else {
+        (
+            load_usernames_by_uids(conn, &all_reactor_uids),
+            avatars.lookup(&all_reactor_uids),
+        )
+    };
 
-        let my_reactions: std::collections::HashSet<(i64, String)> = message_reactions::table
-            .filter(message_reactions::message_id.eq_any(&reacted_message_ids))
-            .filter(message_reactions::user_uid.eq(current_user_uid))
-            .select((message_reactions::message_id, message_reactions::emoji))
-            .load::<(i64, String)>(conn)
-            .unwrap_or_default()
-            .into_iter()
-            .collect();
-
-        // Query 3: Fetch reactor UIDs per (message_id, emoji)
-        let raw_reactors: Vec<(i64, String, i32)> = message_reactions::table
-            .filter(message_reactions::message_id.eq_any(&reacted_message_ids))
-            .select((
-                message_reactions::message_id,
-                message_reactions::emoji,
-                message_reactions::user_uid,
-            ))
-            .load(conn)
-            .unwrap_or_default();
-
-        // Group by (msg_id, emoji) -> Vec<uid>, capped at 5
-        let mut reactor_uids_map: std::collections::HashMap<(i64, String), Vec<i32>> =
-            std::collections::HashMap::new();
-        for (msg_id, emoji, uid) in &raw_reactors {
-            let entry = reactor_uids_map
-                .entry((*msg_id, emoji.clone()))
-                .or_default();
-            if entry.len() < 5 {
-                entry.push(*uid);
-            }
-        }
-
-        // Batch-resolve names + avatars for all reactor UIDs
-        let all_reactor_uids: Vec<i32> = reactor_uids_map
-            .values()
-            .flatten()
-            .copied()
-            .collect::<std::collections::HashSet<i32>>()
-            .into_iter()
-            .collect();
-        let reactor_names = load_usernames_by_uids(conn, &all_reactor_uids);
-        let reactor_avatars = avatars.lookup(&all_reactor_uids);
-
-        for (msg_id, emoji, count) in counts {
-            let reacted_by_me = Some(my_reactions.contains(&(msg_id, emoji.clone())));
-            let reactors = reactor_uids_map.get(&(msg_id, emoji.clone())).map(|uids| {
-                uids.iter()
-                    .map(|&uid| ReactionReactor {
+    for detail in reaction_details {
+        let reactors = if detail.reactor_uids.is_empty() {
+            None
+        } else {
+            Some(
+                detail
+                    .reactor_uids
+                    .into_iter()
+                    .map(|uid| ReactionReactor {
                         uid,
                         name: reactor_names.get(&uid).cloned().flatten(),
                         avatar_url: reactor_avatars.get(&uid).cloned().flatten(),
                         sort_index: None,
                     })
-                    .collect()
+                    .collect(),
+            )
+        };
+        reaction_summaries_map
+            .entry(detail.message_id)
+            .or_default()
+            .push(ReactionSummary {
+                emoji: detail.emoji,
+                count: detail.count,
+                reacted_by_me: Some(detail.reacted_by_me),
+                reactors,
             });
-            reaction_summaries_map
-                .entry(msg_id)
-                .or_default()
-                .push(ReactionSummary {
-                    emoji,
-                    count,
-                    reacted_by_me,
-                    reactors,
-                });
-        }
     }
 
     // --- Mentions ---
@@ -2622,6 +2678,69 @@ mod tests {
         collections::{HashMap, HashSet},
         sync::Arc,
     };
+
+    #[test]
+    fn reaction_details_bound_samples_preserve_counts_and_own_flags() {
+        use diesel::{connection::SimpleConnection, Connection};
+
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        let mut conn = diesel::PgConnection::establish(&url).expect("connect to test database");
+        conn.batch_execute(
+            "CREATE TEMP TABLE message_reactions (
+                 message_id bigint NOT NULL, user_uid integer NOT NULL,
+                 emoji varchar(32) NOT NULL, created_at timestamptz NOT NULL,
+                 PRIMARY KEY (message_id, user_uid, emoji)
+             );
+             INSERT INTO message_reactions (message_id, user_uid, emoji, created_at)
+             SELECT 1, n, 'alpha',
+                    '2026-01-01 00:00:00+00'::timestamptz + ((n - 1) / 2) * interval '1 second'
+             FROM generate_series(100, 1, -1) n;
+             INSERT INTO message_reactions (message_id, user_uid, emoji, created_at) VALUES
+                 (1, 99, 'beta', '2026-01-01 00:00:03+00'),
+                 (1, 7, 'beta', '2026-01-01 00:00:01+00'),
+                 (1, 3, 'beta', '2026-01-01 00:00:01+00'),
+                 (2, 50, 'alpha', '2026-01-01 00:00:00+00'),
+                 (3, 99, 'ignored', '2026-01-01 00:00:00+00');",
+        )
+        .unwrap();
+
+        let details = super::load_reaction_details(&mut conn, &[1, 2], 99);
+        assert_eq!(details.len(), 3);
+        assert_eq!(
+            (
+                details[0].message_id,
+                details[0].emoji.as_str(),
+                details[0].count
+            ),
+            (1, "alpha", 100)
+        );
+        assert!(details[0].reacted_by_me);
+        assert_eq!(details[0].reactor_uids, [1, 2, 3, 4, 5]);
+        assert_eq!(
+            (
+                details[1].message_id,
+                details[1].emoji.as_str(),
+                details[1].count
+            ),
+            (1, "beta", 3)
+        );
+        assert!(details[1].reacted_by_me);
+        assert_eq!(details[1].reactor_uids, [3, 7, 99]);
+        assert_eq!(
+            (
+                details[2].message_id,
+                details[2].emoji.as_str(),
+                details[2].count
+            ),
+            (2, "alpha", 1)
+        );
+        assert!(!details[2].reacted_by_me);
+        assert_eq!(details[2].reactor_uids, [50]);
+        assert!(super::load_reaction_details(&mut conn, &[], 99).is_empty());
+    }
 
     fn attachment(kind: &str) -> Attachment {
         Attachment {

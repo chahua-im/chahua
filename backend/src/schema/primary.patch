@@ -1,0 +1,11 @@
+--- a/schema.rs
++++ b/schema.rs
+@@ -156,7 +156,7 @@
+         created_at -> Timestamptz,
+         item_count -> Int4,
+         payload -> Jsonb,
+-        child_bundle_ids -> Array<Nullable<Int8>>,
++        child_bundle_ids -> Array<Int8>,
+         preview -> Jsonb,
+     }
+ }

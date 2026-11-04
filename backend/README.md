@@ -156,11 +156,14 @@ The server applies pending embedded Diesel migrations at startup in version orde
 New migrations must sort after the latest migration on `main`; preserve dependency
 order when re-dating an unmerged branch's migrations.
 
-The `idx_messages_unread_visible` index is built concurrently, outside a migration
-transaction. Normal database reads and writes remain available during the build,
-but the API still waits for pending migrations. On large production tables, apply
-the index migration before restarting the API to keep that one-time build out of
-the restart's readiness window.
+The reactor-sampling index `idx_message_reactions_sample` is created inside the
+migration transaction during startup. Its build can block writes to
+`message_reactions`; the API waits for the migration to commit before serving.
+
+The older `idx_messages_unread_visible` migration builds its index concurrently,
+outside a transaction. Reads and writes remain available during that build, but
+the API still waits for it. On large production tables, apply that migration
+before restarting to keep its one-time build out of the readiness window.
 
 ## Chat list previews
 
@@ -174,32 +177,53 @@ List previews do not load quoted replies, thread reply counts, reaction details,
 sticker favorites, or forwarded-bundle previews. Full conversation message
 responses retain their normal metadata hydration.
 
+Full-message reaction responses retain exact totals and the viewer's own-reaction
+flag. Reactor identity samples are limited in PostgreSQL to five per
+`(message_id, emoji)`, ordered by creation time and UID, using
+`idx_message_reactions_sample`. Large reaction sets are not hydrated into profiles
+merely to truncate their displayed samples.
+
 Discuz avatar lookups share the bounded, per-process TTL cache described in
 [Avatar lookup](docs/metrics.md#avatar-lookup).
 
 ## Unread counting
 
-Main-chat unread counts come directly from PostgreSQL, not a process-local message
-history index. Each probe counts at most 1000 published, non-deleted, top-level
+Main-chat unread probes count at most 1000 published, non-deleted, top-level
 messages newer than the membership's read cursor. An absent cursor includes all
-eligible messages, up to the same cap. Deletion and delayed publication are reflected
-by subsequent reads without cache maintenance.
+eligible messages, up to the same cap. `idx_messages_unread_visible` indexes
+`(chat_id, id DESC)` with the visibility predicate, so probes seek past the cursor
+and stop at the cap. Hidden-membership probes use
+`idx_messages_non_membership_top_level`.
 
-`idx_messages_unread_visible` indexes `(chat_id, id DESC)` with the same visibility
-predicate, so probes can seek past the cursor and stop at the cap without scanning
-excluded message history. Batched requests and push badge totals deduplicate
-`(chat_id, read cursor, membership visibility)` keys. Each visibility group
-uses one statement so hidden-member probes can use `idx_messages_non_membership_top_level`. Counts are aggregated independently for each user, preserving archive
-and mute rules. Collection summaries use the same main-chat counting path.
+A bounded per-process cache retains up to 100,000 scalar counts, keyed by chat,
+read cursor, membership-message visibility and database revision. Statement-level
+message triggers advance `chat_unread_revisions` transactionally when top-level
+unread eligibility changes, including inserts, deletion, restoration and delayed
+publication. Every lookup checks current database revisions; misses load counts
+and revisions in one statement snapshot. Old revisions cannot replace newer
+results. Diesel-managed transactions and transactions with an assigned write ID
+bypass shared cache reuse and publication. No message history is retained, and
+freshness does not depend on a TTL or local-only invalidation. Concurrent
+single-cursor misses share a load; multi-cursor requests deduplicate and batch
+their probes.
 
-Conversation-state WebSocket snapshots load memberships and chat kinds in one
-query, read the account visibility preference once, and batch main-chat unread
-probes by visibility. Thread counting retains its own scope rules.
+Chat-list row mention and reaction counts are restricted to returned memberships.
+Account totals remain independent of pagination. Collection snapshots share
+main-chat counts with the account app badge, rather than summing overlapping view
+totals. Archive, mute and membership visibility rules remain independently applied.
+
+Conversation-state WebSocket snapshots batch authorization and chat kinds, main
+counts, and thread/message/mention/reaction state instead of querying each watched
+scope separately. Thread authorization and read cursors retain their own rules.
 
 The affected chat-list, read-state and unread-summary handlers acquire connections
 and execute database work on Tokio's blocking pool. WebSocket unread snapshots and
 push unread calculations also run on the blocking pool. No full chat history is
 retained in application memory for unread counting.
+
+Push workers prepare recipients and badges on the blocking pool, release the
+database connection before awaiting APNs/Web Push delivery, and reacquire one only
+when delivery results require subscription cleanup or delivery-state updates.
 
 `GET /chats/unread` accepts either a normal user-session bearer token or a service token
 with `X-On-Behalf-Of: <uid>` and the global `onBehalfOf.socialRead` permission. Delegation
@@ -258,6 +282,12 @@ Only published top-level messages with `has_thread` qualify. Recalled roots rema
 listed while their threads have surviving replies; normal message redaction applies.
 This chat-wide list is independent of the subscription/archive filters and
 latest-reply ordering used by `GET /threads`.
+
+The subscribed thread inbox (`GET /threads`, RPC `threads.list`) returns an optional
+`peer: MemberSummary` for direct-message threads, resolved from the chat's two DM
+UIDs independently of who has posted. Group threads have no peer. Inbox rows do
+not enumerate participants or return a `participants` array; clients needing
+participant details use the paginated endpoint above.
 
 Participants are the root author and distinct authors of published, non-deleted
 replies, ordered by ascending UID. Subscribers without messages are not participants.

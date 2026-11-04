@@ -5,6 +5,7 @@ use super::{
     UnreadService,
 };
 use crate::{
+    constants::MAX_UNREAD_COUNT,
     dto::{
         conversations::{
             ConversationRef, ConversationState, ConversationStatesPayload,
@@ -13,7 +14,7 @@ use crate::{
         ws::ServerWsMessage,
     },
     models::GroupKind,
-    schema::{group_membership, groups, messages},
+    schema::{group_membership, groups},
     state::DbPool,
 };
 use diesel::prelude::*;
@@ -70,6 +71,22 @@ pub fn valid_scopes(scopes: &[ConversationRef]) -> bool {
             .all(|scope| scope.chat_id > 0 && scope.thread_id.is_none_or(|id| id > 0))
 }
 
+#[derive(diesel::QueryableByName)]
+struct ScopeCounts {
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    chat_id: i64,
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    thread_id: i64,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::BigInt>)]
+    last_read_message_id: Option<i64>,
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    unread_count: i64,
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    unread_mentions: i64,
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    unread_reactions: i64,
+}
+
 fn load_states(
     conn: &mut PgConnection,
     service: &UnreadService,
@@ -115,86 +132,104 @@ fn load_states(
                     ),
             })
         });
-    let counts: HashMap<_, _> = UnreadService::count_chat_unread_cursors(conn, cursors)?
+    let counts: HashMap<_, _> = service
+        .count_chat_unread_cursors(conn, cursors)?
         .into_iter()
         .map(|(cursor, count)| (cursor.chat_id, count))
         .collect();
-    scopes
+
+    // Zero represents the main scope; validated thread IDs are positive.
+    let eligible: Vec<_> = scopes
+        .iter()
+        .filter(|scope| memberships.contains_key(&scope.chat_id))
+        .collect();
+    let mut batched = HashMap::new();
+    if !eligible.is_empty() {
+        let chat_ids: Vec<_> = eligible.iter().map(|scope| scope.chat_id).collect();
+        let thread_ids: Vec<_> = eligible
+            .iter()
+            .map(|scope| scope.thread_id.unwrap_or(0))
+            .collect();
+        // Lateral probes retain the indexed per-scope predicates and stop at
+        // the cap without issuing a database round trip for each watch.
+        let rows = diesel::sql_query(
+            "SELECT s.chat_id, s.thread_id,
+                    CASE WHEN s.thread_id = 0 THEN gm.last_read_message_id
+                         ELSE ts.last_read_message_id END AS last_read_message_id,
+                    unread.unread_count, mentions.unread_mentions, reactions.unread_reactions
+             FROM unnest($1::bigint[], $2::bigint[]) AS s(chat_id, thread_id)
+             JOIN group_membership gm ON gm.chat_id = s.chat_id AND gm.uid = $3
+             LEFT JOIN messages root ON root.id = s.thread_id AND root.chat_id = s.chat_id
+                 AND root.reply_root_id IS NULL AND root.is_published = TRUE
+             LEFT JOIN thread_user_states ts ON ts.chat_id = s.chat_id
+                 AND ts.thread_root_id = s.thread_id AND ts.uid = $3
+             CROSS JOIN LATERAL (
+                 SELECT COUNT(*)::bigint AS unread_count FROM (
+                     SELECT 1 FROM messages m
+                     WHERE s.thread_id <> 0 AND ts.thread_root_id IS NOT NULL
+                       AND m.reply_root_id = s.thread_id AND m.deleted_at IS NULL
+                       AND m.is_published = TRUE AND m.id > COALESCE(ts.last_read_message_id, 0)
+                     LIMIT $4
+                 ) items
+             ) unread
+             CROSS JOIN LATERAL (
+                 SELECT COUNT(*)::bigint AS unread_mentions FROM (
+                     SELECT 1 FROM message_mentions mm
+                     WHERE mm.mentioned_uid = $3 AND mm.chat_id = s.chat_id
+                       AND ((s.thread_id = 0 AND mm.thread_root_id IS NULL)
+                            OR (s.thread_id <> 0 AND mm.thread_root_id = s.thread_id))
+                       AND mm.message_id > COALESCE(
+                           CASE WHEN s.thread_id = 0 THEN gm.last_read_message_id
+                                ELSE ts.last_read_message_id END, 0)
+                     LIMIT $4
+                 ) items
+             ) mentions
+             CROSS JOIN LATERAL (
+                 SELECT COUNT(*)::bigint AS unread_reactions FROM (
+                     SELECT DISTINCT mr.message_id
+                     FROM message_reactions mr JOIN messages m ON m.id = mr.message_id
+                     WHERE mr.message_author_uid = $3 AND mr.user_uid <> $3
+                       AND m.chat_id = s.chat_id AND m.deleted_at IS NULL
+                       AND m.is_published = TRUE
+                       AND ((s.thread_id = 0 AND m.reply_root_id IS NULL)
+                            OR (s.thread_id <> 0 AND m.reply_root_id = s.thread_id))
+                       AND mr.created_at > COALESCE(
+                           CASE WHEN s.thread_id = 0 THEN gm.last_reactions_read_at
+                                ELSE ts.last_reactions_read_at END, '-infinity'::timestamptz)
+                     LIMIT $4
+                 ) items
+             ) reactions
+             WHERE s.thread_id = 0 OR root.id IS NOT NULL",
+        )
+        .bind::<diesel::sql_types::Array<diesel::sql_types::BigInt>, _>(chat_ids)
+        .bind::<diesel::sql_types::Array<diesel::sql_types::BigInt>, _>(thread_ids)
+        .bind::<diesel::sql_types::Integer, _>(uid)
+        .bind::<diesel::sql_types::BigInt, _>(MAX_UNREAD_COUNT)
+        .load::<ScopeCounts>(conn)?;
+        for row in rows {
+            batched.insert((row.chat_id, row.thread_id), row);
+        }
+    }
+    Ok(scopes
         .iter()
         .map(|&scope| {
-            load_state(
-                conn,
-                service,
-                uid,
-                scope,
-                memberships
-                    .get(&scope.chat_id)
-                    .map(|&(cursor, _, _)| cursor),
-                counts.get(&scope.chat_id).copied().unwrap_or(0),
-            )
+            let row = batched.get(&(scope.chat_id, scope.thread_id.unwrap_or(0)));
+            ConversationState {
+                conversation: scope,
+                accessible: row.is_some(),
+                last_read_message_id: row.and_then(|row| row.last_read_message_id),
+                unread_count: row.map_or(0, |row| {
+                    if scope.thread_id.is_some() {
+                        row.unread_count
+                    } else {
+                        counts.get(&scope.chat_id).copied().unwrap_or(0)
+                    }
+                }),
+                unread_mentions: row.map_or(0, |row| row.unread_mentions),
+                unread_reactions: row.map_or(0, |row| row.unread_reactions),
+            }
         })
-        .collect()
-}
-
-fn load_state(
-    conn: &mut PgConnection,
-    service: &UnreadService,
-    uid: i32,
-    scope: ConversationRef,
-    membership: Option<Option<i64>>,
-    main_unread_count: i64,
-) -> QueryResult<ConversationState> {
-    let mut row = ConversationState {
-        conversation: scope,
-        accessible: false,
-        last_read_message_id: None,
-        unread_count: 0,
-        unread_mentions: 0,
-        unread_reactions: 0,
-    };
-    let Some(cursor) = membership else {
-        return Ok(row);
-    };
-    row.last_read_message_id = cursor;
-    if let Some(root) = scope.thread_id {
-        let exists = diesel::select(diesel::dsl::exists(
-            messages::table
-                .filter(messages::id.eq(root))
-                .filter(messages::chat_id.eq(scope.chat_id))
-                .filter(messages::reply_root_id.is_null())
-                .filter(messages::is_published.eq(true)),
-        ))
-        .get_result::<bool>(conn)?;
-        if !exists {
-            row.last_read_message_id = None;
-            return Ok(row);
-        }
-        row.last_read_message_id = crate::services::threads::get_thread_last_read_message_id(
-            conn,
-            scope.chat_id,
-            root,
-            uid,
-        )?;
-        row.unread_count = crate::services::threads::get_thread_unread_count(
-            conn,
-            root,
-            uid,
-            row.last_read_message_id,
-        )?;
-    } else {
-        row.unread_count = main_unread_count;
-    }
-    row.accessible = true;
-    row.unread_mentions = service.count_chat_unread_mentions(
-        conn,
-        uid,
-        scope.chat_id,
-        row.last_read_message_id,
-        scope.thread_id,
-    )?;
-    row.unread_reactions =
-        service.count_chat_unread_reactions(conn, uid, scope.chat_id, scope.thread_id)?;
-    Ok(row)
+        .collect())
 }
 
 pub async fn run(
@@ -364,9 +399,21 @@ mod tests {
                     WHERE g.id BETWEEN 9876710001 AND 9876710050;
                  UPDATE messages SET has_thread=TRUE WHERE id=98767100011;
                  INSERT INTO messages(id, chat_id, sender_uid, client_generated_id, message_type, system_kind, reply_root_id, created_at)
-                    VALUES (98767100015,9876710001,1717,'state-watch-reply','system','member_joined',98767100011,NOW());
+                    VALUES (98767100015,9876710001,987671000,'state-watch-reply','system','member_joined',98767100011,NOW()),
+                           (98767100025,9876710002,987671000,'state-watch-untracked','text',NULL,98767100021,NOW());
                  INSERT INTO thread_user_states(chat_id, thread_root_id, uid, subscribed, last_read_message_id)
-                    VALUES (9876710001,98767100011,987671000,FALSE,98767100011);"
+                    VALUES (9876710001,98767100011,987671000,FALSE,98767100011);
+                 UPDATE messages SET sender_uid=987671000 WHERE id=98767100013;
+                 INSERT INTO message_mentions(message_id, mentioned_uid, chat_id, thread_root_id)
+                    VALUES (98767100013,987671000,9876710001,NULL),
+                           (98767100015,987671000,9876710001,98767100011),
+                           (98767100025,987671000,9876710002,98767100021);
+                 INSERT INTO message_reactions(message_id,user_uid,emoji,message_author_uid,created_at)
+                    VALUES (98767100013,1717,'a',987671000,NOW() + INTERVAL '1 second'),
+                           (98767100013,1718,'b',987671000,NOW() + INTERVAL '1 second'),
+                           (98767100015,1717,'a',987671000,NOW() + INTERVAL '1 second'),
+                           (98767100025,1717,'a',987671000,NOW() + INTERVAL '1 second'),
+                           (98767100025,987671000,'self',987671000,NOW() + INTERVAL '1 second');"
             )?;
             let uid = 987671000;
             crate::services::user::save_chat_settings(conn, uid, crate::dto::users::UpdateChatSettings {
@@ -387,6 +434,8 @@ mod tests {
                 ConversationRef { chat_id: 9876710001, thread_id: Some(98767100011) },
                 ConversationRef { chat_id: 9876710002, thread_id: Some(98767100011) },
                 ConversationRef { chat_id: 9876710050, thread_id: Some(98767100501) },
+                ConversationRef { chat_id: 9876710002, thread_id: Some(98767100021) },
+                ConversationRef { chat_id: 9876710001, thread_id: Some(98767100015) },
             ]);
             let rows = load_states(conn, &service, uid, &scopes)?;
             assert_eq!(rows.iter().map(|row| row.conversation).collect::<Vec<_>>(), scopes);
@@ -400,17 +449,20 @@ mod tests {
             assert_eq!(rows[48].unread_count, 3); // DM events remain visible.
             assert!(rows[50].accessible); // Thread access needs membership, not a subscription.
             assert_eq!(rows[50].unread_count, 1);
+            assert_eq!((rows[0].unread_mentions, rows[0].unread_reactions), (1, 1));
+            assert_eq!((rows[50].unread_mentions, rows[50].unread_reactions), (1, 1));
+            // A valid root without a thread state has no unread messages, but
+            // mentions use cursor zero and reactions use the -infinity fallback.
+            assert!(rows[53].accessible);
+            assert_eq!(rows[53].last_read_message_id, None);
+            assert_eq!((rows[53].unread_count, rows[53].unread_mentions, rows[53].unread_reactions), (0, 1, 1));
+            assert!(!rows[54].accessible); // A reply is not a thread root.
             for index in [49,51,52] {
                 assert!(!rows[index].accessible);
                 assert_eq!(rows[index].last_read_message_id, None);
                 assert_eq!(rows[index].unread_count, 0);
             }
-            {
-                let queries = queries.lock().unwrap();
-                assert_eq!(queries.iter().filter(|sql| sql.contains("show_membership_messages")).count(), 1);
-                assert_eq!(queries.iter().filter(|sql| sql.contains("UNNEST($1::BIGINT[], $2::BIGINT[])")).count(), 2);
-                assert_eq!(queries.iter().filter(|sql| sql.contains("INNER JOIN \"groups\"")).count(), 1);
-            }
+            assert!(queries.lock().unwrap().len() <= 8, "snapshot queries must not grow per scope");
             crate::services::user::save_chat_settings(conn, uid, crate::dto::users::UpdateChatSettings {
                 show_membership_messages: true,
             })?;
@@ -419,7 +471,7 @@ mod tests {
             assert_eq!(shown[0].unread_count, 4);
             assert_eq!(shown[1].unread_count, 3);
             assert_eq!(shown[50].unread_count, 1);
-            assert_eq!(queries.lock().unwrap().iter().filter(|sql| sql.contains("UNNEST($1::BIGINT[], $2::BIGINT[])")).count(), 1);
+            assert!(queries.lock().unwrap().len() <= 8, "snapshot queries must stay batched");
             queries.lock().unwrap().clear();
             assert!(load_states(conn, &service, uid, &[])?.is_empty());
             assert!(queries.lock().unwrap().is_empty());

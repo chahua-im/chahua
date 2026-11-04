@@ -28,7 +28,6 @@ const thread: ThreadListItem = {
   chatKind: testChat.kind,
   chatName: '测试群',
   threadRootMessage: { ...testMessage, id: rootId, mentions: [] },
-  participants: [],
   replyCount: 2,
   unreadCount: 2,
   unreadMentions: 0,

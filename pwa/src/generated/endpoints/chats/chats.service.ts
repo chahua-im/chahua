@@ -1348,9 +1348,8 @@ export class ChatsService {
     });
   }
   /**
-     * @summary Optional body for the unread endpoint — allows resetting read position to a specific message.
-    POST /chats/:chat_id/unread — Mark a chat as unread by rewinding the read pointer.
-     */
+   * @summary POST /chats/:chat_id/unread — Mark a chat as unread by rewinding the read pointer.
+   */
   markAsUnread<TData = MarkChatReadStateResponse>(
     chatId: SnowflakeID,
     nullMarkAsUnreadBody?: null | __MarkAsUnreadBody,

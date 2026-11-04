@@ -120,8 +120,19 @@ impl UnreadService {
         uid: i32,
         views: &[ConversationView],
     ) -> Result<Vec<ConversationUnreadSummary>, diesel::result::Error> {
-        if views.is_empty() {
-            return Ok(Vec::new());
+        self.conversation_summaries_and_badge(conn, uid, views, false)
+            .map(|(summaries, _)| summaries)
+    }
+
+    pub(super) fn conversation_summaries_and_badge(
+        &self,
+        conn: &mut PgConnection,
+        uid: i32,
+        views: &[ConversationView],
+        app_badge: bool,
+    ) -> Result<(Vec<ConversationUnreadSummary>, Option<i64>), diesel::result::Error> {
+        if views.is_empty() && !app_badge {
+            return Ok((Vec::new(), None));
         }
         let defaults =
             crate::services::notification_preferences::load_notification_defaults(conn, uid)?;
@@ -147,7 +158,7 @@ impl UnreadService {
              WHERE ts.uid = $1 AND ts.subscribed = TRUE
                AND root.reply_root_id IS NULL AND root.has_thread = TRUE AND root.is_published = TRUE"
         ).bind::<Integer, _>(uid).bind::<Bool, _>(defaults.group_chats_muted).bind::<Bool, _>(defaults.direct_chats_muted).load::<Scope>(conn)?
-            .into_iter().filter(|scope| selections.iter().any(|selection| selection.contains(scope))).collect::<Vec<_>>();
+            .into_iter().filter(|scope| (app_badge && scope.thread_id.is_none()) || selections.iter().any(|selection| selection.contains(scope))).collect::<Vec<_>>();
 
         let settings = crate::services::user::load_chat_settings(conn, uid)?;
         let memberships = scopes
@@ -214,7 +225,11 @@ impl UnreadService {
         for is_thread in [false, true] {
             let addressed = scopes
                 .iter()
-                .filter(|s| !s.is_dm && s.thread_id.is_some() == is_thread)
+                .filter(|s| {
+                    !s.is_dm
+                        && s.thread_id.is_some() == is_thread
+                        && selections.iter().any(|selection| selection.contains(s))
+                })
                 .collect::<Vec<_>>();
             if addressed.is_empty() {
                 continue;
@@ -264,12 +279,25 @@ impl UnreadService {
                 .load::<Count>(conn)?;
             attention.extend(rows.into_iter().map(|r| ((is_thread, r.id), r.count)));
         }
-        Ok(aggregate(
-            &selections,
-            &scopes,
-            &main_counts,
-            &thread_counts,
-            &attention,
+        let badge = app_badge.then(|| {
+            scopes
+                .iter()
+                .filter(|scope| scope.thread_id.is_none() && !scope.archived && !scope.muted)
+                .fold(0_i64, |total, scope| {
+                    total
+                        .saturating_add(main_counts.get(&scope.chat_id).copied().unwrap_or(0))
+                        .min(MAX_UNREAD_COUNT)
+                })
+        });
+        Ok((
+            aggregate(
+                &selections,
+                &scopes,
+                &main_counts,
+                &thread_counts,
+                &attention,
+            ),
+            badge,
         ))
     }
 }
@@ -585,6 +613,22 @@ mod tests {
         let result = service
             .conversation_summaries(&mut conn, 1, &views)
             .unwrap();
+        let (combined, badge) = service
+            .conversation_summaries_and_badge(&mut conn, 1, &views, true)
+            .unwrap();
+        // The all-view also includes threads and muted conversations; neither
+        // may be summed into the main-only, unmuted application badge.
+        assert_eq!(badge, Some(1));
+        assert_eq!(
+            combined
+                .iter()
+                .map(|s| s.unread_message_count)
+                .collect::<Vec<_>>(),
+            result
+                .iter()
+                .map(|s| s.unread_message_count)
+                .collect::<Vec<_>>()
+        );
         let totals = result
             .iter()
             .map(|s| {

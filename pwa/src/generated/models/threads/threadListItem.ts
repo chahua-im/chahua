@@ -6,9 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { GroupKind } from '../groupKind';
+import type { MemberSummary } from '../memberSummary';
 import type { MessagePreview } from '../messagePreview';
 import type { SnowflakeID } from '../snowflakeID';
-import type { User } from '../user';
 
 export interface ThreadListItem {
   archived: boolean;
@@ -19,7 +19,8 @@ export interface ThreadListItem {
   lastReadMessageId?: SnowflakeID;
   lastReply?: MessagePreview;
   lastReplyAt: string;
-  participants: User[];
+  /** The other participant, for DM chats; `None` for regular groups. */
+  peer?: MemberSummary;
   /** The DM peer's authorized read receipt for this thread scope. */
   peerLastReadMessageId?: SnowflakeID;
   replyCount: number;
