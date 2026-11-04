@@ -371,38 +371,6 @@ pub fn build_sender(
     }
 }
 
-pub fn message_response_preview(response: MessageResponse) -> MessagePreview {
-    let is_deleted = response.is_deleted;
-    MessagePreview {
-        system_kind: response.system_kind,
-        forwarded_from_name: response
-            .forwarded_from
-            .and_then(|origin| origin.sender.name)
-            .filter(|_| !is_deleted),
-        id: response.id,
-        client_generated_id: response.client_generated_id,
-        created_at: response.created_at,
-        sender: response.sender,
-        system_links: response.system_links.filter(|_| !is_deleted),
-        message: response.message,
-        message_type: response.message_type,
-        sticker: response.sticker.and_then(|sticker| {
-            (!is_deleted).then_some(MessagePreviewSticker {
-                emoji: sticker.emoji,
-            })
-        }),
-        attachments: response
-            .attachments
-            .iter()
-            .map(|a| MessagePreviewAttachment {
-                kind: a.kind.clone(),
-            })
-            .collect(),
-        is_deleted,
-        mentions: response.mentions,
-    }
-}
-
 pub fn build_mention_info(
     uid: i32,
     user_avatars: &std::collections::HashMap<i32, Option<String>>,

@@ -3,7 +3,6 @@ pub mod messages;
 pub mod reactions;
 pub mod saved_messages;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::Utc;
@@ -16,7 +15,6 @@ use crate::dto::chats::{
     UnreadMentionIdsResponse, UnreadMentionsQuery, UnreadReactionIdsResponse,
     UnreadReactionsAckResponse,
 };
-use crate::dto::messages::MessageResponse;
 use crate::dto::read_receipts::ReadReceiptResponse;
 use crate::errors::AppError;
 use crate::models::GroupKind;
@@ -27,7 +25,6 @@ use crate::services::authz::{Action as AuthzAction, AuthorizationService};
 use crate::services::avatars::AvatarService;
 use crate::services::chat;
 use crate::services::media::MediaStore;
-use crate::services::messages::{attach_metadata, message_response_preview};
 use crate::services::notification_preferences::{
     load_chat_notification_setting, load_notification_defaults, publish_chat_notification_setting,
     set_chat_archived,
@@ -61,11 +58,7 @@ pub async fn get_chats(
         !chat_settings.show_membership_messages,
     )?;
     let has_more = rows.len() as i64 > limit;
-    let items_to_process: Vec<_> = rows.into_iter().take(limit as usize).collect();
-    let messages_to_process = items_to_process
-        .iter()
-        .filter_map(|row| row.last_message.clone())
-        .collect();
+    let mut items_to_process: Vec<_> = rows.into_iter().take(limit as usize).collect();
 
     let memberships = items_to_process
         .iter()
@@ -85,12 +78,12 @@ pub async fn get_chats(
     let mention_counts = unread_service.count_user_chat_unread_mentions(conn, uid)?;
     let reaction_counts = unread_service.count_user_chat_unread_reactions(conn, uid)?;
 
-    let message_responses = attach_metadata(conn, messages_to_process, media, avatars, uid).await;
-
-    let mut message_response_map: HashMap<i64, MessageResponse> = message_responses
-        .into_iter()
-        .map(|message_response| (message_response.id, message_response))
+    let messages_to_process = items_to_process
+        .iter_mut()
+        .filter_map(|row| row.last_message.take())
         .collect();
+    let mut message_previews =
+        crate::services::chat_list::load_last_message_previews(conn, messages_to_process, avatars);
 
     let dm_peer_uids: Vec<i32> = items_to_process
         .iter()
@@ -120,7 +113,7 @@ pub async fn get_chats(
                  avatar_key,
                  last_message_at,
                  last_read_message_id,
-                 last_message: message,
+                 last_message: _,
                  notification_setting: setting,
                  archived,
                  kind,
@@ -132,9 +125,7 @@ pub async fn get_chats(
                 let unread_count = unread_counts.get(&id).copied().unwrap_or(0);
                 let unread_mentions = mention_counts.get(&id).copied().unwrap_or(0);
                 let unread_reactions = reaction_counts.get(&id).copied().unwrap_or(0);
-                let message = message
-                    .and_then(|message| message_response_map.remove(&message.id))
-                    .map(message_response_preview);
+                let message = message_previews.remove(&id);
                 let peer = if kind == GroupKind::Dm {
                     let peer_uid = if dm_uid1 == Some(uid) {
                         dm_uid2

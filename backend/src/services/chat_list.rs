@@ -1,10 +1,21 @@
+use std::collections::{HashMap, HashSet};
+
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 
 use crate::{
+    dto::messages::{MessagePreview, MessagePreviewAttachment},
     models::{GroupKind, Message},
-    schema::{group_membership, groups, media, messages},
-    services::notification_preferences::ChatNotificationSetting,
+    schema::{attachments, group_membership, groups, media, messages, stickers},
+    services::{
+        avatars::AvatarService,
+        messages::{
+            build_message_preview, build_sender, extract_mention_uids, MessagePreviewInput,
+        },
+        notification_preferences::ChatNotificationSetting,
+        single_forwarding::ForwardOrigins,
+        user::lookup_user_profiles,
+    },
 };
 
 #[derive(Queryable)]
@@ -116,10 +127,191 @@ pub(crate) fn load_chat_page(
         .load(conn)
 }
 
+/// Hydrate one last-message preview per chat, without conversation-only metadata.
+pub(crate) fn load_last_message_previews(
+    conn: &mut PgConnection,
+    messages: Vec<Message>,
+    avatars: &AvatarService,
+) -> HashMap<i64, MessagePreview> {
+    if messages.is_empty() {
+        return HashMap::new();
+    }
+    let origins = ForwardOrigins::load_attribution(conn, messages.iter()).unwrap_or_else(|error| {
+        tracing::error!(?error, "failed to load chat preview attribution");
+        Default::default()
+    });
+    let mut uids = HashSet::new();
+    let mut mention_uids = Vec::with_capacity(messages.len());
+    let mut message_ids = Vec::with_capacity(messages.len());
+    let mut sticker_ids = HashSet::new();
+    for message in &messages {
+        uids.insert(message.sender_uid);
+        let mentions = if message.deleted_at.is_none() {
+            message_ids.push(message.id);
+            sticker_ids.extend(message.sticker_id);
+            message
+                .message
+                .as_deref()
+                .map(extract_mention_uids)
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        uids.extend(&mentions);
+        mention_uids.push(mentions);
+    }
+    let user_avatars = avatars.lookup(&uids.iter().copied().collect::<Vec<_>>());
+    // Attribution displays only the origin's name, not its avatar or reply context.
+    origins.collect_uids(&mut uids);
+    let profiles =
+        lookup_user_profiles(conn, &uids.into_iter().collect::<Vec<_>>()).unwrap_or_default();
+    let sticker_emojis = if sticker_ids.is_empty() {
+        HashMap::new()
+    } else {
+        stickers::table
+            .filter(stickers::id.eq_any(&sticker_ids))
+            .select((stickers::id, stickers::emoji))
+            .load::<(i64, String)>(conn)
+            .unwrap_or_default()
+            .into_iter()
+            .collect()
+    };
+    let mut attachment_previews: HashMap<i64, Vec<MessagePreviewAttachment>> = HashMap::new();
+    if !message_ids.is_empty() {
+        let rows = attachments::table
+            .filter(attachments::message_id.eq_any(&message_ids))
+            .filter(attachments::deleted_at.is_null())
+            .order((
+                attachments::message_id.asc(),
+                attachments::order.asc(),
+                attachments::id.asc(),
+            ))
+            .select((attachments::message_id, attachments::kind))
+            .load::<(Option<i64>, String)>(conn)
+            .unwrap_or_else(|error| {
+                tracing::error!(?error, "failed to load chat preview attachments");
+                Vec::new()
+            });
+        for (message_id, kind) in rows {
+            if let Some(message_id) = message_id {
+                attachment_previews
+                    .entry(message_id)
+                    .or_default()
+                    .push(MessagePreviewAttachment { kind });
+            }
+        }
+    }
+    messages
+        .into_iter()
+        .zip(mention_uids)
+        .map(|(message, mentions)| {
+            let forwarded_from_name = origins.name_for(&message, &profiles);
+            (
+                message.chat_id,
+                build_message_preview(
+                    MessagePreviewInput {
+                        system_kind: message.system_kind,
+                        forwarded_from_name,
+                        id: message.id,
+                        client_generated_id: message.client_generated_id,
+                        created_at: message.created_at,
+                        sender: build_sender(message.sender_uid, &user_avatars, &profiles),
+                        message: message.message,
+                        message_type: message.message_type,
+                        sticker_id: message.sticker_id,
+                        attachments: attachment_previews.remove(&message.id).unwrap_or_default(),
+                        deleted_at: message.deleted_at,
+                        mention_source: None,
+                        mention_uids: Some(mentions),
+                    },
+                    &sticker_emojis,
+                    &user_avatars,
+                    &profiles,
+                ),
+            )
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use diesel::connection::SimpleConnection;
+
+    #[test]
+    fn last_message_previews_preserve_display_data_and_redact_deleted_content() {
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        let mut conn = PgConnection::establish(&url).unwrap();
+        conn.test_transaction::<_, diesel::result::Error, _>(|conn| {
+            conn.batch_execute(
+                "CREATE TEMP TABLE messages (LIKE public.messages INCLUDING ALL);
+                 CREATE TEMP TABLE attachments (LIKE public.attachments INCLUDING ALL);
+                 CREATE TEMP TABLE stickers (LIKE public.stickers INCLUDING ALL);
+                 INSERT INTO discuz.common_member(uid, username, loginname) VALUES
+                   (987665900, 'preview-sender', 'preview-sender'),
+                   (987665901, 'preview-mention', 'preview-mention'),
+                   (987665902, 'preview-origin', 'preview-origin');
+                 INSERT INTO stickers(id, media_id, emoji) VALUES (77, 88, '🙂');
+                 INSERT INTO messages(id, chat_id, sender_uid, message_type, system_kind, message,
+                                      client_generated_id, created_at) VALUES
+                   (1, 99, 987665902, 'text', NULL, 'origin @[uid:987665902]', 'preview-origin', NOW()),
+                   (10, 10, 987665900, 'text', NULL, 'hello @[uid:987665901] @[uid:987665901]', 'preview-text', NOW()),
+                   (11, 11, 987665900, 'sticker', NULL, NULL, 'preview-sticker', NOW()),
+                   (12, 12, 987665900, 'text', NULL, 'forwarded text', 'preview-forward', NOW()),
+                   (13, 13, 987665900, 'system', 'member_joined', '{\"text\":\"member joined\",\"links\":{\"uid\":987665901}}', 'preview-system', NOW()),
+                   (14, 14, 987665900, 'text', NULL, 'secret @[uid:987665902]', 'preview-deleted', NOW());
+                 UPDATE messages SET forwarded_from_message_id = 1 WHERE id IN (11, 12, 14);
+                 UPDATE messages SET sticker_id = 77 WHERE id IN (11, 14);
+                 UPDATE messages SET deleted_at = NOW() WHERE id = 14;
+                 INSERT INTO attachments(id, message_id, kind, external_reference, size,
+                                         created_at, \"order\", deleted_at) VALUES
+                   (100, 10, 'image/png', 'second', 1, NOW(), 1, NULL),
+                   (101, 10, 'image/jpeg', 'first', 1, NOW(), 0, NULL),
+                   (102, 10, 'image/gif', 'removed', 1, NOW(), 0, NOW()),
+                   (103, 14, 'application/pdf', 'secret', 1, NOW(), 0, NULL);",
+            )?;
+            let messages = messages::table
+                .filter(messages::id.between(10, 14))
+                .select(Message::as_select())
+                .load(conn)?;
+            let avatars = AvatarService::new(
+                None,
+                std::sync::Arc::new(super::super::avatars::AvatarMetrics::new(
+                    &prometheus::Registry::new(),
+                )),
+            );
+            let previews = load_last_message_previews(conn, messages, &avatars);
+            let text = &previews[&10];
+            assert_eq!(text.sender.name.as_deref(), Some("preview-sender"));
+            assert_eq!(text.message.as_deref(), Some("hello @[uid:987665901] @[uid:987665901]"));
+            assert_eq!(text.mentions.iter().map(|mention| (mention.uid, mention.username.as_deref())).collect::<Vec<_>>(),
+                       [(987665901, Some("preview-mention"))]);
+            assert_eq!(text.attachments.iter().map(|attachment| attachment.kind.as_str()).collect::<Vec<_>>(),
+                       ["image/jpeg", "image/png"]);
+            let sticker = &previews[&11];
+            assert_eq!(sticker.sticker.as_ref().unwrap().emoji, "🙂");
+            assert!(sticker.forwarded_from_name.is_none());
+            let forwarded = &previews[&12];
+            assert_eq!(forwarded.forwarded_from_name.as_deref(), Some("preview-origin"));
+            assert!(forwarded.mentions.is_empty());
+            let system = &previews[&13];
+            assert_eq!(system.message.as_deref(), Some("member joined"));
+            assert_eq!(system.system_links.as_ref().unwrap().uid, Some(987665901));
+            let deleted = &previews[&14];
+            assert!(deleted.is_deleted);
+            assert_eq!(deleted.sender.name.as_deref(), Some("preview-sender"));
+            assert!(deleted.message.is_none());
+            assert!(deleted.sticker.is_none());
+            assert!(deleted.attachments.is_empty());
+            assert!(deleted.mentions.is_empty());
+            assert!(deleted.forwarded_from_name.is_none());
+            assert!(deleted.system_links.is_none());
+            Ok(())
+        });
+    }
 
     #[test]
     fn visible_order_and_cursors_share_the_same_message_boundary() {

@@ -162,6 +162,21 @@ but the API still waits for pending migrations. On large production tables, appl
 the index migration before restarting the API to keep that one-time build out of
 the restart's readiness window.
 
+## Chat list previews
+
+`GET /chats` and RPC `chats.list` hydrate only the fields returned in each
+`lastMessage` preview: sender, text and system links, mentions, sticker emoji,
+ordered attachment kinds, and the forwarding origin's name. Profile and attachment
+lookups are batched across the page. Deleted messages retain their sender and event
+identity but redact content.
+
+List previews do not load quoted replies, thread reply counts, reaction details,
+sticker favorites, or forwarded-bundle previews. Full conversation message
+responses retain their normal metadata hydration.
+
+Discuz avatar lookups share the bounded, per-process TTL cache described in
+[Avatar lookup](docs/metrics.md#avatar-lookup).
+
 ## Unread counting
 
 Main-chat unread counts come directly from PostgreSQL, not a process-local message

@@ -264,8 +264,13 @@ of the backend README](../README.md#scoped-websocket-presence).
 | Family | Type / labels | Meaning and recording boundary | Buckets / cardinality |
 | --- | --- | --- | --- |
 | `discuz_avatar_lookup_duration_seconds` | Histogram | Enabled Discuz avatar lookup latency for a requested UID batch, in seconds. | `H6`; no labels. Lookups return without recording when avatar resolution is not configured. |
-| `discuz_avatar_lookup_fs_duration_seconds` | Histogram | Filesystem portion of an enabled Discuz avatar lookup, in seconds. | `H6`; no labels. |
+| `discuz_avatar_lookup_fs_duration_seconds` | Histogram | Time spent on filesystem metadata calls made by this enabled Discuz avatar lookup, in seconds; cache hits and coalesced waits contribute zero. | `H6`; no labels. |
 | `discuz_avatar_lookup_users_total` | Counter | Requested users processed by enabled Discuz avatar lookups. | No labels. |
+
+Avatar URLs and missing-avatar placeholders are cached per UID for 60 seconds
+after insertion; hits do not extend the TTL. The shared cache has a capacity of
+20,000 entries and may evict or reject entries under capacity pressure. Concurrent
+misses for the same UID share one filesystem lookup.
 
 ## Client tracking and daily activity
 
