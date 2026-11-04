@@ -46,13 +46,13 @@ BEGIN
     END IF;
 
     IF affected_chat_ids IS NOT NULL THEN
-        INSERT INTO public.chat_unread_revisions (chat_id, revision)
-        SELECT g.id, nextval('public.chat_unread_revision_sequence')
-        FROM public.groups g
+        INSERT INTO chat_unread_revisions (chat_id, revision)
+        SELECT g.id, nextval('chat_unread_revision_sequence')
+        FROM groups g
         WHERE g.id = ANY(affected_chat_ids)
         ORDER BY g.id
         ON CONFLICT (chat_id) DO UPDATE
-            SET revision = nextval('public.chat_unread_revision_sequence');
+            SET revision = nextval('chat_unread_revision_sequence');
     END IF;
     RETURN NULL;
 END;
