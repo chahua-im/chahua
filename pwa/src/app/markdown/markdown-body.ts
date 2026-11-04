@@ -1,14 +1,6 @@
-import {
-  afterRenderEffect,
-  Component,
-  DestroyRef,
-  effect,
-  ElementRef,
-  inject,
-  input,
-  output,
-  Renderer2,
-} from '@angular/core';
+import { afterRenderEffect, Component, DestroyRef, ElementRef, inject, input, output, Renderer2 } from '@angular/core';
+import { translateSignal } from '@jsverse/transloco';
+import { copyText } from '../api/clipboard';
 import { attachScrollbars } from '../scrolling/overlay-scrollbars';
 import { highlightCodeBlock } from './code-highlight';
 import type { MarkdownNode } from './nodes';
@@ -33,6 +25,7 @@ export class MarkdownBody {
   readonly nodes = input.required<readonly MarkdownNode[]>();
   readonly blocks = input(false);
   readonly summary = input(false);
+  readonly copyEnabled = input(true);
   readonly mention = output<number>();
   /** An anchor with an `internal` target was activated; the value is the in-app path. */
   readonly follow = output<string>();
@@ -41,12 +34,15 @@ export class MarkdownBody {
   private readonly renderer = inject(Renderer2);
   private readonly destroy = inject(DestroyRef);
 
+  private readonly copyLabel = translateSignal('messages.menu.actions.copy');
+  private readonly copiedLabel = translateSignal('messages.menu.notice.copied');
+  private readonly failedLabel = translateSignal('messages.menu.notice.failed');
   private readonly spoilers: SpoilerParticles[] = [];
+  private readonly copyResets = new Map<HTMLButtonElement, number>();
 
   constructor() {
-    effect(() => this.render(this.nodes()));
     afterRenderEffect((onCleanup) => {
-      this.nodes();
+      this.render(this.nodes());
       const scrollbars = [...this.host.nativeElement.querySelectorAll('pre')].map((element) =>
         attachScrollbars(element),
       );
@@ -56,6 +52,8 @@ export class MarkdownBody {
   }
 
   private render(nodes: readonly MarkdownNode[]) {
+    for (const timer of this.copyResets.values()) window.clearTimeout(timer);
+    this.copyResets.clear();
     for (const spoiler of this.spoilers) spoiler.destroy();
     this.spoilers.length = 0;
     const parent = this.host.nativeElement;
@@ -101,7 +99,10 @@ export class MarkdownBody {
         }
         for (const child of node.children) element.append(this.build(child));
         if (node.tag === 'pre') {
-          for (const code of element.querySelectorAll('code')) highlightCodeBlock(code);
+          const code = element.querySelector('code')!;
+          const language = code.className.replace(/^language-/, '');
+          highlightCodeBlock(code);
+          return this.buildCodeBlock(element, code.textContent ?? '', language);
         }
         if (node.attrs?.['class'] === 'spoiler') {
           const content: HTMLElement = this.renderer.createElement('span');
@@ -131,5 +132,59 @@ export class MarkdownBody {
         return element;
       }
     }
+  }
+
+  private buildCodeBlock(pre: HTMLElement, text: string, language: string): HTMLElement {
+    const block: HTMLElement = this.renderer.createElement('div');
+    block.className = 'code-block';
+    const header: HTMLElement = this.renderer.createElement('div');
+    header.className = 'code-header';
+    const label: HTMLElement = this.renderer.createElement('span');
+    label.textContent = language;
+    const button: HTMLButtonElement = this.renderer.createElement('button');
+    button.type = 'button';
+    button.className = 'code-copy';
+    button.disabled = !this.copyEnabled() || this.summary();
+    const copyLabel = this.copyLabel();
+    const copiedLabel = this.copiedLabel();
+    const failedLabel = this.failedLabel();
+    button.title = copyLabel;
+    const svg = this.renderer.createElement('svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    const path = this.renderer.createElement('path', 'svg');
+    const copyPath = 'M9 5H5v14h10v-4M9 3h10v12H9z';
+    path.setAttribute('d', copyPath);
+    svg.append(path);
+    button.append(svg);
+    button.addEventListener('pointerdown', (event) => event.stopPropagation());
+    button.addEventListener('contextmenu', (event) => event.stopPropagation());
+    button.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      window.clearTimeout(this.copyResets.get(button));
+      this.copyResets.delete(button);
+      button.disabled = true;
+      try {
+        await copyText(text);
+        if (!block.isConnected) return;
+        path.setAttribute('d', 'm5 12 4 4L19 6');
+        button.title = copiedLabel;
+        this.copyResets.set(
+          button,
+          window.setTimeout(() => {
+            path.setAttribute('d', copyPath);
+            button.title = copyLabel;
+            this.copyResets.delete(button);
+          }, 3000),
+        );
+      } catch {
+        path.setAttribute('d', 'M12 8v5m0 3v.01M12 3 2 21h20z');
+        button.title = failedLabel;
+      } finally {
+        button.disabled = !this.copyEnabled() || this.summary();
+      }
+    });
+    header.append(label, button);
+    block.append(header, pre);
+    return block;
   }
 }

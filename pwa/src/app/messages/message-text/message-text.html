@@ -2,6 +2,7 @@
   <app-markdown-body
     [nodes]="nodes"
     [blocks]="prepared().hasBlocks"
+    [copyEnabled]="interactive()"
     (mention)="profile($event)"
     (follow)="followMarkdown($event)" />
 } @else {
