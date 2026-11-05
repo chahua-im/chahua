@@ -33,7 +33,6 @@ export class AttachmentUpload {
   private retryDelay = 1_000;
   private reconnect = false;
   retryable = true;
-  private readonly offline = () => this.attempt?.abort(new UploadError(UploadErrorCode.Offline));
   private readonly online = () => {
     if (!this.retryable) return;
     this.reconnect = !!this.pending;
@@ -46,7 +45,6 @@ export class AttachmentUpload {
     readonly purpose: AttachmentUploadPurpose,
   ) {
     this.url = URL.createObjectURL(file);
-    window.addEventListener('offline', this.offline);
     window.addEventListener('online', this.online);
     void this.retry();
   }
@@ -62,12 +60,7 @@ export class AttachmentUpload {
     this.pending = this.run().finally(() => {
       this.pending = undefined;
       this.attempt = undefined;
-      if (
-        !this.controller.signal.aborted &&
-        this.state().status === UploadStatus.Failed &&
-        this.retryable &&
-        navigator.onLine !== false
-      ) {
+      if (!this.controller.signal.aborted && this.state().status === UploadStatus.Failed && this.retryable) {
         this.timer = setTimeout(() => void this.retry(), this.reconnect ? 0 : this.retryDelay);
         this.retryDelay = Math.min(this.retryDelay * 2, 30_000);
       }
@@ -80,7 +73,6 @@ export class AttachmentUpload {
     if (this.controller.signal.aborted) return;
     this.controller.abort();
     clearTimeout(this.timer);
-    window.removeEventListener('offline', this.offline);
     window.removeEventListener('online', this.online);
     if (this.state().status !== UploadStatus.Ready)
       this.uploadState.update((state) => ({ ...state, status: UploadStatus.Failed }));
@@ -106,7 +98,6 @@ export class AttachmentUpload {
       if (!this.file.size) throw new UploadError(UploadErrorCode.Empty);
       if (!this.file.name.trim() || Array.from(this.file.name).length > 255)
         throw new UploadError(UploadErrorCode.Filename);
-      if (navigator.onLine === false) throw new UploadError(UploadErrorCode.Offline);
       const config = await firstValueFrom(
         this.api.attachments.getConfig().pipe(timeout(IDLE_TIMEOUT), takeUntil(aborted)),
       );
@@ -186,7 +177,6 @@ export function uploadBlob(
       settled = true;
       clearTimeout(timer);
       signal?.removeEventListener('abort', abort);
-      window.removeEventListener('offline', abort);
       if (error) reject(error);
       else resolve();
     };
@@ -218,12 +208,11 @@ export function uploadBlob(
       );
     xhr.onerror = () => finish(new UploadError(UploadErrorCode.Network));
     xhr.onabort = () => finish(new DOMException('上传取消', 'AbortError'));
-    if (signal?.aborted || navigator.onLine === false) {
+    if (signal?.aborted) {
       finish(new DOMException('上传取消', 'AbortError'));
       return;
     }
     signal?.addEventListener('abort', abort, { once: true });
-    window.addEventListener('offline', abort, { once: true });
     activity();
     xhr.send(blob);
   });

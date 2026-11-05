@@ -573,7 +573,6 @@ export class MessageOutbox {
     const task = this.tasks.get(item)!;
     const submitted = (!item.confirmed() && task.create) || task.ready!;
     try {
-      if (navigator.onLine === false) throw new RpcTransportError('disconnected');
       const id = item.editId ?? item.confirmed()?.id;
       task.inflight = submitted;
       if (id == null) task.create = submitted;
@@ -757,25 +756,20 @@ export class MessageOutbox {
   private schedule(item: OutgoingMessage) {
     const task = this.tasks.get(item)!;
     clearTimeout(task.timer);
-    if (!task.retryable || item.disposed || navigator.onLine === false) return;
+    if (!task.retryable || item.disposed) return;
     task.timer = setTimeout(() => void this.retry(item), task.reconnect ? 0 : task.retryDelay);
     task.reconnect = false;
     task.retryDelay = Math.min(task.retryDelay * 2, 30_000);
   }
 
-  private async request<T>(item: OutgoingMessage, request: Observable<T>) {
-    try {
-      return await firstValueFrom(
-        request.pipe(
-          timeout(REQUEST_TIMEOUT),
-          takeUntil(merge(this.tasks.get(item)!.stopped, fromEvent(window, 'offline'))),
-          takeUntilDestroyed(this.destroyRef),
-        ),
-      );
-    } catch (error) {
-      if (navigator.onLine === false) throw new RpcTransportError('disconnected');
-      throw error;
-    }
+  private request<T>(item: OutgoingMessage, request: Observable<T>) {
+    return firstValueFrom(
+      request.pipe(
+        timeout(REQUEST_TIMEOUT),
+        takeUntil(this.tasks.get(item)!.stopped),
+        takeUntilDestroyed(this.destroyRef),
+      ),
+    );
   }
 
   private async checkPublished(item: OutgoingMessage, id: SnowflakeID) {
@@ -897,6 +891,7 @@ function retryable(error: unknown) {
     (error instanceof RpcError &&
       (error.code === RpcErrorCode.Unavailable ||
         error.code === RpcErrorCode.Internal ||
+        error.code === RpcErrorCode.DispatcherInternal ||
         error.code === RpcErrorCode.Overloaded))
   );
 }

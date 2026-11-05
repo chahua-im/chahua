@@ -52,7 +52,6 @@ export function uploadFailure(error: unknown, stage: UploadStage, maximumSize?: 
         : undefined;
   let code: UploadErrorCode;
   if (error instanceof UploadError) code = error.code;
-  else if (navigator.onLine === false) code = UploadErrorCode.Offline;
   else if (error instanceof RpcTransportError) {
     code =
       error.kind === 'timeout'
@@ -72,7 +71,9 @@ export function uploadFailure(error: unknown, stage: UploadStage, maximumSize?: 
             ? UploadErrorCode.Forbidden
             : error.code === RpcErrorCode.Overloaded
               ? UploadErrorCode.RateLimited
-              : error.code === RpcErrorCode.Unavailable || error.code === RpcErrorCode.Internal
+              : error.code === RpcErrorCode.Unavailable ||
+                  error.code === RpcErrorCode.Internal ||
+                  error.code === RpcErrorCode.DispatcherInternal
                 ? UploadErrorCode.Server
                 : error.code === RpcErrorCode.BadRequest && detail === 'Attachment size must be positive'
                   ? UploadErrorCode.Empty
