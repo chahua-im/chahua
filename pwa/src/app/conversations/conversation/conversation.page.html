@@ -7,8 +7,11 @@
     </ion-buttons>
     @if (showBackToChat()) {
       <ion-buttons slot="start" class="ion-hide-md-down">
-        <ion-button (click)="backToChat()">
-          <ion-icon slot="icon-only" [icon]="toolbarIcons.chevronBack" />
+        <ion-button
+          class="parent-chat-button"
+          (click)="backToChat()"
+          [title]="'conversation.actions.parentChat' | transloco">
+          <ng-container [ngTemplateOutlet]="parentChatIcon" />
         </ion-button>
       </ion-buttons>
     }
@@ -38,6 +41,14 @@
       </div>
     </ion-title>
     <ion-buttons #toolbarActions slot="end" class="ion-hide-md-up">
+      @if (showBackToChat()) {
+        <ion-button
+          class="parent-chat-button"
+          (click)="backToChat()"
+          [title]="'conversation.actions.parentChat' | transloco">
+          <ng-container [ngTemplateOutlet]="parentChatIcon" />
+        </ion-button>
+      }
       @if (compactToolbar()) {
         <ion-button (click)="actionsMenu.present($event)">
           <ion-icon slot="icon-only" [icon]="toolbarIcons.ellipsisVertical" />
@@ -65,6 +76,14 @@
         <app-message-preview [message]="pin.message"></app-message-preview>
       </button>
       <ion-buttons slot="end">
+        @if (!threadId() && !pin.message.replyRootId && pin.message.threadInfo) {
+          <ion-button
+            class="pinned-thread"
+            [title]="'conversation.actions.openThread' | transloco"
+            (click)="openThread(pin.message.id)">
+            <ion-icon slot="icon-only" [icon]="toolbarIcons.chatbubbles" />
+          </ion-button>
+        }
         <ion-button [routerLink]="pinsHref()">
           <ion-icon slot="icon-only" [icon]="listIcon"></ion-icon>
         </ion-button>
@@ -532,6 +551,7 @@
 
 <ion-alert
   [isOpen]="!!pendingRecall()"
+  cssClass="recall-confirmation"
   [header]="'messages.menu.confirm.recallTitle' | transloco"
   [message]="
     (chatTitle().isDm ? 'messages.selection.recallConfirmDm' : 'messages.selection.recallConfirm')
@@ -539,7 +559,7 @@
   "
   [buttons]="[
     { text: ('common.cancel' | transloco), role: 'cancel' },
-    { text: ('common.confirm' | transloco), role: 'confirm' },
+    { text: ('common.confirm' | transloco), role: 'confirm', cssClass: 'confirm-action' },
   ]"
   (didDismiss)="confirmRecallSelection($event)" />
 <ion-toast
@@ -558,3 +578,17 @@
   [message]="forwardError() ? (forwardError()! | transloco) : ''"
   [duration]="3000"
   (didDismiss)="forwardError.set(undefined)" />
+
+<ng-template #parentChatIcon>
+  <svg
+    class="parent-chat-icon"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.7"
+    stroke-linecap="round"
+    stroke-linejoin="round">
+    <path d="M20 10V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h2v4l4-4h2" />
+    <path d="M21 21v-5a3 3 0 0 0-3-3h-6m3-3-3 3 3 3" />
+  </svg>
+</ng-template>

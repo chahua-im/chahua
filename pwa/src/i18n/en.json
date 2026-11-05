@@ -435,6 +435,8 @@
   },
   "conversation": {
     "actions": {
+      "openThread": "Open topic",
+      "parentChat": "Go to parent chat",
       "search": "Search",
       "mute": "Mute",
       "unmute": "Unmute",

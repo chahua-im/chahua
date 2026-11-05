@@ -130,6 +130,8 @@ describe('ChatListContent', () => {
   const metadata = {
     chatState: (id: SnowflakeID) => chats.items().find((chat) => chat.id === id),
     notificationDefaults: session.user,
+    isTemporarilyMuted: (id: SnowflakeID) =>
+      Date.parse(chats.items().find((chat) => chat.id === id)?.mutedUntil ?? '') > Date.now(),
     isMuted: (id: SnowflakeID) =>
       Date.parse(chats.items().find((chat) => chat.id === id)?.mutedUntil ?? '') > Date.now(),
     get: () => chatInfo(),
@@ -507,7 +509,6 @@ describe('ChatListContent', () => {
       ['/chats/chat', decodeId(thread.chatId), 'thread', decodeId(thread.threadRootMessage.id)],
       ['/chats/chat', decodeId(testChat.id)],
     ]);
-    expect((fixture.componentInstance['rows']()[0].entry as { state?: unknown }).state).toEqual({ fromChatList: true });
     expect(fixture.nativeElement.textContent).toContain('话题开头');
     const release = threads.activate.mock.results[0].value;
     preferences.showThreadsInMessages.set(false);

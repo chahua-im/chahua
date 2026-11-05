@@ -1,4 +1,4 @@
-import { DOCUMENT, Location, NgTemplateOutlet } from '@angular/common';
+import { DOCUMENT, NgTemplateOutlet } from '@angular/common';
 import {
   afterNextRender,
   afterRenderEffect,
@@ -55,6 +55,7 @@ import {
   arrowRedoOutline,
   arrowUndoOutline,
   at,
+  chatbubbles,
   chevronBack,
   chevronDown,
   chevronUpOutline,
@@ -248,6 +249,7 @@ export class ConversationPage {
       ]);
   }
   protected readonly toolbarIcons = {
+    chatbubbles,
     searchOutline,
     forwardOutline: arrowRedoOutline,
     notificationsOutline,
@@ -674,15 +676,9 @@ export class ConversationPage {
       /* The conversation can remain usable when the root is unavailable. */
     }
   }
-  private readonly location = inject(Location);
   private readonly nav = inject(NavController);
   private readonly outlet = inject(IonRouterOutlet, { optional: true });
-  /** A thread opened from the chat list has no parent conversation behind it. */
-  private readonly fromChatList = linkedSignal({
-    source: this.entryKey,
-    computation: () => !!(this.location.getState() as { fromChatList?: boolean } | null)?.fromChatList,
-  });
-  protected readonly showBackToChat = computed(() => !!this.threadId() && !this.fromChatList());
+  protected readonly showBackToChat = computed(() => !!this.threadId());
 
   /** Mobile follows real history, matching the browser's back gesture. */
   protected back() {
@@ -699,11 +695,11 @@ export class ConversationPage {
     }
   }
 
-  /** Desktop has no browser-style back button; mirror the Escape shortcut's return-to-chat. */
+  /** Start a new Ionic navigation stack at the parent conversation and replace this browser entry. */
   protected backToChat() {
     const threadId = this.threadId();
     if (!threadId) return;
-    void this.router.navigate(['/chats/chat', decodeId(this.id())], {
+    void this.nav.navigateRoot(['/chats/chat', decodeId(this.id())], {
       replaceUrl: true,
       fragment: `msg=${decodeId(threadId)}`,
     });

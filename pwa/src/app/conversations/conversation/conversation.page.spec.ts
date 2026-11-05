@@ -1094,11 +1094,10 @@ describe('ConversationPage', () => {
     expect(back).toHaveBeenCalledOnce();
   });
 
-  it('hides the desktop return-to-chat button for a thread opened from the chat list', async () => {
-    vi.spyOn(TestBed.inject(Location), 'getState').mockReturnValue({ fromChatList: true });
+  it('shows the parent-chat button for a directly opened thread', async () => {
     await enterThread();
     await settleMetadata();
-    expect(component['showBackToChat']()).toBe(false);
+    expect(component['showBackToChat']()).toBe(true);
   });
 
   it('returns a directly opened conversation to the list without leaving the app', () => {
@@ -1127,12 +1126,33 @@ describe('ConversationPage', () => {
   it('returns a thread to its root message on desktop', async () => {
     await enterThread();
     await settleMetadata();
-    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    const navigate = vi.spyOn(TestBed.inject(NavController), 'navigateRoot').mockResolvedValue(true);
     component['backToChat']();
     expect(navigate).toHaveBeenCalledWith(['/chats/chat', wireChat.id], {
       replaceUrl: true,
       fragment: 'msg=100',
     });
+  });
+
+  it('keeps the parent-chat action visible in the collapsed mobile toolbar and starts a new navigation stack', async () => {
+    await enterThread();
+    await settleMetadata();
+    component['compactToolbar'].set(true);
+    fixture.detectChanges();
+    const navigate = vi.spyOn(TestBed.inject(NavController), 'navigateRoot').mockResolvedValue(true);
+    const button = fixture.nativeElement.querySelector(
+      'ion-buttons.ion-hide-md-up[slot="end"] .parent-chat-button',
+    ) as HTMLElement;
+    expect(button).toBeTruthy();
+    button.click();
+    expect(navigate).toHaveBeenCalledWith(['/chats/chat', wireChat.id], {
+      replaceUrl: true,
+      fragment: 'msg=100',
+    });
+  });
+
+  it('does not show parent-chat navigation in a regular conversation', () => {
+    expect(fixture.nativeElement.querySelector('.parent-chat-button')).toBeNull();
   });
 
   it('opens the collapsed toolbar actions from the narrow-screen button', () => {
@@ -1476,6 +1496,26 @@ describe('ConversationPage', () => {
       destroy: () => {},
     } as unknown as WaveSurfer);
   }
+
+  it('opens a pinned topic directly without locating or cycling the pinned preview', () => {
+    const message = { ...testMessage, threadInfo: { replyCount: 0 } };
+    pinMessage('201', message);
+    fixture.detectChanges();
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    const locate = vi.spyOn(component, 'locatePin' as keyof typeof component);
+    const button = fixture.nativeElement.querySelector('.pinned-thread') as HTMLElement;
+    expect(button).not.toBeNull();
+    button.click();
+    expect(navigate).toHaveBeenCalledWith(['/chats/chat', wireChat.id, 'thread', decodeId(message.id)]);
+    expect(locate).not.toHaveBeenCalled();
+    expect(component['selectedPinId']()).toBe(encodeId('201'));
+  });
+
+  it('does not show a topic shortcut for an ordinary pinned message', () => {
+    pinMessage('201', { ...testMessage, threadInfo: undefined });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.pinned-thread')).toBeNull();
+  });
 
   function pinMessage(id: string, message = testMessage) {
     events.next({

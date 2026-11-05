@@ -471,3 +471,11 @@ ion-modal.route-panel.panel-sidebar {
 app-panel-page[hidden] {
   display: none;
 }
+
+// Recall is destructive; keep cancellation and explanatory text neutral.
+ion-alert.recall-confirmation {
+  .alert-title,
+  .alert-button.confirm-action {
+    color: var(--ion-color-danger);
+  }
+}

@@ -435,6 +435,8 @@
   },
   "conversation": {
     "actions": {
+      "openThread": "進入話題",
+      "parentChat": "前往所屬聊天",
       "search": "搜尋",
       "mute": "靜音",
       "unmute": "取消靜音",
@@ -482,7 +484,7 @@
         "pinned": "置頂了{{ message }}",
         "unpinned": "取消置頂了{{ message }}",
         "threadPinned": "在本話題中置頂了{{ message }}",
-        "threadUnpinned": "在話題中取消置頂了{{ message }}",
+        "threadUnpinned": "在本話題中取消置頂了{{ message }}",
         "accepted": "接受了 {{ target }} 的好友申請",
         "message": "訊息"
       },
@@ -541,7 +543,7 @@
       "tooManyAttachments": "每則訊息最多新增 20 個附件。",
       "editMediaOnly": "編輯訊息時只能新增圖片或影片。",
       "placeholder": "輸入訊息",
-      "media": "媒體",
+      "media": "圖片和影片",
       "files": "檔案",
       "blockedTitle": "無法傳送訊息",
       "blockedSelf": "你已將對方封鎖，解除封鎖後可以繼續聊天。",

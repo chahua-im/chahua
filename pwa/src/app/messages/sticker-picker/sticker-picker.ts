@@ -1,6 +1,7 @@
 import { NgTemplateOutlet } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import {
+  afterRenderEffect,
   Component,
   computed,
   DestroyRef,
@@ -150,6 +151,8 @@ export class StickerPicker {
   private readonly selectingPack = signal(false);
   private readonly libraryScroll = viewChild<ElementRef<HTMLElement>>('libraryScroll');
   private readonly groupElements = viewChildren<ElementRef<HTMLElement>>('groupSection');
+  private readonly packTabViewport = viewChild<ElementRef<HTMLElement>>('packTabViewport');
+  protected readonly packTabWidth = signal<number | undefined>(undefined);
   private readonly packTabs = viewChildren<ElementRef<HTMLElement>>('packTab');
   protected readonly groups = computed<StickerGroup[]>(() => {
     if (!this.grouped())
@@ -227,6 +230,31 @@ export class StickerPicker {
     approach: (id) => void this.loadGroup(id),
   });
   constructor() {
+    afterRenderEffect({
+      read: (onCleanup) => {
+        const viewport = this.packTabViewport()?.nativeElement;
+        const count = this.packTabs().length;
+        if (!viewport || !this.embedded()) return;
+        const resize = () => {
+          const width = viewport.clientWidth;
+          if (!width) return;
+          // Keep the right edge through the center of a cover, not its button padding.
+          const style = getComputedStyle(viewport);
+          const minimum = parseFloat(style.getPropertyValue('--pack-tab-min-width'));
+          const gap = parseFloat(style.columnGap);
+          const leading = parseFloat(style.paddingLeft);
+          const trailing = parseFloat(style.paddingRight);
+          const overflow = leading + trailing + count * minimum + Math.max(0, count - 1) * gap > width;
+          const fullTabs = Math.max(0, Math.floor((width - leading - minimum / 2) / (minimum + gap)));
+          this.packTabWidth.set(overflow ? (width - leading - fullTabs * gap) / (fullTabs + 0.5) : undefined);
+        };
+        resize();
+        const observer = new ResizeObserver(resize);
+        observer.observe(viewport);
+        onCleanup(() => observer.disconnect());
+      },
+    });
+
     this.updates.favoriteChanged.pipe(takeUntilDestroyed()).subscribe((sticker) => {
       this.setFavorite(sticker, sticker.isFavorited);
       this.menu.update((menu) =>

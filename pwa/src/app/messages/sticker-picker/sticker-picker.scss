@@ -57,6 +57,7 @@
   flex-shrink: 0;
 }
 .pack-tabs {
+  --pack-tab-min-width: 44px;
   position: relative;
   display: flex;
   flex: 1;
@@ -64,6 +65,9 @@
   overflow-x: auto;
   gap: 4px;
   padding: 0 8px;
+}
+.pack-tabs .pack-tab {
+  width: var(--pack-tab-width, var(--pack-tab-min-width));
 }
 .pack-actions {
   display: flex;

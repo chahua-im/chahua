@@ -633,6 +633,73 @@ describe('StickerPicker selection during requests', () => {
     expect(fixture.componentInstance['packs']().find((item) => item.id === newPack.id)?.stickerCount).toBe(1);
   });
 
+  it('reveals half a cover on overflow and preserves scrolling when the strip resizes', async () => {
+    let width = 250;
+    const callbacks = new Map<Element, () => void>();
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(private readonly callback: () => void) {}
+        observe(target: Element) {
+          callbacks.set(target, this.callback);
+        }
+        disconnect() {}
+      },
+    );
+    const originalStyle = window.getComputedStyle.bind(window);
+    let minimum = 44,
+      gap = 4,
+      padding = 8;
+    const styles = vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
+      if (element.classList.contains('pack-tabs')) {
+        const style = document.createElement('div').style;
+        style.cssText = originalStyle(element).cssText;
+        style.setProperty('--pack-tab-min-width', String(minimum) + 'px');
+        style.columnGap = String(gap) + 'px';
+        style.paddingLeft = style.paddingRight = String(padding) + 'px';
+        return style;
+      }
+      return originalStyle(element);
+    });
+    const size = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('pack-tabs') ? width : 0;
+    });
+    api.getMySubscribedPacks.mockReturnValueOnce(
+      of({
+        packs: Array.from({ length: 10 }, (_, index) => ({ ...pack, id: encodeId(String(100 + index)) })),
+      }),
+    );
+    try {
+      const { fixture } = await render();
+      const strip = fixture.nativeElement.querySelector('.pack-tabs') as HTMLElement;
+      for (const available of [250, 300, 390]) {
+        if (available === 390) {
+          minimum = 48;
+          gap = 6;
+          padding = 10;
+        }
+        width = available;
+        strip.scrollLeft = 37;
+        callbacks.get(strip)!();
+        fixture.detectChanges();
+        const buttonWidth = Number.parseFloat(strip.style.getPropertyValue('--pack-tab-width'));
+        const centers = Array.from(
+          { length: 11 },
+          (_, index) => padding + index * (buttonWidth + gap) + buttonWidth / 2,
+        );
+        expect(centers.some((center) => Math.abs(center - width) < 0.01)).toBe(true);
+        expect(strip.scrollLeft).toBe(37);
+      }
+      width = 1000;
+      callbacks.get(strip)!();
+      fixture.detectChanges();
+      expect(strip.style.getPropertyValue('--pack-tab-width')).toBe('');
+    } finally {
+      size.mockRestore();
+      styles.mockRestore();
+    }
+  });
+
   async function render(embedded = true, selectable = true) {
     const fixture = TestBed.createComponent(StickerPicker);
     fixture.componentRef.setInput('embedded', embedded);

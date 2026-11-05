@@ -146,7 +146,7 @@
   </div>
   @if (selectable() || packs().length > 1) {
     <div class="pack-bar">
-      <div appScrollbars class="pack-tabs">
+      <div #packTabViewport appScrollbars class="pack-tabs" [style.--pack-tab-width.px]="packTabWidth()">
         @if (selectable()) {
           <button
             #packTab
