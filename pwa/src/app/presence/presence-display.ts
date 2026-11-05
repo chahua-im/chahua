@@ -49,6 +49,7 @@ export class UserPresenceDisplay {
   private readonly presence = inject(Presence);
   protected readonly state = computed(() => (this.active() ? this.presence.user(this.uid()) : undefined));
   protected readonly loading = computed(() => this.active() && this.presence.userLoading(this.uid()));
+  protected readonly failed = computed(() => this.active() && this.presence.userFailed(this.uid()));
   protected readonly showFallback = computed(() => this.active() && this.uid() != null && this.presence.live());
   protected readonly lastSeen = computed(() => lastSeenDisplay(this.state()?.lastSeenAt, this.presence.now()));
 
@@ -73,6 +74,7 @@ export class GroupPresenceDisplay {
   private readonly presence = inject(Presence);
   protected readonly state = computed(() => (this.active() ? this.presence.group(this.chatId()) : undefined));
   protected readonly loading = computed(() => this.active() && this.presence.groupLoading(this.chatId()));
+  protected readonly failed = computed(() => this.active() && this.presence.groupFailed(this.chatId()));
 
   constructor() {
     effect((onCleanup) => {

@@ -78,6 +78,7 @@
     "saving": "Saving…"
   },
   "presence": {
+    "loadFailed": "Unable to load status",
     "online": "Online",
     "groupCounts": "{{ online }} online · {{ members }} members",
     "lastSeen": {

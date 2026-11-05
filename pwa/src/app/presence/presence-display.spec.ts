@@ -18,6 +18,7 @@ describe('UserPresenceDisplay', () => {
     });
     const locale = signal('zh-CN');
     const loading = signal(false);
+    const failed = signal(false);
     const live = signal(true);
     TestBed.configureTestingModule({
       providers: [
@@ -27,6 +28,7 @@ describe('UserPresenceDisplay', () => {
           useValue: {
             user: state,
             userLoading: loading,
+            userFailed: failed,
             live,
             now: () => new Date(2026, 9, 21, 16).getTime(),
             watch: () => () => {},
@@ -76,6 +78,11 @@ describe('UserPresenceDisplay', () => {
     expect(fixture.nativeElement.querySelector('.presence-skeleton')).not.toBeNull();
     expect(fixture.nativeElement.textContent).not.toContain('很久没上线');
     loading.set(false);
+    failed.set(true);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('状态加载失败');
+    expect(fixture.nativeElement.querySelector('.presence-skeleton')).toBeNull();
+    failed.set(false);
     live.set(false);
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent.trim()).toBe('');

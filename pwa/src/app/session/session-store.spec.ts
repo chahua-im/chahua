@@ -5,6 +5,7 @@ import { firstValueFrom } from 'rxjs';
 import { vi } from 'vitest';
 import { RpcApi } from '../../generated/rpc-api';
 import { authInterceptor } from '../api/auth.interceptor';
+import { RpcTransport, RpcConnectionState } from '../api/rpc-transport';
 import { RpcErrorCode } from '../api/rpc-error';
 import { RpcTestPeer, provideRpcTesting } from '../api/rpc-testing';
 import { testChat, testUser, wireChat, wireMessage } from '../api/testing';
@@ -158,6 +159,60 @@ describe('SessionStore', () => {
     expect(session.token()).toBeUndefined();
     expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
     expect(document.cookie).not.toContain(`${COOKIE_KEY}=`);
+  });
+
+  it.each(['notification', 'reconnect'])(
+    'expires the signed-in session on %s authorization failure',
+    async (source) => {
+      session.restoreToken();
+      const initialize = session.initialize();
+      await bootstrap();
+      await initialize;
+      vi.useFakeTimers();
+      if (source === 'notification') peer.notify('session.invalidated', { reason: 'revoked' });
+      else {
+        peer.disconnect();
+        vi.advanceTimersByTime(1_200);
+        peer.open();
+        peer.expect('session.open').error(RpcErrorCode.Unauthorized);
+      }
+      const closed = peer.latest;
+      expect(session.user()).toBeUndefined();
+      expect(session.token()).toBeUndefined();
+      expect(session.expired()).toBe(true);
+      expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
+      expect(document.cookie).not.toContain(`${COOKIE_KEY}=`);
+      expect(TestBed.inject(RpcTransport).state()).toBe(RpcConnectionState.Closed);
+      vi.advanceTimersByTime(120_000);
+      expect(peer.latest).toBe(closed);
+      history.replaceState(null, '', '/?token=replacement-token');
+      session.restoreToken();
+      expect(session.expired()).toBe(false);
+      expect(session.token()).toBe('replacement-token');
+    },
+  );
+
+  it('retains the signed-in account during transient reconnect authentication failure', async () => {
+    session.restoreToken();
+    const initialize = session.initialize();
+    await bootstrap();
+    await initialize;
+    const profile = session.user();
+    vi.useFakeTimers();
+    peer.disconnect();
+    vi.advanceTimersByTime(1_200);
+    peer.open();
+    peer.expect('session.open').error(RpcErrorCode.Unavailable);
+    expect(session.user()).toBe(profile);
+    expect(session.token()).toBe('refreshed-token');
+    expect(session.expired()).toBe(false);
+    vi.advanceTimersByTime(2_400);
+    peer.open();
+    peer
+      .expect('session.open')
+      .flush({ protocolVersion: 1, authenticated: true, uid: testUser.uid, clientId: 'fixture-client' });
+    expect(TestBed.inject(RpcTransport).state()).toBe(RpcConnectionState.Authenticated);
+    expect(session.user()).toBe(profile);
   });
 
   it('keeps login usable when optional group hydration is unavailable', async () => {

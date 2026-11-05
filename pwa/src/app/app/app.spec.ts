@@ -17,6 +17,7 @@ describe('App', () => {
     initialize: vi.fn<() => Promise<void>>(),
     restoreToken: vi.fn(),
     token: signal<string | undefined>('test-token'),
+    expired: signal(false),
     user: signal<typeof testUser | undefined>(undefined),
   };
 
@@ -25,12 +26,13 @@ describe('App', () => {
     session.restoreToken.mockReset();
     session.token.set('test-token');
     session.user.set(undefined);
+    session.expired.set(false);
     vi.stubGlobal('matchMedia', () => ({ matches: false, addListener() {}, removeListener() {} }));
     await TestBed.configureTestingModule({
       imports: [App],
       providers: [
         { provide: AppUpdates, useValue: { promptOpen: signal(false), setInteractive: vi.fn() } },
-        { provide: PushNotifications, useValue: { start: vi.fn() } },
+        { provide: PushNotifications, useValue: { start: vi.fn(), shouldPrompt: () => false } },
         provideRouter([]),
         { provide: SessionStore, useValue: session },
       ],
@@ -399,6 +401,22 @@ describe('App', () => {
     expect(fixture.nativeElement.querySelector('ion-button, a')).toBeNull();
     expect(fixture.nativeElement.querySelector('app-chat-list')).toBeNull();
     expect(TestBed.inject(AppUpdates).setInteractive).toHaveBeenLastCalledWith(false);
+  });
+
+  it('replaces an authenticated view with the expired-login message after reconnect revocation', async () => {
+    session.user.set(testUser);
+    const fixture = TestBed.createComponent(App);
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('ion-split-pane')).not.toBeNull();
+    session.user.set(undefined);
+    session.token.set(undefined);
+    session.expired.set(true);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('ion-split-pane')).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('登录状态已失效');
+    expect(fixture.nativeElement.textContent).toContain('请前往茶话发布帖重新进入');
+    expect(fixture.nativeElement.querySelector('ion-button, a')).toBeNull();
   });
 
   it.each([

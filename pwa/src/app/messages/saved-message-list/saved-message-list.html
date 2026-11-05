@@ -28,7 +28,10 @@
   </div>
 }
 @if (failed()) {
-  <app-load-error [message]="'conversation.loadFailed' | transloco" (retry)="load(!!nextCursor())" />
+  <app-load-error
+    [compact]="!!savedRows().length"
+    [message]="'conversation.loadFailed' | transloco"
+    (retry)="retry()" />
 }
 <ion-toast
   [isOpen]="removeFailed()"

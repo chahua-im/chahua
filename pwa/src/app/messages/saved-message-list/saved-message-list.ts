@@ -1,4 +1,4 @@
-import { Component, computed, DestroyRef, inject, signal } from '@angular/core';
+import { Component, computed, DestroyRef, effect, inject, signal, untracked } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { MessageDatePipe } from '../message-date.pipe';
@@ -23,6 +23,8 @@ import { SessionStore } from '../../session/session-store';
 import { LoadError } from '../../ui/load-error/load-error';
 import { Message, type MessageMenuSelection } from '../message/message';
 import { savedMessageContent } from './saved-message-content';
+import { readPages } from '../../api/query';
+import { RpcError, RpcErrorCode } from '../../api/rpc-error';
 
 @Component({
   selector: 'app-saved-message-list',
@@ -48,6 +50,8 @@ export class SavedMessageList {
   private readonly navigation = inject(ConversationNavigation);
   private readonly destroyRef = inject(DestroyRef);
   private version = 0;
+  private refreshPending = false;
+  private retryMore = false;
   private readonly cancelReads = new Subject<void>();
   protected readonly saved = signal<SavedMessageResponse[]>([]);
   protected readonly savedRows = computed(() =>
@@ -67,10 +71,17 @@ export class SavedMessageList {
   constructor() {
     fillScrollViewport(this.loading, this.failed, this.nextCursor, () => this.load(true));
     this.reset();
+    let owner = this.session.user()?.uid;
+    effect(() => {
+      const uid = this.session.user()?.uid;
+      if (uid === owner) return;
+      owner = uid;
+      untracked(() => this.reset());
+    });
 
     inject(Connection)
       .resync$.pipe(takeUntilDestroyed())
-      .subscribe(() => this.reset());
+      .subscribe(() => this.refresh());
     this.destroyRef.onDestroy(() => this.version++);
   }
   private reset() {
@@ -83,7 +94,23 @@ export class SavedMessageList {
     this.removing.set(false);
     this.failed.set(false);
     this.removeFailed.set(false);
-    void this.load();
+    this.refreshPending = false;
+    if (this.session.user()) void this.load();
+  }
+  private refresh() {
+    // A refreshed snapshot must not resurrect an optimistic deletion still in flight.
+    if (this.removing()) {
+      this.refreshPending = true;
+      return;
+    }
+    this.refreshPending = false;
+    this.version++;
+    this.cancelReads.next();
+    this.loading.set(false);
+    if (this.session.user()) void this.load();
+  }
+  protected retry() {
+    void this.load(this.retryMore);
   }
   protected async more(event: InfiniteScrollCustomEvent) {
     try {
@@ -93,23 +120,41 @@ export class SavedMessageList {
     }
   }
   protected async load(more = false) {
-    if (this.loading() || (more && !this.nextCursor())) return;
+    if (this.loading() || this.removing() || (more && !this.nextCursor())) return;
     const version = this.version;
+    this.retryMore = more;
     this.loading.set(true);
     this.failed.set(false);
     try {
-      const page = await firstValueFrom(
-        this.savedApi.savedMessages
-          .list({ limit: 50, ...(more ? { before: this.nextCursor()! } : {}) })
-          .pipe(takeUntil(this.cancelReads), takeUntilDestroyed(this.destroyRef)),
-      );
+      const read = async (before?: SnowflakeID) => {
+        const page = await firstValueFrom(
+          this.savedApi.savedMessages
+            .list({ limit: 50, ...(before ? { before } : {}) })
+            .pipe(takeUntil(this.cancelReads), takeUntilDestroyed(this.destroyRef)),
+        );
+        return { items: page.savedMessages, cursor: page.nextCursor };
+      };
+      const page = more
+        ? await read(this.nextCursor())
+        : await readPages(read, this.saved().length, () => version === this.version);
       if (version !== this.version) return;
       this.saved.update((items) => [
-        ...new Map([...(more ? items : []), ...page.savedMessages].map((item) => [item.id, item])).values(),
+        ...new Map([...(more ? items : []), ...page.items].map((item) => [item.id, item])).values(),
       ]);
-      this.nextCursor.set(page.nextCursor);
-    } catch {
-      if (version === this.version) this.failed.set(true);
+      this.nextCursor.set(page.cursor);
+    } catch (error) {
+      if (version === this.version) {
+        this.failed.set(true);
+        if (
+          error instanceof RpcError &&
+          (error.code === RpcErrorCode.Unauthorized || error.code === RpcErrorCode.Forbidden)
+        ) {
+          this.saved.set([]);
+          this.nextCursor.set(undefined);
+          this.menu.set(undefined);
+          this.retryMore = false;
+        }
+      }
     } finally {
       if (version === this.version) this.loading.set(false);
     }
@@ -137,7 +182,10 @@ export class SavedMessageList {
         this.removeFailed.set(true);
       }
     } finally {
-      if (version === this.version) this.removing.set(false);
+      if (version === this.version) {
+        this.removing.set(false);
+        if (this.refreshPending) this.refresh();
+      }
     }
   }
 }

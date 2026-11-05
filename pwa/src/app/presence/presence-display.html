@@ -1,5 +1,7 @@
 @if (loading()) {
   <span class="skeleton-block presence-skeleton"></span>
+} @else if (failed()) {
+  <span>{{ 'presence.loadFailed' | transloco }}</span>
 } @else if (state(); as presence) {
   @if (presence.online) {
     <span class="online">{{ 'presence.online' | transloco }}</span>

@@ -130,6 +130,88 @@ describe('RpcTransport', () => {
     peer.verify();
   });
 
+  it('advances reconnect backoff once per closed handshake and resets it after authentication', () => {
+    const { transport, peer } = configure();
+    openAuthenticated(transport, peer);
+    peer.disconnect();
+    for (const delay of [1_000, 2_000, 4_000]) {
+      const previous = peer.latest;
+      vi.advanceTimersByTime(delay - 1);
+      expect(peer.latest).toBe(previous);
+      vi.advanceTimersByTime(1);
+      expect(peer.latest).not.toBe(previous);
+      peer.open();
+      const handshake = peer.expect('session.open');
+      if (delay === 4_000) handshake.flush(OPEN_RESULT);
+      else {
+        peer.disconnect();
+        handshake.flush(OPEN_RESULT); // A closed attempt cannot authenticate the new connection.
+        expect(transport.state()).toBe(RpcConnectionState.Reconnecting);
+      }
+    }
+    expect(transport.state()).toBe(RpcConnectionState.Authenticated);
+    const authenticated = peer.latest;
+    peer.disconnect();
+    vi.advanceTimersByTime(1_000);
+    expect(peer.latest).not.toBe(authenticated);
+    peer.open();
+    peer.expect('session.open').flush(OPEN_RESULT);
+    peer.verify();
+  });
+
+  it.each([false, true])('stops queued writes before clearing a malformed response, cancelled: %s', (cancelled) => {
+    const { transport, peer } = configure();
+    openAuthenticated(transport, peer);
+    const failed = vi.fn();
+    const reads = Array.from({ length: 16 }, () => transport.call('messages.list').subscribe({ error: failed }));
+    const requests = peer.match('messages.list');
+    if (cancelled) reads[0].unsubscribe();
+    transport.call('messages.send', { chatId: '1', message: 'queued' }).subscribe({ error: failed });
+    requests[0].deliver({ jsonrpc: '2.0', id: requests[0].id, error: { code: 'invalid' } });
+    expect(transport.state()).toBe(RpcConnectionState.Closed);
+    peer.expectNone('messages.send');
+    expect(failed).toHaveBeenCalledTimes(cancelled ? 16 : 17);
+    for (const [error] of failed.mock.calls) expect(error).toMatchObject({ kind: 'protocol' });
+    for (const request of requests) request.flush(null);
+    vi.advanceTimersByTime(120_000);
+    peer.expectNone('session.open');
+    peer.verify();
+  });
+
+  it('stops queued development authentication on a malformed binding result', () => {
+    const { transport, peer } = configure();
+    transport.open({ appVersion: 'test' }).subscribe();
+    peer.open();
+    peer.expect('session.open').flush({ protocolVersion: 1, authenticated: false });
+    const failed = vi.fn();
+    transport.call('auth.createDevSession', { uid: 1 }).subscribe({ error: failed });
+    const binding = peer.expect('auth.createDevSession');
+    transport.call('auth.createDevSession', { uid: 2 }).subscribe({ error: failed });
+    binding.flush({});
+    peer.expectNone('auth.createDevSession');
+    expect(failed).toHaveBeenCalledTimes(2);
+    expect(transport.state()).toBe(RpcConnectionState.Closed);
+    peer.verify();
+  });
+
+  it('does not invalidate a replacement session opened synchronously while closing a revoked session', () => {
+    const { transport, peer } = configure();
+    openAuthenticated(transport, peer);
+    const invalidated = vi.fn();
+    transport.sessionInvalidated$.subscribe(invalidated);
+    const failed = vi.fn(() => transport.open({ token: 'replacement', appVersion: 'test' }).subscribe());
+    transport.call('messages.list').subscribe({ error: failed });
+    const request = peer.expect('messages.list');
+    peer.notify('session.invalidated', { reason: 'revoked' });
+    expect(failed).toHaveBeenCalledOnce();
+    expect(invalidated).not.toHaveBeenCalled();
+    request.flush(null);
+    peer.open();
+    peer.expect('session.open', { protocolVersion: 1, token: 'replacement', appVersion: 'test' }).flush(OPEN_RESULT);
+    expect(transport.state()).toBe(RpcConnectionState.Authenticated);
+    peer.verify();
+  });
+
   it('keeps cancelled sent calls in the admission budget until their replies arrive', () => {
     const { transport, peer } = configure();
     openAuthenticated(transport, peer);
@@ -233,6 +315,97 @@ describe('RpcTransport', () => {
     peer.verify();
   });
 
+  it.each([
+    ['presence.watch', { requestId: 3, userIds: [], chatIds: [] }],
+    ['conversations.watchStates', { requestId: 3, conversations: [] }],
+    ['conversations.watchUnread', { requestId: 3, views: [], appBadge: false }],
+    ['session.setAppState', { state: 'inactive' }],
+  ])('replaces only unsent %s controls and preserves the final empty scope', (method, latest) => {
+    const { transport, peer } = configure(false);
+    openAuthenticated(transport, peer);
+    peer.expect('session.setAppState').flush(null);
+    const firstParams = { ...latest, requestId: 1 };
+    transport.call(method, firstParams).subscribe();
+    const first = peer.expect(method, firstParams);
+    const superseded = { next: vi.fn(), complete: vi.fn() };
+    transport.call(method, { ...latest, requestId: 2 }).subscribe(superseded);
+    transport.call(method, latest).subscribe();
+    expect(superseded.complete).toHaveBeenCalledOnce();
+    expect(superseded.next).not.toHaveBeenCalled();
+    peer.expectNone(method);
+    first.flush(null);
+    peer.expect(method, latest).flush(null);
+    peer.expectNone(method);
+    peer.verify();
+  });
+
+  it('admits a heartbeat during repeated watch updates without reordering controls', () => {
+    const { transport, peer } = configure(false);
+    openAuthenticated(transport, peer);
+    const held = peer.expect('session.setAppState');
+    const errors = vi.fn();
+    for (let requestId = 1; requestId <= 20; requestId++) {
+      for (const method of ['presence.watch', 'conversations.watchStates', 'conversations.watchUnread'])
+        transport.call(method, { requestId }).subscribe({ error: errors });
+      transport.call('session.setAppState', { state: 'active' }).subscribe({ error: errors });
+    }
+    vi.advanceTimersByTime(10_000);
+    held.flush(null);
+    for (const method of ['presence.watch', 'conversations.watchStates', 'conversations.watchUnread'])
+      peer.expect(method, { requestId: 20 }).flush(null);
+    peer.expect('session.setAppState', { state: 'active' }).flush(null);
+    peer.expect('session.ping').flush(null);
+    expect(errors).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(10_000);
+    peer.expect('session.ping').flush(null);
+    expect(transport.state()).toBe(RpcConnectionState.Authenticated);
+    peer.verify();
+  });
+
+  it('retries heartbeat after local admission rejection once capacity is available', () => {
+    const { transport, peer } = configure(false);
+    openAuthenticated(transport, peer);
+    peer.expect('session.setAppState').flush(null);
+    for (let index = 0; index < 8; index++) transport.call('session.ping').subscribe();
+    vi.advanceTimersByTime(10_000); // The internal heartbeat cannot enter the full control queue.
+    for (let index = 0; index < 8; index++) peer.expect('session.ping').flush(null);
+    vi.advanceTimersByTime(10_000);
+    peer.expect('session.ping', { state: 'active' }).flush(null);
+    expect(transport.state()).toBe(RpcConnectionState.Authenticated);
+    peer.verify();
+  });
+
+  it('retries heartbeat after a server error', () => {
+    const { transport, peer } = configure(false);
+    openAuthenticated(transport, peer);
+    peer.expect('session.setAppState').flush(null);
+    vi.advanceTimersByTime(10_000);
+    peer.expect('session.ping').error(RpcErrorCode.Unavailable);
+    vi.advanceTimersByTime(10_000);
+    peer.expect('session.ping').flush(null);
+    peer.verify();
+  });
+
+  it('reconnects when a cancelled sent control times out and ignores its late reply', () => {
+    const { transport, peer } = configure(false);
+    openAuthenticated(transport, peer);
+    peer.expect('session.setAppState').flush(null);
+    const subscription = transport.call('presence.watch', { requestId: 1 }).subscribe();
+    const held = peer.expect('presence.watch');
+    subscription.unsubscribe();
+    vi.advanceTimersByTime(30_000);
+    expect(transport.state()).toBe(RpcConnectionState.Reconnecting);
+    held.flush(null);
+    vi.advanceTimersByTime(1_000);
+    peer.open();
+    peer.expect('session.open').flush(OPEN_RESULT);
+    peer.expect('session.setAppState').flush(null);
+    peer.expectNone('presence.watch');
+    vi.advanceTimersByTime(10_000);
+    peer.expect('session.ping').flush(null);
+    peer.verify();
+  });
+
   it('surfaces an old-backend negotiation failure without legacy fallback', () => {
     const { transport, peer } = configure(false);
     const error = vi.fn();
@@ -305,6 +478,34 @@ describe('RpcTransport', () => {
     expect(failed).toHaveBeenCalledWith(
       expect.objectContaining({ code: RpcErrorCode.Forbidden, message: 'Forbidden' }),
     );
+    peer.verify();
+  });
+  it.each([false, true])('reclaims stalled ordinary slots through reconnect, cancelled: %s', (cancelled) => {
+    const { transport, peer } = configure();
+    openAuthenticated(transport, peer);
+    const errors = vi.fn();
+    const subscriptions = Array.from({ length: 16 }, () =>
+      transport.call('messages.list').subscribe({ error: errors }),
+    );
+    const held = peer.match('messages.list');
+    if (cancelled) subscriptions.forEach((subscription) => subscription.unsubscribe());
+    vi.advanceTimersByTime(30_000);
+    expect(errors).toHaveBeenCalledTimes(cancelled ? 0 : 16);
+    expect(transport.state()).toBe(RpcConnectionState.Authenticated);
+    vi.advanceTimersByTime(60_000);
+    expect(transport.state()).toBe(RpcConnectionState.Reconnecting);
+    vi.advanceTimersByTime(1_000);
+    peer.open();
+    peer.expect('session.open').flush(OPEN_RESULT);
+    peer.expectNone('messages.list');
+    const received = vi.fn();
+    transport.call('messages.list').subscribe(received);
+    for (const request of held) request.flush({ obsolete: true });
+    expect(received).not.toHaveBeenCalled();
+    peer.expect('messages.list').flush({ messages: [] });
+    expect(received).toHaveBeenCalledWith({ messages: [] });
+    vi.advanceTimersByTime(90_000);
+    expect(transport.state()).toBe(RpcConnectionState.Authenticated);
     peer.verify();
   });
 });

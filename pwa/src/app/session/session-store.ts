@@ -36,13 +36,9 @@ export class SessionStore {
   private readonly diagnostics = inject(Diagnostics);
   readonly token = signal<string | undefined>(undefined);
   readonly user = signal<(MeResponse & Pick<User, 'userGroup'>) | undefined>(undefined);
+  readonly expired = signal(false);
   constructor() {
-    this.transport.notifications$
-      .pipe(
-        filter((notification) => notification.method === 'session.invalidated'),
-        takeUntilDestroyed(this.destroy),
-      )
-      .subscribe(() => this.logout());
+    this.transport.sessionInvalidated$.pipe(takeUntilDestroyed(this.destroy)).subscribe(() => this.invalidate());
     this.api.results$
       .pipe(
         filter(({ method }) => !method.startsWith('savedMessages.')),
@@ -121,7 +117,7 @@ export class SessionStore {
       });
     } catch (error) {
       if (!current()) return;
-      if (error instanceof RpcError && error.code === RpcErrorCode.Unauthorized) this.logout();
+      if (error instanceof RpcError && error.code === RpcErrorCode.Unauthorized) this.invalidate();
       throw error;
     }
   }
@@ -246,9 +242,15 @@ export class SessionStore {
   }
 
   logout() {
+    this.expired.set(false);
     this.initializationEpoch++;
     this.clearAccountState();
     this.saveToken(undefined);
+  }
+
+  private invalidate() {
+    this.logout();
+    this.expired.set(true);
   }
 
   devUid() {
@@ -262,6 +264,7 @@ export class SessionStore {
 
   private saveToken(token: string | undefined) {
     this.diagnostics.setAccount(token ? tokenIdentity(token)?.uid : undefined);
+    if (token) this.expired.set(false);
     this.token.set(token);
     if (token) window.localStorage.setItem(TOKEN_KEY, token);
     else window.localStorage.removeItem(TOKEN_KEY);

@@ -1,3 +1,4 @@
+import { RpcErrorCode } from './rpc-error';
 import { TestBed } from '@angular/core/testing';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
@@ -217,5 +218,53 @@ describe('Connection', () => {
     });
 
     expect(resync).toHaveBeenCalledTimes(2);
+  });
+  it.each(['presence.watch', 'conversations.watchStates', 'conversations.watchUnread'] as const)(
+    'retries only the latest %s scope, including clearing the scope',
+    (method) => {
+      vi.useFakeTimers();
+      peer.authenticate();
+      const failed = vi.fn();
+      const watch = (requestId: number) => {
+        if (method === 'presence.watch') connection.watchPresence(requestId, [], [], failed);
+        else if (method === 'conversations.watchStates') connection.watchConversationStates(requestId, [], failed);
+        else connection.watchConversationUnread(requestId, [], false, failed);
+      };
+      watch(1);
+      peer.expect(method).error(RpcErrorCode.Unavailable);
+      expect(failed).toHaveBeenCalledOnce();
+      vi.advanceTimersByTime(1_000);
+      peer.expect(method, (params) => params['requestId'] === 1).error(RpcErrorCode.Internal);
+      watch(2);
+      peer.expect(method, (params) => params['requestId'] === 2).flush(null);
+      vi.advanceTimersByTime(30_000);
+      peer.expectNone(method);
+    },
+  );
+
+  it.each([RpcErrorCode.Forbidden, RpcErrorCode.InvalidParams])(
+    'reports permanent watch failure without retrying: %s',
+    (code) => {
+      vi.useFakeTimers();
+      peer.authenticate();
+      const failed = vi.fn();
+      connection.watchPresence(1, [2], [], failed);
+      peer.expect('presence.watch').error(code);
+      expect(failed).toHaveBeenCalledWith(expect.objectContaining({ code }));
+      vi.advanceTimersByTime(120_000);
+      peer.expectNone('presence.watch');
+    },
+  );
+
+  it.each(['disconnect', 'account', 'destroy'])('cancels watch retries on %s', (reason) => {
+    vi.useFakeTimers();
+    peer.authenticate();
+    connection.watchPresence(1, [2], []);
+    peer.expect('presence.watch').error(RpcErrorCode.Unavailable);
+    if (reason === 'disconnect') peer.disconnect();
+    else if (reason === 'account') connection.reset();
+    else TestBed.resetTestingModule();
+    vi.advanceTimersByTime(10_000);
+    peer.expectNone('presence.watch');
   });
 });

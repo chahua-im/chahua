@@ -100,6 +100,28 @@ describe('explicit conversation state watches', () => {
     expect(watch.mock.calls.at(-1)![1]).toEqual([]);
   });
 
+  it('requires a full snapshot again after a watch failure and ignores obsolete errors', () => {
+    const accept = vi.fn();
+    const state = TestBed.runInInjectionContext(() =>
+      conversationStates(TestBed.inject(Connection), TestBed.inject(SessionStore), TestBed.inject(DestroyRef), accept),
+    );
+    state.watch([{ chatId: testChat.id }]);
+    TestBed.tick();
+    publish();
+    const failed = watch.mock.calls.at(-1)![2]!;
+    failed(new Error('unavailable'));
+    expect(state.ready(row())).toBe(false);
+    publish([row(2)], false);
+    expect(accept).toHaveBeenCalledOnce();
+    publish([row(3)]);
+    expect(state.ready(row())).toBe(true);
+    expect(accept).toHaveBeenLastCalledWith([row(3)]);
+    state.refresh();
+    publish([row(4)]);
+    failed(new Error('obsolete'));
+    expect(state.ready(row())).toBe(true);
+  });
+
   it('limits the shared scope set and leaves overflow eligible for a direct RPC read', () => {
     const state = TestBed.runInInjectionContext(() =>
       conversationStates(TestBed.inject(Connection), TestBed.inject(SessionStore), TestBed.inject(DestroyRef), vi.fn()),

@@ -124,6 +124,21 @@ describe('conversation unread WebSocket subscription', () => {
     expect(summary()?.unreadMessageCount).toBe(8);
   });
 
+  it('ends loading on a watch RPC failure and accepts the retried snapshot', () => {
+    store.viewUnread.refresh();
+    const previousFailure = watch.mock.calls.at(-1)![3]!;
+    previousFailure(new Error('unavailable'));
+    expect(store.viewUnread.loading()).toBe(false);
+    expect(store.viewUnread.error()).toBe(true);
+    expect(summary()?.unreadMessageCount).toBe(12);
+    store.viewUnread.refresh();
+    previousFailure(new Error('late error'));
+    expect(store.viewUnread.error()).toBe(false);
+    publish({ summaries: [counts('friends', 8)] });
+    expect(store.viewUnread.loading()).toBe(false);
+    expect(summary()?.unreadMessageCount).toBe(8);
+  });
+
   it('does not resubscribe on healthy foreground resync, but does after reconnection', () => {
     resync.next(ResyncReason.Foreground);
     TestBed.tick();
@@ -153,7 +168,7 @@ describe('conversation unread WebSocket subscription', () => {
     user.set(undefined);
     expect(summary()).toBeUndefined();
     TestBed.tick();
-    expect(watch.mock.calls.at(-1)?.slice(1)).toEqual([[], false]);
+    expect(watch.mock.calls.at(-1)?.slice(1, 3)).toEqual([[], false]);
   });
 
   it('keeps the subscription in the background and cancels after the final consumer leaves', () => {
@@ -168,7 +183,7 @@ describe('conversation unread WebSocket subscription', () => {
     expect(watch).toHaveBeenCalledOnce();
     releaseBadge();
     TestBed.tick();
-    expect(watch.mock.calls.at(-1)?.slice(1)).toEqual([[], false]);
+    expect(watch.mock.calls.at(-1)?.slice(1, 3)).toEqual([[], false]);
   });
 
   it('updates archived totals and mute expiry directly from server publications', () => {

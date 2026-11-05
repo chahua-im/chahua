@@ -3,6 +3,9 @@ import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
 import { provideIonicAngular } from '@ionic/angular';
 import { vi } from 'vitest';
+import { Connection, ResyncReason } from '../../api/connection';
+import { RpcErrorCode } from '../../api/rpc-error';
+import { Subject } from 'rxjs';
 import { MessageType } from '../../../generated/models';
 import { RpcTestPeer, provideRpcTesting } from '../../api/rpc-testing';
 import { encodeId } from '../../api/snowflake-id';
@@ -58,21 +61,135 @@ describe('SavedMessagesPage', () => {
   });
 
   afterEach(() => {
-    peer.verify();
-    vi.useRealTimers();
-    vi.restoreAllMocks();
+    try {
+      peer.verify();
+    } finally {
+      TestBed.resetTestingModule();
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
   });
 
   function list(): SavedMessageList {
     return fixture.debugElement.query(By.directive(SavedMessageList)).componentInstance;
   }
 
+  async function settle() {
+    // A refreshed range commits after the page reader and range reader settle.
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    await fixture.whenStable();
+  }
+
   async function saved() {
     fixture.detectChanges();
     peer.expect('savedMessages.list', { limit: 50 }).flush({ savedMessages: [savedSnapshot()], nextCursor: '499' });
-    await fixture.whenStable();
+    await settle();
     fixture.detectChanges();
   }
+
+  function refresh() {
+    (TestBed.inject(Connection)['resync'] as Subject<ResyncReason>).next(ResyncReason.Foreground);
+  }
+
+  it('keeps rows and pagination on refresh failure and retries from the first page', async () => {
+    await saved();
+    const node = fixture.nativeElement.querySelector('app-message');
+    refresh();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-message')).toBe(node);
+    expect(list()['nextCursor']()).toBe(encodeId('499'));
+    peer.expect('savedMessages.list', { limit: 50 }).error(RpcErrorCode.Unavailable);
+    await settle();
+    fixture.detectChanges();
+    expect(list()['failed']()).toBe(true);
+    expect(fixture.nativeElement.querySelector('app-message')).toBe(node);
+    expect(list()['nextCursor']()).toBe(encodeId('499'));
+    list()['retry']();
+    peer.expect('savedMessages.list', { limit: 50 }).flush({ savedMessages: [savedSnapshot()], nextCursor: '498' });
+    await settle();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-message')).toBe(node);
+    expect(list()['nextCursor']()).toBe(encodeId('498'));
+    expect(list()['failed']()).toBe(false);
+  });
+
+  it('refreshes the loaded depth atomically and retains rows if a later refresh page fails', async () => {
+    await saved();
+    const more = list()['load'](true);
+    peer.expect('savedMessages.list', { limit: 50, before: '499' }).flush({
+      savedMessages: [{ ...savedSnapshot(), id: '499' }],
+      nextCursor: '498',
+    });
+    await more;
+    const previous = list()['saved']();
+    refresh();
+    peer.expect('savedMessages.list', { limit: 50 }).flush({
+      savedMessages: [{ ...savedSnapshot(), message: 'new snapshot' }],
+      nextCursor: '499',
+    });
+    await settle();
+    expect(list()['saved']()).toBe(previous);
+    peer.expect('savedMessages.list', { limit: 50, before: '499' }).error(RpcErrorCode.Unavailable);
+    await settle();
+    expect(list()['saved']()).toBe(previous);
+    expect(list()['nextCursor']()).toBe(encodeId('498'));
+    list()['retry']();
+    peer.expect('savedMessages.list', { limit: 50 }).flush({
+      savedMessages: [{ ...savedSnapshot(), message: 'new snapshot' }],
+      nextCursor: '499',
+    });
+    await settle();
+    peer.expect('savedMessages.list', { limit: 50, before: '499' }).flush({
+      savedMessages: [{ ...savedSnapshot(), id: '499' }],
+      nextCursor: '497',
+    });
+    await settle();
+    expect(list()['saved']()).toHaveLength(2);
+    expect(list()['saved']()[0].message).toBe('new snapshot');
+    expect(list()['nextCursor']()).toBe(encodeId('497'));
+  });
+
+  it('defers resync until an optimistic deletion settles and preserves its rollback', async () => {
+    await saved();
+    const removing = list()['removeSaved'](list()['saved']()[0]);
+    refresh();
+    refresh();
+    peer.expectNone('savedMessages.list');
+    peer.expect('savedMessages.delete').error(RpcErrorCode.Unavailable);
+    await removing;
+    expect(list()['saved']()).toHaveLength(1);
+    expect(list()['removeFailed']()).toBe(true);
+    peer.expect('savedMessages.list', { limit: 50 }).error(RpcErrorCode.Unavailable);
+    await settle();
+    expect(list()['saved']()).toHaveLength(1);
+  });
+
+  it('clears the old account and ignores its pending refresh response', async () => {
+    await saved();
+    refresh();
+    const old = peer.expect('savedMessages.list');
+    TestBed.inject(SessionStore).user.set({ ...testUser, uid: 2 });
+    fixture.detectChanges();
+    expect(list()['saved']()).toEqual([]);
+    old.flush({ savedMessages: [savedSnapshot()] });
+    peer.expect('savedMessages.list', { limit: 50 }).flush({ savedMessages: [{ ...savedSnapshot(), id: '501' }] });
+    await settle();
+    expect(
+      list()
+        ['saved']()
+        .map((item) => item.id),
+    ).toEqual([encodeId('501')]);
+  });
+
+  it('clears saved content when a refresh confirms access denial', async () => {
+    await saved();
+    refresh();
+    peer.expect('savedMessages.list').error(RpcErrorCode.Forbidden);
+    await settle();
+    expect(list()['saved']()).toEqual([]);
+    expect(list()['nextCursor']()).toBeUndefined();
+    expect(list()['failed']()).toBe(true);
+  });
 
   it('labels yesterday using the original send date instead of the save date', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
@@ -87,7 +204,7 @@ describe('SavedMessagesPage', () => {
         },
       ],
     });
-    await fixture.whenStable();
+    await settle();
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.saved-source').textContent).toContain('昨天');
     expect(fixture.nativeElement.querySelector('app-message time').textContent.trim()).toBe('14:30');
@@ -140,7 +257,7 @@ describe('SavedMessagesPage', () => {
     fixture.detectChanges();
     peer.expect('savedMessages.list', { limit: 50 }).flush({ savedMessages: [{ ...savedSnapshot(), id: '501' }] });
     old.flush({ savedMessages: [savedSnapshot()] });
-    await fixture.whenStable();
+    await settle();
     expect(
       list()
         ['saved']()
@@ -204,7 +321,7 @@ describe('SavedMessagesPage', () => {
     peer.expect('savedMessages.list', { limit: 50 }).flush({
       savedMessages: [{ ...savedSnapshot(), messageType: MessageType.system, message: 'joined the chat' }],
     });
-    await fixture.whenStable();
+    await settle();
     fixture.detectChanges();
     const entry = fixture.nativeElement.querySelector('.system-message') as HTMLElement;
     entry.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 80 }));

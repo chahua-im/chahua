@@ -36,6 +36,12 @@ describe('PinnedMessagesPage', () => {
   let peer: RpcTestPeer;
 
   beforeEach(async () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+      removeItem: (key: string) => storage.delete(key),
+    });
     await TestBed.configureTestingModule({
       imports: [PinnedMessagesPage],
       providers: [
@@ -56,6 +62,7 @@ describe('PinnedMessagesPage', () => {
   afterEach(() => {
     peer.verify();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   async function pins(role = GroupRole.admin, thread = false, deleted = false) {

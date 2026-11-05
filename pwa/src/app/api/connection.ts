@@ -1,6 +1,6 @@
 import { DestroyRef, inject, Service, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { filter, map, Subject } from 'rxjs';
+import { filter, map, Subject, type Subscription } from 'rxjs';
 import { rpcEvents, rpcMethods, rpcSchemas } from '../../generated/rpc-codecs';
 import type { ConversationRef, ConversationView, MessageResponse, ServerWsMessage } from '../../generated/models';
 import { ServerWsMessageType } from '../../generated/models';
@@ -8,6 +8,16 @@ import { isMessageChange, type MessageChange, type PinChange } from '../messages
 import { decodeJsonIds, encodeJsonIds } from './json-ids';
 import { RpcConnectionState, RpcTransport, type RpcNotification } from './rpc-transport';
 import type { SnowflakeID } from './snowflake-id';
+import { RpcError, RpcErrorCode, RpcTransportError } from './rpc-error';
+
+type WatchMethod = 'presence.watch' | 'conversations.watchStates' | 'conversations.watchUnread';
+interface WatchRequest {
+  wire: object;
+  onError?: (error: unknown) => void;
+  delay: number;
+  timer?: ReturnType<typeof setTimeout>;
+  subscription?: Subscription;
+}
 
 export enum ResyncReason {
   Connected,
@@ -29,6 +39,7 @@ export class Connection {
   readonly changes$ = this.events$.pipe(filter(isMessageChange));
   readonly resync$ = this.resync.asObservable();
   private readonly acceptedIds = new Set<SnowflakeID>();
+  private readonly watches = new Map<WatchMethod, WatchRequest>();
 
   /** RPC confirmations and their notification echoes share one delivery path. */
   accept(message: MessageResponse) {
@@ -47,21 +58,36 @@ export class Connection {
   }
 
   /** Replaces this connection's server-side presence watch scope when authenticated. */
-  watchPresence(requestId: number, userIds: readonly number[], chatIds: readonly SnowflakeID[]) {
-    this.watch('presence.watch', { requestId, userIds, chatIds });
+  watchPresence(
+    requestId: number,
+    userIds: readonly number[],
+    chatIds: readonly SnowflakeID[],
+    onError?: (error: unknown) => void,
+  ) {
+    this.watch('presence.watch', { requestId, userIds, chatIds }, onError);
   }
 
-  watchConversationStates(requestId: number, conversations: readonly ConversationRef[]) {
-    this.watch('conversations.watchStates', { requestId, conversations });
+  watchConversationStates(
+    requestId: number,
+    conversations: readonly ConversationRef[],
+    onError?: (error: unknown) => void,
+  ) {
+    this.watch('conversations.watchStates', { requestId, conversations }, onError);
   }
 
-  watchConversationUnread(requestId: number, views: readonly ConversationView[], appBadge: boolean) {
-    this.watch('conversations.watchUnread', { requestId, appBadge, views });
+  watchConversationUnread(
+    requestId: number,
+    views: readonly ConversationView[],
+    appBadge: boolean,
+    onError?: (error: unknown) => void,
+  ) {
+    this.watch('conversations.watchUnread', { requestId, appBadge, views }, onError);
   }
 
   /** Clears delivery state when SessionStore changes the authenticated account. */
   reset() {
     this.acceptedIds.clear();
+    this.clearWatches();
   }
 
   constructor() {
@@ -69,6 +95,7 @@ export class Connection {
     this.transport.state$.pipe(takeUntilDestroyed(this.destroy)).subscribe((state) => {
       const connected = state === RpcConnectionState.Authenticated;
       this.connected.set(connected);
+      if (!connected) this.clearWatches();
       if (connected && !authenticated) this.resync.next(ResyncReason.Connected);
       authenticated = connected;
     });
@@ -78,12 +105,48 @@ export class Connection {
     this.transport.notifications$
       .pipe(takeUntilDestroyed(this.destroy))
       .subscribe((notification) => this.receive(notification));
+    this.destroy.onDestroy(() => this.clearWatches());
   }
 
-  private watch(method: keyof typeof rpcMethods, params: object) {
+  private clearWatch(method: WatchMethod) {
+    const request = this.watches.get(method);
+    this.watches.delete(method);
+    clearTimeout(request?.timer);
+    request?.subscription?.unsubscribe();
+  }
+
+  private clearWatches() {
+    for (const method of this.watches.keys()) this.clearWatch(method);
+  }
+
+  private watch(method: WatchMethod, params: object, onError?: (error: unknown) => void) {
+    this.clearWatch(method);
     if (!this.connected()) return;
     const wire = decodeJsonIds(params, rpcMethods[method].params, rpcSchemas) as object;
-    this.transport.call<void>(method, wire).subscribe({ error: () => {} });
+    const request: WatchRequest = { wire, onError, delay: 1_000 };
+    this.watches.set(method, request);
+    this.sendWatch(method, request);
+  }
+
+  private sendWatch(method: WatchMethod, request: WatchRequest) {
+    request.subscription = this.transport.call<void>(method, request.wire).subscribe({
+      error: (error: unknown) => {
+        if (this.watches.get(method) !== request) return;
+        request.onError?.(error);
+        const retryable =
+          (error instanceof RpcTransportError && error.kind !== 'protocol') ||
+          (error instanceof RpcError &&
+            [
+              RpcErrorCode.Internal,
+              RpcErrorCode.DispatcherInternal,
+              RpcErrorCode.Unavailable,
+              RpcErrorCode.Overloaded,
+            ].includes(error.code));
+        if (!retryable || !this.connected() || this.watches.get(method) !== request) return;
+        request.timer = setTimeout(() => this.sendWatch(method, request), request.delay);
+        request.delay = Math.min(request.delay * 2, 30_000);
+      },
+    });
   }
 
   private receive(notification: RpcNotification) {
