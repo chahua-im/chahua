@@ -222,10 +222,13 @@
             </ion-item>
           }
         }
-        @if (showThreads() && threads().error()) {
+        @let combinedError = showThreads() && threads().error() && showChats() && chatQuery().error();
+        @if (combinedError) {
+          <app-load-error compact [message]="'chats.content.combinedLoadFailed' | transloco" (retry)="refresh()" />
+        } @else if (showThreads() && threads().error()) {
           <app-load-error compact [message]="'chats.content.threadsLoadFailed' | transloco" (retry)="refresh()" />
         }
-        @if (showChats()) {
+        @if (showChats() && !combinedError) {
           @if (chatQuery().error(); as error) {
             <app-load-error
               compact

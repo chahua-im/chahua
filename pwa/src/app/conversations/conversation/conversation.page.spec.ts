@@ -91,10 +91,12 @@ describe('ConversationPage', () => {
   const avatars = signal(false);
 
   const dmDetails = signal(true);
+  const showDiagnosticsOnError = signal(true);
 
   const membershipMessages = signal(true);
 
   beforeEach(async () => {
+    showDiagnosticsOnError.set(true);
     vi.spyOn(IonActionSheet.prototype, 'present').mockResolvedValue();
     vi.spyOn(IonActionSheet.prototype, 'onDidDismiss').mockResolvedValue({
       role: 'selected',
@@ -158,7 +160,12 @@ describe('ConversationPage', () => {
         },
         {
           provide: Preferences,
-          useValue: { showAllAvatars: avatars, showDmDetails: dmDetails, showMembershipMessages: membershipMessages },
+          useValue: {
+            showAllAvatars: avatars,
+            showDmDetails: dmDetails,
+            showMembershipMessages: membershipMessages,
+            showDiagnosticsOnError,
+          },
         },
         ...provideRpcTesting(),
         {
@@ -4216,10 +4223,21 @@ describe('ConversationPage', () => {
     await loading;
     expect(component['conversation'].error()).toBe(ConversationError.Page);
     fixture.detectChanges();
-    expect(fixture.nativeElement.textContent).toContain('加载消息失败');
+    expect(fixture.nativeElement.textContent).toContain('更早的消息加载失败');
+    expect(fixture.nativeElement.querySelector('app-load-error app-diagnostics-copy')).not.toBeNull();
+    showDiagnosticsOnError.set(false);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-load-error app-diagnostics-copy')).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('更早的消息加载失败');
+    showDiagnosticsOnError.set(true);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-load-error app-diagnostics-copy')).not.toBeNull();
+    const error = fixture.nativeElement.querySelector('app-load-error');
+    const message = fixture.nativeElement.querySelector('app-message');
+    expect(error.compareDocumentPosition(message) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // A scroll at the opposite end has nothing to load and must not replace the failed action.
     await component['loadPage'](PageDirection.Newer);
-    component['retry']();
+    error.querySelector('ion-button').click();
     await Promise.resolve();
     peer.expect('messages.list', { chatId: wireChat.id, max: 50, before: wireMessage.id }).flush({
       chatSettings: { showMembershipMessages: true },

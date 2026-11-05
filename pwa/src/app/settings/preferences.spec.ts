@@ -36,6 +36,19 @@ describe('Preferences', () => {
     expect(preferences.showDmDetails()).toBe(true);
   });
 
+  it('defaults error diagnostics to visible and persists changes across service instances', () => {
+    const preferences = TestBed.inject(Preferences);
+    expect(preferences.showDiagnosticsOnError()).toBe(true);
+    preferences.setShowDiagnosticsOnError(false);
+    expect(preferences.showDiagnosticsOnError()).toBe(false);
+    TestBed.resetTestingModule();
+    const restored = TestBed.inject(Preferences);
+    expect(restored.showDiagnosticsOnError()).toBe(false);
+    restored.setShowDiagnosticsOnError(true);
+    TestBed.resetTestingModule();
+    expect(TestBed.inject(Preferences).showDiagnosticsOnError()).toBe(true);
+  });
+
   it('persists display settings and restores them in a fresh service', () => {
     const preferences = TestBed.inject(Preferences);
     preferences.setShowThreadsInMessages(false);

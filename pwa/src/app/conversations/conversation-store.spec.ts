@@ -967,6 +967,33 @@ describe('ConversationStore', () => {
     expect(timeline.items()).toEqual([]);
   });
 
+  it.each([PageDirection.Older, PageDirection.Newer])(
+    'keeps the failed page direction until retry or navigation (%s)',
+    async (direction) => {
+      const opening = timeline.open();
+      messages().flush({
+        chatSettings: { showMembershipMessages: true },
+        messages: [wire('100')],
+        olderCursor: '100',
+        newerCursor: '100',
+      });
+      await opening;
+      const params = direction === PageDirection.Older ? { before: '100' } : { after: '100' };
+      const loading = timeline.load(direction);
+      messages(params).error(RpcErrorCode.Unavailable);
+      await loading;
+      expect(timeline.errorDirection()).toBe(direction);
+      expect(timeline.items()).toEqual([message('100')]);
+      const retrying = timeline.load(direction);
+      expect(timeline.errorDirection()).toBeUndefined();
+      messages(params).error(RpcErrorCode.Unavailable);
+      await retrying;
+      expect(timeline.errorDirection()).toBe(direction);
+      timeline.reset();
+      expect(timeline.errorDirection()).toBeUndefined();
+    },
+  );
+
   it('retries a failed automatic catch-up from the retained cursor on the next reconnect', async () => {
     const opening = timeline.open();
     messages().flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('100')] });

@@ -10,6 +10,6 @@
   } @loading (after 100ms) {
     <div class="loading-status"><ion-spinner /></div>
   } @error {
-    <p class="ion-padding">{{ 'emojiPicker.loadFailed' | transloco }}</p>
+    <app-load-error compact [retryable]="false" [message]="'emojiPicker.loadFailed' | transloco" />
   }
 </div>

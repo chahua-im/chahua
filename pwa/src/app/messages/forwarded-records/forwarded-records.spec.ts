@@ -195,6 +195,7 @@ describe('ForwardedRecords', () => {
     await fixture.whenStable();
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('app-message')).toBe(node);
+    expect(fixture.nativeElement.querySelector('app-load-error.compact ion-button')).not.toBeNull();
     resync.next(ResyncReason.Connected);
     peer
       .expect('messages.listForwardedMessages', { chatId: wireChat.id, messageId: wireMessage.id })
@@ -202,6 +203,7 @@ describe('ForwardedRecords', () => {
     await fixture.whenStable();
     fixture.detectChanges();
     expect(fixture.componentInstance['unavailable']()).toBe(true);
+    expect(fixture.nativeElement.querySelector('app-load-error ion-button')).toBeNull();
     peer.verify();
   });
 

@@ -109,7 +109,15 @@
   right: 12px;
 }
 .load-error {
-  color: inherit;
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+  a {
+    color: inherit;
+    text-decoration: underline;
+  }
 }
 .gallery-viewport {
   overflow-x: auto;

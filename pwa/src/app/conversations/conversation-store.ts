@@ -60,12 +60,16 @@ export class ConversationStore {
   private readonly isLoading = signal(false);
   private readonly pageDirection = signal<PageDirection | undefined>(undefined);
   private readonly currentError = signal<ConversationError | undefined>(undefined);
+  private readonly failedPageDirection = signal<PageDirection | undefined>(undefined);
   readonly page = this.currentPage.asReadonly();
   readonly items = computed(() => this.page()?.messages ?? []);
   readonly loading = this.isLoading.asReadonly();
   readonly pagingDirection = this.pageDirection.asReadonly();
   readonly paging = computed(() => this.pageDirection() !== undefined);
   readonly error = this.currentError.asReadonly();
+  readonly errorDirection = computed(() =>
+    this.error() === ConversationError.Page ? this.failedPageDirection() : undefined,
+  );
   readonly atLatest = computed(() => !!this.page() && !this.page()?.newerCursor && !this.loading());
   private readonly realtime = inject(Connection);
   private readonly chatInfo = inject(ChatStore);
@@ -273,6 +277,7 @@ export class ConversationStore {
           durationMs: Math.round(performance.now() - startedAt),
         });
         void this.diagnostics.captureWorker();
+        this.failedPageDirection.set(direction);
         this.currentError.set(ConversationError.Page);
       }
     } finally {

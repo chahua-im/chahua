@@ -1,3 +1,4 @@
+import { LoadError } from '../../ui/load-error/load-error';
 import { Component, computed, DestroyRef, inject, input, output, signal } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
 import {
@@ -27,6 +28,7 @@ import { ContentScrollbars } from '../../scrolling/content-scrollbars';
   selector: 'app-notification-exception-picker',
   templateUrl: './notification-exception-picker.html',
   imports: [
+    LoadError,
     TranslocoPipe,
     ContentScrollbars,
     ChatAvatar,

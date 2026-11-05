@@ -20,7 +20,7 @@
     }
   </ion-segment>
 </ion-header>
-<ion-content appScrollbars>
+<ion-content [class.load-error-page]="error() && !loading()" appScrollbars>
   @if (loading()) {
     <div class="page-loading"><ion-spinner /></div>
   } @else if (error()) {

@@ -66,7 +66,7 @@
     "upload": "Upload",
     "ok": "OK",
     "retry": "Retry",
-    "loadFailed": "Failed to load. Please try again.",
+    "loadFailed": "Could not load",
     "name": "Name",
     "close": "Close",
     "confirm": "Confirm",
@@ -150,7 +150,7 @@
     },
     "friendVerification": {
       "title": "Friend Verification",
-      "loadFailed": "Failed to load friend verification settings.",
+      "loadFailed": "Could not load friend verification settings",
       "allowAnyone": "Allow anyone to add me",
       "needMessage": "Require a verification message",
       "needQuestion": "Require an answer to a question",
@@ -165,7 +165,7 @@
     },
     "presence": {
       "title": "Presence Privacy",
-      "loadFailed": "Failed to load presence privacy settings.",
+      "loadFailed": "Could not load presence settings",
       "everyone": "Everyone",
       "friends": "Friends",
       "nobody": "Nobody",
@@ -175,25 +175,25 @@
       "friendInherit": "Use global setting",
       "friendShare": "Share with this friend",
       "friendHide": "Hide from this friend",
-      "friendLoadFailed": "Failed to load this friend's presence setting."
+      "friendLoadFailed": "Could not load presence settings for this friend"
     },
     "readReceipt": {
       "title": "Read Receipts",
-      "loadFailed": "Failed to load read receipt settings.",
+      "loadFailed": "Could not load read receipt settings",
       "reciprocalNote": "Read receipts are visible only when both people allow sharing. Group conversations never show read receipts.",
       "saveFailed": "Save failed. Please try again.",
       "friendTitle": "Read receipt sharing",
       "friendInherit": "Use global setting",
       "friendShare": "Share with this friend",
       "friendHide": "Hide from this friend",
-      "friendLoadFailed": "Failed to load this friend's read receipt setting."
+      "friendLoadFailed": "Could not load read receipt settings for this friend"
     },
     "stickers": {
       "title": "Emojis & Stickers",
       "pinnedReactions": "Pinned reactions ({{ count }}/5)",
       "autoSortPacks": "Auto-sort sticker packs by recent use",
       "autoSortFavorites": "Auto-sort favorite stickers by recent use",
-      "loadFailed": "Failed to load sticker packs.",
+      "loadFailed": "Could not load sticker packs",
       "sortDivider": "Packs below this line are not auto-sorted",
       "owned": "Mine",
       "orderFailed": "Could not save sticker order. Please retry."
@@ -226,7 +226,7 @@
       "allowAnyone": "Allow anyone",
       "presence": "Who can see my last seen and online status",
       "loadFailed": "Failed to load. Click to retry",
-      "blocksLoadFailed": "Could not load blocked users."
+      "blocksLoadFailed": "Could not load blocked users"
     },
     "privacyExceptions": {
       "title": "Exceptions",
@@ -239,7 +239,13 @@
       "search": "Search friends",
       "added": "Added",
       "noFriends": "No matching friends",
-      "clearTitle": "Delete all exceptions?"
+      "clearTitle": "Delete all exceptions?",
+      "loadFailed": "Could not load exceptions",
+      "friendsLoadFailed": "Could not load friends"
+    },
+    "advanced": {
+      "title": "Advanced",
+      "showDiagnosticsOnError": "Show “Copy diagnostics” on load errors"
     }
   },
   "chats": {
@@ -296,11 +302,12 @@
       "unnamedGroup": "Unnamed group",
       "emptyThreads": "No threads yet",
       "emptyChats": "No conversations yet",
-      "threadsLoadFailed": "Failed to load threads. Refresh and try again.",
-      "chatsLoadFailed": "Failed to load conversations. Refresh and try again.",
-      "unreadLoadFailed": "Failed to update unread counts. Refresh and try again.",
-      "recentLoadFailed": "Failed to update conversations. Pull to refresh.",
-      "moreLoadFailed": "Failed to load more conversations. Try again."
+      "threadsLoadFailed": "Could not load threads",
+      "chatsLoadFailed": "Could not load chats",
+      "unreadLoadFailed": "Could not update unread counts",
+      "recentLoadFailed": "Could not update chats",
+      "moreLoadFailed": "Could not load more chats",
+      "combinedLoadFailed": "Could not update chats and threads"
     },
     "inviteStatus": {
       "expired": "Invite expired",
@@ -364,7 +371,7 @@
       "leaveGroup": "Leave group",
       "unblock": "Unblock",
       "block": "Block",
-      "loadFailed": "Failed to load. Try again.",
+      "loadFailed": "Could not load details",
       "tabs": {
         "threads": "Threads",
         "members": "Members",
@@ -395,7 +402,7 @@
       "groups": "Groups",
       "users": "Users",
       "moreGroups": "Load more groups",
-      "failed": "Search failed. Please try again.",
+      "failed": "Search failed",
       "noResults": "No results found",
       "prompt": "Search groups and users"
     },
@@ -404,7 +411,7 @@
       "placeholder": "Search messages",
       "relevance": "Relevance",
       "newest": "Newest",
-      "failed": "Search failed. Please try again.",
+      "failed": "Could not load search results",
       "noResults": "No messages found"
     },
     "threads": {
@@ -454,14 +461,14 @@
     "thread": "Thread",
     "chat": "Conversation",
     "pinned": "Pinned message",
-    "pinnedLoadFailed": "Failed to load pinned messages. Retry",
+    "pinnedLoadFailed": "Could not load pinned messages",
     "unreadBelow": "Unread messages",
-    "threadLoadFailed": "Failed to load thread status. Try again.",
-    "threadUpdateFailed": "Failed to update thread. Try again.",
+    "threadLoadFailed": "Could not load thread status",
+    "threadUpdateFailed": "Could not update thread",
     "empty": "No messages yet",
     "emptyVisible": "No visible messages",
     "missing": "This message was deleted or is unavailable.",
-    "loadFailed": "Failed to load messages. Try again.",
+    "loadFailed": "Could not load messages",
     "editing": "Editing message",
     "replyingTo": "Replying to {{ name }}",
     "reply": "Replying to a message",
@@ -471,7 +478,8 @@
     "emptySaved": "No saved messages",
     "viewOriginal": "View original message",
     "unsave": "Remove from saved",
-    "loadMoreFailed": "Failed to load messages. Try again."
+    "olderLoadFailed": "Could not load earlier messages",
+    "newerLoadFailed": "Could not load newer messages"
   },
   "messages": {
     "date": {
@@ -558,7 +566,7 @@
     },
     "invite": {
       "groupInvite": "Group invite",
-      "failed": "Invite is invalid or couldn't load. Tap to retry.",
+      "failed": "Could not load invitation",
       "joined": "Already joined. Open group.",
       "view": "View group info and join"
     },
@@ -571,7 +579,9 @@
       "original": "Original file"
     },
     "media": {
-      "openOriginal": "Failed to load. Open the original file."
+      "openOriginal": "Open original file",
+      "imageLoadFailed": "Could not load image",
+      "videoLoadFailed": "Could not load video"
     },
     "thread": {
       "replies": "{{ count }} replies"
@@ -589,8 +599,8 @@
       "otherParticipants": "{{first}} and {{count}} others",
       "navigationFailed": "Could not open the destination. Please retry.",
       "loadMore": "Load more",
-      "chatsFailed": "Could not load chats. Please retry.",
-      "threadsFailed": "Could not load topics. Please retry.",
+      "chatsFailed": "Could not load chats",
+      "threadsFailed": "Could not load threads",
       "recordsUnavailable": "These chat records are no longer available.",
       "unavailable": "Some selected messages cannot be forwarded. Adjust your selection.",
       "action": "Forward",
@@ -658,7 +668,7 @@
     "emojiPlaceholder": "Emoji, e.g. 🙂",
     "emojiExample": "e.g. 🙂",
     "optionalName": "Name (optional)",
-    "loadFailed": "Failed to load.",
+    "loadFailed": "Could not load stickers",
     "empty": "No stickers yet",
     "add": "Add sticker",
     "added": "Sticker added",
@@ -671,7 +681,7 @@
     "subscribeAll": "Subscribe to pack",
     "removePack": "Remove pack",
     "addPack": "Add pack",
-    "emojiLoadFailed": "Failed to load emojis. Close and try again.",
+    "emojiLoadFailed": "Could not load emoji. Reload the app to try again.",
     "createPack": "Create sticker pack",
     "createFailed": "Failed to create sticker pack",
     "emojiLabel": "Emoji",
@@ -704,7 +714,7 @@
     "description": "Description: "
   },
   "emojiPicker": {
-    "loadFailed": "Failed to load emojis. Refresh the page and try again."
+    "loadFailed": "Could not load emoji. Reload the app to try again."
   },
   "pwa": {
     "notificationPrompt": {
@@ -792,7 +802,7 @@
     "alwaysUnmuted": "Always notify",
     "archived": "Archived",
     "noExceptions": "No exceptions",
-    "loadFailed": "Could not load. Please retry.",
+    "loadFailed": "Could not load notification settings",
     "saveFailed": "Could not save. Please try again.",
     "loadMore": "Load more",
     "chatNotifications": "Chat notifications",
@@ -812,7 +822,9 @@
     "searchChats": "Search loaded chats",
     "addHint": "Choose a chat to use the opposite of the current default. Tap an exception to change it later.",
     "alreadyAdded": "Added",
-    "noChats": "No matching chats"
+    "noChats": "No matching chats",
+    "chatsLoadFailed": "Could not load chats",
+    "archivedLoadFailed": "Could not load archived chats"
   },
   "speaking": {
     "groupTitle": "Group speaking permissions",

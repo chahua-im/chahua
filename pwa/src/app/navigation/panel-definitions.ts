@@ -31,6 +31,7 @@ export enum PanelContent {
   NotificationCategory,
   General,
   Language,
+  Advanced,
   FriendVerification,
   Privacy,
   BlockedUsers,
@@ -140,6 +141,12 @@ export const panelDefinitions: readonly PanelDefinition[] = [
     kind: PanelKind.Settings,
     content: PanelContent.Language,
     settings: { address: 'language', parent: '/settings', child: 'language' },
+  },
+  {
+    path: 'settings/advanced',
+    kind: PanelKind.Settings,
+    content: PanelContent.Advanced,
+    settings: { address: 'advanced', parent: '/settings', child: 'advanced' },
   },
   {
     path: 'settings/friend-verification',

@@ -1,3 +1,4 @@
+import { AdvancedSettings } from '../advanced-settings/advanced-settings';
 import { ChangeDetectorRef, Component, getDebugNode, signal, type WritableSignal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
@@ -218,6 +219,26 @@ describe('Settings', () => {
     await fixture.whenStable();
     fixture.detectChanges();
   }
+
+  it('moves diagnostics into Advanced and keeps manual copy available when error shortcuts are off', async () => {
+    expect(page.querySelector('app-diagnostics-copy')).toBeNull();
+    expect(page.querySelector('ion-item[href="/settings/advanced"]')).not.toBeNull();
+    await nav.push(AdvancedSettings);
+    page = (await nav.getActive())!.element!;
+    await fixture.whenStable();
+    expect(page.querySelector('ion-title')!.textContent).toBe('高级');
+    const toggle = page.querySelector('ion-toggle')!;
+    expect(toggle.checked).toBe(true);
+    toggle.dispatchEvent(new CustomEvent('ionChange', { detail: { checked: false } }));
+    await fixture.whenStable();
+    expect(TestBed.inject(Preferences).showDiagnosticsOnError()).toBe(false);
+    expect(page.querySelector('app-diagnostics-copy ion-item')).not.toBeNull();
+    await nav.pop();
+    await nav.push(AdvancedSettings);
+    page = (await nav.getActive())!.element!;
+    await fixture.whenStable();
+    expect(page.querySelector('ion-toggle')!.checked).toBe(false);
+  });
 
   it('keeps general and verification controls on secondary pages instead of the settings home', () => {
     expect(page.textContent).toContain(testUser.username);
@@ -464,7 +485,7 @@ describe('Settings', () => {
       Array.from(page.querySelectorAll('ion-list')[0].querySelectorAll('ion-label')).map((item) =>
         item.textContent?.trim(),
       ),
-    ).toEqual(['消息通知', '隐私', '聊天设置', '语言']);
+    ).toEqual(['消息通知', '隐私', '聊天设置', '语言', '高级']);
     expect(page.querySelector('ion-item[href="/settings/experimental"]')).toBeNull();
     expect(page.querySelector('ion-toggle')).toBeNull();
     expect(notifications.refresh).not.toHaveBeenCalled();

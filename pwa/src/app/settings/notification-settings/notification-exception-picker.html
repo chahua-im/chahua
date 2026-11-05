@@ -52,12 +52,15 @@
         }
         @for (source of sources; track $index) {
           @if (source.error()) {
-            <ion-item lines="none">
-              <ion-note color="danger">{{ 'notificationPreferences.loadFailed' | transloco }}</ion-note>
-              <ion-button slot="end" fill="clear" (click)="source.refresh()">
-                {{ 'common.retry' | transloco }}
-              </ion-button>
-            </ion-item>
+            <app-load-error
+              compact
+              [message]="
+                ($index === 0
+                  ? 'notificationPreferences.chatsLoadFailed'
+                  : 'notificationPreferences.archivedLoadFailed'
+                ) | transloco
+              "
+              (retry)="source.refresh()" />
           }
         }
         @if (moreAvailable()) {

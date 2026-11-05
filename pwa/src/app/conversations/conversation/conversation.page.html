@@ -90,12 +90,12 @@
       </ion-buttons>
     </ion-toolbar>
   } @else if (accessible() && pinsFailed()) {
-    <ion-toolbar>
-      @if (pins().loading()) {
-        <ion-spinner></ion-spinner>
-      } @else {
-        <ion-button fill="clear" (click)="loadPins()">{{ 'conversation.pinnedLoadFailed' | transloco }}</ion-button>
-      }
+    <ion-toolbar class="pinned-bar">
+      <app-load-error
+        compact
+        [busy]="pins().loading()"
+        [message]="'conversation.pinnedLoadFailed' | transloco"
+        (retry)="loadPins()" />
     </ion-toolbar>
   }
   <app-voice-bar />
@@ -135,7 +135,7 @@
     {{ visibleDate() | messageDate }}
   </span>
   <!-- Keep the default slot stable when pagination adds loading indicators or changes paging controls. -->
-  <div #messageContent>
+  <div #messageContent [class.load-error-page]="!!conversation.error() && !conversation.page() && !rows().length">
     @if (threadError()) {
       <app-load-error
         compact
@@ -145,7 +145,17 @@
         "
         (retry)="loadSubscription()" />
     }
-    @if (conversation.page()?.olderCursor) {
+    @if (conversation.errorDirection() === PageDirection.Older) {
+      <app-load-error
+        compact
+        [message]="'conversation.olderLoadFailed' | transloco"
+        (retry)="loadPage(PageDirection.Older)">
+        @if (preferences.showDiagnosticsOnError()) {
+          <app-diagnostics-copy />
+        }
+      </app-load-error>
+    }
+    @if (conversation.page()?.olderCursor && conversation.errorDirection() !== PageDirection.Older) {
       <div class="ion-text-center">
         <button
           type="button"
@@ -246,7 +256,7 @@
         }
       }
     </div>
-    @if (conversation.page()?.newerCursor) {
+    @if (conversation.page()?.newerCursor && conversation.errorDirection() !== PageDirection.Newer) {
       <div class="ion-text-center">
         <button
           type="button"
@@ -261,22 +271,29 @@
         </button>
       </div>
     }
-    @if (conversation.error()) {
+    @if (conversation.errorDirection() === PageDirection.Newer) {
+      <app-load-error
+        compact
+        [message]="'conversation.newerLoadFailed' | transloco"
+        (retry)="loadPage(PageDirection.Newer)">
+        @if (preferences.showDiagnosticsOnError()) {
+          <app-diagnostics-copy />
+        }
+      </app-load-error>
+    }
+    @if (conversation.error() && conversation.error() !== ConversationError.Page) {
       <app-load-error
         [compact]="!!conversation.page()"
         [message]="
-          (conversation.error() === ConversationError.Missing
-            ? 'conversation.missing'
-            : conversation.error() === ConversationError.Open
-              ? 'conversation.loadFailed'
-              : 'conversation.loadMoreFailed'
-          ) | transloco
+          (conversation.error() === ConversationError.Missing ? 'conversation.missing' : 'conversation.loadFailed')
+            | transloco
         "
         [retryable]="conversation.error() !== ConversationError.Missing"
-        (retry)="retry()" />
-      <div class="ion-text-center">
-        <app-diagnostics-copy />
-      </div>
+        (retry)="retry()">
+        @if (preferences.showDiagnosticsOnError()) {
+          <app-diagnostics-copy />
+        }
+      </app-load-error>
     }
   </div>
   @if (conversation.page(); as page) {

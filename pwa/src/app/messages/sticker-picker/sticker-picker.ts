@@ -1,3 +1,4 @@
+import { LoadError } from '../../ui/load-error/load-error';
 import { NgTemplateOutlet } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import {
@@ -84,6 +85,7 @@ type StickerContent = StickerPackDetailResponse | { stickers: StickerSummary[] }
   templateUrl: './sticker-picker.html',
   styleUrl: './sticker-picker.scss',
   imports: [
+    LoadError,
     RouterLink,
     ContentScrollbars,
     MediaLoaded,

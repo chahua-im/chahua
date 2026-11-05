@@ -1,3 +1,4 @@
+import { AdvancedSettings } from './settings/advanced-settings/advanced-settings';
 import { type Type } from '@angular/core';
 import { type Routes } from '@angular/router';
 import { ChatDetails } from './chats/chat-details/chat-details';
@@ -33,6 +34,7 @@ export const panelComponents: Record<PanelContent, Type<unknown>> = {
   [PanelContent.NotificationCategory]: NotificationCategoryPage,
   [PanelContent.General]: GeneralSettings,
   [PanelContent.Language]: LanguageSettings,
+  [PanelContent.Advanced]: AdvancedSettings,
   [PanelContent.FriendVerification]: FriendVerificationSettings,
   [PanelContent.Privacy]: PrivacySettings,
   [PanelContent.BlockedUsers]: BlockedUsers,

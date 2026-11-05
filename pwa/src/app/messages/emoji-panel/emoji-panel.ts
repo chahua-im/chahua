@@ -1,3 +1,4 @@
+import { LoadError } from '../../ui/load-error/load-error';
 import { afterRenderEffect, Component, ElementRef, input, output, signal, viewChild } from '@angular/core';
 import { createAnimation, IonIcon, IonSpinner, isPlatform } from '@ionic/angular';
 import { TranslocoPipe } from '@jsverse/transloco';
@@ -35,7 +36,7 @@ export function emojiPanelAnimation(element: HTMLElement, entering: boolean) {
   selector: 'app-emoji-panel',
   templateUrl: './emoji-panel.html',
   styleUrl: './emoji-panel.scss',
-  imports: [EmojiPicker, IonIcon, IonSpinner, TranslocoPipe],
+  imports: [LoadError, EmojiPicker, IonIcon, IonSpinner, TranslocoPipe],
   host: { '(click)': 'dismissBackdrop($event)' },
 })
 export class EmojiPanel {

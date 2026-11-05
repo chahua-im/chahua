@@ -9,6 +9,8 @@ describe('Readable panel URLs', () => {
 
   it.each([
     [['/settings'], 'settings'],
+    [['/settings', '/settings/advanced'], 'settings=advanced'],
+    [['/settings/advanced'], 'settings=~advanced'],
     [['/settings', '/settings/privacy'], 'settings=privacy'],
     [[...settings, '/profile/2'], 'settings=privacy/blocked-users&profile=2'],
     [['/profile/2', '/settings/privacy'], 'profile=2&settings=~privacy'],

@@ -13,6 +13,7 @@ const DM_DETAILS_KEY = 'chahua.preferences.showDmDetails';
 
 const COLOR_MODE_KEY = 'chahua.preferences.colorMode';
 const LOCALE_KEY = 'chahua.preferences.locale';
+const ERROR_DIAGNOSTICS_KEY = 'chahua.preferences.showDiagnosticsOnError';
 
 @Service()
 export class Preferences {
@@ -43,6 +44,8 @@ export class Preferences {
   private readonly threads = signal(window.localStorage.getItem(THREADS_KEY) !== 'false');
   private readonly avatars = signal(window.localStorage.getItem(AVATARS_KEY) === 'true');
   private readonly dmDetails = signal(window.localStorage.getItem(DM_DETAILS_KEY) !== 'false');
+  private readonly errorDiagnostics = signal(window.localStorage.getItem(ERROR_DIAGNOSTICS_KEY) !== 'false');
+  readonly showDiagnosticsOnError = this.errorDiagnostics.asReadonly();
   private readonly mode = signal(readColorMode());
   readonly showThreadsInMessages = this.threads.asReadonly();
   readonly showAllAvatars = this.avatars.asReadonly();
@@ -54,6 +57,11 @@ export class Preferences {
   setShowThreadsInMessages(value: boolean) {
     window.localStorage.setItem(THREADS_KEY, String(value));
     this.threads.set(value);
+  }
+
+  setShowDiagnosticsOnError(value: boolean) {
+    window.localStorage.setItem(ERROR_DIAGNOSTICS_KEY, String(value));
+    this.errorDiagnostics.set(value);
   }
 
   setShowAllAvatars(value: boolean) {

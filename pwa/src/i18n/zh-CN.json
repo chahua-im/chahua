@@ -66,7 +66,7 @@
     "upload": "上传",
     "ok": "知道了",
     "retry": "重试",
-    "loadFailed": "加载失败，请重试。",
+    "loadFailed": "加载失败",
     "name": "名称",
     "close": "关闭",
     "confirm": "确认",
@@ -150,7 +150,7 @@
     },
     "friendVerification": {
       "title": "加我好友时的验证方式",
-      "loadFailed": "好友验证设置加载失败。",
+      "loadFailed": "好友验证设置加载失败",
       "allowAnyone": "允许任何人",
       "needMessage": "需要验证消息",
       "needQuestion": "需要回答问题并由我确认",
@@ -165,7 +165,7 @@
     },
     "presence": {
       "title": "谁能查看我的活动状态",
-      "loadFailed": "在线状态加载失败，点击重试",
+      "loadFailed": "在线状态设置加载失败",
       "everyone": "所有人",
       "friends": "我的好友",
       "nobody": "不允许任何人",
@@ -175,25 +175,25 @@
       "friendInherit": "使用全局设置",
       "friendShare": "与这位好友分享",
       "friendHide": "对这位好友隐藏",
-      "friendLoadFailed": "此好友的在线状态设置加载失败。"
+      "friendLoadFailed": "此好友的在线状态设置加载失败"
     },
     "readReceipt": {
       "title": "已读回执",
-      "loadFailed": "已读回执设置加载失败。",
+      "loadFailed": "已读回执设置加载失败",
       "reciprocalNote": "仅在双方都允许分享时显示已读回执；群组对话永不显示已读回执。",
       "saveFailed": "保存失败，请重试。",
       "friendTitle": "已读回执分享",
       "friendInherit": "使用全局设置",
       "friendShare": "与这位好友分享",
       "friendHide": "对这位好友隐藏",
-      "friendLoadFailed": "此好友的已读回执设置加载失败。"
+      "friendLoadFailed": "此好友的已读回执设置加载失败"
     },
     "stickers": {
       "title": "表情和贴纸",
       "pinnedReactions": "置顶表态表情 ({{ count }}/5)",
       "autoSortPacks": "按最近使用自动排序贴纸包",
       "autoSortFavorites": "按最近使用自动排序收藏贴纸",
-      "loadFailed": "贴纸包加载失败。",
+      "loadFailed": "贴纸包加载失败",
       "sortDivider": "此行以下的贴纸包不会自动排序",
       "owned": "我的",
       "orderFailed": "贴纸排序保存失败，请重试。"
@@ -226,7 +226,7 @@
       "allowAnyone": "允许任何人",
       "presence": "谁能查看我的活动状态",
       "loadFailed": "加载失败，点击重试",
-      "blocksLoadFailed": "拉黑用户列表加载失败。"
+      "blocksLoadFailed": "拉黑用户列表加载失败"
     },
     "privacyExceptions": {
       "title": "例外",
@@ -239,7 +239,13 @@
       "search": "搜索好友",
       "added": "已添加",
       "noFriends": "没有匹配的好友",
-      "clearTitle": "删除所有例外？"
+      "clearTitle": "删除所有例外？",
+      "loadFailed": "例外设置加载失败",
+      "friendsLoadFailed": "好友列表加载失败"
+    },
+    "advanced": {
+      "title": "高级",
+      "showDiagnosticsOnError": "加载失败时显示「复制诊断信息」"
     }
   },
   "chats": {
@@ -296,11 +302,12 @@
       "unnamedGroup": "未命名群聊",
       "emptyThreads": "暂无话题",
       "emptyChats": "暂无会话",
-      "threadsLoadFailed": "话题加载失败，请刷新重试。",
-      "chatsLoadFailed": "会话加载失败，请刷新重试。",
-      "unreadLoadFailed": "更新未读数量失败，请刷新重试。",
-      "recentLoadFailed": "更新会话失败，请下拉刷新重试。",
-      "moreLoadFailed": "加载更多会话失败，请重试。"
+      "threadsLoadFailed": "话题加载失败",
+      "chatsLoadFailed": "会话加载失败",
+      "unreadLoadFailed": "未读数量更新失败",
+      "recentLoadFailed": "会话更新失败",
+      "moreLoadFailed": "更多会话加载失败",
+      "combinedLoadFailed": "会话和话题更新失败"
     },
     "inviteStatus": {
       "expired": "邀请已过期",
@@ -364,7 +371,7 @@
       "leaveGroup": "退群",
       "unblock": "解除拉黑",
       "block": "拉黑",
-      "loadFailed": "加载失败，请重试。",
+      "loadFailed": "详情加载失败",
       "tabs": {
         "threads": "话题",
         "members": "成员",
@@ -395,7 +402,7 @@
       "groups": "群聊",
       "users": "用户",
       "moreGroups": "加载更多群组",
-      "failed": "搜索失败，请重试。",
+      "failed": "搜索失败",
       "noResults": "没有找到结果",
       "prompt": "搜索群组和用户"
     },
@@ -404,7 +411,7 @@
       "placeholder": "搜索聊天消息",
       "relevance": "相关度",
       "newest": "最新",
-      "failed": "搜索失败，请重试。",
+      "failed": "搜索结果加载失败",
       "noResults": "没有找到消息"
     },
     "threads": {
@@ -454,14 +461,14 @@
     "thread": "话题",
     "chat": "会话",
     "pinned": "置顶消息",
-    "pinnedLoadFailed": "置顶消息加载失败，请重试",
+    "pinnedLoadFailed": "置顶消息加载失败",
     "unreadBelow": "未读消息",
-    "threadLoadFailed": "话题状态加载失败，请重试。",
-    "threadUpdateFailed": "话题更新失败，请重试。",
+    "threadLoadFailed": "话题状态加载失败",
+    "threadUpdateFailed": "话题更新失败",
     "empty": "暂无消息",
     "emptyVisible": "暂无可显示的消息",
     "missing": "这条消息已删除或无法查看。",
-    "loadFailed": "消息加载失败，请重试。",
+    "loadFailed": "消息加载失败",
     "editing": "编辑消息",
     "replyingTo": "正在回复 {{ name }}",
     "reply": "回复消息",
@@ -471,7 +478,8 @@
     "emptySaved": "暂无收藏",
     "viewOriginal": "查看原消息",
     "unsave": "取消收藏",
-    "loadMoreFailed": "加载消息失败，请重试。"
+    "olderLoadFailed": "更早的消息加载失败",
+    "newerLoadFailed": "更新的消息加载失败"
   },
   "messages": {
     "date": {
@@ -558,7 +566,7 @@
     },
     "invite": {
       "groupInvite": "群聊邀请",
-      "failed": "邀请失效或无法加载，点击重试",
+      "failed": "邀请加载失败",
       "joined": "已加入，打开群组",
       "view": "查看群资料并加入"
     },
@@ -571,7 +579,9 @@
       "original": "原文件"
     },
     "media": {
-      "openOriginal": "加载失败，打开原文件"
+      "openOriginal": "打开原文件",
+      "imageLoadFailed": "图片加载失败",
+      "videoLoadFailed": "视频加载失败"
     },
     "thread": {
       "replies": "{{ count }} 条回复"
@@ -589,8 +599,8 @@
       "otherParticipants": "{{first}}和其他{{count}}人",
       "navigationFailed": "无法打开目标会话，请重试。",
       "loadMore": "继续加载",
-      "chatsFailed": "聊天加载失败，请重试。",
-      "threadsFailed": "话题加载失败，请重试。",
+      "chatsFailed": "聊天加载失败",
+      "threadsFailed": "话题加载失败",
       "recordsUnavailable": "聊天记录已无法访问。",
       "unavailable": "所选消息中包含无法转发的消息，请调整选择。",
       "action": "转发",
@@ -658,7 +668,7 @@
     "emojiPlaceholder": "对应表情，例如 🙂",
     "emojiExample": "例如 🙂",
     "optionalName": "名称（选填）",
-    "loadFailed": "加载失败。",
+    "loadFailed": "贴纸加载失败",
     "empty": "暂无贴纸",
     "add": "添加贴纸",
     "added": "贴纸已添加",
@@ -671,7 +681,7 @@
     "subscribeAll": "订阅整组",
     "removePack": "移除贴纸包",
     "addPack": "添加贴纸包",
-    "emojiLoadFailed": "表情加载失败，请关闭后重试。",
+    "emojiLoadFailed": "表情加载失败，请重新加载应用",
     "createPack": "创建贴纸包",
     "createFailed": "创建贴纸包失败",
     "emojiLabel": "对应表情",
@@ -704,7 +714,7 @@
     "description": "简介："
   },
   "emojiPicker": {
-    "loadFailed": "表情加载失败，请刷新页面后重试。"
+    "loadFailed": "表情加载失败，请重新加载应用"
   },
   "pwa": {
     "notificationPrompt": {
@@ -792,7 +802,7 @@
     "alwaysUnmuted": "始终通知",
     "archived": "已归档",
     "noExceptions": "暂无例外",
-    "loadFailed": "加载失败，请重试",
+    "loadFailed": "通知设置加载失败",
     "saveFailed": "保存失败，请重试",
     "loadMore": "加载更多",
     "chatNotifications": "聊天通知",
@@ -812,7 +822,9 @@
     "searchChats": "搜索已加载的聊天",
     "addHint": "选择聊天，设为与当前默认相反的通知状态。添加后可点击例外修改。",
     "alreadyAdded": "已添加",
-    "noChats": "没有匹配的聊天"
+    "noChats": "没有匹配的聊天",
+    "chatsLoadFailed": "聊天列表加载失败",
+    "archivedLoadFailed": "已归档聊天加载失败"
   },
   "speaking": {
     "groupTitle": "全群发言权限",

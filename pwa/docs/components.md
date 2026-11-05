@@ -85,7 +85,7 @@ ChatLink 在应用壳中承载一个稳定的路由面板容器，PanelPage 使�
 
 ChatListPage 在 ionViewWillEnter 中先同步检测缓存视图，再激活列表查询，使 pop 动画使用已更新的本地行；ionViewDidLeave 同步释放子查询消费者。
 
-ChatListContent 的普通会话行和话题行都是共享资料、查询成员、草稿和待发消息的派生结果；本人发送的最后一条非系统、未撤回消息在预览正文后显示待发队列派生的发送中或已发送，私聊另外使用 ChatStore 的对方回执显示已读；待发消息按聊天或话题根区分，在服务器摘要回显前提供预览和排序时间，话题回复不改变父会话行，已确认后由共享摘要替换。分类内容各自保留滚动位置，仅当前分类激活查询和续页。tab、归档范围属于父组件；操作进度属于被点击的行。固定入口与独立角标不参与初次内容等待。隐私首页摘要失败在对应行显示重试文案，其余加载失败使用 LoadError（message、compact、retryable → retry）：页面级居中，列表和设置分区使用紧凑行。
+ChatListContent 的普通会话行和话题行都是共享资料、查询成员、草稿和待发消息的派生结果；本人发送的最后一条非系统、未撤回消息在预览正文后显示待发队列派生的发送中或已发送，私聊另外使用 ChatStore 的对方回执显示已读；待发消息按聊天或话题根区分，在服务器摘要回显前提供预览和排序时间，话题回复不改变父会话行，已确认后由共享摘要替换。分类内容各自保留滚动位置，仅当前分类激活查询和续页。tab、归档范围属于父组件；操作进度属于被点击的行。固定入口与独立角标不参与初次内容等待。隐私首页摘要失败在对应行显示重试文案，其余加载失败使用 LoadError（message、compact、retryable、busy、disabled → retry），内容投影承载诊断复制等次要操作：页面级居中，列表和设置分区使用紧凑行。
 
 ## 消息页面
 
@@ -198,11 +198,12 @@ ChatDetails 和 ConversationPage 激活同一个好友关系查询。用户资�
 | 组件                        | 状态与职责                                                                                                                                                                         |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Settings                    | 当前用户和更新状态；持有局部更新结果，打开通知、隐私、聊天与语言子页                                                                                                               |
-| DiagnosticsCopy             | row 输入决定列表行或按钮呈现；共享待复制状态与成功／失败 Toast；创建时采集 Worker 状态，点击直接复制 Diagnostics 报告；用于设置及会话失败页                                          |
+| DiagnosticsCopy             | row 输入决定列表行或按钮呈现；共享待复制状态与成功／失败 Toast；创建时采集 Worker 状态，点击直接复制 Diagnostics 报告；用于高级设置及会话失败页                                    |
 | NotificationSettings        | 本机通知开关、权限申请及重试；私聊／群组 NotificationCategory 摘要行；进入时检查本机订阅，权限拒绝使用 toast                                                                       |
 | NotificationCategoryPage    | 分类通知独立路由页面；标题、返回和 NotificationCategory 详情                                                                                                                       |
 | NotificationExceptionPicker | 激活普通／归档聊天查询，搜索已加载聊天，添加与默认相反的永久例外                                                                                                                   |
 | NotificationCategory        | 紧凑摘要或分类详情；正向通知开关、完整总数、例外分页、添加／移除／确认批量清除；刷新保留内容                                                                                       |
+| AdvancedSettings            | 手动复制诊断信息；编辑 Preferences 的 showDiagnosticsOnError 本机开关，默认开启，仅控制失败提示旁的复制入口                                                                        |
 | GeneralSettings             | 提供表情和贴纸子页入口，编辑 Preferences 的颜色模式、消息字号及本机显示开关；群成员进出群消息开关从账号资料派生，通过 Preferences 调用 SessionStore 保存，持有局部保存中与错误状态 |
 | LanguageSettings            | 自动/三种语言的单选；写入 Preferences 并调用 Localization 切换 catalog                                                                                                             |
 | FriendVerificationSettings  | Signal Form、读取/保存状态与结果；FriendsService                                                                                                                                   |

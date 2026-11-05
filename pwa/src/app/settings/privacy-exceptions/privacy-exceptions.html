@@ -30,12 +30,12 @@
     </ion-item>
   }
   @if (failed()) {
-    <ion-item lines="none">
-      <ion-note color="danger">{{ 'common.loadFailed' | transloco }}</ion-note>
-      <ion-button slot="end" fill="clear" [disabled]="loading() || busy()" (click)="load()">
-        {{ 'common.retry' | transloco }}
-      </ion-button>
-    </ion-item>
+    <app-load-error
+      compact
+      [message]="'settings.privacyExceptions.loadFailed' | transloco"
+      [busy]="loading()"
+      [disabled]="busy()"
+      (retry)="load()" />
   }
   @if (rows()?.length) {
     <ion-item [button]="true" [detail]="false" lines="none" [disabled]="busy()" (click)="clear()">
@@ -96,10 +96,10 @@
           <ion-item lines="none"><ion-spinner /></ion-item>
         }
         @if (friendsFailed()) {
-          <ion-item lines="none">
-            <ion-note color="danger">{{ 'common.loadFailed' | transloco }}</ion-note>
-            <ion-button slot="end" fill="clear" (click)="loadFriends()">{{ 'common.retry' | transloco }}</ion-button>
-          </ion-item>
+          <app-load-error
+            compact
+            [message]="'settings.privacyExceptions.friendsLoadFailed' | transloco"
+            (retry)="loadFriends()" />
         }
         @if (saveFailed()) {
           <ion-item lines="none">
