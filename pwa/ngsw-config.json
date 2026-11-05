@@ -18,5 +18,20 @@
       }
     }
   ],
-  "navigationUrls": ["/chats", "/chats/**", "/m/**", "/landing", "/"]
+  "navigationUrls": [
+    "/**",
+    "!/**/*.*",
+    "!/_api",
+    "!/_api/**",
+    "!/.well-known",
+    "!/.well-known/**",
+    "!/icon",
+    "!/icon/**",
+    "!/icon-maskable",
+    "!/icon-maskable/**",
+    "!/emoji",
+    "!/emoji/**",
+    "!/media",
+    "!/media/**"
+  ]
 }

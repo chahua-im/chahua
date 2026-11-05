@@ -103,6 +103,7 @@
           [rows]="1"
           [value]="restriction() ? '' : display().text"
           (ionInput)="changed($event.detail.value || '', $event.detail.event)"
+          (beforeinput)="beforeInput($event)"
           (ionFocus)="!dockStickers() && closeStickers()"
           (paste)="paste($event)"
           (keydown)="key($event)" />
