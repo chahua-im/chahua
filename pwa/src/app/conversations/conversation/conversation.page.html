@@ -449,6 +449,9 @@
             }
           </strong>
           <span><app-message-preview [message]="message" /></span>
+          @if (jumpingTo() === message.id) {
+            <ion-spinner />
+          }
         </button>
         <button type="button" class="reply-close" (click)="cancelReply()">
           <ion-icon [icon]="closeIcon" />
