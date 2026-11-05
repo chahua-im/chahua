@@ -632,7 +632,6 @@
       "unavailable": "[无法显示的消息]"
     },
     "upload": {
-      "offline": "上传因网络中断而停止。",
       "tooLarge": "文件超过 {{limit}} MiB 上限，请压缩文件或移除后重新选择。",
       "tooLargeUnknown": "文件超过服务器大小上限，请压缩文件或移除后重新选择。",
       "empty": "文件为空，请移除后重新选择。",
@@ -653,7 +652,6 @@
       "autoRetry": "将自动重试。",
       "retrying": "正在重试上传…",
       "unreadable": "无法读取本地文件，请移除后重新选择。",
-      "reconnect": "联网后将自动重试。",
       "failedTitle": "上传失败",
       "attachmentsTitle": "附件"
     }

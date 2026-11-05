@@ -67,11 +67,7 @@ export class UploadFailure {
     equal: (a, b) => a.limit === b.limit,
   });
   private readonly reason = translateSignal(this.reasonKey, this.reasonParams);
-  private readonly retryNoteKey = computed(
-    () =>
-      `messages.upload.${this.upload().state().error?.code === UploadErrorCode.Offline ? 'reconnect' : 'autoRetry'}`,
-  );
-  private readonly retryNote = translateSignal(this.retryNoteKey);
+  private readonly retryNote = translateSignal('messages.upload.autoRetry');
   protected readonly message = computed(() =>
     this.failure()?.autoRetry ? `${this.reason()} ${this.retryNote()}` : this.reason(),
   );

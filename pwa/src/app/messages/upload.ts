@@ -28,7 +28,6 @@ export class AttachmentUpload {
   private readonly controller = new AbortController();
   private prepared?: Awaited<ReturnType<typeof prepareMedia>>;
   private pending?: Promise<SnowflakeID | undefined>;
-  private attempt?: AbortController;
   private timer?: ReturnType<typeof setTimeout>;
   private retryDelay = 1_000;
   private reconnect = false;
@@ -56,10 +55,8 @@ export class AttachmentUpload {
     if (this.pending) return this.pending;
     clearTimeout(this.timer);
     this.retryable = true;
-    this.attempt = new AbortController();
     this.pending = this.run().finally(() => {
       this.pending = undefined;
-      this.attempt = undefined;
       if (!this.controller.signal.aborted && this.state().status === UploadStatus.Failed && this.retryable) {
         this.timer = setTimeout(() => void this.retry(), this.reconnect ? 0 : this.retryDelay);
         this.retryDelay = Math.min(this.retryDelay * 2, 30_000);
@@ -80,7 +77,7 @@ export class AttachmentUpload {
   }
 
   private async run(): Promise<SnowflakeID | undefined> {
-    const signal = AbortSignal.any([this.controller.signal, this.attempt!.signal]);
+    const signal = this.controller.signal;
     const aborted = fromEvent(signal, 'abort');
     const uploadStart = this.purpose === AttachmentUploadPurpose.media ? 0.5 : 0;
     const processing = uploadStart > 0 && !this.prepared;
@@ -149,7 +146,7 @@ export class AttachmentUpload {
       return response.attachmentId;
     } catch (error) {
       if (!this.controller.signal.aborted) {
-        const failure = uploadFailure(signal.aborted ? signal.reason : error, stage, maximumSize);
+        const failure = uploadFailure(error, stage, maximumSize);
         this.retryable = failure.autoRetry;
         this.uploadState.update((state) => ({ ...state, status: UploadStatus.Failed, error: failure }));
       }
