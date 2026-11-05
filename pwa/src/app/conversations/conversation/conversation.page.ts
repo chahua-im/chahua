@@ -105,6 +105,7 @@ import {
 } from '../../messages/forwarding';
 import { MessageActions } from '../../messages/message-actions';
 import { MessageComposer, type Composition } from '../../messages/message-composer/message-composer';
+import { AvatarMention } from '../../messages/avatar-mention';
 import { MessageDatePipe } from '../../messages/message-date.pipe';
 import { MessageMenu } from '../../messages/message-menu/message-menu';
 import { MessageOutbox, type OutgoingMessage } from '../../messages/message-outbox';
@@ -180,6 +181,7 @@ type ScrollPosition =
     ConversationViewportHeader,
     ForwardPicker,
     ForwardedLabel,
+    AvatarMention,
     AvatarColor,
     AvatarTextPipe,
     ContentScrollbars,

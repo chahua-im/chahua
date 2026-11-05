@@ -92,7 +92,11 @@ index.html 的独立内联脚本在 Angular 加载前检查更新；先复用已
 
 设置页的手动检查同时监听 Worker 的版本事件，不把 `checkForUpdate()` 的 `false` 单独视为已是最新版本：收到无新版本确认且没有下载或安装失败时才显示最新；已检测到的后台下载等待 `VERSION_READY`，失败、离线未确认或超过 15 秒显示检查失败。已就绪版本继续保留，并读取启动监听层记录的就绪版本，避免漏过 Angular 订阅前的通知。
 
-Service Worker 缓存应用资源（包括 landing 安装页及含表情数据的延迟加载代码），不缓存业务 API。表情选择器的最近记录由 @nicematic/emoji-picker 存入 localStorage，与 Preferences 的快捷表态记录独立。共享聊天数据仅在内存，连续消息的保留与释放由页面生命周期决定，没有离线消息数据库。
+Service Worker 缓存应用资源（包括 landing 安装页及含表情数据的延迟加载代码），不缓存业务 API。页面导航（GET、`navigate` 模式且接受 HTML）使用缓存的 `/index.html`，覆盖聊天、话题、资料、设置等所有无文件扩展名的应用路径；查询参数不影响匹配。不为每个聊天或话题 URL 单独缓存 HTML。
+
+导航 fallback 与服务器 SPA fallback 保持相同边界：`/_api`、`/.well-known`、`/icon`、`/icon-maskable`、`/emoji`、`/media` 及其子路径，以及末段带扩展名的路径，不回退为应用 HTML。普通 `fetch`、API 与资源请求不因离线或失败而收到 `index.html`。首次安装前仍依赖服务器的页面 fallback；缓存应用壳不代表聊天消息可离线读取。
+
+表情选择器的最近记录由 @nicematic/emoji-picker 存入 localStorage，与 Preferences 的快捷表态记录独立。共享聊天数据仅在内存，连续消息的保留与释放由页面生命周期决定，没有离线消息数据库。
 
 表情选择器不预取全部国旗图片。国旗图片使用浏览器原生懒加载，在滚动或搜索使对应图片接近可见区域时请求；加载失败沿用组件的 Unicode 字符回退。
 

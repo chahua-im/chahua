@@ -23,6 +23,7 @@ import { MessageText } from '../message-text/message-text';
 import { MessageThread } from '../message-thread/message-thread';
 import { UploadStatus, type AttachmentUpload } from '../upload';
 import { userColors } from '../user-colors';
+import { AvatarMention } from '../avatar-mention';
 
 export type MessageContent = MessageAttachmentSource &
   Pick<MessageResponse, 'sender' | 'message'> &
@@ -57,6 +58,7 @@ export interface MessageMenuSelection {
   styleUrl: './message.scss',
   imports: [
     NgTemplateOutlet,
+    AvatarMention,
     ForwardedLabel,
     ForwardedCard,
     AvatarTextPipe,
@@ -180,6 +182,8 @@ export class Message<T extends MessageContent = MessageResponse> {
       : MessageDelivery.Sending;
   });
   readonly canReply = input(true);
+  readonly canMention = input(false);
+  readonly mention = output<MessageContent['sender']>();
   readonly canOpenThread = input(false);
   readonly reply = output<T>();
   readonly jumpingTo = input<SnowflakeID>();

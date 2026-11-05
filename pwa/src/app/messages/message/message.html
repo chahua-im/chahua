@@ -65,6 +65,8 @@
       <span class="avatar-slot">
         @if (showAvatar()) {
           <ion-avatar
+            [avatarMention]="canMention() && !preview() && !selecting() && !record()"
+            (mentionRequested)="mention.emit(message().sender)"
             (click)="profile()"
             class="avatar"
             [style.visibility]="stickyAvatar() ? 'hidden' : null"

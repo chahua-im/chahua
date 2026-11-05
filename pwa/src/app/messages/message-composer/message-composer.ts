@@ -1,5 +1,6 @@
 import { NgTemplateOutlet } from '@angular/common';
 import {
+  ChangeDetectorRef,
   Component,
   computed,
   DestroyRef,
@@ -156,6 +157,7 @@ export class MessageComposer {
   protected readonly dragDepth = signal(0);
   readonly voiceActive = signal(false);
   private readonly destroy = inject(DestroyRef);
+  private readonly changeDetector = inject(ChangeDetectorRef);
   private readonly textarea = viewChild(IonTextarea);
   protected readonly uploads = signal<AttachmentUpload[]>([]);
   protected readonly borrowedUploads = linkedSignal(() => this.editingUploads());
@@ -417,6 +419,34 @@ export class MessageComposer {
     this.mentionSearch = undefined;
     this.mentionQuery = undefined;
   }
+  protected beforeInput(event: Event) {
+    if (!(event instanceof InputEvent) || event.isComposing || !event.inputType.startsWith('delete')) return;
+    const input = event.target;
+    if (!(input instanceof HTMLTextAreaElement)) return;
+    const display = this.display();
+    let start = input.selectionStart;
+    let end = input.selectionEnd;
+    let from = start;
+    let to = end;
+    if (start === end) {
+      if (event.inputType.endsWith('Backward')) {
+        if (event.inputType === 'deleteWordBackward') while (from > 0 && /\s/.test(display.text[from - 1])) from--;
+        from = Math.max(0, from - 1);
+      } else if (event.inputType.endsWith('Forward')) {
+        if (event.inputType === 'deleteWordForward')
+          while (to < display.text.length && /\s/.test(display.text[to])) to++;
+        to = Math.min(display.text.length, to + 1);
+      }
+    }
+    for (const mention of display.mentions) {
+      if (mention.start < to && from < mention.end) {
+        start = Math.min(start, mention.start);
+        end = Math.max(end, mention.end);
+      }
+    }
+    // Let the native deletion operate on the expanded selection, preserving undo.
+    input.setSelectionRange(start, end);
+  }
   protected async changed(text: string, event?: Event) {
     this.text.set(wireText(editText(this.display(), text)));
     const version = ++this.mentionVersion;
@@ -460,7 +490,14 @@ export class MessageComposer {
         },
       });
   }
-  protected async mention(member: MemberResponse) {
+  async insertMention(sender: MessageContent['sender']) {
+    if (this.restriction() || this.voiceActive()) return;
+    const input = await this.textarea()?.getInputElement();
+    if (!input) return;
+    this.mentionRange = { start: input.selectionStart, end: input.selectionEnd };
+    await this.mention({ ...sender, username: sender.name });
+  }
+  protected async mention(member: Pick<MentionInfo, 'uid' | 'username' | 'gender' | 'avatarUrl' | 'userGroup'>) {
     const range = this.mentionRange;
     if (!range) return;
     const name = member.username || 'User ' + member.uid;
@@ -474,8 +511,12 @@ export class MessageComposer {
       new Map(mentions).set(uid, { uid, gender, avatarUrl, userGroup, username: name }),
     );
     this.text.set(wireText(display));
+    this.cancelMentionSearch();
+    this.mentionRange = undefined;
     this.suggestions.set([]);
     this.mentionVersion++;
+    // Apply the textarea value before placing the caret; a later value write resets it.
+    this.changeDetector.detectChanges();
     await this.setFocus();
     const input = await this.textarea()?.getInputElement();
     input?.setSelectionRange(range.start + token.length, range.start + token.length);

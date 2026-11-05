@@ -113,6 +113,8 @@
     @if (stickyAvatarsEnabled() && stickySender(); as sender) {
       <button
         class="sticky-avatar"
+        [avatarMention]="!selecting() && !speakingRestriction()"
+        (mentionRequested)="composer()?.insertMention(sender)"
         [avatarColor]="sender.avatarUrl ? null : (sender.name ?? sender.uid.toString())"
         [style.transform]="'translateY(' + stickyOffset() + 'px)'"
         [routerLink]="['/profile', sender.uid]">
@@ -215,6 +217,8 @@
           [first]="row.first"
           [last]="row.last"
           [canReply]="!editing() && canSendMessage()"
+          [canMention]="!speakingRestriction()"
+          (mention)="composer()?.insertMention($event)"
           [jumpingTo]="jumpingTo()"
           [jumpDisabled]="!!pendingNavigation()"
           [canOpenThread]="!threadId()"

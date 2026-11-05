@@ -867,6 +867,64 @@ describe('Message composer upload ownership', () => {
     expect(mentions?.[0].username).toBe('当前昵称很长');
   });
 
+  it('inserts avatar mentions at the selection while preserving existing mention identities', async () => {
+    fixture.componentRef.setInput('mentionsEnabled', false);
+    const sender = { uid: 42, name: 'Timeline User', gender: 1 };
+    composer.text.set('hello replace tail');
+    fixture.detectChanges();
+    const input = await composer['textarea']()!.getInputElement();
+    input.setSelectionRange(6, 13);
+    await composer.insertMention(sender);
+    fixture.detectChanges();
+    expect(composer.text()).toBe('hello @[uid:42]  tail');
+    expect(composer['display']().text).toBe('hello @Timeline User  tail');
+    expect(input.selectionStart).toBe(21);
+
+    input.setSelectionRange(0, 0);
+    await composer.insertMention({ uid: 7, name: 'Other User', gender: 0 });
+    expect(composer.text()).toBe('@[uid:7] hello @[uid:42]  tail');
+    composer['submit']();
+    expect(submitted.mock.calls[0][0].mentions).toEqual([
+      { uid: 7, username: 'Other User', gender: 0 },
+      { uid: 42, username: 'Timeline User', gender: 1 },
+    ]);
+  });
+
+  it('preserves the draft when speaking restrictions prevent avatar mentions', async () => {
+    fixture.componentRef.setInput('restriction', SpeakingMode.readOnly);
+    composer.text.set('keep this draft');
+    fixture.detectChanges();
+    await composer.insertMention({ uid: 42, name: 'Timeline User', gender: 1 });
+    expect(composer.text()).toBe('keep this draft');
+  });
+
+  it.each([
+    ['deleteContentBackward', 14, 14, 'x @[uid:7] y'],
+    ['deleteContentForward', 2, 2, 'x @[uid:7] y'],
+    ['deleteContentBackward', 8, 8, 'x @[uid:7] y'],
+    ['deleteContentForward', 8, 8, 'x @[uid:7] y'],
+    ['deleteContentBackward', 8, 16, 'x  y'],
+    ['deleteByCut', 8, 10, 'x @[uid:7] y'],
+  ] as const)('deletes whole mention identities for %s at %i–%i', async (inputType, start, end, expected) => {
+    edit({
+      ...testMessage,
+      mentions: [
+        { uid: 42, username: 'Alice Smith', gender: 0 },
+        { uid: 7, username: 'Bob', gender: 0 },
+      ],
+    });
+    composer.text.set('x @[uid:42]@[uid:7] y');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const input = await composer['textarea']()!.getInputElement();
+    input.setSelectionRange(start, end);
+    input.dispatchEvent(new InputEvent('beforeinput', { inputType, bubbles: true }));
+    // jsdom has no native editing default; apply the browser's selected-range deletion.
+    input.setRangeText('', input.selectionStart, input.selectionEnd, 'start');
+    await composer['changed'](input.value, new InputEvent('input', { inputType }));
+    expect(composer.text()).toBe(expected);
+  });
+
   it('retains editing mention names in the emitted snapshot', () => {
     const mentions = [{ uid: 42, gender: 1, username: '原消息名字' }];
     edit({ ...testMessage, mentions });

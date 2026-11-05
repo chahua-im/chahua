@@ -74,6 +74,10 @@ function relocateMentions(previous: EditableText, nextText: string): MentionSpan
   const maxAnchor = Math.min(previousText.length, nextText.length);
   let prefix = 0;
   while (prefix < maxAnchor && previousText[prefix] === nextText[prefix]) prefix += 1;
+  // Shared characters (such as adjacent mentions' "@") must not split a token
+  // between the unchanged prefix and the edited range.
+  const splitMention = entries.find((entry) => entry.start < prefix && prefix < entry.end);
+  if (splitMention) prefix = splitMention.start;
   let suffix = 0;
   while (
     suffix < maxAnchor - prefix &&
