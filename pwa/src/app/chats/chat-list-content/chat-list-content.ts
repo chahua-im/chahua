@@ -298,7 +298,6 @@ export class ChatListContent {
             unreadReactions: thread.unreadReactions,
             muted: thread.archived,
             link: ['/chats/chat', decodeId(thread.chatId), 'thread', decodeId(root.id)],
-            state: { fromChatList: true },
           } satisfies ChatListEntry,
           markRead: () => this.metadata.markThreadRead(thread.chatId, root.id, last?.id ?? root.id),
           toggleArchived: () => this.metadata.setThreadArchived(thread.chatId, root.id, !thread.archived),

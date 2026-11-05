@@ -1,5 +1,7 @@
 import { MessageType, type MessageResponse } from '../../generated/models';
 
+const MAX_GROUP_SPAN_MS = 10 * 60 * 1000;
+
 export function messageRows<T extends Pick<MessageResponse, 'createdAt' | 'messageType' | 'sender'>>(
   messages: readonly T[],
 ) {
@@ -16,10 +18,21 @@ export function messageRows<T extends Pick<MessageResponse, 'createdAt' | 'messa
       dates[left] === dates[right]
     );
   };
-  return messages.map((message, index) => ({
-    message,
-    first: !continuesGroup(index - 1, index),
-    last: !continuesGroup(index, index + 1),
-    dateBreak: index === 0 || dates[index - 1] !== dates[index],
-  }));
+  let groupStart = 0;
+  const rows = messages.map((message, index) => {
+    const first =
+      !continuesGroup(index - 1, index) ||
+      Date.parse(message.createdAt) - Date.parse(messages[groupStart].createdAt) > MAX_GROUP_SPAN_MS;
+    if (first) groupStart = index;
+    return {
+      message,
+      first,
+      last: false,
+      dateBreak: index === 0 || dates[index - 1] !== dates[index],
+    };
+  });
+  for (let index = 0; index < rows.length; index++) {
+    rows[index].last = rows[index + 1]?.first ?? true;
+  }
+  return rows;
 }

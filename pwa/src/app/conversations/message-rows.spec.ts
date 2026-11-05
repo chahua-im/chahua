@@ -9,7 +9,7 @@ describe('messageRows', () => {
     expect(messageRows([testMessage])).toEqual([{ message: testMessage, first: true, last: true, dateBreak: true }]);
   });
 
-  it('groups adjacent messages by sender and local day regardless of time gap', () => {
+  it('splits messages by sender, local day and maximum group span', () => {
     const messages = [
       { ...testMessage, id: encodeId('100'), createdAt: new Date(2026, 8, 5, 1).toISOString() },
       { ...testMessage, id: encodeId('101'), createdAt: new Date(2026, 8, 5, 23).toISOString() },
@@ -22,10 +22,27 @@ describe('messageRows', () => {
       },
     ];
     expect(messageRows(messages).map(({ first, last, dateBreak }) => ({ first, last, dateBreak }))).toEqual([
-      { first: true, last: false, dateBreak: true },
-      { first: false, last: true, dateBreak: false },
       { first: true, last: true, dateBreak: true },
       { first: true, last: true, dateBreak: false },
+      { first: true, last: true, dateBreak: true },
+      { first: true, last: true, dateBreak: false },
+    ]);
+  });
+
+  it('limits the entire group to ten minutes even when messages keep arriving', () => {
+    const start = Date.parse(testMessage.createdAt);
+    const messages = [0, 5, 10, 11, 20, 21, 22].map((minutes) => ({
+      ...testMessage,
+      createdAt: new Date(start + minutes * 60_000).toISOString(),
+    }));
+    expect(messageRows(messages).map(({ first, last }) => [first, last])).toEqual([
+      [true, false],
+      [false, false],
+      [false, true],
+      [true, false],
+      [false, false],
+      [false, true],
+      [true, true],
     ]);
   });
 

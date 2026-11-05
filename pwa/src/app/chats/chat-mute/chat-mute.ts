@@ -32,9 +32,21 @@ export class ChatMute {
     );
   });
   protected notificationButtons(buttons: ActionSheetButton<UpdateNotificationSettingRequest>[]) {
-    return this.permanentlyMuted()
-      ? buttons.filter((button) => button.data?.mode !== NotificationSettingMode.temporarilyMuted)
-      : buttons;
+    const chatId = this.chatId();
+    const state = chatId == null ? undefined : this.store.chatState(chatId);
+    const temporarilyMuted = chatId != null && this.store.isTemporarilyMuted(chatId);
+    const currentMode =
+      state?.muteOverride == null
+        ? NotificationSettingMode.inherit
+        : state.muteOverride
+          ? NotificationSettingMode.alwaysMuted
+          : NotificationSettingMode.alwaysUnmuted;
+    return buttons.filter((button) => {
+      const mode = button.data?.mode;
+      if (mode === NotificationSettingMode.temporarilyMuted) return !this.permanentlyMuted();
+      // Selecting a permanent preference also ends an active temporary mute.
+      return temporarilyMuted || mode !== currentMode;
+    });
   }
   protected readonly Mode = NotificationSettingMode;
 

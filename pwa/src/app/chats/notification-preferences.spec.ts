@@ -1,3 +1,4 @@
+import { computed } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
@@ -315,6 +316,8 @@ describe('notification preferences', () => {
       mode: NotificationSettingMode.temporarilyMuted,
       durationSeconds: 1,
     });
+    const temporary = computed(() => store.isTemporarilyMuted(testChat.id));
+    expect(temporary()).toBe(true);
     expect(store.isMuted(testChat.id)).toBe(true);
     peer
       .expect(endpoint, { chatId: wireChat.id, mode: NotificationSettingMode.temporarilyMuted, durationSeconds: 1 })
@@ -326,6 +329,7 @@ describe('notification preferences', () => {
     await save;
     TestBed.tick();
     await vi.advanceTimersByTimeAsync(1001);
+    expect(temporary()).toBe(false);
     expect(store.isMuted(testChat.id)).toBe(false);
     expect(store.chatState(testChat.id)?.muteOverride).toBe(false);
     expect(store.chat(testChat.id).unreadCount).toBe(testChat.unreadCount);

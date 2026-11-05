@@ -40,7 +40,11 @@ describe('MessagePreview', () => {
     [SystemMessageKind.message_pinned, 'pinned a message', '测试用户 置顶了消息'],
     [SystemMessageKind.message_unpinned, 'unpinned a message', '测试用户 取消置顶了消息'],
     [SystemMessageKind.thread_message_pinned, 'pinned a message in this thread', '测试用户 在本话题中置顶了消息'],
-    [SystemMessageKind.thread_message_unpinned, 'unpinned a message in this thread', '测试用户 在话题中取消置顶了消息'],
+    [
+      SystemMessageKind.thread_message_unpinned,
+      'unpinned a message in this thread',
+      '测试用户 在本话题中取消置顶了消息',
+    ],
   ] as const)('renders the system phrase %s with its actor', (systemKind, message, expected) => {
     expect(render({ messageType: MessageType.system, systemKind, message })).toBe(expected);
     expect(fixture.nativeElement.classList.contains('action')).toBe(true);

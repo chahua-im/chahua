@@ -13,12 +13,14 @@ describe('chat notification menu', () => {
   const user = signal(testUser);
   const kind = signal(GroupKind.group);
   const state = signal<{ muteOverride?: boolean; mutedUntil?: string }>({});
+  const now = signal(Date.now());
   const save = vi.fn().mockResolvedValue(undefined);
   beforeEach(() => {
     user.set(testUser);
     save.mockClear();
     kind.set(GroupKind.group);
     state.set({});
+    now.set(Date.now());
     TestBed.configureTestingModule({
       providers: [
         { provide: SessionStore, useValue: { user } },
@@ -28,6 +30,7 @@ describe('chat notification menu', () => {
             setNotificationSetting: save,
             get: () => ({ kind: kind() }),
             chatState: state,
+            isTemporarilyMuted: () => Date.parse(state().mutedUntil ?? '') > now(),
             notificationDefaults: user,
           },
         },
@@ -104,6 +107,45 @@ describe('chat notification menu', () => {
     },
   );
 
+  it.each([undefined, false, true])('hides only the current preference for override %s', async (override) => {
+    state.set({ muteOverride: override, mutedUntil: new Date(Date.now() - 1000).toISOString() });
+    vi.spyOn(IonActionSheet.prototype, 'onDidDismiss').mockResolvedValue({ role: 'cancel' });
+    vi.spyOn(IonActionSheet.prototype, 'present').mockImplementation(async function (this: IonActionSheet) {
+      const modes = this.buttons.flatMap((button) => (typeof button === 'string' ? [] : [button.data?.mode]));
+      expect(modes.includes(NotificationSettingMode.inherit)).toBe(override != null);
+      expect(modes.includes(NotificationSettingMode.alwaysMuted)).toBe(override !== true);
+      expect(modes.includes(NotificationSettingMode.alwaysUnmuted)).toBe(override !== false);
+    });
+    const fixture = TestBed.createComponent(ChatMute);
+    fixture.detectChanges();
+    await fixture.componentInstance.toggle(testChat.id);
+  });
+
+  it('hides the current preference when a temporary mute expires while the menu is open', async () => {
+    const expires = Date.now() + 1000;
+    state.set({ mutedUntil: new Date(expires).toISOString() });
+    let dismiss!: (value: { role: string }) => void;
+    vi.spyOn(IonActionSheet.prototype, 'onDidDismiss').mockReturnValue(
+      new Promise((resolve) => {
+        dismiss = resolve;
+      }),
+    );
+    const fixture = TestBed.createComponent(ChatMute);
+    fixture.detectChanges();
+    const opening = fixture.componentInstance.toggle(testChat.id);
+    const sheet = fixture.debugElement.query(By.directive(IonActionSheet)).componentInstance as IonActionSheet;
+    const inherits = () =>
+      sheet.buttons.some(
+        (button) => typeof button !== 'string' && button.data?.mode === NotificationSettingMode.inherit,
+      );
+    expect(inherits()).toBe(true);
+    now.set(expires);
+    fixture.detectChanges();
+    expect(inherits()).toBe(false);
+    dismiss({ role: 'cancel' });
+    await opening;
+  });
+
   it('updates an open menu when account defaults or the chat exception change', async () => {
     let dismiss!: (value: { role: string }) => void;
     vi.spyOn(IonActionSheet.prototype, 'onDidDismiss').mockReturnValue(
@@ -115,13 +157,13 @@ describe('chat notification menu', () => {
     fixture.detectChanges();
     const opening = fixture.componentInstance.toggle(testChat.id);
     const sheet = fixture.debugElement.query(By.directive(IonActionSheet)).componentInstance as IonActionSheet;
-    expect(sheet.buttons).toHaveLength(4);
+    expect(sheet.buttons).toHaveLength(3);
     user.set({ ...testUser, muteGroupChatsByDefault: false });
     fixture.detectChanges();
-    expect(sheet.buttons).toHaveLength(8);
+    expect(sheet.buttons).toHaveLength(7);
     state.set({ muteOverride: true });
     fixture.detectChanges();
-    expect(sheet.buttons).toHaveLength(4);
+    expect(sheet.buttons).toHaveLength(3);
     dismiss({ role: 'cancel' });
     await opening;
   });

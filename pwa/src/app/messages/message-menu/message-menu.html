@@ -117,6 +117,7 @@
 </ion-modal>
 <ion-alert
   [isOpen]="!!confirmation()"
+  [cssClass]="confirmation()?.action === Action.Recall ? 'recall-confirmation' : ''"
   [header]="
     (confirmation()?.action === Action.Recall
       ? 'messages.menu.confirm.recallTitle'
@@ -136,7 +137,7 @@
   "
   [buttons]="[
     { text: ('common.cancel' | transloco), role: 'cancel' },
-    { text: ('common.confirm' | transloco), role: 'confirm' },
+    { text: ('common.confirm' | transloco), role: 'confirm', cssClass: 'confirm-action' },
   ]"
   (didDismiss)="confirm($event)"></ion-alert>
 <ion-toast

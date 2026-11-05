@@ -335,6 +335,11 @@ export class ChatStore {
     return this.chatState(chatId)?.mutedUntil;
   }
 
+  isTemporarilyMuted(chatId: SnowflakeID) {
+    this.muteTime();
+    return Date.parse(this.mutedUntil(chatId) ?? '') > Date.now();
+  }
+
   isMuted(chatId: SnowflakeID) {
     this.muteTime();
     return notificationMuted(this.get(chatId)?.kind, this.chatState(chatId), this.notificationDefaults());
