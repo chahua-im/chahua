@@ -125,17 +125,18 @@ describe('Upload activity deadlines', () => {
     expect(xhr.abort).toHaveBeenCalledOnce();
   });
 
-  it('terminates a standalone transfer on offline and ignores callbacks after abort', async () => {
+  it('allows a standalone transfer despite an offline hint or event', async () => {
+    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
     const progress = vi.fn();
     const pending = uploadBlob('https://storage.invalid/offline', new Blob(), {}, undefined, progress);
-    const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
     const xhr = FakeUpload.requests[0];
+    expect(xhr.send).toHaveBeenCalledOnce();
     window.dispatchEvent(new Event('offline'));
-    await rejected;
     xhr.progress(1, 1);
     xhr.finish();
-    expect(progress).not.toHaveBeenCalled();
-    expect(xhr.abort).toHaveBeenCalledOnce();
+    await pending;
+    expect(progress).toHaveBeenCalledWith(1);
+    expect(xhr.abort).not.toHaveBeenCalled();
   });
 });
 
@@ -432,7 +433,9 @@ describe('Attachment upload tasks', () => {
     [RpcErrorCode.Forbidden, 'Forbidden', UploadErrorCode.Forbidden, false],
     [RpcErrorCode.Overloaded, 'Too many requests', UploadErrorCode.RateLimited, true],
     [RpcErrorCode.Unavailable, 'Unavailable', UploadErrorCode.Server, true],
-  ])('preserves the API error for RPC code %s', async (rpcCode, detail, code, autoRetry) => {
+    [RpcErrorCode.DispatcherInternal, 'Internal error', UploadErrorCode.Server, true],
+  ])('preserves the API error for RPC code %s despite an offline hint', async (rpcCode, detail, code, autoRetry) => {
+    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
     const task = create();
     const pending = task.retry();
     peer.expect('attachments.getConfig').error(rpcCode, detail);
@@ -528,25 +531,49 @@ describe('Attachment upload tasks', () => {
     peer.expectNone('attachments.getConfig');
   });
 
-  it('aborts only the offline attempt and reuses the preview when online retries', async () => {
+  it('uploads through config, signing and storage despite an offline hint or event', async () => {
+    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
     const task = create();
     const pending = task.retry();
     config();
     const xhr = await sign();
-    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
     window.dispatchEvent(new Event('offline'));
+    xhr.finish();
+    await expect(pending).resolves.toBe(encodeId('100'));
+    expect(task.state().status).toBe(UploadStatus.Ready);
+    expect(xhr.abort).not.toHaveBeenCalled();
+  });
+
+  it('automatically retries dispatcher errors despite an offline hint', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    const task = create();
+    const pending = task.retry();
+    peer.expect('attachments.getConfig').error(RpcErrorCode.DispatcherInternal);
     await pending;
-    expect(xhr.abort).toHaveBeenCalledOnce();
-    expect(task.state().status).toBe(UploadStatus.Failed);
+    expect(task.state().error).toMatchObject({ code: UploadErrorCode.Server, autoRetry: true });
+    await vi.advanceTimersByTimeAsync(1_000);
+    const retry = task.retry();
+    config();
+    (await sign()).finish();
+    await expect(retry).resolves.toBe(encodeId('100'));
+  });
+
+  it('retries a network failure on an online event and reuses the preview', async () => {
+    const task = create();
+    const pending = task.retry();
+    config();
+    const xhr = await sign();
+    xhr.onerror?.();
+    await pending;
+    expect(task.state().error).toMatchObject({ code: UploadErrorCode.Network, autoRetry: true });
     expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(task.url);
-    online.mockReturnValue(true);
     window.dispatchEvent(new Event('online'));
     const retry = task.retry();
     config();
     (await sign(encodeId('101'))).finish();
     await expect(retry).resolves.toBe(encodeId('101'));
     expect(task.url).toBe('blob:mock-1');
-    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(task.url);
   });
 
   it('times out a pending RPC round, ignores its late reply and automatically retries transient failure', async () => {

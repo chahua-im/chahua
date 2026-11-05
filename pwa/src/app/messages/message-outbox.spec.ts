@@ -834,17 +834,65 @@ describe('MessageOutbox', () => {
     await item.operation;
   });
 
-  it('aborts offline work and retries online without losing local content', async () => {
-    const item = outbox.enqueue(testChat.id, undefined, 'offline', text);
-    const offline = peer.expect('messages.send');
-    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+  it('sends and accepts acknowledgements despite an offline hint or event', async () => {
+    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    const item = outbox.enqueue(testChat.id, undefined, 'offline hint', text);
+    const request = peer.expect('messages.send');
     window.dispatchEvent(new Event('offline'));
+    await Promise.resolve();
+    expect(item.delivery()).toBe(MessageDelivery.Sending);
+    request.flush(accepted(item));
     await item.operation;
-    offline.flush(accepted(item));
-    online.mockReturnValue(true);
-    window.dispatchEvent(new Event('online'));
-    peer.expect('messages.send').flush(accepted(item));
+    expect(item.delivery()).toBe(MessageDelivery.Sent);
+  });
+
+  it.each([RpcErrorCode.Unavailable, RpcErrorCode.DispatcherInternal])(
+    'automatically retries RPC error %s with the same payload despite an offline hint',
+    async (code) => {
+      vi.useFakeTimers();
+      vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+      const item = outbox.enqueue(testChat.id, undefined, 'retry', text);
+      const request = peer.expect('messages.send');
+      request.error(code);
+      await item.operation;
+      expect(item.delivery()).toBe(MessageDelivery.Failed);
+      await vi.advanceTimersByTimeAsync(1_000);
+      peer.expect('messages.send', request.params).flush(accepted(item));
+      await item.operation;
+      expect(item.delivery()).toBe(MessageDelivery.Sent);
+    },
+  );
+
+  it('preserves permanent errors despite an offline hint and permits explicit retry', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    const item = outbox.enqueue(testChat.id, undefined, 'retry', text);
+    const request = peer.expect('messages.send');
+    request.error(RpcErrorCode.Forbidden);
     await item.operation;
+    await vi.advanceTimersByTimeAsync(60_000);
+    resync.next();
+    peer.expectNone('messages.send');
+    expect(item.delivery()).toBe(MessageDelivery.Failed);
+    const retry = outbox.retry(item);
+    peer.expect('messages.send', request.params).flush(accepted(item));
+    await retry;
+    expect(item.delivery()).toBe(MessageDelivery.Sent);
+  });
+
+  it('recovers a disconnected send on resync without an online browser event', async () => {
+    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    const item = outbox.enqueue(testChat.id, undefined, 'disconnected', text);
+    const request = peer.expect('messages.send');
+    peer.disconnect();
+    await item.operation;
+    expect(item.delivery()).toBe(MessageDelivery.Failed);
+    request.flush(accepted(item)); // A response on the closed socket cannot acknowledge the task.
+    peer.authenticate();
+    resync.next();
+    peer.expect('messages.send', request.params).flush(accepted(item));
+    await item.operation;
+    expect(item.delivery()).toBe(MessageDelivery.Sent);
   });
 
   it('retries transient deletes but stops automatic attempts after a permanent rejection', async () => {
