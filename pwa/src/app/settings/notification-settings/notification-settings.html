@@ -66,12 +66,10 @@
   </ion-list>
   @if (store.defaultsError()) {
     <ion-list [inset]="true">
-      <ion-item>
-        <ion-note color="danger">{{ 'notificationPreferences.loadFailed' | transloco }}</ion-note>
-        <ion-button slot="end" fill="clear" (click)="store.refreshNotificationDefaults()">
-          {{ 'common.retry' | transloco }}
-        </ion-button>
-      </ion-item>
+      <app-load-error
+        compact
+        [message]="'notificationPreferences.loadFailed' | transloco"
+        (retry)="store.refreshNotificationDefaults()" />
     </ion-list>
   }
   <ion-list [inset]="true">

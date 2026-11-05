@@ -108,7 +108,7 @@
   inset: 0;
 }
 
-.media-frame:has(.loaded) .media-skeleton {
+.media-frame:has(.loaded, .media-error) .media-skeleton {
   display: none;
 }
 
@@ -178,13 +178,25 @@
 }
 
 .media-error {
+  align-content: center;
+  gap: 8px;
+  font-size: var(--app-font-caption);
+  line-height: var(--app-line-caption);
   position: absolute;
   inset: 0;
   display: grid;
   place-items: center;
   padding: 8px;
   text-align: center;
-  color: inherit;
+  color: var(--ion-color-medium-contrast);
+  a {
+    color: inherit;
+    text-decoration: underline;
+  }
+}
+
+.sticker .media-error {
+  color: var(--ion-text-color);
 }
 
 .file {

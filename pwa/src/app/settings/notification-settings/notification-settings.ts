@@ -1,3 +1,4 @@
+import { LoadError } from '../../ui/load-error/load-error';
 import { afterRenderEffect, Component, DestroyRef, inject, viewChild } from '@angular/core';
 import {
   IonButton,
@@ -30,6 +31,7 @@ import { NotificationCategory } from './notification-category';
   selector: 'app-notification-settings',
   templateUrl: './notification-settings.html',
   imports: [
+    LoadError,
     ContentScrollbars,
     NotificationCategory,
     TranslocoPipe,

@@ -27,7 +27,7 @@
     <ion-progress-bar type="indeterminate" />
   }
 </ion-header>
-<ion-content appScrollbars color="light">
+<ion-content [class.load-error-page]="error() && !pack()" appScrollbars color="light">
   @if (pack(); as current) {
     <input #stickerFile type="file" accept="image/*,video/webm" hidden (change)="upload($event)" />
     @if (owned()) {

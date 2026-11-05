@@ -1,0 +1,22 @@
+<ion-header>
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <ion-button (click)="panels.back()"><ion-icon slot="icon-only" [icon]="backIcon" /></ion-button>
+    </ion-buttons>
+    <ion-title>{{ 'settings.advanced.title' | transloco }}</ion-title>
+  </ion-toolbar>
+</ion-header>
+<ion-content appScrollbars color="light">
+  <ion-list [inset]="true">
+    <ion-item lines="none">
+      <ion-toggle
+        [checked]="preferences.showDiagnosticsOnError()"
+        (ionChange)="preferences.setShowDiagnosticsOnError($event.detail.checked)">
+        <span class="ion-text-wrap">{{ 'settings.advanced.showDiagnosticsOnError' | transloco }}</span>
+      </ion-toggle>
+    </ion-item>
+  </ion-list>
+  <ion-list [inset]="true">
+    <app-diagnostics-copy row />
+  </ion-list>
+</ion-content>

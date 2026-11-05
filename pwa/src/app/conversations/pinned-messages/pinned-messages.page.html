@@ -7,6 +7,7 @@
   </ion-toolbar>
 </ion-header>
 <ion-content
+  [class.load-error-page]="failed() && !messages().length"
   appScrollbars
   [scrollEvents]="true"
   (ionScroll)="onScroll()"
@@ -55,13 +56,16 @@
       }
     }
   </div>
-  @if (loading()) {
+  @if (loading() && !messages().length) {
     <div class="page-loading">
       <ion-spinner></ion-spinner>
     </div>
   }
   @if (failed()) {
-    <app-load-error [message]="'conversation.loadFailed' | transloco" (retry)="load()" />
+    <app-load-error
+      [compact]="!!messages().length"
+      [message]="'conversation.pinnedLoadFailed' | transloco"
+      (retry)="load()" />
   }
 </ion-content>
 <app-message-menu

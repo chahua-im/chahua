@@ -235,8 +235,8 @@ describe('MessageAttachments', () => {
     element.querySelector('img')!.dispatchEvent(new Event('error'));
     fixture.detectChanges();
     expect(frame.getAttribute('style')).toBe(before);
-    expect(element.querySelector('.media-error')?.textContent).toContain('加载失败，打开原文件');
-    expect(element.querySelector('.media-error')?.getAttribute('href')).toBe(image.url);
+    expect(element.querySelector('.media-error')?.textContent).toContain('图片加载失败');
+    expect(element.querySelector('.media-error a')?.getAttribute('href')).toBe(image.url);
   });
 
   it('backs a stretched image with its own aspect ratio and removes the blurred gutters on failure', async () => {
@@ -614,7 +614,7 @@ describe('MessageAttachments', () => {
     await fixture.whenStable();
     expect(frames[0].querySelector('app-upload-progress')).toBeNull();
     expect(frames[0].querySelector('.media-error')).not.toBeNull();
-    expect(frames[0].querySelector('.media-error')?.getAttribute('href')).toBe(first.url);
+    expect(frames[0].querySelector('.media-error a')?.getAttribute('href')).toBe(first.url);
     expect(frames[1].querySelector('app-upload-progress')).not.toBeNull();
     expect(frames[1].querySelector('img')?.getAttribute('src')).toBe(second.url);
   });
@@ -678,7 +678,7 @@ describe('MessageAttachments', () => {
     const element: HTMLElement = fixture.nativeElement;
     element.querySelector(media)!.dispatchEvent(new Event('error'));
     fixture.detectChanges();
-    const link = element.querySelector<HTMLAnchorElement>('a.media-error')!;
+    const link = element.querySelector<HTMLAnchorElement>('.media-error a')!;
     expect(link.getAttribute('href')).toBe('blob:failed-preview');
     expect(link.target).toBe('_blank');
     expect(link.rel).toBe('noopener');

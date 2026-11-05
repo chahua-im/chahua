@@ -22,12 +22,12 @@ import {
   eyeOutline,
   languageOutline,
   notificationsOutline,
+  optionsOutline,
   refreshOutline,
 } from 'ionicons/icons';
 import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
 import { PanelNavigation } from '../../navigation/panel-navigation';
 import { AppUpdates, UpdateCheckResult } from '../../pwa/app-updates';
-import { DiagnosticsCopy } from '../../pwa/diagnostics-copy';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { devBackendEnabled, SessionStore } from '../../session/session-store';
 import { localeLabels } from '../locale';
@@ -39,7 +39,6 @@ import { Preferences } from '../preferences';
   styleUrl: './settings.scss',
   imports: [
     ChatAvatar,
-    DiagnosticsCopy,
     RouterLink,
     ContentScrollbars,
     IonButton,
@@ -78,6 +77,7 @@ export class Settings {
   protected readonly presenceIcon = eyeOutline;
   protected readonly notificationIcon = notificationsOutline;
   protected readonly updateIcon = refreshOutline;
+  protected readonly advancedIcon = optionsOutline;
   protected readonly devIcon = constructOutline;
   protected readonly devMode = isDevMode() && devBackendEnabled();
   protected readonly devUidInput = signal('');

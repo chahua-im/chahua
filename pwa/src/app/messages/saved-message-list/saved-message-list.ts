@@ -28,6 +28,7 @@ import { RpcError, RpcErrorCode } from '../../api/rpc-error';
 
 @Component({
   selector: 'app-saved-message-list',
+  host: { '[class.load-error-page]': 'failed() && !savedRows().length' },
   templateUrl: './saved-message-list.html',
   styleUrl: './saved-message-list.scss',
   imports: [

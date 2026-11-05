@@ -27,7 +27,7 @@ import { DraftStore } from '../../conversations/draft-store';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
 import { ChatListItem } from '../chat-list-item/chat-list-item';
-import { ChatListStore, FriendRequestAction, type ChatListError } from '../chat-list-store';
+import { ChatListStore, FriendRequestAction, ChatListError } from '../chat-list-store';
 import { ChatStore, type ChatInfo } from '../chat-store';
 import { MessageDelivery } from '../../messages/message-delivery';
 import { MessageStatus } from '../../messages/message-status/message-status';
@@ -186,6 +186,25 @@ describe('ChatListContent', () => {
     const selection = listSelection(router.routerState.snapshot.root);
     if (selection) fixture.componentRef.setInput('selection', selection);
   }
+  it('combines chat and thread failures with one recovery action and keeps partial errors specific', async () => {
+    preferences.showThreadsInMessages.set(true);
+    await selectRoute('/chats/messages');
+    chats.error.set(ChatListError.Load);
+    threads.error.set(true);
+    fixture.detectChanges();
+    let errors = fixture.nativeElement.querySelectorAll('app-load-error');
+    expect(errors).toHaveLength(1);
+    expect(errors[0].textContent).toContain('会话和话题更新失败');
+    errors[0].querySelector('ion-button').click();
+    expect(chats.refresh).toHaveBeenCalledOnce();
+    expect(threads.refresh).toHaveBeenCalledOnce();
+    chats.error.set(undefined);
+    fixture.detectChanges();
+    errors = fixture.nativeElement.querySelectorAll('app-load-error');
+    expect(errors).toHaveLength(1);
+    expect(errors[0].textContent).toContain('话题加载失败');
+  });
+
   beforeEach(async () => {
     ListVisibilityObserver.instances = [];
     vi.stubGlobal('IntersectionObserver', ListVisibilityObserver);
@@ -215,10 +234,12 @@ describe('ChatListContent', () => {
     });
     outbox.items.set([]);
     chats.items.set([{ ...testChat, lastMessage }]);
+    chats.error.set(undefined);
     chats.loading.set(false);
     chats.hasMore.set(false);
     chatInfo.set({ ...testChat, avatar: 'https://example.com/group.jpg' });
     threads.items.set([]);
+    threads.error.set(false);
     threads.loading.set(false);
     threads.hasMore.set(false);
     counts.chats.value.set(0);

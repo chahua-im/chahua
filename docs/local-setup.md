@@ -12,6 +12,8 @@ All Git worktrees share PostgreSQL, Meilisearch, RustFS, development keys, and s
 
 The launcher supports Linux and macOS and requires `pkill` to stop Cargo's child during rebuilds. Host PostgreSQL, S3 tools, and Diesel CLI are not required. Frontend-only online development needs Git, Node.js, and npm; it does not need Docker or Rust.
 
+Swagger UI assets are bundled through the `utoipa-swagger-ui` `vendored` feature. Cargo downloads the asset crate with the other Rust dependencies; the build script does not fetch a separate archive from GitHub. Offline builds still require all Cargo dependencies to be cached.
+
 ## Start development
 
 Run launcher commands from the current worktree's repository root.

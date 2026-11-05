@@ -116,12 +116,11 @@
   </ion-list>
 }
 @if (error()) {
-  <ion-item lines="none">
-    <ion-note color="danger">{{ 'notificationPreferences.loadFailed' | transloco }}</ion-note>
-    <ion-button slot="end" fill="clear" [disabled]="loading()" (click)="refresh()">
-      {{ 'common.retry' | transloco }}
-    </ion-button>
-  </ion-item>
+  <app-load-error
+    compact
+    [message]="'notificationPreferences.loadFailed' | transloco"
+    [busy]="loading()"
+    (retry)="refresh()" />
 }
 @if (saveError()) {
   <ion-item lines="none">

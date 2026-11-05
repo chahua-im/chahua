@@ -1,3 +1,4 @@
+import { LoadError } from '../../ui/load-error/load-error';
 import { Component, computed, DestroyRef, effect, inject, input, signal, untracked, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
@@ -31,6 +32,7 @@ import type { SnowflakeID } from '../../api/snowflake-id';
   templateUrl: './notification-category.html',
   styleUrl: './notification-category.scss',
   imports: [
+    LoadError,
     TranslocoPipe,
     RouterLink,
     IonAlert,

@@ -26,10 +26,14 @@
       <ion-icon slot="start" [icon]="generalIcon" color="primary"></ion-icon>
       <ion-label>{{ 'settings.general.title' | transloco }}</ion-label>
     </ion-item>
-    <ion-item [button]="true" [detail]="true" routerLink="/settings/language" lines="none">
+    <ion-item [button]="true" [detail]="true" routerLink="/settings/language">
       <ion-icon slot="start" [icon]="languageIcon" color="primary"></ion-icon>
       <ion-label>{{ 'settings.general.language' | transloco }}</ion-label>
       <ion-note slot="end">{{ localeLabel() }}</ion-note>
+    </ion-item>
+    <ion-item [button]="true" [detail]="true" routerLink="/settings/advanced" lines="none">
+      <ion-icon slot="start" [icon]="advancedIcon" color="primary" />
+      <ion-label>{{ 'settings.advanced.title' | transloco }}</ion-label>
     </ion-item>
   </ion-list>
   <ion-list [inset]="true">
@@ -63,9 +67,6 @@
         </ion-note>
       }
     </ion-item>
-  </ion-list>
-  <ion-list [inset]="true">
-    <app-diagnostics-copy row />
   </ion-list>
   @if (devMode) {
     <ion-list [inset]="true">

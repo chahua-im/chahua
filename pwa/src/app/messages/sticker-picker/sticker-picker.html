@@ -130,10 +130,11 @@
             }
           }
           @if (group.error) {
-            <p class="empty">
-              {{ 'stickers.loadFailed' | transloco }}
-              <ion-button fill="clear" (click)="retryGroup(group)">{{ 'common.retry' | transloco }}</ion-button>
-            </p>
+            <app-load-error
+              class="group-error"
+              compact
+              [message]="'stickers.loadFailed' | transloco"
+              (retry)="retryGroup(group)" />
           } @else if (!canAdd && (group.content || !group.loading) && !group.content?.stickers?.length) {
             <p class="empty">{{ 'stickers.empty' | transloco }}</p>
           }

@@ -4,6 +4,7 @@
 
 .load-error {
   display: grid;
+  align-content: center;
   justify-items: center;
   gap: 12px;
   min-height: min(280px, 50vh);
@@ -37,12 +38,32 @@ ion-button {
   margin: 4px 0 0;
 }
 
+.details:empty {
+  display: none;
+}
+
+:host(.compact) .details {
+  flex-basis: 100%;
+  text-align: end;
+}
+
+.retrying {
+  visibility: hidden;
+}
+
+ion-spinner {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+}
+
 :host(.compact) .load-error {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   min-height: 0;
-  padding: 14px 16px;
+  padding: var(--load-error-padding, 8px 16px);
   text-align: start;
 }
 
@@ -59,6 +80,8 @@ ion-button {
 
 :host(.compact) p {
   flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
   max-width: none;
   font-size: var(--app-font-caption);
   line-height: var(--app-line-caption);

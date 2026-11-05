@@ -1,3 +1,4 @@
+import { LoadError } from '../../ui/load-error/load-error';
 import { Component, computed, DestroyRef, effect, inject, input, signal, untracked } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
@@ -39,6 +40,7 @@ import { ContentScrollbars } from '../../scrolling/content-scrollbars';
   selector: 'app-privacy-exceptions',
   templateUrl: './privacy-exceptions.html',
   imports: [
+    LoadError,
     TranslocoPipe,
     ChatAvatar,
     ContentScrollbars,

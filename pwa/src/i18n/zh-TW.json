@@ -66,7 +66,7 @@
     "upload": "上傳",
     "ok": "知道了",
     "retry": "重試",
-    "loadFailed": "載入失敗，請重試。",
+    "loadFailed": "載入失敗",
     "name": "名稱",
     "close": "關閉",
     "confirm": "確認",
@@ -150,7 +150,7 @@
     },
     "friendVerification": {
       "title": "加我好友時的驗證方式",
-      "loadFailed": "好友驗證設定載入失敗。",
+      "loadFailed": "好友驗證設定載入失敗",
       "allowAnyone": "允許任何人",
       "needMessage": "需要驗證訊息",
       "needQuestion": "需要回答問題並由我確認",
@@ -165,7 +165,7 @@
     },
     "presence": {
       "title": "誰能查看我的活動狀態",
-      "loadFailed": "在線狀態載入失敗，點擊重試",
+      "loadFailed": "線上狀態設定載入失敗",
       "everyone": "所有人",
       "friends": "我的好友",
       "nobody": "不允許任何人",
@@ -175,25 +175,25 @@
       "friendInherit": "使用全域設定",
       "friendShare": "與這位好友分享",
       "friendHide": "對這位好友隱藏",
-      "friendLoadFailed": "此好友的在線狀態設定載入失敗。"
+      "friendLoadFailed": "此好友的線上狀態設定載入失敗"
     },
     "readReceipt": {
       "title": "已讀回條",
-      "loadFailed": "已讀回條設定載入失敗。",
+      "loadFailed": "已讀回條設定載入失敗",
       "reciprocalNote": "只會在雙方都允許分享時顯示已讀回條；群組對話永不顯示已讀回條。",
       "saveFailed": "儲存失敗，請重試。",
       "friendTitle": "已讀回條分享",
       "friendInherit": "使用全域設定",
       "friendShare": "與這位好友分享",
       "friendHide": "對這位好友隱藏",
-      "friendLoadFailed": "此好友的已讀回條設定載入失敗。"
+      "friendLoadFailed": "此好友的已讀回條設定載入失敗"
     },
     "stickers": {
       "title": "表情和貼紙",
       "pinnedReactions": "置頂表態表情 ({{ count }}/5)",
       "autoSortPacks": "按最近使用自動排序貼紙包",
       "autoSortFavorites": "按最近使用自動排序收藏貼紙",
-      "loadFailed": "貼紙包載入失敗。",
+      "loadFailed": "貼圖包載入失敗",
       "sortDivider": "此行以下的貼紙包不會自動排序",
       "owned": "我的",
       "orderFailed": "貼紙排序儲存失敗，請重試。"
@@ -226,7 +226,7 @@
       "allowAnyone": "允許任何人",
       "presence": "誰能查看我的活動狀態",
       "loadFailed": "載入失敗，點擊重試",
-      "blocksLoadFailed": "封鎖使用者清單載入失敗。"
+      "blocksLoadFailed": "封鎖使用者清單載入失敗"
     },
     "privacyExceptions": {
       "title": "例外",
@@ -239,7 +239,13 @@
       "search": "搜尋好友",
       "added": "已新增",
       "noFriends": "沒有符合的好友",
-      "clearTitle": "刪除所有例外？"
+      "clearTitle": "刪除所有例外？",
+      "loadFailed": "例外設定載入失敗",
+      "friendsLoadFailed": "好友清單載入失敗"
+    },
+    "advanced": {
+      "title": "進階",
+      "showDiagnosticsOnError": "載入失敗時顯示「複製診斷資訊」"
     }
   },
   "chats": {
@@ -296,11 +302,12 @@
       "unnamedGroup": "未命名群組",
       "emptyThreads": "尚無話題",
       "emptyChats": "尚無會話",
-      "threadsLoadFailed": "話題載入失敗，請重新整理後重試。",
-      "chatsLoadFailed": "會話載入失敗，請重新整理後重試。",
-      "unreadLoadFailed": "更新未讀數量失敗，請重新整理後重試。",
-      "recentLoadFailed": "更新會話失敗，請下拉重新整理後重試。",
-      "moreLoadFailed": "載入更多會話失敗，請重試。"
+      "threadsLoadFailed": "話題載入失敗",
+      "chatsLoadFailed": "對話載入失敗",
+      "unreadLoadFailed": "未讀數量更新失敗",
+      "recentLoadFailed": "對話更新失敗",
+      "moreLoadFailed": "更多對話載入失敗",
+      "combinedLoadFailed": "對話與話題更新失敗"
     },
     "inviteStatus": {
       "expired": "邀請已過期",
@@ -364,7 +371,7 @@
       "leaveGroup": "退出群組",
       "unblock": "解除封鎖",
       "block": "封鎖",
-      "loadFailed": "載入失敗，請重試。",
+      "loadFailed": "詳細資料載入失敗",
       "tabs": {
         "threads": "話題",
         "members": "成員",
@@ -395,7 +402,7 @@
       "groups": "群聊",
       "users": "使用者",
       "moreGroups": "載入更多群組",
-      "failed": "搜尋失敗，請重試。",
+      "failed": "搜尋失敗",
       "noResults": "找不到結果",
       "prompt": "搜尋群組和使用者"
     },
@@ -404,7 +411,7 @@
       "placeholder": "搜尋聊天訊息",
       "relevance": "相關度",
       "newest": "最新",
-      "failed": "搜尋失敗，請重試。",
+      "failed": "搜尋結果載入失敗",
       "noResults": "找不到訊息"
     },
     "threads": {
@@ -454,14 +461,14 @@
     "thread": "話題",
     "chat": "會話",
     "pinned": "置頂訊息",
-    "pinnedLoadFailed": "置頂訊息載入失敗，請重試",
+    "pinnedLoadFailed": "置頂訊息載入失敗",
     "unreadBelow": "未讀訊息",
-    "threadLoadFailed": "話題狀態載入失敗，請重試。",
-    "threadUpdateFailed": "話題更新失敗，請重試。",
+    "threadLoadFailed": "話題狀態載入失敗",
+    "threadUpdateFailed": "話題更新失敗",
     "empty": "尚無訊息",
     "emptyVisible": "尚無可顯示的訊息",
     "missing": "這則訊息已刪除或無法查看。",
-    "loadFailed": "訊息載入失敗，請重試。",
+    "loadFailed": "訊息載入失敗",
     "editing": "編輯訊息",
     "replyingTo": "正在回覆 {{ name }}",
     "reply": "回覆訊息",
@@ -471,7 +478,8 @@
     "emptySaved": "尚無收藏訊息",
     "viewOriginal": "查看原訊息",
     "unsave": "取消收藏",
-    "loadMoreFailed": "載入訊息失敗，請重試。"
+    "olderLoadFailed": "更早的訊息載入失敗",
+    "newerLoadFailed": "更新的訊息載入失敗"
   },
   "messages": {
     "date": {
@@ -558,7 +566,7 @@
     },
     "invite": {
       "groupInvite": "群聊邀請",
-      "failed": "邀請失效或無法載入，點擊重試",
+      "failed": "邀請載入失敗",
       "joined": "已加入，開啟群組",
       "view": "查看群組資訊並加入"
     },
@@ -571,7 +579,9 @@
       "original": "原始檔案"
     },
     "media": {
-      "openOriginal": "載入失敗，開啟原始檔案"
+      "openOriginal": "開啟原始檔案",
+      "imageLoadFailed": "圖片載入失敗",
+      "videoLoadFailed": "影片載入失敗"
     },
     "thread": {
       "replies": "{{ count }} 則回覆"
@@ -589,8 +599,8 @@
       "otherParticipants": "{{first}}和其他{{count}}人",
       "navigationFailed": "無法開啟目標會話，請重試。",
       "loadMore": "繼續載入",
-      "chatsFailed": "聊天載入失敗，請重試。",
-      "threadsFailed": "話題載入失敗，請重試。",
+      "chatsFailed": "聊天載入失敗",
+      "threadsFailed": "話題載入失敗",
       "recordsUnavailable": "聊天記錄已無法存取。",
       "unavailable": "所選訊息中包含無法轉發的訊息，請調整選取範圍。",
       "action": "轉發",
@@ -658,7 +668,7 @@
     "emojiPlaceholder": "對應表情，例如 🙂",
     "emojiExample": "例如 🙂",
     "optionalName": "名稱（選填）",
-    "loadFailed": "載入失敗。",
+    "loadFailed": "貼圖載入失敗",
     "empty": "尚無貼紙",
     "add": "新增貼紙",
     "added": "貼紙已新增",
@@ -671,7 +681,7 @@
     "subscribeAll": "訂閱整組",
     "removePack": "移除貼紙包",
     "addPack": "新增貼紙包",
-    "emojiLoadFailed": "表情載入失敗，請關閉後重試。",
+    "emojiLoadFailed": "表情載入失敗，請重新載入應用程式",
     "createPack": "建立貼紙包",
     "createFailed": "建立貼紙包失敗",
     "emojiLabel": "對應表情",
@@ -704,7 +714,7 @@
     "description": "簡介："
   },
   "emojiPicker": {
-    "loadFailed": "表情載入失敗，請重新整理頁面後重試。"
+    "loadFailed": "表情載入失敗，請重新載入應用程式"
   },
   "pwa": {
     "notificationPrompt": {
@@ -792,7 +802,7 @@
     "alwaysUnmuted": "一律通知",
     "archived": "已封存",
     "noExceptions": "尚無例外",
-    "loadFailed": "載入失敗，請重試",
+    "loadFailed": "通知設定載入失敗",
     "saveFailed": "儲存失敗，請重試",
     "loadMore": "載入更多",
     "chatNotifications": "聊天通知",
@@ -812,7 +822,9 @@
     "searchChats": "搜尋已載入的聊天",
     "addHint": "選擇聊天，設為與目前預設相反的通知狀態。新增後可點擊例外修改。",
     "alreadyAdded": "已新增",
-    "noChats": "沒有符合的聊天"
+    "noChats": "沒有符合的聊天",
+    "chatsLoadFailed": "聊天清單載入失敗",
+    "archivedLoadFailed": "已封存聊天載入失敗"
   },
   "speaking": {
     "groupTitle": "全群發言權限",

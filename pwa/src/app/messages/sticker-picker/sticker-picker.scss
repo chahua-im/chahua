@@ -99,7 +99,8 @@
   object-fit: contain;
   pointer-events: none;
 }
-.empty {
+.empty,
+.group-error {
   grid-column: 1/-1;
   text-align: center;
   color: var(--ion-color-medium);
@@ -155,7 +156,8 @@
   .sticker-skeleton {
     visibility: hidden;
   }
-  .empty {
+  .empty,
+  .group-error {
     position: absolute;
     inset: 0;
     display: flex;

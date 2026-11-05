@@ -35,9 +35,15 @@
       (touchcancel)="end($event)">
       @for (item of [current()]; track item.url) {
         @if (failed()) {
-          <a class="load-error" [href]="item.url" target="_blank" rel="noopener">
-            {{ 'messages.media.openOriginal' | transloco }}
-          </a>
+          <div class="load-error">
+            <span>
+              {{
+                (item.kind === Kind.Video ? 'messages.media.videoLoadFailed' : 'messages.media.imageLoadFailed')
+                  | transloco
+              }}
+            </span>
+            <a [href]="item.url" target="_blank" rel="noopener">{{ 'messages.media.openOriginal' | transloco }}</a>
+          </div>
         } @else if (item.kind === Kind.Video) {
           <video
             #video

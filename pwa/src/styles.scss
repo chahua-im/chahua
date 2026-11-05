@@ -240,6 +240,20 @@ ion-infinite-scroll-content > .infinite-loading {
   pointer-events: none;
 }
 
+// Empty content failures fill the available panel; partial failures stay beside their content.
+.load-error-page:not(ion-content),
+ion-content.load-error-page::part(scroll) {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.load-error-page > app-load-error:not(.compact) {
+  display: grid;
+  align-content: center;
+  flex: 1;
+}
+
 .skeleton-block {
   background: var(--ion-background-color-step-100, #f0f0f0);
   animation: skeleton-pulse 1.4s ease-in-out infinite;

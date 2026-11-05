@@ -987,7 +987,7 @@ describe('StickerPicker selection during requests', () => {
     expect(sections[1].querySelectorAll('.sticker-skeleton')).toHaveLength(0);
     expect(sections[1].querySelector('.group-placeholder')).not.toBeNull();
     expect(sections[0].querySelector('.sticker-item')).toBe(favorite);
-    sections[1].querySelector('.empty ion-button').click();
+    sections[1].querySelector('.group-error ion-button').click();
     await fixture.whenStable();
     fixture.detectChanges();
     expect(sections[1].querySelector('.sticker-item')).not.toBeNull();

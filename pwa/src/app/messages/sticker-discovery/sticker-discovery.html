@@ -44,7 +44,7 @@
     }
   </ion-toolbar>
 </ion-header>
-<ion-content appScrollbars>
+<ion-content [class.load-error-page]="error() && !loaded()" appScrollbars>
   @if (loading() && !loaded()) {
     @for (slot of [0, 1, 2, 3]; track slot) {
       <section class="pack pack-skeleton">

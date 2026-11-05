@@ -6,7 +6,7 @@
     </ion-buttons>
   </ion-toolbar>
 </ion-header>
-<ion-content appScrollbars>
+<ion-content [class.load-error-page]="error() && !messages().length" appScrollbars>
   <ion-searchbar
     [placeholder]="'chats.search.placeholder' | transloco"
     [debounce]="300"
@@ -32,7 +32,7 @@
   @if (loading() && cursor() == null) {
     <div class="page-loading"><ion-spinner /></div>
   } @else if (error()) {
-    <app-load-error [message]="'chats.search.failed' | transloco" (retry)="load()" />
+    <app-load-error [compact]="!!messages().length" [message]="'chats.search.failed' | transloco" (retry)="load()" />
   } @else if (query().trim() && !messages().length) {
     <p class="ion-padding ion-text-center">{{ 'chats.search.noResults' | transloco }}</p>
   }
