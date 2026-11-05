@@ -470,21 +470,23 @@ impl UnreadService {
         if memberships.is_empty() {
             return Ok(HashMap::new());
         }
-        // Filter messages directly so their chat distribution informs the join
-        // estimate; filtering only memberships can favor hashing chat history.
+        // Keep membership estimates out of the reaction/message join: otherwise
+        // some pages favor hashing entire chat histories before checking reads.
         let rows = sql_query(
-            "SELECT m.chat_id AS chat_id, COUNT(DISTINCT mr.message_id)::BIGINT AS reaction_count
-             FROM message_reactions mr
-             JOIN messages m ON m.id = mr.message_id
-             JOIN group_membership gm
-               ON gm.chat_id = m.chat_id AND gm.uid = $1
-             WHERE mr.message_author_uid = $1 AND m.chat_id = ANY($2)
-               AND mr.user_uid <> $1
-               AND m.deleted_at IS NULL
-               AND m.is_published = TRUE
-               AND m.reply_root_id IS NULL
-               AND mr.created_at > gm.last_reactions_read_at
-             GROUP BY m.chat_id",
+            "WITH reacted_messages AS MATERIALIZED (
+                 SELECT m.chat_id, mr.message_id, mr.created_at
+                 FROM message_reactions mr
+                 JOIN messages m ON m.id = mr.message_id
+                 WHERE mr.message_author_uid = $1 AND m.chat_id = ANY($2)
+                   AND mr.user_uid <> $1
+                   AND m.deleted_at IS NULL AND m.is_published = TRUE
+                   AND m.reply_root_id IS NULL
+             )
+             SELECT reacted.chat_id, COUNT(DISTINCT reacted.message_id)::BIGINT AS reaction_count
+             FROM reacted_messages reacted
+             JOIN group_membership gm ON gm.chat_id = reacted.chat_id AND gm.uid = $1
+             WHERE reacted.created_at > gm.last_reactions_read_at
+             GROUP BY reacted.chat_id",
         )
         .bind::<diesel::sql_types::Integer, _>(uid)
         .bind::<diesel::sql_types::Array<diesel::sql_types::BigInt>, _>(

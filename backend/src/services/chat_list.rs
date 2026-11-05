@@ -72,16 +72,17 @@ pub(crate) fn load_chat_page(
         };
     }
     let mut query = base_query!()
-        .left_join(
-            media::table.on(groups::avatar_image_id
-                .eq(media::id.nullable())
-                .and(media::deleted_at.is_null())),
-        )
         .filter(group_membership::archived.eq(archived))
         .select((
             groups::id,
             groups::name,
-            media::storage_key.nullable(),
+            // Resolve avatar keys after pagination, not by joining media across
+            // every membership when a sparse-message page is underestimated.
+            media::table
+                .select(media::storage_key)
+                .filter(media::id.nullable().eq(groups::avatar_image_id))
+                .filter(media::deleted_at.is_null())
+                .single_value(),
             messages::created_at.nullable(),
             group_membership::last_read_message_id,
             messages::all_columns.nullable(),
@@ -325,6 +326,11 @@ mod tests {
                 (987665201, 'A'), (987665202, 'B'), (987665203, 'hidden'),
                 (987665204, 'empty'), (987665205, 'same-time'), (987665206, 'archived'),
                 (987665207, 'not-a-member');
+                INSERT INTO media(id, content_type, storage_key, size, created_at, purpose, deleted_at) VALUES
+                  (987665401, 'image/png', 'avatars/live.png', 1, NOW(), 'avatar', NULL),
+                  (987665402, 'image/png', 'avatars/deleted.png', 1, NOW(), 'avatar', NOW());
+                UPDATE groups SET avatar_image_id = 987665401 WHERE id = 987665201;
+                UPDATE groups SET avatar_image_id = 987665402 WHERE id = 987665204;
                 INSERT INTO group_membership(chat_id, uid, archived)
                   SELECT id, 987665200, id = 987665206 FROM groups
                   WHERE id BETWEEN 987665201 AND 987665206;
@@ -344,6 +350,8 @@ mod tests {
             assert_eq!(first.iter().map(|r| r.chat_id).collect::<Vec<_>>(), [987665205, 987665202]);
             let second = load_chat_page(conn, uid, false, None, Some(first[1].chat_id), 2, true)?;
             assert_eq!(second.iter().map(|r| r.chat_id).collect::<Vec<_>>(), [987665201, 987665204]);
+            assert_eq!(second[0].avatar_key.as_deref(), Some("avatars/live.png"));
+            assert!(second[1].avatar_key.is_none());
             assert_eq!(second[0].last_message.as_ref().unwrap().id, 987665301);
             assert_eq!(second[0].last_message_at, Some(second[0].last_message.as_ref().unwrap().created_at));
             let tail = load_chat_page(conn, uid, false, None, Some(second[1].chat_id), 2, true)?;
