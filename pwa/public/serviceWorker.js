@@ -1,5 +1,209 @@
 const development = new URL(self.location.href).searchParams.get('development') === '1';
 
+// Diagnostics observe Angular's own fetches; they never handle fetch events.
+const diagnostics = development
+  ? null
+  : (() => {
+      const limit = 60;
+      const maxBytes = 24 * 1024;
+      const encoder = new TextEncoder();
+      let events = [];
+      let generation = 0;
+      const database = new Promise((resolve, reject) => {
+        const opening = indexedDB.open('chahua-worker-diagnostics', 1);
+        opening.onupgradeneeded = () => opening.result.createObjectStore('events');
+        opening.onsuccess = () => {
+          opening.result.onversionchange = () => opening.result.close();
+          resolve(opening.result);
+        };
+        opening.onerror = () => reject(opening.error);
+      });
+      const storage = async (mode, action) => {
+        const db = await database;
+        return new Promise((resolve, reject) => {
+          const transaction = db.transaction('events', mode);
+          const request = action(transaction.objectStore('events'));
+          transaction.oncomplete = () => resolve(request?.result);
+          transaction.onabort = transaction.onerror = () => reject(transaction.error);
+        });
+      };
+      // A single serialized, bounded record prevents concurrent writes from restoring cleared data.
+      let pending = storage('readonly', (store) => store.get('ring'))
+        .then((saved) => {
+          if (Array.isArray(saved)) events = saved;
+        })
+        .catch(() => {});
+      const enqueue = (action) => {
+        pending = pending.then(action).catch(() => {});
+        return pending;
+      };
+      const persist = () => storage('readwrite', (store) => store.put(events, 'ring')).catch(() => {});
+      const clear = () => {
+        generation++;
+        return enqueue(async () => {
+          events = [];
+          await persist();
+        });
+      };
+      const allowed = (value, values, fallback) => (values.includes(value) ? value : fallback);
+      const pathWords = [
+        'chats',
+        'chat',
+        'thread',
+        'message',
+        'settings',
+        'profile',
+        '_api',
+        'ws',
+        'ngsw',
+        'state',
+        'index.html',
+        'ngsw.json',
+        'i18n',
+        'icon',
+        'icon-maskable',
+        'media',
+        'emoji',
+        '.well-known',
+        'invite',
+        'join',
+      ];
+      const safePath = (pathname) => {
+        let previous;
+        const parts = pathname
+          .split('/')
+          .filter(Boolean)
+          .slice(0, 12)
+          .map((part) => {
+            try {
+              part = decodeURIComponent(part);
+            } catch {
+              part = '';
+            }
+            const secret = previous === 'invite' || previous === 'join';
+            previous = part;
+            if (
+              !secret &&
+              (pathWords.includes(part) ||
+                /^\d{1,20}$/.test(part) ||
+                /^(?:main|chunk)-[\w-]{8,32}\.js$/.test(part) ||
+                /^styles-[\w-]{8,32}\.css$/.test(part))
+            )
+              return part;
+            return '[redacted]';
+          });
+        return `/${parts.join('/')}`;
+      };
+      const requestDetails = (input, options = {}) => {
+        const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url, self.location.href);
+        const path = safePath(url.pathname);
+        const headers = options.headers ?? input?.headers;
+        const accept = new Headers(headers).get('accept') ?? '';
+        return {
+          url: `${url.origin}${path}`,
+          method: allowed(
+            (options.method ?? input?.method ?? 'GET').toUpperCase(),
+            ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+            'OTHER',
+          ),
+          mode: allowed(options.mode ?? input?.mode ?? 'cors', ['cors', 'no-cors', 'same-origin', 'navigate'], 'other'),
+          cache: allowed(
+            options.cache ?? input?.cache ?? 'default',
+            ['default', 'no-store', 'reload', 'no-cache', 'force-cache', 'only-if-cached'],
+            'other',
+          ),
+          destination: allowed(
+            input?.destination ?? '',
+            [
+              '',
+              'audio',
+              'document',
+              'embed',
+              'font',
+              'frame',
+              'iframe',
+              'image',
+              'manifest',
+              'object',
+              'report',
+              'script',
+              'sharedworker',
+              'style',
+              'track',
+              'video',
+              'worker',
+              'xslt',
+            ],
+            'other',
+          ),
+          accept: accept.toLowerCase().includes('text/html') ? 'text/html' : 'other',
+        };
+      };
+      const record = (epoch, event, details) => {
+        if (epoch !== generation) return;
+        const at = Date.now();
+        void enqueue(async () => {
+          if (epoch !== generation) return;
+          const previous = events[events.length - 1];
+          const comparable = ({ durationMs, count, ...rest }) => JSON.stringify(rest);
+          if (previous?.event === event && comparable(previous.details) === comparable(details)) {
+            previous.at = at;
+            previous.details.durationMs = details.durationMs;
+            previous.details.count = (previous.details.count ?? 1) + 1;
+          } else {
+            events.push({ at, event, details });
+          }
+          while (events.length > limit || encoder.encode(JSON.stringify(events)).length > maxBytes) events.shift();
+          await persist();
+        });
+      };
+      const fetch = self.fetch;
+      self.fetch = function (...args) {
+        const epoch = generation;
+        const start = Date.now();
+        let details;
+        try {
+          details = requestDetails(args[0], args[1]);
+        } catch {}
+        const observe = (event, extra) => {
+          try {
+            if (details) record(epoch, event, { ...details, ...extra, durationMs: Math.max(0, Date.now() - start) });
+          } catch {}
+        };
+        let result;
+        try {
+          result = fetch.apply(this, args);
+        } catch (error) {
+          try {
+            observe('fetch-rejected', {
+              errorName: allowed(error?.name, ['TypeError', 'AbortError', 'NetworkError', 'SecurityError'], 'Error'),
+            });
+          } catch {}
+          throw error;
+        }
+        return result.then(
+          (response) => {
+            try {
+              if (response.status >= 400) observe('fetch-http-error', { status: response.status });
+            } catch {}
+            return response;
+          },
+          (error) => {
+            try {
+              observe('fetch-rejected', {
+                errorName: allowed(error?.name, ['TypeError', 'AbortError', 'NetworkError', 'SecurityError'], 'Error'),
+              });
+            } catch {}
+            throw error;
+          },
+        );
+      };
+      return {
+        clear,
+        snapshot: () => enqueue(() => events.map((entry) => ({ ...entry, details: { ...entry.details } }))),
+      };
+    })();
+
 (() => {
   // web-push 0.11 defaults to a 28-day TTL; keep records beyond that delivery window.
   const retention = 30 * 24 * 60 * 60 * 1000;
@@ -139,10 +343,24 @@ const development = new URL(self.location.href).searchParams.get('development') 
   });
   self.addEventListener('message', (event) => {
     const data = event.data;
+    if (data?.type === 'CHAHUA_DIAGNOSTICS') {
+      if (event.ports?.[0] && (data.action === 'snapshot' || data.action === 'clear')) {
+        event.waitUntil(
+          enqueue(async () => {
+            let events = [];
+            if (data.action === 'clear') await diagnostics?.clear();
+            else if (data.uid === (account ?? null)) events = (await diagnostics?.snapshot()) ?? [];
+            event.ports[0].postMessage({ events });
+          }),
+        );
+      }
+      return;
+    }
     if (!data?.type?.startsWith('CHAHUA_')) return;
     event.waitUntil(
       enqueue(async () => {
         if (data.type === 'CHAHUA_SESSION') {
+          if (account !== undefined && data.uid !== account) void diagnostics?.clear();
           if (account !== undefined && data.uid !== account) {
             for (const notification of await self.registration.getNotifications()) notification.close();
           }

@@ -50,6 +50,11 @@
     "updatePendingMessages": "仍有未发送的消息，更新将丢失这些任务。",
     "updateAnyway": "仍然更新"
   },
+  "diagnostics": {
+    "copy": "复制诊断信息",
+    "copied": "诊断信息已复制",
+    "copyFailed": "无法复制诊断信息"
+  },
   "common": {
     "done": "完成",
     "save": "保存",

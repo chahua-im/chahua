@@ -21,6 +21,7 @@
 | ConversationNavigation | 关闭会话入口弹层、路由与即时定位；不保存消息或位置                                 | 应用；当前页面消费                                                                  |
 | PushNotifications      | 本机通知意图、浏览器权限、操作状态、去重记录                                       | 应用；本机意图保存到 localStorage，去重保存到独立 IndexedDB                         |
 | AppUpdates             | 检查更新和可更新状态                                                               | 应用                                                                                |
+| Diagnostics            | RPC、会话加载、页面及 Worker 的脱敏诊断事件与导出快照                              | 当前标签页 sessionStorage；Worker 失败记录独立保存在本机 IndexedDB，账号变化时清除 |
 
 话题订阅的已知值、新鲜度与响应版本保存在同一缓存条目中；失效时继续显示已知值，读取使用新鲜度判断，不另存一套失效 ID。
 
@@ -99,6 +100,16 @@ Service Worker 缓存应用资源（包括 landing 安装页及含表情数据�
 表情选择器的最近记录由 @nicematic/emoji-picker 存入 localStorage，与 Preferences 的快捷表态记录独立。共享聊天数据仅在内存，连续消息的保留与释放由页面生命周期决定，没有离线消息数据库。
 
 表情选择器不预取全部国旗图片。国旗图片使用浏览器原生懒加载，在滚动或搜索使对应图片接近可见区域时请求；加载失败沿用组件的 Unicode 字符回退。
+
+## 本机诊断
+
+Diagnostics 在应用初始化时启用，记录构建版本、时间、脱敏路由、联网与可见状态，以及 RPC 请求的方法、ID、连接代际、耗时、错误码／类型和重连状态。ConversationStore 在显示首次加载／分页失败前保留错误关联；页面错误与未处理拒绝保留分类和脱敏源码位置，不抑制原有错误处理。相同事件在 30 秒内合并计数。
+
+页面事件最多 120 条、48 KiB，保存到当前标签页的 sessionStorage，刷新后保留；切换账号或退出时清除。生产 Worker 仅观察 Angular 自身的 fetch 调用，记录网络拒绝及 HTTP 错误的 URL、方法、mode、cache、destination、Accept 分类和耗时，不接管 fetch 事件、不改变响应或异常。Worker 失败环形记录最多 60 条、24 KiB，保存到独立 IndexedDB；账号变化时清除，迟到的旧账号请求不能恢复记录，快照只返回给身份匹配的页面。
+
+导出时通过 MessageChannel 读取 Worker 失败记录，并收集 controller／active／waiting／installing 状态、缓存 index 是否存在，以及 `/ngsw/state` 中的驱动状态和 manifest hash；不导出原始 debug 文本或客户端列表。收集有截止时间，Worker 不可用时仍可复制页面诊断。存储不可用时仅保留内存记录，不影响正常使用。复制直接在用户操作中调用剪贴板，兼容需要同步用户激活的浏览器。
+
+报告不包含 token、Cookie、请求参数／结果、消息正文、任意后端错误文案、URL 查询／fragment 值或邀请凭据；未知路径段与文件名脱敏，保留可识别的应用路径、数字 ID 和构建资源 hash。诊断只在本机保存，不主动上传；入口与反馈见[设置约定](requirements.md#通知静音与设置)，组件职责见[外围组件](components.md#设置与应用外围)。
 
 ## 何时请求
 

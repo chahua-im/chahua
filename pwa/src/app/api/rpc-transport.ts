@@ -4,6 +4,7 @@ import { CHAHUA_BASE_URL } from '../../generated/endpoints/chahua.base-url';
 import { rpcMethodClasses } from '../../generated/rpc-codecs';
 import type { SessionOpenResult } from '../../generated/rpc-models';
 import { RpcError, RpcErrorCode, RpcTransportError } from './rpc-error';
+import { Diagnostics } from '../pwa/diagnostics';
 
 const PROTOCOL_VERSION = 1;
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -56,6 +57,8 @@ export interface RpcNotification {
 interface PendingCall {
   readonly id: string;
   readonly method: string;
+  readonly epoch: number;
+  readonly startedAt: number;
   readonly wire: string;
   readonly bytes: number;
   readonly lane: RpcLane;
@@ -110,6 +113,7 @@ export class RpcTransport {
   private readonly baseUrl = inject(CHAHUA_BASE_URL);
   private readonly socketFactory = inject(RPC_WEBSOCKET_FACTORY);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly diagnostics = inject(Diagnostics);
   private socket?: RpcSocket;
   private attempt?: Attempt;
   private epoch = 0;
@@ -171,7 +175,8 @@ export class RpcTransport {
   call<T>(method: string, params?: object): Observable<T> {
     return new Observable<T>((subscriber) => {
       if (!this.canCall(method)) {
-        subscriber.error(new RpcTransportError('disconnected', 'The RPC session is not authenticated'));
+        const error = new RpcTransportError('disconnected', 'The RPC session is not authenticated');
+        subscriber.error(this.admissionError(method, undefined, error));
         return;
       }
       const pending = this.createPending(
@@ -226,7 +231,8 @@ export class RpcTransport {
     let socket: RpcSocket;
     try {
       socket = this.socketFactory(this.socketUrl());
-    } catch {
+    } catch (error) {
+      this.diagnostics.recordError('rpc.socket.failed', error, { epoch });
       const transportError = new RpcTransportError('disconnected', 'Unable to create the RPC socket');
       this.attempt = undefined;
       this.transition(RpcConnectionState.Closed);
@@ -259,8 +265,11 @@ export class RpcTransport {
       // WebSocket errors are followed by close in browsers. Keep the socket alive
       // until that close so a valid final frame is not discarded.
     };
-    socket.onclose = () => {
-      if (this.isCurrent(socket, epoch)) this.handleSocketClose(epoch);
+    socket.onclose = (event) => {
+      if (this.isCurrent(socket, epoch)) {
+        this.diagnostics.record('rpc.close', { epoch, closeCode: event.code, wasClean: event.wasClean });
+        this.handleSocketClose(epoch);
+      }
     };
     return epoch;
   }
@@ -312,6 +321,13 @@ export class RpcTransport {
     return this.state() === RpcConnectionState.Anonymous && method === 'auth.createDevSession';
   }
 
+  private admissionError(method: string, requestId: string | undefined, error: Error): Error {
+    const details = { method, requestId, epoch: this.epoch };
+    this.diagnostics.correlate(error, details);
+    this.diagnostics.recordError('rpc.rejected', error, details);
+    return error;
+  }
+
   private createPending(
     method: string,
     params: object | undefined,
@@ -322,12 +338,12 @@ export class RpcTransport {
     const wire = JSON.stringify({ jsonrpc: '2.0', id, method, ...(params === undefined ? {} : { params }) });
     const bytes = utf8.encode(wire).byteLength;
     if (bytes > MAX_REQUEST_BYTES || this.queuedBytes + bytes > MAX_REQUEST_BYTES) {
-      reject(new RpcTransportError('overloaded', 'The RPC request queue is full'));
+      reject(this.admissionError(method, id, new RpcTransportError('overloaded', 'The RPC request queue is full')));
       return undefined;
     }
     const lane = this.laneFor(method);
     if (lane === 'control' && this.controlPendingCount() >= MAX_CONTROL_PENDING) {
-      reject(new RpcTransportError('overloaded', 'The RPC control queue is full'));
+      reject(this.admissionError(method, id, new RpcTransportError('overloaded', 'The RPC control queue is full')));
       return undefined;
     }
     if (
@@ -335,13 +351,15 @@ export class RpcTransport {
       this.ordinarySent >= MAX_ORDINARY_SENT &&
       this.ordinaryQueue.length >= MAX_ORDINARY_QUEUED
     ) {
-      reject(new RpcTransportError('overloaded', 'The RPC request queue is full'));
+      reject(this.admissionError(method, id, new RpcTransportError('overloaded', 'The RPC request queue is full')));
       return undefined;
     }
     const pending: PendingCall = {
       id,
       method,
       wire,
+      epoch: this.epoch,
+      startedAt: performance.now(),
       bytes,
       lane,
       resolve,
@@ -371,12 +389,15 @@ export class RpcTransport {
 
   private send(pending: PendingCall): void {
     if (!pending.active || !this.socket || this.socket.readyState !== 1) {
-      if (this.release(pending)) pending.reject(new RpcTransportError('disconnected', 'The RPC socket is closed'));
+      if (this.release(pending))
+        this.rejectCall(pending, new RpcTransportError('disconnected', 'The RPC socket is closed'));
       return;
     }
     pending.sent = true;
     if (pending.lane === 'ordinary') this.ordinarySent++;
     else this.controlSent = true;
+    if (pending.lane === 'ordinary' || pending.method === 'session.open')
+      this.diagnostics.record('rpc.sent', { method: pending.method, requestId: pending.id, epoch: pending.epoch });
     try {
       this.socket.send(pending.wire);
     } catch {
@@ -410,11 +431,24 @@ export class RpcTransport {
     if (pending.sent) {
       pending.abandoned = true;
       window.clearTimeout(pending.timer);
-      pending.reject(new RpcTransportError('timeout', `RPC request ${pending.method} timed out`));
+      this.rejectCall(pending, new RpcTransportError('timeout', `RPC request ${pending.method} timed out`));
       return;
     }
     if (this.release(pending))
-      pending.reject(new RpcTransportError('timeout', `RPC request ${pending.method} timed out`));
+      this.rejectCall(pending, new RpcTransportError('timeout', `RPC request ${pending.method} timed out`));
+  }
+
+  private rejectCall(pending: PendingCall, error: Error, correlate = true) {
+    const details = {
+      method: pending.method,
+      requestId: pending.id,
+      epoch: pending.epoch,
+      durationMs: Math.round(performance.now() - pending.startedAt),
+      sent: pending.sent,
+    };
+    if (correlate) this.diagnostics.correlate(error, details);
+    this.diagnostics.recordError('rpc.failed', error, details);
+    pending.reject(error);
   }
 
   private release(pending: PendingCall) {
@@ -490,7 +524,8 @@ export class RpcTransport {
     if (hasError && !isRpcError(responseError)) {
       this.release(pending);
       this.protocolFailure('Malformed correlated JSON-RPC response');
-      if (!pending.abandoned) pending.reject(new RpcTransportError('protocol', 'Malformed JSON-RPC error response'));
+      if (!pending.abandoned)
+        this.rejectCall(pending, new RpcTransportError('protocol', 'Malformed JSON-RPC error response'));
       return;
     }
     const result = envelope['result'];
@@ -505,7 +540,8 @@ export class RpcTransport {
     ) {
       this.release(pending);
       this.protocolFailure('Malformed correlated JSON-RPC response');
-      if (!pending.abandoned) pending.reject(new RpcTransportError('protocol', 'Malformed development session result'));
+      if (!pending.abandoned)
+        this.rejectCall(pending, new RpcTransportError('protocol', 'Malformed development session result'));
       return;
     }
     if (!hasError && pending.method === 'auth.createDevSession') {
@@ -519,8 +555,17 @@ export class RpcTransport {
     this.release(pending);
     if (pending.abandoned) return;
     if (hasError && isRpcError(responseError))
-      pending.reject(new RpcError(responseError.code, responseError.message, responseError.data));
-    else pending.resolve(result);
+      this.rejectCall(pending, new RpcError(responseError.code, responseError.message, responseError.data));
+    else {
+      if (pending.lane === 'ordinary')
+        this.diagnostics.record('rpc.completed', {
+          method: pending.method,
+          requestId: pending.id,
+          epoch: pending.epoch,
+          durationMs: Math.round(performance.now() - pending.startedAt),
+        });
+      pending.resolve(result);
+    }
   }
 
   private handleNotification(notification: RpcNotification): void {
@@ -555,6 +600,10 @@ export class RpcTransport {
   }
 
   private stopCurrent(error: Error, reconnect: boolean): void {
+    this.diagnostics.recordError('rpc.stopped', error, {
+      epoch: this.epoch,
+      reason: error instanceof RpcTransportError ? error.message : undefined,
+    });
     const closingEpoch = this.epoch;
     window.clearTimeout(this.reconnectTimer);
     this.reconnectTimer = undefined;
@@ -591,7 +640,8 @@ export class RpcTransport {
   }
 
   private rejectPending(pending: readonly PendingCall[], error: Error): void {
-    for (const call of pending) call.reject(error);
+    this.diagnostics.correlate(error, { epoch: this.epoch });
+    for (const call of pending) this.rejectCall(call, error, false);
   }
 
   private scheduleReconnect(): void {
@@ -603,6 +653,11 @@ export class RpcTransport {
     const delay =
       Math.min(RECONNECT_INITIAL_MS * 2 ** this.retryAttempt++, RECONNECT_MAX_MS) * (0.8 + Math.random() * 0.4);
     this.transition(RpcConnectionState.Reconnecting);
+    this.diagnostics.record('rpc.reconnect', {
+      epoch: this.epoch,
+      reconnectAttempt: this.retryAttempt,
+      reconnectInMs: Math.round(delay),
+    });
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = undefined;
       if (!this.retryAllowed || !this.reconnectToken) return;
@@ -679,6 +734,13 @@ export class RpcTransport {
   }
 
   private transition(state: RpcConnectionState): void {
+    this.diagnostics.record('rpc.state', {
+      previousState: RpcConnectionState[this.state()],
+      state: RpcConnectionState[state],
+      epoch: this.epoch,
+      pending: this.pending.size,
+      queued: this.ordinaryQueue.length + this.controlQueue.length,
+    });
     this.stateValue.set(state);
     this.stateChanges.next(state);
   }

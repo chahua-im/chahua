@@ -50,6 +50,11 @@
     "updatePendingMessages": "仍有未傳送的訊息，更新將遺失這些工作。",
     "updateAnyway": "仍然更新"
   },
+  "diagnostics": {
+    "copy": "複製診斷資訊",
+    "copied": "診斷資訊已複製",
+    "copyFailed": "無法複製診斷資訊"
+  },
   "common": {
     "done": "完成",
     "save": "儲存",

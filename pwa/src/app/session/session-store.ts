@@ -8,6 +8,7 @@ import { RpcError, RpcErrorCode } from '../api/rpc-error';
 import { RpcConnectionState, RpcTransport } from '../api/rpc-transport';
 import { appVersion } from '../app-version';
 import type { SnowflakeID } from '../api/snowflake-id';
+import { Diagnostics } from '../pwa/diagnostics';
 
 declare const CHAHUA_DEV_TOKEN: string | undefined;
 declare const CHAHUA_DEV_BACKEND: boolean | undefined;
@@ -32,6 +33,7 @@ export class SessionStore {
   private readonly api = inject(RpcApi);
   private readonly transport = inject(RpcTransport);
   private readonly connection = inject(Connection);
+  private readonly diagnostics = inject(Diagnostics);
   readonly token = signal<string | undefined>(undefined);
   readonly user = signal<(MeResponse & Pick<User, 'userGroup'>) | undefined>(undefined);
   constructor() {
@@ -108,6 +110,7 @@ export class SessionStore {
 
       const user = await request(this.api.users.getMe());
       if (!current()) return;
+      this.diagnostics.setAccount(user.uid);
       // /users/me omits the group tag; the existing UID lookup includes it.
       const profile = await request(this.api.users.search({ q: String(user.uid), limit: 1 })).catch(() => undefined);
       if (!current()) return;
@@ -160,6 +163,7 @@ export class SessionStore {
     this.transport.close();
     this.connection.reset();
     this.user.set(undefined);
+    this.diagnostics.setAccount(undefined);
   }
 
   async setShowMembershipMessages(showMembershipMessages: boolean) {
@@ -257,6 +261,7 @@ export class SessionStore {
   }
 
   private saveToken(token: string | undefined) {
+    this.diagnostics.setAccount(token ? tokenIdentity(token)?.uid : undefined);
     this.token.set(token);
     if (token) window.localStorage.setItem(TOKEN_KEY, token);
     else window.localStorage.removeItem(TOKEN_KEY);

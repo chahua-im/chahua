@@ -50,6 +50,11 @@
     "updatePendingMessages": "You have unsent messages. Updating will discard these tasks.",
     "updateAnyway": "Update anyway"
   },
+  "diagnostics": {
+    "copy": "Copy diagnostics",
+    "copied": "Diagnostics copied",
+    "copyFailed": "Could not copy diagnostics"
+  },
   "common": {
     "done": "Done",
     "save": "Save",

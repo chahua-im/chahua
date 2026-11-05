@@ -118,6 +118,7 @@ import { VoiceBar } from '../../messages/voice-player/voice-bar';
 import { VoicePlayback } from '../../messages/voice-player/voice-playback';
 import { PanelNavigation } from '../../navigation/panel-navigation';
 import { GroupPresenceDisplay, UserPresenceDisplay } from '../../presence/presence-display';
+import { DiagnosticsCopy } from '../../pwa/diagnostics-copy';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { scrollActivity } from '../../scrolling/scroll-activity';
 import { SessionStore } from '../../session/session-store';
@@ -198,6 +199,7 @@ type ScrollPosition =
     MessagePreview,
     VoiceBar,
     LoadError,
+    DiagnosticsCopy,
     NgTemplateOutlet,
     IonAlert,
     IonBadge,

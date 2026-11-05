@@ -53,6 +53,8 @@ Apache 部署需一并上传构建目录中的 `.htaccess`，启用 `mod_rewrite
 
 单元测试共用 `src/test-providers.ts` 的 HTTP 与弹窗替身；普通业务操作使用 `api/rpc-testing.ts` 的可控 JSON-RPC peer 驱动真实 RpcTransport/RpcApi，不伪造 HTTP 状态或 API 回显。实际 multipart／字节上传继续拦截 HTTP/XHR。禁止生产写入、S3 测试上传与真实推送订阅写入；实际后端验证使用[隔离 RPC runner](../backend/README.md#isolated-rpc-regression-runner)的 `--keep` 模式及其打印的前端代理命令，不使用 online 模式。
 
+偶发问题报告可附上设置或会话失败页复制的[本机诊断](docs/data-flow.md#本机诊断)文本，以及发生时间和截图；诊断不自动上传。应尽量在同一标签页中、切换账号前复制。
+
 `npm run format` 格式化 `pwa/` 下 Git 中已暂存、未暂存及未跟踪的现有文件，跳过已删除文件，并遵循 Prettier 的忽略规则；不会暂存格式化结果。`npm run format:all` 格式化整个 `pwa/` 目录。命令从 `pwa/` 执行，使用项目本地安装的 Prettier。
 
 ## CI 与发布

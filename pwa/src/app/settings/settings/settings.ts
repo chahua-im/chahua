@@ -27,6 +27,7 @@ import {
 import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
 import { PanelNavigation } from '../../navigation/panel-navigation';
 import { AppUpdates, UpdateCheckResult } from '../../pwa/app-updates';
+import { DiagnosticsCopy } from '../../pwa/diagnostics-copy';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { devBackendEnabled, SessionStore } from '../../session/session-store';
 import { localeLabels } from '../locale';
@@ -38,6 +39,7 @@ import { Preferences } from '../preferences';
   styleUrl: './settings.scss',
   imports: [
     ChatAvatar,
+    DiagnosticsCopy,
     RouterLink,
     ContentScrollbars,
     IonButton,

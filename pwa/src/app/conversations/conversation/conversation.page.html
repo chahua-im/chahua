@@ -274,6 +274,9 @@
         "
         [retryable]="conversation.error() !== ConversationError.Missing"
         (retry)="retry()" />
+      <div class="ion-text-center">
+        <app-diagnostics-copy />
+      </div>
     }
   </div>
   @if (conversation.page(); as page) {

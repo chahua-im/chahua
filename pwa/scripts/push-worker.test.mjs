@@ -7,7 +7,13 @@ import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 const source = await readFile(new URL('../public/serviceWorker.js', import.meta.url), 'utf8');
 function worker(
   existing = [],
-  { dbFactory = new IDBFactory(), now = Date.now(), failShow = false, development = false } = {},
+  {
+    dbFactory = new IDBFactory(),
+    now = Date.now(),
+    failShow = false,
+    development = false,
+    fetch = async () => ({ status: 200 }),
+  } = {},
 ) {
   const listeners = new Map();
   const shown = [];
@@ -19,8 +25,11 @@ function worker(
   const clients = [];
   let skipped = false;
   let claimed = false;
+  let diagnosticUid = null;
   const context = {
     URL,
+    Headers,
+    TextEncoder,
     indexedDB: dbFactory,
     IDBKeyRange,
     Date: class extends Date {
@@ -29,9 +38,16 @@ function worker(
       }
     },
     console: { error: (...args) => errors.push(args) },
-    importScripts: (url) => imports.push(url),
+    importScripts: (url) => {
+      imports.push(url);
+      // Model Angular's fetch ownership and its offline 504, not a second observer handler.
+      context.self.addEventListener('fetch', (event) => {
+        event.respondWith(context.self.fetch(event.request).catch(() => ({ status: 504 })));
+      });
+    },
     self: {
       location: { href: `https://chat.example/serviceWorker.js${development ? '?development=1' : ''}` },
+      fetch,
       skipWaiting: async () => {
         skipped = true;
       },
@@ -103,7 +119,38 @@ function worker(
     errors,
     imports,
     notifications,
+    fetch: (...args) => context.self.fetch(...args),
+    dispatchFetch: (request) => {
+      let response;
+      listeners.get('fetch')({
+        request,
+        respondWith: (value) => {
+          response = value;
+        },
+      });
+      return response;
+    },
+    diagnostics: async (action = 'snapshot', uid = diagnosticUid) => {
+      let pending;
+      let reply;
+      listeners.get('message')({
+        data: { type: 'CHAHUA_DIAGNOSTICS', action, uid },
+        ports: [
+          {
+            postMessage: (value) => {
+              reply = value;
+            },
+          },
+        ],
+        waitUntil: (value) => {
+          pending = value;
+        },
+      });
+      await pending;
+      return reply.events;
+    },
     command: (data) => {
+      if (data.type === 'CHAHUA_SESSION') diagnosticUid = data.uid;
       let pending;
       listeners.get('message')({
         data,
@@ -401,4 +448,187 @@ test('development notifications retain deduplication and click navigation for wa
     instance.opened[0],
     'https://chat.example/chats/chat/90071992547409931/thread/90071992547409932#msg=90071992547409933',
   );
+});
+
+test('observes fetch failures without changing responses or error identity', async () => {
+  const response = { status: 200 };
+  const failure = new TypeError('private network error');
+  let receiver;
+  const instance = worker([], {
+    fetch: function (input) {
+      receiver = this;
+      return input === '/ok' ? Promise.resolve(response) : Promise.reject(failure);
+    },
+  });
+  assert.equal(await instance.fetch('/ok'), response);
+  assert.equal((await instance.diagnostics()).length, 0);
+  await assert.rejects(instance.fetch('/failure'), (error) => error === failure);
+  assert.equal(typeof receiver.addEventListener, 'function');
+  const events = await instance.diagnostics();
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, 'fetch-rejected');
+  assert.equal(events[0].details.errorName, 'TypeError');
+  assert.equal(JSON.stringify(events).includes('private network error'), false);
+});
+
+test('leaves the imported worker in control of fetch and records its rejection before a synthesized 504', async () => {
+  const failure = new TypeError('network');
+  const instance = worker([], {
+    fetch: async () => {
+      throw failure;
+    },
+  });
+  const response = await instance.dispatchFetch('/offline');
+  assert.equal(response.status, 504);
+  const events = await instance.diagnostics();
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, 'fetch-rejected');
+  assert.equal(events[0].details.errorName, 'TypeError');
+  assert.equal(events[0].details.status, undefined);
+});
+
+test('captures restricted fetch metadata and redacts secrets while preserving safe routes', async () => {
+  const failure = new TypeError('only-if-cached requires same-origin');
+  const instance = worker([], {
+    fetch: async () => {
+      throw failure;
+    },
+  });
+  const request = {
+    url: 'https://user:password@chat.example/%69nvite/settings/join/123456/chats/chat/98765/secret-name?jwt=private#message',
+    method: 'GET',
+    mode: 'cors',
+    cache: 'only-if-cached',
+    destination: 'document',
+    headers: new Headers({ accept: 'text/html,application/xhtml+xml', authorization: 'secret' }),
+  };
+  await assert.rejects(instance.fetch(request), (error) => error === failure);
+  const [entry] = await instance.diagnostics();
+  assert.equal(entry.details.url, 'https://chat.example/invite/[redacted]/join/[redacted]/chats/chat/98765/[redacted]');
+  assert.equal(entry.details.method, 'GET');
+  assert.equal(entry.details.mode, 'cors');
+  assert.equal(entry.details.cache, 'only-if-cached');
+  assert.equal(entry.details.destination, 'document');
+  assert.equal(entry.details.accept, 'text/html');
+  for (const secret of [
+    'user',
+    'password',
+    'settings',
+    '123456',
+    'secret-name',
+    'jwt',
+    'private',
+    'message',
+    'authorization',
+  ])
+    assert.equal(JSON.stringify(entry).includes(secret), false);
+});
+
+test('preserves safe API and compiled asset paths without exposing arbitrary segments', async () => {
+  const instance = worker([], { fetch: async () => ({ status: 503 }) });
+  await instance.fetch('/_api/ws');
+  await instance.fetch('/main-ABCDEF12.js?token=private');
+  await instance.fetch('/chunk-ZYXW9876.js');
+  await instance.fetch('/styles-ABCDEF12.css');
+  await instance.fetch('/profile/arbitrary-name');
+  const events = await instance.diagnostics();
+  assert.equal(events[0].details.url, 'https://chat.example/_api/ws');
+  assert.equal(events[1].details.url, 'https://chat.example/main-ABCDEF12.js');
+  assert.equal(events[2].details.url, 'https://chat.example/chunk-ZYXW9876.js');
+  assert.equal(events[3].details.url, 'https://chat.example/styles-ABCDEF12.css');
+  assert.equal(events[4].details.url, 'https://chat.example/profile/[redacted]');
+  assert.equal(JSON.stringify(events).includes('private'), false);
+  assert.equal(JSON.stringify(events).includes('arbitrary-name'), false);
+});
+
+test('persists bounded HTTP failures across restarts and coalesces repeats', async () => {
+  let status = 400;
+  const first = worker([], { fetch: async () => ({ status: status++ }) });
+  for (let index = 0; index < 70; index++) await first.fetch(`/asset/${index}?private=value`);
+  const events = await first.diagnostics();
+  assert.equal(events.length, 60);
+  assert.equal(events[0].details.status, 410);
+  assert.equal(events[59].details.status, 469);
+  assert.ok(new TextEncoder().encode(JSON.stringify(events)).length <= 24 * 1024);
+  const next = worker([], { dbFactory: first.dbFactory, fetch: async () => ({ status: 503 }) });
+  assert.equal((await next.diagnostics()).length, 60);
+  await next.fetch('/same');
+  await next.fetch('/same');
+  const restored = await next.diagnostics();
+  assert.equal(restored.length, 60);
+  assert.equal(restored[59].event, 'fetch-http-error');
+  assert.equal(restored[59].details.status, 503);
+  assert.equal(restored[59].details.count, 2);
+  assert.equal(typeof restored[59].at, 'number');
+  assert.equal((await next.diagnostics('clear')).length, 0);
+  assert.equal((await worker([], { dbFactory: first.dbFactory }).diagnostics()).length, 0);
+});
+
+test('keeps startup failures for the first identity and prevents old account requests restoring cleared data', async () => {
+  const failure = new TypeError('network');
+  let rejectOld;
+  const first = worker([], {
+    fetch: (url) =>
+      url === '/old'
+        ? new Promise((resolve, reject) => {
+            rejectOld = reject;
+          })
+        : Promise.reject(failure),
+  });
+  await assert.rejects(first.fetch('/startup'));
+  await first.command({ type: 'CHAHUA_SESSION', uid: 1 });
+  assert.equal((await first.diagnostics()).length, 1);
+  const oldRequest = first.fetch('/old');
+  await first.command({ type: 'CHAHUA_SESSION', uid: 2 });
+  rejectOld(failure);
+  await assert.rejects(oldRequest, (error) => error === failure);
+  assert.equal((await first.diagnostics()).length, 0);
+  await assert.rejects(first.fetch('/new'));
+  assert.equal((await first.diagnostics()).length, 1);
+  await first.command({ type: 'CHAHUA_SESSION', uid: null });
+  assert.equal((await first.diagnostics()).length, 0);
+  assert.equal((await worker([], { dbFactory: first.dbFactory }).diagnostics()).length, 0);
+});
+
+test('clears a persisted previous account when the first session after restart differs', async () => {
+  const first = worker([], { fetch: async () => ({ status: 503 }) });
+  await first.command({ type: 'CHAHUA_SESSION', uid: 1 });
+  await first.fetch('/failure');
+  assert.equal((await first.diagnostics()).length, 1);
+  const next = worker([], { dbFactory: first.dbFactory });
+  await next.command({ type: 'CHAHUA_SESSION', uid: 2 });
+  assert.equal((await next.diagnostics()).length, 0);
+  assert.equal((await worker([], { dbFactory: first.dbFactory }).diagnostics()).length, 0);
+});
+
+test('retains bounded in-memory diagnostics if diagnostics storage is unavailable', async () => {
+  const backing = new IDBFactory();
+  const dbFactory = {
+    open(name, version) {
+      if (name === 'chahua-worker-diagnostics') throw new Error('storage unavailable');
+      return backing.open(name, version);
+    },
+  };
+  const instance = worker([], { dbFactory, fetch: async () => ({ status: 503 }) });
+  await instance.fetch('/failure');
+  assert.equal((await instance.diagnostics()).length, 1);
+  assert.equal((await instance.diagnostics('clear')).length, 0);
+});
+
+test('does not expose persisted diagnostics to a different or unknown account after restart', async () => {
+  const first = worker([], { fetch: async () => ({ status: 503 }) });
+  await first.command({ type: 'CHAHUA_SESSION', uid: 1 });
+  await first.fetch('/chats/chat/123');
+  assert.equal((await first.diagnostics('snapshot', 2)).length, 0);
+  const next = worker([], { dbFactory: first.dbFactory });
+  assert.equal((await next.diagnostics()).length, 0);
+  assert.equal((await next.diagnostics('snapshot', 1)).length, 1);
+});
+
+test('retains actual mixed-case build hashes without URL credentials or search values', async () => {
+  const instance = worker([], { fetch: async () => ({ status: 503 }) });
+  await instance.fetch('https://user:secret@chat.example/chunk-DxqKAYlM.js?token=secret#secret');
+  const events = await instance.diagnostics();
+  assert.equal(events[0].details.url, 'https://chat.example/chunk-DxqKAYlM.js');
+  assert.equal(JSON.stringify(events).includes('secret'), false);
 });
