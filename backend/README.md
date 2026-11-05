@@ -212,6 +212,9 @@ single-cursor misses share a load; multi-cursor requests deduplicate and batch
 their probes.
 
 Chat-list row mention and reaction counts are restricted to returned memberships.
+Reaction-count page filters constrain `messages.chat_id` directly so PostgreSQL
+can use the message table's chat distribution when choosing the join order,
+rather than building a hash of chat history before checking reaction rows.
 Account totals remain independent of pagination. Collection snapshots share
 main-chat counts with the account app badge, rather than summing overlapping view
 totals. Archive, mute and membership visibility rules remain independently applied.

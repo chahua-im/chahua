@@ -470,13 +470,15 @@ impl UnreadService {
         if memberships.is_empty() {
             return Ok(HashMap::new());
         }
+        // Filter messages directly so their chat distribution informs the join
+        // estimate; filtering only memberships can favor hashing chat history.
         let rows = sql_query(
             "SELECT m.chat_id AS chat_id, COUNT(DISTINCT mr.message_id)::BIGINT AS reaction_count
              FROM message_reactions mr
              JOIN messages m ON m.id = mr.message_id
              JOIN group_membership gm
                ON gm.chat_id = m.chat_id AND gm.uid = $1
-             WHERE mr.message_author_uid = $1 AND gm.chat_id = ANY($2)
+             WHERE mr.message_author_uid = $1 AND m.chat_id = ANY($2)
                AND mr.user_uid <> $1
                AND m.deleted_at IS NULL
                AND m.is_published = TRUE
