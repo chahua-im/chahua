@@ -232,14 +232,11 @@
   border-radius: 4px;
   margin-bottom: 6px;
 
-  &.busy .reply-content {
-    visibility: hidden;
-  }
-
   > ion-spinner {
     position: absolute;
-    inset: 0;
-    margin: auto;
+    inset-block: 0;
+    inset-inline-end: 6px;
+    margin-block: auto;
     pointer-events: none;
   }
 }

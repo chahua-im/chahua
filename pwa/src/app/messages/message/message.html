@@ -119,7 +119,6 @@
             class="reply-preview"
             [attr.inert]="preview() ? '' : null"
             [disabled]="jumpDisabled() || !canInteract()"
-            [class.busy]="jumpingTo() === quote.id"
             (click)="jump.emit(quote.id)">
             <span class="reply-content">
               @if (quote.forwardedFromName) {
