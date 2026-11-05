@@ -8,7 +8,6 @@ export enum UploadStage {
 }
 
 export enum UploadErrorCode {
-  Offline = 'offline',
   TooLarge = 'tooLarge',
   Empty = 'empty',
   Filename = 'filename',
@@ -122,7 +121,6 @@ export function uploadFailure(error: unknown, stage: UploadStage, maximumSize?: 
     UploadErrorCode.Unreadable,
   ].includes(code);
   const autoRetry = [
-    UploadErrorCode.Offline,
     UploadErrorCode.Timeout,
     UploadErrorCode.Network,
     UploadErrorCode.RateLimited,

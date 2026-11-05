@@ -632,7 +632,6 @@
       "unavailable": "[無法顯示的訊息]"
     },
     "upload": {
-      "offline": "上傳因網路中斷而停止。",
       "tooLarge": "檔案超過 {{limit}} MiB 上限，請壓縮檔案或移除後重新選擇。",
       "tooLargeUnknown": "檔案超過伺服器大小上限，請壓縮檔案或移除後重新選擇。",
       "empty": "檔案為空，請移除後重新選擇。",
@@ -653,7 +652,6 @@
       "autoRetry": "將自動重試。",
       "retrying": "正在重試上傳…",
       "unreadable": "無法讀取本機檔案，請移除後重新選擇。",
-      "reconnect": "連線後將自動重試。",
       "failedTitle": "上傳失敗",
       "attachmentsTitle": "附件"
     }
