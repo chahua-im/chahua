@@ -966,6 +966,66 @@ describe('ConversationStore', () => {
     timeline.reset();
     expect(timeline.items()).toEqual([]);
   });
+
+  it('retries a failed automatic catch-up from the retained cursor on the next reconnect', async () => {
+    const opening = timeline.open();
+    messages().flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('100')] });
+    await opening;
+    const catchup = timeline.reconnect();
+    messages({ after: '100' }).error(RpcErrorCode.Unavailable);
+    await catchup;
+    expect(timeline.error()).toBe(ConversationError.Page);
+    const retry = timeline.reconnect();
+    expect(timeline.items()).toEqual([message('100')]);
+    messages({ after: '100' }).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [wire('101')],
+      newerCursor: null,
+    });
+    await retry;
+    expect(timeline.atLatest()).toBe(true);
+    expect(timeline.error()).toBeUndefined();
+    expect(timeline.items().map(({ id }) => id)).toEqual(['100', '101'].map(encodeId));
+  });
+
+  it('resumes an automatic catch-up cancelled while a detail page retained the range', async () => {
+    const opening = timeline.open();
+    messages().flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('100')] });
+    await opening;
+    const catchup = timeline.reconnect();
+    const old = messages({ after: '100' });
+    timeline.cancelLoading();
+    await catchup;
+    const retry = timeline.reconnect();
+    messages({ after: '100' }).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [wire('101')],
+    });
+    await retry;
+    old.flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('999')] });
+    expect(timeline.atLatest()).toBe(true);
+    expect(timeline.items().map(({ id }) => id)).toEqual(['100', '101'].map(encodeId));
+  });
+
+  it('does not retry the old catch-up after navigating into history', async () => {
+    const opening = timeline.open();
+    messages().flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('100')] });
+    await opening;
+    const catchup = timeline.reconnect();
+    messages({ after: '100' }).error(RpcErrorCode.Unavailable);
+    await catchup;
+    const history = timeline.open(encodeId('50'));
+    messages({ around: '50' }).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [wire('50')],
+      newerCursor: '50',
+    });
+    await history;
+    await timeline.reconnect();
+    peer.expectNone('messages.list');
+    expect(timeline.items()).toEqual([message('50')]);
+  });
+
   it('reconciles a reconnect received while the initial request was in flight', async () => {
     const opening = timeline.open();
     await timeline.reconnect();

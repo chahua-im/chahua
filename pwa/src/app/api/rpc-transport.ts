@@ -8,6 +8,7 @@ import { Diagnostics } from '../pwa/diagnostics';
 
 const PROTOCOL_VERSION = 1;
 const REQUEST_TIMEOUT_MS = 30_000;
+const SENT_REQUEST_LIFETIME_MS = 90_000;
 const HEARTBEAT_INTERVAL_MS = 10_000;
 const HEARTBEAT_STALE_MS = 90_000;
 const FOREGROUND_STALE_MS = 30_000;
@@ -17,6 +18,12 @@ const MAX_ORDINARY_SENT = 16;
 const MAX_ORDINARY_QUEUED = 64;
 const MAX_CONTROL_PENDING = 8;
 const MAX_REQUEST_BYTES = 64 * 1024 * 1024;
+const REPLACEABLE_CONTROLS = new Set([
+  'presence.watch',
+  'conversations.watchStates',
+  'conversations.watchUnread',
+  'session.setAppState',
+]);
 const utf8 = new TextEncoder();
 
 type RpcMethodClass = 'read' | 'mutation' | 'session' | 'control';
@@ -64,7 +71,9 @@ interface PendingCall {
   readonly lane: RpcLane;
   readonly resolve: (result: unknown) => void;
   readonly reject: (error: Error) => void;
+  readonly supersede: () => void;
   timer: number;
+  leaseTimer?: number;
   sent: boolean;
   active: boolean;
   abandoned: boolean;
@@ -107,6 +116,8 @@ export class RpcTransport {
   readonly state$ = this.stateChanges.asObservable();
   private readonly notifications = new Subject<RpcNotification>();
   readonly notifications$ = this.notifications.asObservable();
+  private readonly sessionInvalidated = new Subject<void>();
+  readonly sessionInvalidated$ = this.sessionInvalidated.asObservable();
   private readonly foreground = new Subject<void>();
   readonly foreground$ = this.foreground.asObservable();
 
@@ -187,6 +198,7 @@ export class RpcTransport {
           subscriber.complete();
         },
         (error) => subscriber.error(error),
+        () => subscriber.complete(),
       );
       if (!pending) return;
       this.admit(pending);
@@ -300,6 +312,10 @@ export class RpcTransport {
   private rejectSessionOpen(epoch: number, error: Error): void {
     if (epoch !== this.epoch) return;
     if (error instanceof RpcError && error.code === RpcErrorCode.Unauthorized) {
+      if (this.attempt?.reconnect) {
+        this.invalidateSession(error);
+        return;
+      }
       this.retryAllowed = false;
       this.reconnectToken = undefined;
     }
@@ -333,16 +349,22 @@ export class RpcTransport {
     params: object | undefined,
     resolve: (result: unknown) => void,
     reject: (error: Error) => void,
+    supersede: () => void = () => {},
   ): PendingCall | undefined {
     const id = String(++this.requestNumber);
     const wire = JSON.stringify({ jsonrpc: '2.0', id, method, ...(params === undefined ? {} : { params }) });
     const bytes = utf8.encode(wire).byteLength;
-    if (bytes > MAX_REQUEST_BYTES || this.queuedBytes + bytes > MAX_REQUEST_BYTES) {
+    const previous = REPLACEABLE_CONTROLS.has(method)
+      ? this.controlQueue.find((call) => call.method === method)
+      : undefined;
+    if (bytes > MAX_REQUEST_BYTES || this.queuedBytes - (previous?.bytes ?? 0) + bytes > MAX_REQUEST_BYTES) {
       reject(this.admissionError(method, id, new RpcTransportError('overloaded', 'The RPC request queue is full')));
       return undefined;
     }
     const lane = this.laneFor(method);
-    if (lane === 'control' && this.controlPendingCount() >= MAX_CONTROL_PENDING) {
+    // Leave one admission slot for the heartbeat; preserve control execution order.
+    const controlLimit = method === 'session.ping' ? MAX_CONTROL_PENDING : MAX_CONTROL_PENDING - 1;
+    if (lane === 'control' && !previous && this.controlPendingCount() >= controlLimit) {
       reject(this.admissionError(method, id, new RpcTransportError('overloaded', 'The RPC control queue is full')));
       return undefined;
     }
@@ -364,6 +386,7 @@ export class RpcTransport {
       lane,
       resolve,
       reject,
+      supersede,
       timer: 0,
       sent: false,
       active: true,
@@ -372,6 +395,11 @@ export class RpcTransport {
     pending.timer = window.setTimeout(() => this.expire(pending), REQUEST_TIMEOUT_MS);
     this.pending.set(id, pending);
     this.queuedBytes += bytes;
+    if (previous) {
+      this.release(previous);
+      // Supersession is cancellation, not a fabricated server acknowledgement.
+      previous.supersede();
+    }
     return pending;
   }
 
@@ -394,6 +422,12 @@ export class RpcTransport {
       return;
     }
     pending.sent = true;
+    if (pending.lane === 'ordinary') {
+      pending.leaseTimer = window.setTimeout(() => {
+        if (pending.active)
+          this.stopCurrent(new RpcTransportError('timeout', `RPC request ${pending.method} did not settle`), true);
+      }, SENT_REQUEST_LIFETIME_MS);
+    }
     if (pending.lane === 'ordinary') this.ordinarySent++;
     else this.controlSent = true;
     if (pending.lane === 'ordinary' || pending.method === 'session.open')
@@ -420,7 +454,7 @@ export class RpcTransport {
     if (!pending.active) return;
     if (pending.sent) {
       pending.abandoned = true;
-      window.clearTimeout(pending.timer);
+      if (pending.lane !== 'control') window.clearTimeout(pending.timer);
       return;
     }
     this.release(pending);
@@ -428,6 +462,11 @@ export class RpcTransport {
 
   private expire(pending: PendingCall): void {
     if (!pending.active) return;
+    if (pending.sent && pending.lane === 'control') {
+      // Releasing the slot alone could overlap a still-running server control.
+      this.stopCurrent(new RpcTransportError('timeout', `RPC request ${pending.method} timed out`), true);
+      return;
+    }
     if (pending.sent) {
       pending.abandoned = true;
       window.clearTimeout(pending.timer);
@@ -456,6 +495,7 @@ export class RpcTransport {
     pending.active = false;
     window.clearTimeout(pending.timer);
     this.pending.delete(pending.id);
+    window.clearTimeout(pending.leaseTimer);
     this.queuedBytes -= pending.bytes;
     if (pending.sent) {
       if (pending.lane === 'ordinary') this.ordinarySent--;
@@ -522,10 +562,7 @@ export class RpcTransport {
     if (!pending) return;
     const responseError = envelope['error'];
     if (hasError && !isRpcError(responseError)) {
-      this.release(pending);
-      this.protocolFailure('Malformed correlated JSON-RPC response');
-      if (!pending.abandoned)
-        this.rejectCall(pending, new RpcTransportError('protocol', 'Malformed JSON-RPC error response'));
+      this.protocolFailure('Malformed JSON-RPC error response');
       return;
     }
     const result = envelope['result'];
@@ -538,10 +575,7 @@ export class RpcTransport {
         !('token' in result) ||
         typeof result.token !== 'string')
     ) {
-      this.release(pending);
-      this.protocolFailure('Malformed correlated JSON-RPC response');
-      if (!pending.abandoned)
-        this.rejectCall(pending, new RpcTransportError('protocol', 'Malformed development session result'));
+      this.protocolFailure('Malformed development session result');
       return;
     }
     if (!hasError && pending.method === 'auth.createDevSession') {
@@ -570,9 +604,7 @@ export class RpcTransport {
 
   private handleNotification(notification: RpcNotification): void {
     if (notification.method === 'session.invalidated') {
-      this.retryAllowed = false;
-      this.reconnectToken = undefined;
-      this.stopCurrent(new RpcError(RpcErrorCode.Unauthorized, 'Session invalidated'), false);
+      this.invalidateSession(new RpcError(RpcErrorCode.Unauthorized, 'Session invalidated'));
       this.notifications.next(notification);
       return;
     }
@@ -587,19 +619,20 @@ export class RpcTransport {
     this.stopCurrent(new RpcTransportError('protocol', message), false);
   }
 
-  private handleSocketClose(epoch: number): void {
-    if (epoch !== this.epoch) return;
-    this.socket = undefined;
-    this.clearHeartbeat();
-    this.clearHandshakeDeadline();
-    const error = new RpcTransportError('disconnected', 'The RPC socket closed');
-    const pending = this.takePending();
-    this.scheduleReconnect();
-    this.finishOpenError(epoch, error);
-    this.rejectPending(pending, error);
+  private invalidateSession(error: RpcError): void {
+    this.retryAllowed = false;
+    this.reconnectToken = undefined;
+    const stoppedEpoch = this.stopCurrent(error, false);
+    // A synchronous error/state subscriber may already have opened a new session.
+    if (this.epoch === stoppedEpoch) this.sessionInvalidated.next();
   }
 
-  private stopCurrent(error: Error, reconnect: boolean): void {
+  private handleSocketClose(epoch: number): void {
+    if (epoch !== this.epoch) return;
+    this.stopCurrent(new RpcTransportError('disconnected', 'The RPC socket closed'), true);
+  }
+
+  private stopCurrent(error: Error, reconnect: boolean): number {
     this.diagnostics.recordError('rpc.stopped', error, {
       epoch: this.epoch,
       reason: error instanceof RpcTransportError ? error.message : undefined,
@@ -612,7 +645,7 @@ export class RpcTransport {
     const socket = this.socket;
     this.socket = undefined;
     if (!reconnect) this.attempt = undefined;
-    ++this.epoch;
+    const stoppedEpoch = ++this.epoch;
     const pending = this.takePending();
     if (socket) {
       socket.onopen = null;
@@ -629,6 +662,7 @@ export class RpcTransport {
     else this.transition(RpcConnectionState.Closed);
     this.finishOpenError(closingEpoch, error);
     this.rejectPending(pending, error);
+    return stoppedEpoch;
   }
 
   private takePending(): PendingCall[] {
@@ -696,9 +730,12 @@ export class RpcTransport {
     }
     if (this.pingOutstanding) return;
     this.pingOutstanding = true;
-    this.enqueueInternalControl('session.ping', { state: this.appState() }, () => {
-      this.pingOutstanding = false;
-    });
+    const epoch = this.epoch;
+    const settled = () => {
+      if (this.epoch === epoch) this.pingOutstanding = false;
+    };
+    const pending = this.createPending('session.ping', { state: this.appState() }, settled, settled);
+    if (pending) this.admit(pending);
   }
 
   private sendAppState(): void {
@@ -706,8 +743,13 @@ export class RpcTransport {
     this.enqueueInternalControl('session.setAppState', { state: this.appState() });
   }
 
-  private enqueueInternalControl(method: string, params: object, onSuccess?: () => void): void {
-    const pending = this.createPending(method, params, onSuccess ?? (() => {}), () => {});
+  private enqueueInternalControl(method: string, params: object): void {
+    const pending = this.createPending(
+      method,
+      params,
+      () => {},
+      () => {},
+    );
     if (pending) this.admit(pending);
   }
 

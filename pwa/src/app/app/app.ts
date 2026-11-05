@@ -103,9 +103,11 @@ export class App {
   protected readonly loading = signal(false);
   private readonly slow = signal(false);
   private readonly error = signal<EntryState | undefined>(undefined);
-  protected readonly entryState = computed(() =>
-    this.loading() ? (this.slow() ? EntryState.Slow : EntryState.Loading) : (this.error() ?? EntryState.Missing),
-  );
+  protected readonly entryState = computed(() => {
+    if (this.loading()) return this.slow() ? EntryState.Slow : EntryState.Loading;
+    if (this.session.expired()) return EntryState.Expired;
+    return this.error() ?? EntryState.Missing;
+  });
   protected readonly needsLogin = computed(() => [EntryState.Missing, EntryState.Expired].includes(this.entryState()));
   protected readonly EntryState = EntryState;
   private initializationEpoch = 0;

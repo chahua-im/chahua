@@ -34,7 +34,11 @@ export function conversationUnread(connection: Connection, session: SessionStore
     watchedUid = account();
     loading.set(watch);
     error.set(false);
-    connection.watchConversationUnread(id, watch ? builtinConversationViews() : [], watch);
+    connection.watchConversationUnread(id, watch ? builtinConversationViews() : [], watch, () => {
+      if (id !== requestId || account() !== watchedUid) return;
+      loading.set(false);
+      error.set(watch);
+    });
   };
   effect(() => {
     const uid = account();

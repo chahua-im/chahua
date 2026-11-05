@@ -38,7 +38,9 @@ export function conversationStates(
     if (!refs.length && !subscribed) return;
     subscribed = !!refs.length;
     selected = new Set(refs.map(key));
-    connection.watchConversationStates(id, refs);
+    connection.watchConversationStates(id, refs, () => {
+      if (id === requestId) fullRequestId = 0;
+    });
   };
   effect(() => {
     account();

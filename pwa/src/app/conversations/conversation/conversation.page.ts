@@ -1218,7 +1218,7 @@ export class ConversationPage {
         if (reason === ResyncReason.Foreground && this.realtime.connected()) {
           // Current pages receive messages even while the document is hidden.
           // Retry failed reads, but do not re-read successful event-backed data.
-          if (this.conversation.error()) void this.conversation.reconnect();
+          if (this.conversation.error()) this.restoreConversation();
           void this.loadPins();
           if (this.threadError()) void this.loadSubscription();
           const missingReceipts = 3 & ~this.receiptFresh();
@@ -1230,7 +1230,7 @@ export class ConversationPage {
             });
           return;
         }
-        void this.conversation.reconnect();
+        this.restoreConversation();
         void this.loadPins();
         this.invalidateReadReceipt();
         void this.refreshConversationMetadata()
@@ -1766,6 +1766,16 @@ export class ConversationPage {
 
   protected retry() {
     this.retryAction();
+  }
+
+  private restoreConversation() {
+    if (!this.accessible()) return;
+    if (this.conversation.error() === ConversationError.Open) {
+      // Reuse navigation/filter parameters and positioning, including exact message targets.
+      if (!this.conversation.loading() && !this.pendingNavigation()) this.retryAction();
+      return;
+    }
+    void this.conversation.reconnect();
   }
 
   private observeToolbar() {

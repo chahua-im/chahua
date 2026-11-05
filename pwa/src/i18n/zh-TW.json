@@ -78,6 +78,7 @@
     "saving": "儲存中…"
   },
   "presence": {
+    "loadFailed": "狀態載入失敗",
     "online": "在線",
     "groupCounts": "{{ online }} 人在線 · 共 {{ members }} 人",
     "lastSeen": {

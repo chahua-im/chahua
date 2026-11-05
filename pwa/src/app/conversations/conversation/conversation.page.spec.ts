@@ -4051,6 +4051,69 @@ describe('ConversationPage', () => {
     expect(fixture.nativeElement.querySelector('ion-title').textContent).toContain('新群名');
   });
 
+  it.each([
+    { reason: ResyncReason.Connected, retained: false },
+    { reason: ResyncReason.Foreground, retained: false },
+    { reason: ResyncReason.Connected, retained: true },
+  ])('restores a failed message target on resync ($reason, retained: $retained)', async ({ reason, retained }) => {
+    const animate = vi.fn();
+    Object.defineProperty(Element.prototype, 'animate', { value: animate, configurable: true });
+    try {
+      const originalRow = fixture.nativeElement.querySelector('app-message');
+      if (!retained) component['conversation'].reset(testChat.id);
+      const targetId = encodeId('9007199254741009');
+      const target = { type: ConversationTargetKind.Message as const, messageId: targetId };
+      const params = { chatId: wireChat.id, max: 50, around: decodeId(targetId) };
+      const opening = component['goTo'](target);
+      peer.expect('messages.list', params).error(RpcErrorCode.Unavailable);
+      await opening;
+      expect(component['conversation'].error()).toBe(ConversationError.Open);
+      const positioning = vi.spyOn(component['position'], 'set');
+      resync.next(reason);
+      const retry = peer.expect('messages.list', params);
+      peer.expectNone('messages.list');
+      for (const request of peer.match('users.getNotificationSettings')) request.flush(testUser);
+      for (const request of peer.match('groups.get')) request.flush(wireChat);
+      for (const request of peer.match('chats.getUnreadCount')) request.flush({ unreadCount: 0 });
+      await settleMetadata();
+      await fixture.whenStable();
+      if (retained) {
+        expect(component['conversation'].items()).toEqual([testMessage]);
+        expect(fixture.nativeElement.querySelector('app-message')).toBe(originalRow);
+      } else {
+        expect(component['conversation'].page()).toBeUndefined();
+      }
+      retry.flush({
+        chatSettings: { showMembershipMessages: true },
+        messages: [{ ...wireMessage, id: decodeId(targetId) }],
+      });
+      await fixture.whenStable();
+      await settleMetadata();
+      expect(component['conversation'].error()).toBeUndefined();
+      expect(component['conversation'].items().map(({ id }) => id)).toEqual([targetId]);
+      expect(positioning).toHaveBeenCalledWith(expect.objectContaining({ messageId: targetId }));
+    } finally {
+      Reflect.deleteProperty(Element.prototype, 'animate');
+    }
+  });
+
+  it('ignores a recovered message response after leaving and does not retry the old conversation', async () => {
+    component['conversation'].reset(testChat.id);
+    const opening = component['goTo']({ type: ConversationTargetKind.Latest });
+    peer.expect('messages.list').error(RpcErrorCode.Unavailable);
+    await opening;
+    resync.next(ResyncReason.Foreground);
+    const retry = peer.expect('messages.list', { chatId: wireChat.id, max: 50 });
+    for (const request of peer.match('groups.get')) request.flush(wireChat);
+    await settleMetadata();
+    component.ionViewDidLeave();
+    retry.flush({ chatSettings: { showMembershipMessages: true }, messages: [wireMessage] });
+    await fixture.whenStable();
+    resync.next(ResyncReason.Foreground);
+    peer.expectNone('messages.list');
+    expect(component['conversation'].page()).toBeUndefined();
+  });
+
   it('reuses a successful DM receipt on foreground and retries failed receipt reads', async () => {
     const dm = { ...testChat, kind: GroupKind.dm };
     TestBed.inject(ChatStore).remember([dm]);

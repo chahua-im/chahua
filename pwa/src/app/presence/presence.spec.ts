@@ -1,6 +1,7 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
+import { RpcError, RpcErrorCode } from '../api/rpc-error';
 import { Connection, ResyncReason } from '../api/connection';
 import { encodeId } from '../api/snowflake-id';
 import { SessionStore } from '../session/session-store';
@@ -93,6 +94,34 @@ describe('presence', () => {
       },
     });
     expect(presence.user(2)).toEqual({ uid: 2, online: false, lastSeenBucket: 'recently' });
+  });
+
+  it('ends failed watch loading, retains known presence and rejects obsolete errors', () => {
+    const { presence, events, watchPresence, resync } = createPresenceHarness();
+    const chatId = encodeId('100');
+    presence.watch({ userIds: [2], chatIds: [chatId] });
+    TestBed.tick();
+    const [requestId, , , failed] = watchPresence.mock.lastCall!;
+    failed(new RpcError(RpcErrorCode.Unavailable, 'unavailable'));
+    expect(presence.userLoading(2)).toBe(false);
+    expect(presence.groupLoading(chatId)).toBe(false);
+    expect(presence.userFailed(2)).toBe(true);
+    expect(presence.groupFailed(chatId)).toBe(true);
+    events.next({
+      type: 'presenceSnapshot',
+      payload: { requestId, users: [{ uid: 2, online: true }], groups: [] },
+    });
+    expect(presence.userFailed(2)).toBe(false);
+    expect(presence.user(2)?.online).toBe(true);
+    resync.next();
+    failed(new RpcError(RpcErrorCode.Forbidden, 'obsolete'));
+    expect(presence.user(2)?.online).toBe(true);
+    watchPresence.mock.lastCall![3](new RpcError(RpcErrorCode.Unavailable, 'unavailable'));
+    expect(presence.user(2)?.online).toBe(true);
+    expect(presence.userFailed(2)).toBe(false);
+    watchPresence.mock.lastCall![3](new RpcError(RpcErrorCode.Forbidden, 'forbidden'));
+    expect(presence.user(2)).toBeUndefined();
+    expect(presence.userFailed(2)).toBe(true);
   });
 
   it('shows scoped loading only until the current snapshot resolves, including omitted entries', () => {

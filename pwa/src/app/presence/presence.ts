@@ -9,6 +9,7 @@ import {
 import { Connection, ResyncReason } from '../api/connection';
 import type { SnowflakeID } from '../api/snowflake-id';
 import { SessionStore } from '../session/session-store';
+import { RpcError, RpcErrorCode } from '../api/rpc-error';
 
 export type PresenceScope = { userIds?: readonly number[]; chatIds?: readonly SnowflakeID[] };
 
@@ -30,6 +31,7 @@ export class Presence {
   private readonly groupsState = signal<ReadonlyMap<SnowflakeID, GroupPresenceResponse>>(new Map());
   private readonly pendingUsers = signal<ReadonlySet<number>>(new Set());
   private readonly pendingGroups = signal<ReadonlySet<SnowflakeID>>(new Set());
+  private readonly failed = signal(false);
   private readonly clock = signal(Date.now());
   private requestId = 0;
   private publishedRequestId = 0;
@@ -131,12 +133,26 @@ export class Presence {
     return uid != null && this.live() && this.pendingUsers().has(uid);
   }
 
+  userFailed(uid: number | undefined) {
+    return uid != null && this.live() && this.failed() && this.publishedScope.userIds.includes(uid) && !this.user(uid);
+  }
+
   group(chatId: SnowflakeID | undefined) {
     return chatId == null || !this.live() ? undefined : this.groupsState().get(chatId);
   }
 
   groupLoading(chatId: SnowflakeID | undefined) {
     return chatId != null && this.live() && this.pendingGroups().has(chatId);
+  }
+
+  groupFailed(chatId: SnowflakeID | undefined) {
+    return (
+      chatId != null &&
+      this.live() &&
+      this.failed() &&
+      this.publishedScope.chatIds.includes(chatId) &&
+      !this.group(chatId)
+    );
   }
 
   private scope() {
@@ -154,14 +170,28 @@ export class Presence {
     const requestId = ++this.requestId;
     this.publishedScope = scope;
     this.publishedRequestId = requestId;
+    this.failed.set(false);
     const users = untracked(this.usersState);
     const groups = untracked(this.groupsState);
     this.pendingUsers.set(new Set(scope.userIds.filter((uid) => !users.has(uid))));
     this.pendingGroups.set(new Set(scope.chatIds.filter((chatId) => !groups.has(chatId))));
-    this.connection.watchPresence(requestId, scope.userIds, scope.chatIds);
+    this.connection.watchPresence(requestId, scope.userIds, scope.chatIds, (error) => {
+      if (requestId !== this.publishedRequestId) return;
+      this.failed.set(true);
+      this.pendingUsers.set(new Set());
+      this.pendingGroups.set(new Set());
+      if (
+        error instanceof RpcError &&
+        (error.code === RpcErrorCode.Forbidden || error.code === RpcErrorCode.Unauthorized)
+      ) {
+        this.usersState.update((users) => new Map([...users].filter(([uid]) => !scope.userIds.includes(uid))));
+        this.groupsState.update((groups) => new Map([...groups].filter(([id]) => !scope.chatIds.includes(id))));
+      }
+    });
   }
 
   private clear() {
+    this.failed.set(false);
     this.publishedRequestId = 0;
     this.publishedScope = { userIds: [], chatIds: [] };
     this.usersState.set(new Map());
@@ -172,6 +202,7 @@ export class Presence {
 
   private receive(snapshot: PresenceSnapshotPayload) {
     if (snapshot.requestId !== this.publishedRequestId) return;
+    this.failed.set(false);
     const users = new Map(this.usersState());
     for (const uid of this.publishedScope.userIds) users.delete(uid);
     for (const user of snapshot.users) users.set(user.uid, user);

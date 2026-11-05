@@ -50,6 +50,7 @@ export class ConversationStore {
   hideMembershipMessages = false;
   private pageHidesMembershipMessages = false;
   private needsResync = false;
+  private retryNewer = false;
   private readonly pendingUpdates = new Map<SnowflakeID, MessageUpdate>();
   /** Ids recalled in this context; their snapshots inside quoting messages must be redacted too. */
   private readonly deletedIds = new Set<SnowflakeID>();
@@ -105,6 +106,7 @@ export class ConversationStore {
     this.cancelLoading();
     this.latestSeenId = undefined;
     this.needsResync = false;
+    this.retryNewer = false;
     this.currentPage.set(undefined);
   }
 
@@ -124,6 +126,7 @@ export class ConversationStore {
     exact = false,
     hideMembershipMessages = this.hideMembershipMessages,
   ): Promise<boolean> {
+    this.retryNewer = false;
     // Returning to the retained page's filter still needs a fresh read: arrivals
     // during the cancelled refresh may have been deferred or hidden.
     const filterChanged =
@@ -259,6 +262,7 @@ export class ConversationStore {
           ? { ...updated, olderCursor: page.olderCursor }
           : this.withLiveCursor({ ...updated, newerCursor: page.newerCursor });
       });
+      if (direction === PageDirection.Newer) this.retryNewer = false;
     } catch (error) {
       if (version === this.version && !(error instanceof ChatSettingsChanged)) {
         this.diagnostics.recordError('conversation.page.failed', error, {
@@ -483,6 +487,10 @@ export class ConversationStore {
 
   async reconnect() {
     this.needsResync = true;
+    if (this.retryNewer) {
+      await this.load(PageDirection.Newer);
+      return;
+    }
     if (!this.atLatest()) return;
     const page = this.page()!;
     this.needsResync = false;
@@ -493,6 +501,7 @@ export class ConversationStore {
       return;
     }
     this.currentPage.set({ ...page, newerCursor: lastId });
+    this.retryNewer = true;
     // Fetch one batch. Any remaining gap is traversed by normal forward pagination.
     await this.load(PageDirection.Newer);
   }

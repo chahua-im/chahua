@@ -78,6 +78,7 @@
     "saving": "保存中…"
   },
   "presence": {
+    "loadFailed": "状态加载失败",
     "online": "在线",
     "groupCounts": "{{ online }} 人在线 · 共 {{ members }} 人",
     "lastSeen": {

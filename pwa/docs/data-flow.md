@@ -75,7 +75,7 @@ SessionStore 先按 localStorage、Cookie（当前键优先于旧键）和开发
 
 本地后端开发构建没有显式 URL 凭据或开发预设时，每次页面加载先匿名 `session.open`，再调用 `auth.createDevSession({uid, clientId})`，以 sessionStorage 的 `uid`（默认 1）和本机持久化 clientId 换取并绑定身份；显式 URL token 即使因身份相同而保留旧凭据，也不触发开发会话创建。开发凭据在 `auth.refresh` 前保存并设置为下一次重连凭据。
 
-localStorage 和 Cookie 使用同一个键 `jwt_token`；读取身份及刷新 token 时同步写入两处。Cookie 只属于当前主机，使用 `Path=/`、`SameSite=Lax`，HTTPS 下设置 `Secure`，每次写入续期 400 天。Cookie 过期不影响 localStorage；只有 Cookie 时自动补入 localStorage，并同样参与 URL token 的身份比较。退出、登录 Unauthorized 或服务端 `session.invalidated` 时清除两处；网络、服务器或身份查询暂不可用时保留凭据供重试。保留的 HTTP 上传请求继续使用 Bearer token。
+localStorage 和 Cookie 使用同一个键 `jwt_token`；读取身份及刷新 token 时同步写入两处。Cookie 只属于当前主机，使用 `Path=/`、`SameSite=Lax`，HTTPS 下设置 `Secure`，每次写入续期 400 天。Cookie 过期不影响 localStorage；只有 Cookie 时自动补入 localStorage，并同样参与 URL token 的身份比较。退出、初次登录或自动重连握手返回 Unauthorized、服务端 `session.invalidated` 时清除两处；网络、服务器或身份查询暂不可用时保留凭据供重试。自动重连鉴权拒绝与服务端失效通知通过 RpcTransport.sessionInvalidated$ 进入同一失效流程，清除账号状态并由 SessionStore.expired 驱动登录失效提示；新的凭证清除失效标记。初次登录错误仍交由初始化调用者处理，开发身份失败可沿既有凭证回退。保留的 HTTP 上传请求继续使用 Bearer token。
 
 iOS/iPadOS 17.2+ 与 macOS Safari 安装网页应用时复制 Cookie，不复制 localStorage；安装后两边存储独立，已安装应用不会收到 Safari 后续的登录变化。更早 iOS 不提供这条安装登录传递；`start_url` 固定为 `/chats`，不携带 token。[WebKit 安装行为](https://webkit.org/blog/14787/webkit-features-in-safari-17-2/#login-cookies)
 
@@ -85,7 +85,7 @@ iOS/iPadOS 17.2+ 与 macOS Safari 安装网页应用时复制 Cookie，不复制
 
 App 先调用 SessionStore.restoreToken 同步读取并保存 token，后续 initialize 及登录重试复用内存中的 token；没有 token 时，生产构建显示前往发布帖重新进入的文字指引，不启动登录请求；开发构建在业务路径先获取开发会话，普通浏览器的 `/landing` 无凭证时仍显示该指引。有 token 时，普通浏览器的 `/landing` 只恢复 token，不刷新凭据、不获取用户、不启动通知或打开邀请预览。已安装 PWA 的 `/landing` 由同步路由 guard 重定向到 `/chats` 并替换历史记录，App 正常初始化登录。其他业务页面由 App 的身份加载/错误状态控制，进入时才执行登录请求。
 
-RpcTransport 的请求截止时间从订阅开始计为 30 秒，包含排队；普通请求最多 16 个已发送、64 个未发送，序列化总字节最多 64 MiB，控制命令使用独立的 8 槽串行通道。退订只移除客户端等待，不新增服务端取消协议；迟到结果不再交给消费者。断线同时失败所有已发送和未发送请求，重连不重放请求，也不回退 HTTP 或旧 WS。只有 MessageOutbox 保留既有的操作级消息重试。账号切换先关闭旧连接、失效请求与事件代际，再接收新身份的数据；同账号后台校准保留已知内容。
+RpcTransport 的请求截止时间从订阅开始计为 30 秒，包含排队；普通请求最多 16 个已发送、64 个未发送，序列化总字节最多 64 MiB，控制命令使用独立的 8 槽串行通道。退订只移除客户端等待，不新增服务端取消协议；迟到结果不再交给消费者。普通请求发送后仍占用并发槽位，收到响应才释放；从发送起满 90 秒仍无响应则重建连接并回收槽位，消费者超时或退订不取消此期限。断线同时失败所有已发送和未发送请求，重连不重放请求，也不回退 HTTP 或旧 WS。只有 MessageOutbox 保留既有的操作级消息重试。协议错误先终止连接及请求调度，再统一失败所有等待者，清理期间不释放槽位发送排队写请求。账号切换先关闭旧连接、失效请求与事件代际，再接收新身份的数据；同账号后台校准保留已知内容。
 
 index.html 的启动恢复层独立于 app-root，内嵌文案从语言文件生成。主脚本错误、未处理的启动异常或 bootstrap 拒绝时保留恢复层；bootstrap 成功后移除恢复层及错误监听。当前语言和回退语言均加载失败时拒绝 bootstrap，避免渲染空白或翻译键。
 
@@ -182,6 +182,12 @@ Mention 跳转列表按当前页面会话保存，首次读取、真实重连及
 
 ## 分页、刷新与页面生命周期
 
+控制请求保持串行；`presence.watch`、`conversations.watchStates`、`conversations.watchUnread` 和 `session.setAppState` 的同类未发送请求只保留最新完整参数（包含 requestId 与清空范围），被替代调用直接结束、不伪造服务端确认。已发送请求不替换、不跨连接重放。控制队列为心跳保留一个容量；心跳入队失败或收到错误后恢复后续尝试，已发送控制请求超时则重建连接，退订不会取消该截止时间。
+
+Connection 对三种 watch 命令的暂时性失败按 1 秒起、最多 30 秒间隔重试，只保留最新范围；权限、参数或协议错误不自动重试。范围更新、断线、账号切换与销毁会取消旧重试，重连后的范围由现有消费者重新发布。失败反馈结束未知状态的加载，已有可展示快照在暂时失败时保留，权限拒绝清除对应在线状态。
+
+当前会话打开失败后，重连成功或健康连接恢复前台时重试原加载动作，保留消息定位、话题、过滤与滚动目标；加载进行中不重复打开，离开页面或失去访问权限后不重试。已有消息仍沿用增量同步。
+
 健康连接恢复前台时，消息区间、话题列表、订阅、置顶和成功读取的私聊回执由已接收的事件保持，不重复读取；失败的查询仍可重试。当前会话隐藏期间继续接收消息，恢复后校验可见读位置。群资料、好友关系和申请历史缺少完整跨设备事件，仍校准；收藏等无可靠事件的数据保留原有读取。真正重连按当前范围恢复一次监看，并补消息、校准列表与元数据。服务端普通事件队列溢出会断开该连接，强制走重连校准，避免把漏事件的连接当作健康连接。
 
 逐会话快照确认不可访问时，立即停止展示该范围的消息、置顶和发送入口，并使进行中的读取失效；父聊天的撤权同时覆盖其话题，单个话题的撤权不影响其他范围。迟到的已授权回复不能恢复这些内容；只有后续确认可访问后，才恢复正常读取。未知状态、普通刷新和断线本身不等同于撤权。
@@ -192,7 +198,7 @@ Mention 跳转列表按当前页面会话保存，首次读取、真实重连及
 
 只有消息 tab 开启话题时才使用两来源共同覆盖范围：未加载边界为 Infinity，末尾为 -Infinity，展示时间不早于两边较新边界的行。触底补覆盖较浅的一侧，相同则同时补。其他分类独立分页。群/好友的归档数字都是后端归档对话未读总数，不遍历归档历史分类型 count。
 
-ThreadParticipants 独立读取服务端参与者分页，名单不从 ChatStore 或会话消息推导；ChatDetails 只传 chatId 与 rootId，根消息仍用于信息头部，应用壳向路由面板传入当前会话中同一话题的根消息；独立话题详情通过消息接口读取根消息。参与者 UID 游标是普通 number，ChatThreads 的根 ID 游标使用 SnowflakeID 品牌类型，生成客户端在 RPC 边界无损转换；两者的 null 末页游标原样保留。资料列表不写入订阅、归档或未读缓存。SavedMessagesPage 通过 SavedMessageList 读取全局收藏快照；进入媒体详情时保留列表与滚动位置；离开收藏及其详情时销毁列表，重新进入时重新读取。
+ThreadParticipants 独立读取服务端参与者分页，名单不从 ChatStore 或会话消息推导；ChatDetails 只传 chatId 与 rootId，根消息仍用于信息头部，应用壳向路由面板传入当前会话中同一话题的根消息；独立话题详情通过消息接口读取根消息。参与者 UID 游标是普通 number，ChatThreads 的根 ID 游标使用 SnowflakeID 品牌类型，生成客户端在 RPC 边界无损转换；两者的 null 末页游标原样保留。资料列表不写入订阅、归档或未读缓存。SavedMessagesPage 通过 SavedMessageList 读取全局收藏快照；进入媒体详情时保留列表与滚动位置；离开收藏及其详情时销毁列表，重新进入时重新读取。 重连或恢复前台时从首页刷新到已加载数量，新范围全部就绪后原位替换；等待或暂时失败保留已有快照及分页游标，重试沿失败操作的首屏或续页方向执行。取消收藏期间合并并延后刷新，删除完成或回滚后再读取；账号切换或确认权限拒绝时清除旧快照，迟到回包不得恢复。
 
 ChatDetails 可由 chatId 或用户资料打开；后者从共享好友关系派生 dmChatId，得到可访问会话后读取详情和当前标签。不为资料另存好友状态。验证方式在点击添加好友后读取，发送前在确认弹窗内收集验证信息；添加、解除好友与拉黑操作完成后刷新共享关系。
 
@@ -226,7 +232,7 @@ Ionic 会缓存页面实例。群聊进入其话题时保留群聊区间、消�
 | 首次 presenceUpdate、恢复前台                             | Connection 区分认证连接与前台恢复的 resync，同一次 focus/visibility 恢复只发布一次；健康连接保留事件维护的数据，断线重连校准已加载范围                                                               |
 | presenceSnapshot                                          | Presence 仅接收当前 `requestId` 的绝对授权快照；清除当前请求中缺席的用户/群，刷新期间保留已知状态；本机断网、断开或文档隐藏时不显示实时结论                                                          |
 
-RpcTransport 每 10 秒发送一次 `session.ping`，最多一个在途心跳；90 秒未收到有效心跳则重连，恢复前台时使用 30 秒过期边界。退避从 1 秒倍增至 30 秒并带抖动。只有文档可见且窗口拥有焦点时才上报 active，否则为 inactive；鉴权成功和 visibilitychange、窗口 focus/blur 时立即调用 `session.setAppState`，不等待下次心跳。Connection.connected 由成功的认证握手或开发身份绑定决定；真实绑定／重连只发布一次 Connected，健康连接恢复可见且聚焦时发布 Foreground，刷新凭据不发布 Connected。presenceUpdate 无在线用户列表消费者；stickerPackOrderUpdated 由 StickerPreferences 接收，替换 SessionStore 中的贴纸包顺序。重连时最新区间至多补一页，不扫旧历史；离线期间编辑/撤回/表态可能在重开区间后才更新。Presence 通过 Connection 调用 `presence.watch({requestId,userIds,chatIds})`，以该连接的可见范围替换服务端监看范围；Snowflake chatId 按生成的 RPC 元数据还原为十进制字符串。每次范围变动、重连、恢复联网或恢复可见都会发起新请求；非空范围立即取得 `presenceSnapshot`，随后每 15 秒刷新，发布前重新授权。客户端只采用最新请求的完整快照，绝不从本地页面推算群人数。
+RpcTransport 每 10 秒发送一次 `session.ping`，最多一个在途心跳；90 秒未收到有效心跳则重连，恢复前台时使用 30 秒过期边界。退避从 1 秒倍增至 30 秒并带抖动；套接字关闭与主动终止共用清理路径，先失效连接代际再通知等待者，每次失败只推进一次退避，认证成功后重置。只有文档可见且窗口拥有焦点时才上报 active，否则为 inactive；鉴权成功和 visibilitychange、窗口 focus/blur 时立即调用 `session.setAppState`，不等待下次心跳。Connection.connected 由成功的认证握手或开发身份绑定决定；真实绑定／重连只发布一次 Connected，健康连接恢复可见且聚焦时发布 Foreground，刷新凭据不发布 Connected。presenceUpdate 无在线用户列表消费者；stickerPackOrderUpdated 由 StickerPreferences 接收，替换 SessionStore 中的贴纸包顺序。重连时最新区间至多补一页，不扫旧历史；自动补读失败后记住待补游标，下次重连或前台校准继续重试，主动切换区间则取消该恢复状态；离线期间编辑/撤回/表态可能在重开区间后才更新。Presence 通过 Connection 调用 `presence.watch({requestId,userIds,chatIds})`，以该连接的可见范围替换服务端监看范围；Snowflake chatId 按生成的 RPC 元数据还原为十进制字符串。每次范围变动、重连、恢复联网或恢复可见都会发起新请求；非空范围立即取得 `presenceSnapshot`，随后每 15 秒刷新，发布前重新授权。客户端只采用最新请求的完整快照，绝不从本地页面推算群人数。
 
 ChatListContent 在活跃列表中使用一个 IntersectionObserver，按实际进入视口的私聊行收集并去重对方 UID，注册到同一 Presence；滚出视口、切换分类、离开页面或销毁时释放对应范围。群组、话题和好友请求不注册列表在线范围；不为已加载但未显示的分页成员请求在线状态，也不为每行创建 observer、WebSocket 或轮询。列表、会话标题和资料的范围由 Presence 合并，聊天列表响应不另存在线副本。
 
