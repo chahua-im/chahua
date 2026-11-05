@@ -142,6 +142,11 @@ export class SavedMessageList {
       this.saved.update((items) => [
         ...new Map([...(more ? items : []), ...page.items].map((item) => [item.id, item])).values(),
       ]);
+      this.menu.update((selection) => {
+        if (!selection) return undefined;
+        const item = this.saved().find((item) => item.id === selection.item.id);
+        return item ? { ...selection, item } : undefined;
+      });
       this.nextCursor.set(page.cursor);
     } catch (error) {
       if (version === this.version) {
@@ -165,11 +170,13 @@ export class SavedMessageList {
     this.menu.set(undefined);
     await this.navigation.open(saved.originalChatId, saved.originalThreadRootId, saved.originalMessageId);
   }
-  protected async removeSaved(saved: SavedMessageResponse) {
+  protected async removeSaved(item: SavedMessageResponse) {
     if (this.removing()) return;
     const version = this.version;
-    const index = this.saved().findIndex((item) => item.id === saved.id);
+    const index = this.saved().findIndex((saved) => saved.id === item.id);
     this.menu.set(undefined);
+    if (index < 0) return;
+    const saved = this.saved()[index];
     this.saved.update((items) => items.filter((item) => item.id !== saved.id));
     this.removing.set(true);
     this.removeFailed.set(false);

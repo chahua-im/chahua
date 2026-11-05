@@ -91,6 +91,59 @@ describe('SavedMessagesPage', () => {
     (TestBed.inject(Connection)['resync'] as Subject<ResyncReason>).next(ResyncReason.Foreground);
   }
 
+  it('updates an open menu to the refreshed source permissions without replacing its row', async () => {
+    await saved();
+    const item = list()['saved']()[0];
+    const event = new MouseEvent('contextmenu');
+    const row = fixture.nativeElement.querySelector('app-message');
+    list()['menu'].set({ item, event });
+    refresh();
+    expect(list()['menu']()?.item).toBe(item);
+    peer.expect('savedMessages.list', { limit: 50 }).flush({
+      savedMessages: [{ ...savedSnapshot(), canLocateContext: false }],
+    });
+    await settle();
+    const selection = list()['menu']()!;
+    expect(selection.item).toBe(list()['saved']()[0]);
+    expect(selection.item.canLocateContext).toBe(false);
+    expect(selection.event).toBe(event);
+    expect(fixture.nativeElement.querySelector('app-message')).toBe(row);
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    await list()['locateSaved'](selection.item);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('closes the menu for a remotely removed snapshot and ignores its stale delete action', async () => {
+    await saved();
+    const item = list()['saved']()[0];
+    list()['menu'].set({ item, event: new MouseEvent('contextmenu') });
+    refresh();
+    peer.expect('savedMessages.list', { limit: 50 }).flush({ savedMessages: [] });
+    await settle();
+    expect(list()['menu']()).toBeUndefined();
+    await list()['removeSaved'](item);
+    peer.expectNone('savedMessages.delete');
+    expect(list()['saved']()).toEqual([]);
+    expect(list()['removing']()).toBe(false);
+  });
+
+  it('rolls back the current snapshot when a stale delete action fails after refresh', async () => {
+    await saved();
+    const previous = list()['saved']()[0];
+    refresh();
+    peer.expect('savedMessages.list', { limit: 50 }).flush({
+      savedMessages: [{ ...savedSnapshot(), canLocateContext: false }],
+    });
+    await settle();
+    const current = list()['saved']()[0];
+    const removing = list()['removeSaved'](previous);
+    peer.expect('savedMessages.delete', { savedMessageId: '500' }).error(RpcErrorCode.Unavailable);
+    await removing;
+    expect(list()['saved']()).toEqual([current]);
+    expect(list()['saved']()[0].canLocateContext).toBe(false);
+    expect(list()['removeFailed']()).toBe(true);
+  });
+
   it('keeps rows and pagination on refresh failure and retries from the first page', async () => {
     await saved();
     const node = fixture.nativeElement.querySelector('app-message');

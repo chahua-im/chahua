@@ -632,7 +632,6 @@
       "unavailable": "[Unavailable message]"
     },
     "upload": {
-      "offline": "The upload stopped because the network disconnected.",
       "tooLarge": "This file exceeds the {{limit}} MiB limit. Compress it, or remove it and choose another file.",
       "tooLargeUnknown": "This file exceeds the server size limit. Compress it, or remove it and choose another file.",
       "empty": "This file is empty. Remove it and choose another file.",
@@ -653,7 +652,6 @@
       "autoRetry": "Will retry automatically.",
       "retrying": "Retrying upload…",
       "unreadable": "Cannot read this local file. Remove it and choose it again.",
-      "reconnect": "Will retry when you reconnect.",
       "failedTitle": "Upload failed",
       "attachmentsTitle": "Attachments"
     }
