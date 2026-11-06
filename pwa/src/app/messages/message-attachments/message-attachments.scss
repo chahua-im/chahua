@@ -206,13 +206,32 @@
   width: 280px;
   max-width: 100%;
   height: 56px;
-  color: inherit;
-  text-decoration: none;
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
 
   ion-icon {
     flex-shrink: 0;
     font-size: 24px;
   }
+}
+
+.file-open {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+}
+
+.file-download {
+  display: grid;
+  place-items: center;
+  align-self: stretch;
+  padding: 0 6px;
 }
 
 .file-info {

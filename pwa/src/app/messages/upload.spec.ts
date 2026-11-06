@@ -262,6 +262,34 @@ describe('Attachment upload tasks', () => {
     },
   );
 
+  it.each([
+    ['', 'image/jpeg', new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0])],
+    ['application/octet-stream', 'video/mp4', new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109])],
+  ])('detects media in %s file uploads without changing their bytes', async (type, detected, bytes) => {
+    const file = new File([bytes], 'original.bin', { type });
+    const task = create(AttachmentUploadPurpose.file, file);
+    const pending = task.retry();
+    config();
+    const request = await peer.expectAsync('attachments.createUploadUrl');
+    expect(request.params).toEqual({
+      filename: file.name,
+      contentType: detected,
+      size: file.size,
+      purpose: AttachmentUploadPurpose.file,
+    });
+    expect(task.state().contentType).toBe(detected);
+    request.flush({ attachmentId: '100', uploadHeaders: {}, uploadUrl: 'https://storage.invalid/upload' });
+    await vi.waitFor(() => expect(FakeUpload.requests).toHaveLength(1));
+    const xhr = FakeUpload.requests[0];
+    const uploaded = xhr.send.mock.calls[0][0] as File;
+    expect(new Uint8Array(await uploaded.arrayBuffer())).toEqual(bytes);
+    expect(uploaded.name).toBe(file.name);
+    expect(createBitmap).not.toHaveBeenCalled();
+    expect(convertToBlob).not.toHaveBeenCalled();
+    xhr.finish();
+    await expect(pending).resolves.toBe(encodeId('100'));
+  });
+
   it('maps compression to the first half and upload to the second half without resetting progress', async () => {
     let compressed!: (blob: Blob) => void;
     convertToBlob.mockReturnValue(new Promise<Blob>((resolve) => (compressed = resolve)));

@@ -41,7 +41,7 @@ import { VoicePlayer } from '../voice-player/voice-player';
 import { MediaLoaded } from '../media-loaded';
 import { VideoPreview } from '../video-preview';
 import { albumLayout } from './album-layout';
-import { attachmentKind, MediaKind } from './media-kind';
+import { attachmentKind, mediaKind, MediaKind } from './media-kind';
 
 type Attachment = MessageResponse['attachments'][number];
 type Sticker = NonNullable<MessageResponse['sticker']>;
@@ -93,10 +93,12 @@ export class MessageAttachments {
     event.preventDefault();
     if (this.message().messageType === MessageType.sticker) return;
     event.stopPropagation();
-    const media = this.items().filter((item) => item.kind === MediaKind.Image || item.kind === MediaKind.Video);
+    const media = this.items().filter(
+      (item) => item.previewKind === MediaKind.Image || item.previewKind === MediaKind.Video,
+    );
     await openMediaViewer(
       this.router,
-      media,
+      media.map(({ url, previewKind: kind, fileName, width, height }) => ({ url, kind, fileName, width, height })),
       media.findIndex((item) => (item.id ?? item.url) === key),
     );
   }
@@ -161,6 +163,7 @@ export class MessageAttachments {
         ...attachment,
         upload,
         kind: attachmentKind(message.messageType, attachment.kind),
+        previewKind: mediaKind(state?.contentType ?? attachment.kind),
         sticker: !!sticker,
         knownSize,
         progress:

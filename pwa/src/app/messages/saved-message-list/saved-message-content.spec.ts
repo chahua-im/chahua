@@ -62,10 +62,13 @@ describe('savedMessageContent rendered by Message', () => {
     expect(element.textContent).toContain('保存时的作者');
     expect(element.textContent).toContain('收藏快照内容');
     expect(element.querySelector('time')?.getAttribute('datetime')).toBe(snapshot.originalCreatedAt);
-    const download = element.querySelector<HTMLAnchorElement>('.file')!;
+    const open = element.querySelector<HTMLAnchorElement>('.file-open')!;
+    expect(open.href).toBe('https://example.com/saved-file.pdf');
+    expect(open.download).toBe('记录.pdf');
+    expect(open.textContent).toContain('2.0 KB');
+    const download = element.querySelector<HTMLAnchorElement>('.file-download')!;
     expect(download.href).toBe('https://example.com/saved-file.pdf');
     expect(download.download).toBe('记录.pdf');
-    expect(download.textContent).toContain('2.0 KB');
     expect(element.querySelector('.reply-button')).toBeNull();
     const menu = vi.fn();
     fixture.componentInstance.menu.subscribe(menu);

@@ -3,6 +3,7 @@ import { firstValueFrom, from, fromEvent, takeUntil, timeout } from 'rxjs';
 import { RpcApi } from '../../generated/rpc-api';
 import { AttachmentUploadPurpose, type SnowflakeID } from '../../generated/models';
 import { prepareMedia } from './media-processing/prepare-media';
+import { detectFileMimeType, normalizeMimeType, withDetectedMimeType } from './media-processing/file-type';
 import { UploadError, UploadErrorCode, UploadStage, uploadFailure, type UploadFailure } from './upload-error';
 
 const IDLE_TIMEOUT = 30_000;
@@ -22,6 +23,7 @@ export class AttachmentUpload {
     id?: SnowflakeID;
     width?: number;
     height?: number;
+    contentType?: string;
     error?: UploadFailure;
   }>({ status: UploadStatus.Processing, progress: 0 });
   readonly state = this.uploadState.asReadonly();
@@ -106,6 +108,19 @@ export class AttachmentUpload {
           from(prepareMedia(this.file, signal, (value) => progress(value * uploadStart))).pipe(takeUntil(aborted)),
         );
         signal.throwIfAborted();
+      }
+      if (
+        this.purpose === AttachmentUploadPurpose.file &&
+        !this.prepared &&
+        (!this.file.type || normalizeMimeType(this.file.type) === 'application/octet-stream')
+      ) {
+        stage = UploadStage.Processing;
+        const contentType = await firstValueFrom(
+          from(detectFileMimeType(this.file)).pipe(timeout(IDLE_TIMEOUT), takeUntil(aborted)),
+        );
+        signal.throwIfAborted();
+        this.prepared = { file: withDetectedMimeType(this.file, contentType) };
+        this.uploadState.update((state) => ({ ...state, contentType }));
       }
       const { file, dimensions } = this.prepared ?? { file: this.file, dimensions: undefined };
       stage = UploadStage.Signing;
