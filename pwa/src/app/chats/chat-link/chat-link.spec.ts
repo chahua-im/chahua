@@ -1,7 +1,8 @@
 import { PanelUrlSerializer } from '../../navigation/panel-url';
-import { Location } from '@angular/common';
+import { Location, NgTemplateOutlet } from '@angular/common';
 import { provideLocationMocks } from '@angular/common/testing';
-import { Component, signal } from '@angular/core';
+import { Component, computed, contentChild, input, output, signal, TemplateRef } from '@angular/core';
+import { By } from '@angular/platform-browser';
 import { TestBed } from '@angular/core/testing';
 import {
   NavigationCancel,
@@ -13,7 +14,7 @@ import {
   withRouterConfig,
 } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
-import { IonModal, ModalController } from '@ionic/angular';
+import { ModalController, type Animation, type AnimationBuilder } from '@ionic/angular';
 import { filter, firstValueFrom } from 'rxjs';
 import { routes } from '../../app.routes';
 import { PanelNavigation, panelPaths } from '../../navigation/panel-navigation';
@@ -335,41 +336,182 @@ describe('Panel route history', () => {
   });
 });
 
-@Component({ selector: 'test-modal', template: '', providers: [{ provide: IonModal, useExisting: ModalStub }] })
+@Component({
+  selector: 'ion-modal',
+  imports: [NgTemplateOutlet],
+  template: '<ng-container [ngTemplateOutlet]="content() ?? null" />',
+})
 class ModalStub {
+  readonly content = contentChild(TemplateRef);
+  readonly enterAnimation = input<AnimationBuilder>();
+  readonly leaveAnimation = input<AnimationBuilder>();
+  readonly keepContentsMounted = input(false);
+  readonly canDismiss = input<() => boolean>();
+  readonly showBackdrop = input(true);
+  readonly focusTrap = input(true);
+  readonly didDismiss = output<void>();
   visible = false;
-  finishOpening!: () => void;
+  opening?: Promise<void>;
+  closing?: Promise<void>;
+  readonly animations: Animation[] = [];
+  private animate(builder?: AnimationBuilder) {
+    if (!builder) return;
+    const element = document.createElement('div');
+    element.attachShadow({ mode: 'open' }).innerHTML = '<div class="modal-wrapper"></div>';
+    this.animations.push(builder(element));
+  }
   async present() {
-    await new Promise<void>((resolve) => (this.finishOpening = resolve));
+    if (this.visible) return;
+    this.animate(this.enterAnimation());
+    await this.opening;
     this.visible = true;
   }
   async dismiss() {
+    if (!this.visible || this.canDismiss()?.() === false) return;
+    this.animate(this.leaveAnimation());
+    await this.closing;
     this.visible = false;
+    this.didDismiss.emit();
   }
+}
+
+@Component({ selector: 'app-panel-page', template: '{{ path() }}' })
+class PanelPageStub {
+  readonly path = input.required<string>();
+  readonly source = input<unknown>();
+  readonly active = input(true);
 }
 
 describe('Panel presentation', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it('finishes closing when Back arrives during the opening animation', async () => {
-    vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: false }));
-    const paths = signal(['/profile/2']);
+  function setup(initialPaths: string[], wide = false) {
+    vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: wide }));
+    const paths = signal(initialPaths);
+    const close = vi.fn();
     TestBed.configureTestingModule({
       providers: [
         {
           provide: PanelNavigation,
-          useValue: { paths, sidebar: () => false, media: () => false, largeScreen: signal(false) },
+          useValue: { paths, media: computed(() => paths().at(-1) === '/media'), largeScreen: signal(wide), close },
         },
       ],
-    }).overrideComponent(ChatLink, { set: { imports: [ModalStub], template: '<test-modal />' } });
+    }).overrideComponent(ChatLink, { set: { imports: [ModalStub, PanelPageStub] } });
     const fixture = TestBed.createComponent(ChatLink);
     fixture.detectChanges();
+    const [panel, media] = fixture.debugElement
+      .queryAll(By.directive(ModalStub))
+      .map((el) => el.componentInstance as ModalStub);
+    const settle = async () => {
+      fixture.detectChanges();
+      await fixture.componentInstance['transition'];
+      fixture.detectChanges();
+    };
+    return { paths, close, fixture, panel, media, settle };
+  }
+
+  it('finishes closing when Back arrives during the opening animation', async () => {
+    const { paths, fixture, panel, media, settle } = setup(['/profile/2']);
+    let finishOpening!: () => void;
+    panel.opening = new Promise<void>((resolve) => (finishOpening = resolve));
     await Promise.resolve();
-    const modal = fixture.debugElement.children[0].componentInstance as ModalStub;
     paths.set([]);
     fixture.detectChanges();
-    modal.finishOpening();
-    await fixture.componentInstance['transition'];
-    expect(modal.visible).toBe(false);
+    finishOpening();
+    await settle();
+    expect(panel.visible).toBe(false);
+    expect(media.visible).toBe(false);
+  });
+
+  it.each([false, true])('fades media above an existing panel and retains the parent (wide: %s)', async (wide) => {
+    const { paths, fixture, panel, media, settle } = setup(['/chats/chat/100/info'], wide);
+    await settle();
+    const parent = fixture.debugElement.query(By.directive(PanelPageStub));
+    const panelElement = fixture.nativeElement.querySelector('ion-modal');
+    expect(panelElement.classList.contains('panel-sidebar')).toBe(wide);
+    paths.set(['/chats/chat/100/info', '/media']);
+    await settle();
+    expect(panel.visible).toBe(true);
+    expect(media.visible).toBe(true);
+    expect(fixture.debugElement.query(By.directive(PanelPageStub)).nativeElement).toBe(parent.nativeElement);
+    expect((parent.componentInstance as PanelPageStub).active()).toBe(false);
+    expect(parent.nativeElement.hidden).toBe(false);
+    expect(panelElement.classList.contains('panel-sidebar')).toBe(wide);
+    expect(media.animations[0].getDuration()).toBe(180);
+    expect(media.animations[0].getKeyframes()).toEqual([
+      { offset: 0, opacity: '0' },
+      { offset: 1, opacity: '1' },
+    ]);
+
+    let finishClosing!: () => void;
+    media.closing = new Promise<void>((resolve) => (finishClosing = resolve));
+    paths.set(['/chats/chat/100/info']);
+    fixture.detectChanges();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(fixture.debugElement.queryAll(By.directive(PanelPageStub))).toHaveLength(2);
+    expect(media.animations[1].getDuration()).toBe(180);
+    expect(media.animations[1].getKeyframes()).toEqual([
+      { offset: 0, opacity: '1' },
+      { offset: 1, opacity: '0' },
+    ]);
+    finishClosing();
+    await settle();
+    expect(media.visible).toBe(false);
+    expect(panel.visible).toBe(true);
+    expect(fixture.debugElement.queryAll(By.directive(PanelPageStub))).toHaveLength(1);
+    expect(fixture.debugElement.query(By.directive(PanelPageStub)).nativeElement).toBe(parent.nativeElement);
+    expect((parent.componentInstance as PanelPageStub).active()).toBe(true);
+  });
+
+  it('opens media directly and routes its close action through browser history', async () => {
+    const { paths, close, panel, media, settle } = setup(['/media']);
+    await settle();
+    expect(panel.visible).toBe(false);
+    expect(media.visible).toBe(true);
+    await media.dismiss();
+    expect(close).toHaveBeenCalledOnce();
+    expect(media.visible).toBe(true);
+    paths.set([]);
+    await settle();
+    expect(media.visible).toBe(false);
+    expect(media.animations).toHaveLength(2);
+  });
+
+  it('finishes closing when Back arrives during the media opening animation', async () => {
+    const { paths, fixture, panel, media, settle } = setup(['/chats/chat/100/info']);
+    await settle();
+    let finishOpening!: () => void;
+    media.opening = new Promise<void>((resolve) => (finishOpening = resolve));
+    paths.set(['/chats/chat/100/info', '/media']);
+    fixture.detectChanges();
+    await Promise.resolve();
+    await Promise.resolve();
+    paths.set(['/chats/chat/100/info']);
+    fixture.detectChanges();
+    finishOpening();
+    await settle();
+    expect(panel.visible).toBe(true);
+    expect(media.visible).toBe(false);
+  });
+
+  it('keeps media content when Forward reopens it during the closing animation', async () => {
+    const { paths, fixture, panel, media, settle } = setup(['/chats/chat/100/info', '/media']);
+    await settle();
+    const viewer = fixture.debugElement.queryAll(By.directive(PanelPageStub))[1].nativeElement;
+    let finishClosing!: () => void;
+    media.closing = new Promise<void>((resolve) => (finishClosing = resolve));
+    paths.set(['/chats/chat/100/info']);
+    fixture.detectChanges();
+    await Promise.resolve();
+    await Promise.resolve();
+    paths.set(['/chats/chat/100/info', '/media']);
+    fixture.detectChanges();
+    finishClosing();
+    await settle();
+    expect(panel.visible).toBe(true);
+    expect(media.visible).toBe(true);
+    expect(fixture.debugElement.queryAll(By.directive(PanelPageStub))[1].nativeElement).toBe(viewer);
+    expect(media.animations).toHaveLength(3);
   });
 });
