@@ -39,6 +39,7 @@ import { type VoiceDock } from '../voice-player/voice-playback';
 import { VoicePlayer } from '../voice-player/voice-player';
 
 import { MediaLoaded } from '../media-loaded';
+import { VideoPreview } from '../video-preview';
 import { albumLayout } from './album-layout';
 import { attachmentKind, MediaKind } from './media-kind';
 
@@ -60,6 +61,7 @@ export type MessageAttachmentSource = Pick<MessageResponse, 'messageType' | 'cre
   imports: [
     ContentScrollbars,
     MediaLoaded,
+    VideoPreview,
     VoicePlayer,
     IonBadge,
     IonIcon,

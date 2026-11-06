@@ -2,7 +2,7 @@ import { Directive, ElementRef, inject, signal } from '@angular/core';
 
 /**
  * Marks an image or video once its data is available, so the placeholder behind it can go away.
- * Videos settle on metadata because `preload="metadata"` never decodes a first frame on its own.
+ * Video metadata alone does not mean that a frame is available.
  * Failures settle too; the surrounding component already renders its own failure state.
  */
 @Directive({
@@ -10,8 +10,9 @@ import { Directive, ElementRef, inject, signal } from '@angular/core';
   host: {
     '[class.loaded]': 'settled()',
     '(load)': 'settled.set(true)',
-    '(loadedmetadata)': 'settled.set(true)',
     '(loadeddata)': 'settled.set(true)',
+    '(seeked)': 'frameReady()',
+    '(emptied)': 'settled.set(false)',
     '(error)': 'settled.set(true)',
   },
 })
@@ -21,6 +22,11 @@ export class MediaLoaded {
   protected readonly settled = signal(
     this.element instanceof HTMLImageElement
       ? this.element.complete && this.element.naturalWidth > 0
-      : this.element.readyState >= 1,
+      : this.element.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA,
   );
+
+  protected frameReady() {
+    if (this.element instanceof HTMLVideoElement && this.element.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA)
+      this.settled.set(true);
+  }
 }

@@ -18,7 +18,7 @@
 | 好友验证、全局在线隐私设置加载        | 列表内 spinner                                                                                                                                                                                                                           | FriendVerificationSettings.loading / PresenceSettings.loading |
 | 表情组件代码加载                      | @loading 延迟 100ms 展示 spinner                                                                                                                                                                                                         | @defer 的加载状态                                             |
 | 表情面板内容加载                      | 贴纸网格骨架块                                                                                                                                                                                                                           | StickerPicker 当前分组 loading 且没有可展示的贴纸                         |
-| 单个媒体加载                          | 每个媒体框覆盖骨架块，含相册中的每一格                                                                                                                                                                                                   | 图片 load 或视频元数据可用之前                                |
+| 单个媒体加载                          | 每个媒体框覆盖骨架块，含相册中的每一格                                                                                                                                                                                                   | 图片 load 或视频实际画面可用之前                                |
 
 后台更新检查无加载提示，不阻塞 Angular 或登录。业务页面的新版就绪 toast 不自动消失，提供“立即更新”和“暂不更新”；启动失败或 landing 时按[更新约定](requirements.md#通知静音与设置)自动刷新。
 

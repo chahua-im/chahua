@@ -23,6 +23,13 @@ describe('Message', () => {
   beforeEach(() => {
     vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: false }));
     vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    vi.stubGlobal(
       'ResizeObserver',
       class {
         observe() {}

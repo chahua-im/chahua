@@ -39,6 +39,7 @@
         } @else {
           <video
             appMediaLoaded
+            [appVideoPreview]="!item.sticker"
             [src]="item.url"
             [autoplay]="item.sticker"
             [loop]="item.sticker"
