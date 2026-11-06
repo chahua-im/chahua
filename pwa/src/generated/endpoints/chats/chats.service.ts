@@ -1034,6 +1034,7 @@ export class ChatsService {
    * new reactions it carries (default 1000, hard cap 1000). A reaction is
    * unread while `created_at > last_reactions_read_at` (cursor-derived; the
    * cursor advances only through the explicit reaction acknowledgement).
+   * Pass the previous snapshot's readThrough as after to fetch only new reactions.
    * @summary GET /chats/{chat_id}/reactions - Message ids with unread reactions for the current user.
    */
   getChatReactions<TData = UnreadReactionIdsResponse>(

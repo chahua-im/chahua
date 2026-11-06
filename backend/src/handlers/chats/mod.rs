@@ -16,7 +16,7 @@ use crate::{
         AcknowledgeReactionsBody, ListChatsQuery, ListChatsResponse, MarkAsReadBody,
         MarkAsUnreadBody, MarkChatReadStateResponse, ReadReceiptQuery, UnreadCountResponse,
         UnreadMentionIdsResponse, UnreadMentionsQuery, UnreadReactionIdsResponse,
-        UnreadReactionsAckResponse,
+        UnreadReactionsAckResponse, UnreadReactionsQuery,
     },
     dto::read_receipts::ReadReceiptResponse,
     errors::AppError,
@@ -273,6 +273,7 @@ async fn get_chat_mentions(
 /// new reactions it carries (default 1000, hard cap 1000). A reaction is
 /// unread while `created_at > last_reactions_read_at` (cursor-derived; the
 /// cursor advances only through the explicit reaction acknowledgement).
+/// Pass the previous snapshot's readThrough as after to fetch only new reactions.
 #[utoipa::path(
     get,
     path = "/reactions",
@@ -281,6 +282,7 @@ async fn get_chat_mentions(
         ("chat_id" = String, Path, description = "Chat ID"),
         ("threadId" = Option<String>, Query, description = "Thread root message id; omit for main-scope reactions"),
         ("max" = Option<i64>, Query, description = "Max ids to return (default 1000, capped at 1000)"),
+        ("after" = Option<chrono::DateTime<chrono::Utc>>, Query, description = "Previous snapshot readThrough; return only reactions created strictly after it"),
     ),
     responses(
         (status = 200, description = "Message ids with unread reactions, newest-first", body = UnreadReactionIdsResponse),
@@ -292,7 +294,7 @@ async fn get_chat_reactions(
     State(state): State<AppState>,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
     mut conn: DbConn,
-    Query(query): Query<UnreadMentionsQuery>,
+    Query(query): Query<UnreadReactionsQuery>,
 ) -> Result<Json<UnreadReactionIdsResponse>, AppError> {
     crate::services::api::chats::get_chat_reactions(
         uid,

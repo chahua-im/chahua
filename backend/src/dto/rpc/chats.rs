@@ -3,7 +3,7 @@ use utoipa::ToSchema;
 
 use crate::dto::chats::{
     AcknowledgeReactionsBody, ListChatsQuery, MarkAsReadBody, MarkAsUnreadBody, ReadReceiptQuery,
-    UnreadMentionsQuery,
+    UnreadMentionsQuery, UnreadReactionsQuery,
 };
 
 #[derive(Deserialize, ToSchema)]
@@ -88,7 +88,7 @@ pub struct ChatsListUnreadReactionsParams {
     #[schema(schema_with = crate::serde_i64_string::schema)]
     pub chat_id: i64,
     #[serde(flatten)]
-    pub query: UnreadMentionsQuery,
+    pub query: UnreadReactionsQuery,
 }
 
 #[derive(Deserialize, ToSchema)]

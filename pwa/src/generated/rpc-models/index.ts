@@ -273,6 +273,7 @@ export type ChatsListParams = {
   limit?: number;
 };
 export type ChatsListUnreadReactionsParams = {
+  after?: string;
   chatId: Shared.SnowflakeID;
   max?: number;
   threadId?: Shared.SnowflakeID;
@@ -621,6 +622,7 @@ export type ThreadsSubscribeParams = { chatId: Shared.SnowflakeID; threadRootId:
 export type ThreadsUnarchiveParams = { chatId: Shared.SnowflakeID; threadRootId: Shared.SnowflakeID };
 export type ThreadsUnsubscribeParams = { chatId: Shared.SnowflakeID; threadRootId: Shared.SnowflakeID };
 export type UnreadMentionsQuery = { max?: number; threadId?: Shared.SnowflakeID };
+export type UnreadReactionsQuery = { after?: string; max?: number; threadId?: Shared.SnowflakeID };
 export type UsersClearNotificationExceptionsParams = { kind: Shared.GroupKind };
 export type UsersGetMeParams = {};
 export type UsersGetNotificationSettingsParams = {};

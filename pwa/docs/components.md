@@ -102,7 +102,7 @@ UserPresenceDisplay 按 online、away、模糊区间、精确时间的顺序展�
 
 输入文字、回复对象与编辑目标由页面持有；Composer 通过 model 和输出传递变化。引用来源栈、当前置顶选择等只保留需要重新查找的 ID；已有同一对象引用无需转成 ID。未读数字直接消费 ChatStore。滚动中的已读与分页判断共用一次滚动尺寸读取；已确认消息的元素集合随消息行和视图变化派生，不在每次滚动时重新过滤。置顶栏持有当前显示的置顶对象引用，仅在栏位出现或消失时等待触摸与惯性结束；共享的置顶数据仍即时更新。
 
-ConversationPage 持有当前群聊或群聊话题的 mention 跳转 ID、请求及过期状态；加载与合并规则见[数据流](data-flow.md)。所有会话的 reaction 跳转 ID 在进入前台、恢复可见和重连时读取。私聊及其话题不显示 mention 跳转入口。新目标与尚未跳转的目标去重合并；跳转成功或目标已删除时移除该目标。reaction 按查询响应的 readThrough 确认，前台离开时再确认；mention 依赖消息已读游标、不单独确认。FAB 按消息时间从旧到新逐个定位，同时可见时纵向堆叠。消息已读游标推进时，游标及之前的 mention 和 reaction 跳转目标同时从 FAB 移除；reaction 服务端游标仍按查询快照确认，普通消息已读不推进该游标。阅读期间推进的边界同时过滤在途 reaction 查询的迟到目标；之后新发起的查询仍可包含旧消息上的新表态。
+ConversationPage 持有当前群聊或群聊话题的 mention 跳转 ID、请求及过期状态；私聊及其话题不显示 mention 跳转入口。所有会话的 reaction 跳转 ID、已查看目标、查询快照边界及确认请求均由 ConversationPage 持有。ReactionVisibility 是会话页面内的 DOM 观察器，管理 reaction 区域的连续可见计时；页面负责观察范围、前后台及面板状态。新目标与尚未处理的目标去重合并，加载、确认及并发规则见[数据流](data-flow.md)。FAB 按消息时间从旧到新逐个定位，同时可见时纵向堆叠。消息已读游标推进时仅移除游标及之前的 mention 目标；reaction 目标在对应表态区域达到可见条件后移除；FAB 定位表态区域，使用同一判断，目标已删除或确认没有表态时跳过，临时失败保留。表态 FAB 的消失及退出语义见[需求与边界](requirements.md)。
 
 时间线普通头像通过 Message 的 canMention 输入与 mention 输出交给 ConversationPage，浮动头像由页面直接交给 MessageComposer.insertMention。两种头像复用 AvatarMention 指令处理右键、长按、移动取消及后续点击抑制；Composer 复用候选选择的提及编码与用户展示快照，在原生输入选区插入。
 

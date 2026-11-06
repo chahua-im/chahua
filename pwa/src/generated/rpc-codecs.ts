@@ -163,6 +163,7 @@ import type {
   ThreadsUnarchiveParams,
   ThreadsUnsubscribeParams,
   UnreadMentionsQuery,
+  UnreadReactionsQuery,
   UsersClearNotificationExceptionsParams,
   UsersGetMeParams,
   UsersGetNotificationSettingsParams,
@@ -1220,6 +1221,9 @@ export const rpcSchemas: Record<string, JsonCodec> = {
   },
   UnreadReactionIdsResponse: {
     messageIds: [1],
+  },
+  UnreadReactionsQuery: {
+    threadId: 1,
   },
   UnsubscribeBody: {
     environment: 'PushEnvironment',

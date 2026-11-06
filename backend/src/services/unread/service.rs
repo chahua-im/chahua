@@ -535,6 +535,7 @@ impl UnreadService {
     }
 
     /// Capture the boundary and IDs while holding the same lock as reaction writes.
+    /// `after` narrows the snapshot without advancing the user's read cursor.
     pub fn snapshot_chat_unread_reactions(
         &self,
         conn: &mut PgConnection,
@@ -542,16 +543,18 @@ impl UnreadService {
         chat_id: i64,
         thread_root_id: Option<i64>,
         limit: i64,
+        after: Option<DateTime<Utc>>,
     ) -> Result<crate::dto::chats::UnreadReactionIdsResponse, DieselError> {
         conn.transaction(|conn| {
             let read_through = crate::services::reactions::lock_scope(conn, chat_id, uid)?;
-            let ids = self.list_chat_unread_reactions(
+            let ids = Self::list_chat_unread_reactions(
                 conn,
                 uid,
                 chat_id,
                 thread_root_id,
                 limit,
                 read_through,
+                after,
             )?;
             Ok(crate::dto::chats::UnreadReactionIdsResponse {
                 read_through,
@@ -567,20 +570,20 @@ impl UnreadService {
     /// limit is interpolated instead of bound so both scope variants share one
     /// placeholder layout (`limit` is a validated `i64` from `validate_limit`).
     fn list_chat_unread_reactions(
-        &self,
         conn: &mut PgConnection,
         uid: i32,
         chat_id: i64,
         thread_root_id: Option<i64>,
         limit: i64,
         read_through: DateTime<Utc>,
+        after: Option<DateTime<Utc>>,
     ) -> Result<Vec<i64>, DieselError> {
         let sql = format!(
             "SELECT DISTINCT mr.message_id AS message_id {UNREAD_REACTIONS_FILTER} {} \
              ORDER BY mr.message_id DESC LIMIT {limit}",
             match thread_root_id {
-                Some(_) => format!("{UNREAD_REACTIONS_THREAD_TAIL} AND mr.created_at <= $4"),
-                None => format!("{UNREAD_REACTIONS_MAIN_TAIL} AND mr.created_at <= $3"),
+                Some(_) => format!("{UNREAD_REACTIONS_THREAD_TAIL} AND mr.created_at <= $4 AND mr.created_at > COALESCE($5, '-infinity'::timestamptz)"),
+                None => format!("{UNREAD_REACTIONS_MAIN_TAIL} AND mr.created_at <= $3 AND mr.created_at > COALESCE($4, '-infinity'::timestamptz)"),
             }
         );
         let rows: Vec<UnreadReactionIdRow> = match thread_root_id {
@@ -589,11 +592,13 @@ impl UnreadService {
                 .bind::<diesel::sql_types::BigInt, _>(chat_id)
                 .bind::<diesel::sql_types::BigInt, _>(thread_id)
                 .bind::<diesel::sql_types::Timestamptz, _>(read_through)
+                .bind::<diesel::sql_types::Nullable<diesel::sql_types::Timestamptz>, _>(after)
                 .load(conn)?,
             None => sql_query(&sql)
                 .bind::<diesel::sql_types::Integer, _>(uid)
                 .bind::<diesel::sql_types::BigInt, _>(chat_id)
                 .bind::<diesel::sql_types::Timestamptz, _>(read_through)
+                .bind::<diesel::sql_types::Nullable<diesel::sql_types::Timestamptz>, _>(after)
                 .load(conn)?,
         };
         Ok(rows.into_iter().map(|r| r.message_id).collect())
@@ -1937,7 +1942,7 @@ mod tests {
             .bind::<diesel::sql_types::Integer, _>(author)
             .execute(conn)?;
             assert_eq!(
-                service.list_chat_unread_reactions(conn, author, chat_id, None, 1000, boundary)?,
+                UnreadService::list_chat_unread_reactions(conn, author, chat_id, None, 1000, boundary, None)?,
                 vec![msg_a],
             );
             assert_eq!(
@@ -2033,6 +2038,80 @@ mod tests {
         assert!(
             matches!(result, Err(diesel::result::Error::RollbackTransaction)),
             "transaction should roll back"
+        );
+    }
+
+    #[test]
+    fn reaction_snapshots_read_only_the_incremental_time_window() {
+        use chrono::DateTime;
+        use diesel::{
+            connection::SimpleConnection, prelude::*, result::Error as DieselError, sql_query,
+        };
+
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        let mut conn = PgConnection::establish(&url).expect("connect to test database");
+        let service = UnreadService::new();
+        const CHAT: i64 = 9_876_712_000;
+        const ROOT: i64 = CHAT + 1;
+        const REPLY: i64 = CHAT + 2;
+        const AUTHOR: i32 = 4308;
+        const ACTOR: i32 = 4309;
+        let result = conn.transaction::<(), DieselError, _>(|conn| {
+            conn.batch_execute(&format!(
+                "INSERT INTO groups (id, name) VALUES ({CHAT}, 'reaction-delta-test');
+                 INSERT INTO group_membership (chat_id, uid, last_reactions_read_at)
+                     VALUES ({CHAT}, {AUTHOR}, '-infinity');
+                 INSERT INTO messages (id, message_type, client_generated_id, sender_uid, chat_id, created_at, has_thread)
+                     VALUES ({ROOT}, 'text', 'reaction-delta-root', {AUTHOR}, {CHAT}, NOW(), TRUE);
+                 INSERT INTO messages (id, message_type, client_generated_id, sender_uid, chat_id, created_at, reply_root_id)
+                     VALUES ({REPLY}, 'text', 'reaction-delta-reply', {AUTHOR}, {CHAT}, NOW(), {ROOT});
+                 INSERT INTO thread_user_states (chat_id, thread_root_id, uid, subscribed_at, last_reactions_read_at)
+                     VALUES ({CHAT}, {ROOT}, {AUTHOR}, NOW(), '-infinity');"
+            ))?;
+
+            let old = DateTime::<Utc>::from_timestamp(Utc::now().timestamp() - 7200, 0).unwrap();
+            let newer = old + chrono::Duration::hours(1);
+            for (scope, message_id) in [(None, ROOT), (Some(ROOT), REPLY)] {
+                sql_query(
+                    "INSERT INTO message_reactions (message_id, user_uid, emoji, created_at, message_author_uid)
+                     VALUES ($1, $2, 'old', $3, $5), ($1, $2, 'new', $4, $5)",
+                )
+                .bind::<diesel::sql_types::BigInt, _>(message_id)
+                .bind::<diesel::sql_types::Integer, _>(ACTOR)
+                .bind::<diesel::sql_types::Timestamptz, _>(old)
+                .bind::<diesel::sql_types::Timestamptz, _>(newer)
+                .bind::<diesel::sql_types::Integer, _>(AUTHOR)
+                .execute(conn)?;
+
+                // Bounds are exclusive at after and inclusive at readThrough.
+                assert_eq!(UnreadService::list_chat_unread_reactions(conn, AUTHOR, CHAT, scope, 1000, old, None)?, vec![message_id]);
+                assert_eq!(UnreadService::list_chat_unread_reactions(conn, AUTHOR, CHAT, scope, 1000, newer, Some(old))?, vec![message_id]);
+                assert!(UnreadService::list_chat_unread_reactions(conn, AUTHOR, CHAT, scope, 1000, newer, Some(newer))?.is_empty());
+                let first = service.snapshot_chat_unread_reactions(conn, AUTHOR, CHAT, scope, 1000, None)?;
+                assert_eq!(first.message_ids, vec![message_id.to_string()]);
+                let empty = service.snapshot_chat_unread_reactions(conn, AUTHOR, CHAT, scope, 1000, Some(first.read_through))?;
+                assert!(empty.message_ids.is_empty());
+                assert!(empty.read_through >= first.read_through);
+                assert_eq!(service.count_chat_unread_reactions(conn, AUTHOR, CHAT, scope)?, 1);
+
+                // A new reaction on the same message reappears in the next delta.
+                let message = crate::schema::messages::table.find(message_id).first::<crate::models::Message>(conn)?;
+                crate::services::reactions::insert_reaction(conn, &message, ACTOR, "👍".into())?;
+                let delta = service.snapshot_chat_unread_reactions(conn, AUTHOR, CHAT, scope, 1000, Some(empty.read_through))?;
+                assert_eq!(delta.message_ids, vec![message_id.to_string()]);
+                assert_eq!(service.acknowledge_chat_unread_reactions(conn, AUTHOR, CHAT, scope, Some(empty.read_through))?, 1);
+                assert_eq!(service.acknowledge_chat_unread_reactions(conn, AUTHOR, CHAT, scope, Some(delta.read_through))?, 0);
+                // An old after value cannot resurrect reactions read on another device.
+                assert!(service.snapshot_chat_unread_reactions(conn, AUTHOR, CHAT, scope, 1000, Some(old))?.message_ids.is_empty());
+            }
+            Err(DieselError::RollbackTransaction)
+        });
+        assert!(
+            matches!(result, Err(DieselError::RollbackTransaction)),
+            "{result:?}"
         );
     }
     #[test]
