@@ -70,6 +70,13 @@ describe('MessageAttachments', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({ providers: [provideRouter([])] });
     disconnect.mockClear();
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
     vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: false }));
     vi.stubGlobal(
       'ResizeObserver',
@@ -305,13 +312,16 @@ describe('MessageAttachments', () => {
     expect(media[1].classList.contains('loaded')).toBe(false);
   });
 
-  it('settles a video placeholder once its metadata is available', async () => {
+  it('keeps a video placeholder until a decoded frame is available', async () => {
     const fixture = await render({
       attachments: [{ ...image, kind: 'video/mp4', url: '/clip.mp4', fileName: 'clip.mp4' }],
     });
     const video: HTMLVideoElement = fixture.nativeElement.querySelector('.media-frame video');
     expect(video.classList.contains('loaded')).toBe(false);
     video.dispatchEvent(new Event('loadedmetadata'));
+    fixture.detectChanges();
+    expect(video.classList.contains('loaded')).toBe(false);
+    video.dispatchEvent(new Event('loadeddata'));
     fixture.detectChanges();
     expect(video.classList.contains('loaded')).toBe(true);
   });
