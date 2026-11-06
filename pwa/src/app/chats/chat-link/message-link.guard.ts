@@ -3,9 +3,10 @@ import { inject } from '@angular/core';
 import { RedirectCommand, Router, type CanActivateFn } from '@angular/router';
 import { ToastController } from '@ionic/angular';
 import { TranslocoService } from '@jsverse/transloco';
-import { catchError, defer, map } from 'rxjs';
+import { catchError, defer, filter, map, of, switchMap, take } from 'rxjs';
 import { RpcApi } from '../../../generated/rpc-api';
 import { decodeId, encodeId } from '../../api/snowflake-id';
+import { SessionStore } from '../../session/session-store';
 
 /** Resolve before leaving the current page so an unavailable message only needs a toast. */
 export const openMessageLink: CanActivateFn = (route) => {
@@ -13,6 +14,7 @@ export const openMessageLink: CanActivateFn = (route) => {
   const chats = inject(RpcApi);
   const toasts = inject(ToastController);
   const i18n = inject(TranslocoService);
+  const session = inject(SessionStore);
   const navigationId = router.currentNavigation()!.id;
 
   return defer(() => {
@@ -22,23 +24,31 @@ export const openMessageLink: CanActivateFn = (route) => {
     const view = new DataView(bytes.buffer);
     const chatId = encodeId(view.getBigUint64(0).toString());
     const messageId = encodeId(view.getBigUint64(8).toString());
-    return chats.messages
-      .get({ chatId, messageId })
-      .pipe(
-        map(
-          (message) =>
-            new RedirectCommand(
-              router.createUrlTree(
-                [
-                  '/chats/chat',
-                  decodeId(chatId),
-                  ...(message.replyRootId ? ['thread', decodeId(message.replyRootId)] : []),
-                ],
-                { fragment: `msg=${decodeId(messageId)}` },
-              ),
+    // The app owns login errors and retries; keep the link pending until login succeeds.
+    // Check the live signal because user$ may still replay the previous account's value.
+    return (
+      session.user()
+        ? of(session.user())
+        : session.user$.pipe(
+            filter(() => !!session.user()),
+            take(1),
+          )
+    ).pipe(
+      switchMap(() => chats.messages.get({ chatId, messageId })),
+      map(
+        (message) =>
+          new RedirectCommand(
+            router.createUrlTree(
+              [
+                '/chats/chat',
+                decodeId(chatId),
+                ...(message.replyRootId ? ['thread', decodeId(message.replyRootId)] : []),
+              ],
+              { fragment: `msg=${decodeId(messageId)}` },
             ),
-        ),
-      );
+          ),
+      ),
+    );
   }).pipe(
     catchError(async (error: unknown) => {
       const toast = await toasts.create({

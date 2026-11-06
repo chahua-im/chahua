@@ -1,5 +1,5 @@
 import { DestroyRef, inject, isDevMode, Service, signal } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { filter, firstValueFrom, timeout, type Observable } from 'rxjs';
 import { RpcApi } from '../../generated/rpc-api';
 import type { ChatSettings, MeResponse, StickerPackOrderItem, User } from '../../generated/models';
@@ -36,6 +36,7 @@ export class SessionStore {
   private readonly diagnostics = inject(Diagnostics);
   readonly token = signal<string | undefined>(undefined);
   readonly user = signal<(MeResponse & Pick<User, 'userGroup'>) | undefined>(undefined);
+  readonly user$ = toObservable(this.user);
   readonly expired = signal(false);
   constructor() {
     this.transport.sessionInvalidated$.pipe(takeUntilDestroyed(this.destroy)).subscribe(() => this.invalidate());
