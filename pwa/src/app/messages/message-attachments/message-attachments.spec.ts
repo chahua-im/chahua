@@ -445,14 +445,90 @@ describe('MessageAttachments', () => {
     expect(video.autoplay && video.loop && video.muted).toBe(true);
   });
 
-  it('keeps explicit file messages as download cards even when their MIME is image', async () => {
-    const fixture = await render({ messageType: MessageType.file, attachments: [image] });
+  it.each([
+    ['image/jpeg', MediaKind.Image],
+    ['video/mp4', MediaKind.Video],
+  ])('previews %s files on click without loading media in the file card', async (kind, previewKind) => {
+    const attachment = { ...image, kind };
+    const fixture = await render({ messageType: MessageType.file, attachments: [attachment] });
     const element: HTMLElement = fixture.nativeElement;
-    expect(element.querySelector('img')).toBeNull();
-    const link = element.querySelector<HTMLAnchorElement>('.file')!;
+    expect(element.querySelector('img, video')).toBeNull();
+    const link = element.querySelector<HTMLAnchorElement>('.file-open')!;
     expect(link.href).toBe(image.url);
-    expect(link.download).toBe(image.fileName);
+    expect(link.hasAttribute('download')).toBe(false);
     expect(link.textContent).toContain('2.0 KB');
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    const bubbled = vi.fn();
+    element.addEventListener('click', bubbled);
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+    link.dispatchEvent(click);
+    await fixture.whenStable();
+    expect(click.defaultPrevented).toBe(true);
+    expect(bubbled).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith(['/media'], {
+      state: {
+        media: [
+          { url: image.url, kind: previewKind, fileName: image.fileName, width: image.width, height: image.height },
+        ],
+        initial: 0,
+      },
+    });
+
+    navigate.mockClear();
+    const download = element.querySelector<HTMLAnchorElement>('.file-download')!;
+    expect(download.href).toBe(image.url);
+    expect(download.download).toBe(image.fileName);
+    const downloadClick = new MouseEvent('click', { bubbles: true, cancelable: true });
+    // Exercise the Angular handler without jsdom performing a real link navigation.
+    fixture.debugElement.query(By.css('.file-download')).triggerEventHandler('click', downloadClick);
+    expect(downloadClick.defaultPrevented).toBe(false);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it.each(['application/pdf', 'audio/ogg', 'application/octet-stream'])(
+    'keeps %s files downloadable from the card',
+    async (kind) => {
+      const fixture = await render({ messageType: MessageType.file, attachments: [{ ...image, kind }] });
+      const link = fixture.debugElement.query(By.css('.file-open'));
+      expect((link.nativeElement as HTMLAnchorElement).download).toBe(image.fileName);
+      const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+      const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+      link.triggerEventHandler('click', click);
+      expect(click.defaultPrevented).toBe(false);
+      expect(navigate).not.toHaveBeenCalled();
+    },
+  );
+
+  it('uses detected MIME for local file preview and passes only serializable media to the viewer', async () => {
+    const local = upload('blob:detected-file', 'application/octet-stream');
+    const fixture = await render({
+      messageType: MessageType.file,
+      attachments: [
+        { kind: 'application/pdf', url: '/doc.pdf', fileName: 'doc.pdf', size: 5 },
+        { kind: 'image/png', url: '/photo.png', fileName: 'photo.png', size: 5 },
+        { kind: local.file.type, url: local.url, fileName: local.file.name, size: local.file.size },
+      ],
+    });
+    fixture.componentRef.setInput('uploads', [local]);
+    fixture.detectChanges();
+    const link = fixture.nativeElement.querySelectorAll('.file-open')[2] as HTMLAnchorElement;
+    expect(link.hasAttribute('download')).toBe(true);
+    local.state.set({ status: UploadStatus.Uploading, progress: 0, contentType: 'video/mp4' });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('.file-open')[2]).toBe(link);
+    expect(link.hasAttribute('download')).toBe(false);
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    link.click();
+    await fixture.whenStable();
+    const state = navigate.mock.calls[0][1]!.state!;
+    expect(state).toEqual({
+      media: [
+        { url: '/photo.png', fileName: 'photo.png', kind: MediaKind.Image, width: 240, height: 240 },
+        { url: local.url, fileName: local.file.name, kind: MediaKind.Video, width: 240, height: 240 },
+      ],
+      initial: 1,
+    });
+    expect(() => structuredClone(state)).not.toThrow();
   });
 
   it('renders voice attachments with the waveform player inside a fixed container', async () => {
@@ -481,6 +557,8 @@ describe('MessageAttachments', () => {
     [MessageType.text, 'video/mp4'],
     [MessageType.audio, 'audio/ogg'],
     [MessageType.file, 'application/pdf'],
+    [MessageType.file, 'image/jpeg'],
+    [MessageType.file, 'video/mp4'],
   ])('opens the upload error instead of previewing or downloading failed %s / %s', async (messageType, kind) => {
     const local = upload('blob:failed', kind);
     local.state.set({

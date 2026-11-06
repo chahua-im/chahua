@@ -106,29 +106,46 @@
         }
       </div>
     } @else {
+      @let canPreview = item.previewKind === MediaKind.Image || item.previewKind === MediaKind.Video;
       <div class="file-frame">
-        <a class="file" [href]="item.url" [attr.download]="item.fileName" target="_blank" rel="noopener">
-          <ion-icon [icon]="fileIcon"></ion-icon>
-          <span class="file-info">
-            <span class="file-name" [title]="item.fileName">{{ item.fileName }}</span>
-            @if (item.size != null) {
-              <small>
-                @if (item.size < 1024) {
-                  {{ item.size }} B
-                } @else if (item.size < 1024 * 1024) {
-                  {{ (item.size / 1024).toFixed(1) }} KB
-                } @else {
-                  {{ (item.size / (1024 * 1024)).toFixed(1) }} MB
-                }
-              </small>
-            }
-          </span>
+        <div class="file">
+          <a
+            class="file-open"
+            [href]="item.url"
+            [attr.download]="canPreview ? null : item.fileName"
+            target="_blank"
+            rel="noopener"
+            (click)="canPreview ? view(item.id ?? item.url, $event) : $event.stopPropagation()">
+            <ion-icon [icon]="fileIcon"></ion-icon>
+            <span class="file-info">
+              <span class="file-name" [title]="item.fileName">{{ item.fileName }}</span>
+              @if (item.size != null) {
+                <small>
+                  @if (item.size < 1024) {
+                    {{ item.size }} B
+                  } @else if (item.size < 1024 * 1024) {
+                    {{ (item.size / 1024).toFixed(1) }} KB
+                  } @else {
+                    {{ (item.size / (1024 * 1024)).toFixed(1) }} MB
+                  }
+                </small>
+              }
+            </span>
+          </a>
           @if (item.progress != null) {
             <app-upload-progress [value]="item.progress" />
           } @else {
-            <ion-icon [icon]="downloadIcon"></ion-icon>
+            <a
+              class="file-download"
+              [href]="item.url"
+              [attr.download]="item.fileName"
+              target="_blank"
+              rel="noopener"
+              (click)="$event.stopPropagation()">
+              <ion-icon [icon]="downloadIcon"></ion-icon>
+            </a>
           }
-        </a>
+        </div>
         @if (item.upload; as upload) {
           @if (upload.state().error) {
             <app-upload-failure
