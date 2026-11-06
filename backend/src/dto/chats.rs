@@ -71,6 +71,20 @@ pub struct UnreadMentionsQuery {
     pub max: Option<i64>,
 }
 
+#[derive(Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UnreadReactionsQuery {
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[schema(schema_with = crate::serde_i64_string::schema_opt)]
+    pub thread_id: Option<i64>,
+    pub max: Option<i64>,
+    /// Previous snapshot's readThrough; only return reactions created after it.
+    pub after: Option<DateTime<Utc>>,
+}
+
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatListItem {

@@ -161,8 +161,9 @@ mod tests {
                     let reader = std::thread::spawn(move || {
                         let mut conn = connect(&url);
                         ready.send(backend_pid(&mut conn)).unwrap();
-                        UnreadService::new()
-                            .snapshot_chat_unread_reactions(&mut conn, AUTHOR, CHAT, scope, 1000)
+                        UnreadService::new().snapshot_chat_unread_reactions(
+                            &mut conn, AUTHOR, CHAT, scope, 1000, None,
+                        )
                     });
                     wait_until_blocked(conn, started.recv().unwrap());
                     Ok(reader)
@@ -175,8 +176,15 @@ mod tests {
             // The queued writer must timestamp its insert only after this commits.
             let writer = conn
                 .transaction::<_, diesel::result::Error, _>(|conn| {
-                    let snapshot =
-                        service.snapshot_chat_unread_reactions(conn, AUTHOR, CHAT, scope, 1000)?;
+                    let snapshot = service.snapshot_chat_unread_reactions(
+                        conn,
+                        AUTHOR,
+                        CHAT,
+                        scope,
+                        1000,
+                        Some(snapshot.read_through),
+                    )?;
+                    assert!(snapshot.message_ids.is_empty());
                     let (ready, started) = mpsc::channel();
                     let url = url.clone();
                     let writer = std::thread::spawn(move || {
@@ -210,7 +218,7 @@ mod tests {
                 1
             );
             let snapshot = service
-                .snapshot_chat_unread_reactions(&mut conn, AUTHOR, CHAT, scope, 1000)
+                .snapshot_chat_unread_reactions(&mut conn, AUTHOR, CHAT, scope, 1000, None)
                 .unwrap();
             assert_eq!(snapshot.message_ids, vec![message_id.to_string()]);
             // Omitting readThrough uses the same serialized database clock.

@@ -87,6 +87,7 @@ describe('ConversationPage', () => {
   let scroll: HTMLElement;
 
   let resizes: Map<Element, () => void>;
+  let intersections: Map<Element, (ratio: number) => void>;
 
   const avatars = signal(false);
 
@@ -121,11 +122,29 @@ describe('ConversationPage', () => {
         }
       },
     );
+    intersections = new Map();
     vi.stubGlobal(
       'IntersectionObserver',
       class {
-        observe() {}
-        disconnect() {}
+        private readonly targets = new Set<Element>();
+        constructor(private readonly callback: IntersectionObserverCallback) {}
+        observe(target: Element) {
+          this.targets.add(target);
+          intersections.set(target, (ratio) =>
+            this.callback(
+              [{ target, isIntersecting: ratio > 0, intersectionRatio: ratio } as IntersectionObserverEntry],
+              this as unknown as IntersectionObserver,
+            ),
+          );
+        }
+        unobserve(target: Element) {
+          this.targets.delete(target);
+          intersections.delete(target);
+        }
+        disconnect() {
+          for (const target of this.targets) intersections.delete(target);
+          this.targets.clear();
+        }
       },
     );
     vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: false }));
@@ -798,7 +817,7 @@ describe('ConversationPage', () => {
     expect(component['selectedMessages']().size).toBe(0);
   });
 
-  it('clears mention and reaction targets as scrolling advances the read cursor', () => {
+  it('clears only mention targets as scrolling advances the read cursor', () => {
     component['mentionJumpIds'].set([encodeId('201'), encodeId('202')]);
     component['reactionJumpIds'].set([encodeId('302'), encodeId('301')]);
     const changes = TestBed.inject(ChatStore) as unknown as {
@@ -816,7 +835,7 @@ describe('ConversationPage', () => {
       chatId: testChat.id,
       readThrough: encodeId('301'),
     });
-    expect(component['reactionJumpIds']()).toEqual([encodeId('302')]);
+    expect(component['reactionJumpIds']()).toEqual([encodeId('302'), encodeId('301')]);
   });
 
   it('keeps a one-item multi-selection eligible for forwarding and removes recalled selections', () => {
@@ -3483,7 +3502,7 @@ describe('ConversationPage', () => {
     });
   }
 
-  it('does not acknowledge reactions received behind a panel when navigating to another conversation', async () => {
+  it('acknowledges all reactions when leaving a conversation previously covered by a panel', async () => {
     const router = TestBed.inject(Router);
     const url = vi.spyOn(router, 'url', 'get');
     const cover = (covered: boolean) => {
@@ -3498,9 +3517,7 @@ describe('ConversationPage', () => {
       .flush({ messageIds: [], readThrough: reactionBoundary });
     peer.expect('chats.listMentions', { chatId: wireChat.id }).flush({ messageIds: [] });
     await notificationSettled();
-    peer
-      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
-      .flush({ unreadReactions: 0 });
+    peer.expectNone('chats.acknowledgeReactions');
     await fixture.whenStable();
     cover(true);
     fixture.detectChanges();
@@ -3512,7 +3529,8 @@ describe('ConversationPage', () => {
     fixture.detectChanges();
     component.ionViewWillLeave();
     await fixture.whenStable();
-    peer.expectNone('chats.acknowledgeReactions');
+    peer.expect('chats.acknowledgeReactions', { chatId: wireChat.id }).flush({ unreadReactions: 0 });
+    expect(component['reactionJumpIds']()).toEqual([]);
   });
 
   it('ignores a snapshot covered in flight and refreshes reactions when the panel closes', async () => {
@@ -3541,13 +3559,12 @@ describe('ConversationPage', () => {
       .flush({ messageIds: ['101', '102'], readThrough: reactionBoundary });
     await Promise.resolve();
     await Promise.resolve();
-    const ack = peer.expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary });
-    ack.flush({ unreadReactions: 0 });
+    peer.expectNone('chats.acknowledgeReactions');
     await fixture.whenStable();
     expect(component['reactionJumpIds']()).toEqual([encodeId('102'), encodeId('101')]);
   });
 
-  it('fetches reaction IDs and acknowledges the conversation on entry', async () => {
+  it('keeps offscreen reaction targets and server unread state on entry', async () => {
     const chatInfo = TestBed.inject(ChatStore);
     vi.spyOn(chatInfo, 'unreadReactions').mockReturnValue(2);
     const applied = vi.spyOn(chatInfo, 'applyReactionRead').mockImplementation(() => {});
@@ -3561,13 +3578,548 @@ describe('ConversationPage', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    const ack = peer.expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary });
-    ack.flush({ unreadReactions: 0 });
+    peer.expectNone('chats.acknowledgeReactions');
     await Promise.resolve();
 
-    expect(applied).toHaveBeenCalledWith(testChat.id, undefined, 0);
+    expect(applied).not.toHaveBeenCalled();
     expect(component['reactionJumpIds']()).toEqual(ids);
     expect(component['canJumpReaction']()).toBe(true);
+  });
+
+  async function reactionViewport(enter = true) {
+    vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 200));
+    Object.defineProperty(scroll, 'clientHeight', { value: 200, configurable: true });
+    Object.defineProperty(scroll, 'scrollHeight', { value: 2000, configurable: true });
+    const opening = component['conversation'].open(encodeId('101'));
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '101' }).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: ['101', '102'].map((id) => ({
+        ...wireMessage,
+        id,
+        clientGeneratedId: `reaction-${id}`,
+        reactions: [{ emoji: '👍', count: 1 }],
+      })),
+    });
+    await opening;
+    await fixture.whenStable();
+    await settleMetadata();
+    const regions = new Map<string, HTMLElement>();
+    for (const row of fixture.nativeElement.querySelectorAll('app-message') as NodeListOf<HTMLElement>) {
+      const region = row.querySelector<HTMLElement>('app-message-reactions')!;
+      vi.spyOn(region, 'getBoundingClientRect').mockReturnValue(new DOMRect(20, 60, 180, 30));
+      Object.defineProperty(region, 'offsetHeight', { value: 30, configurable: true });
+      Object.defineProperty(region, 'animate', { value: vi.fn(), configurable: true });
+      Object.defineProperty(row, 'animate', { value: vi.fn(), configurable: true });
+      regions.set(row.getAttribute('data-message-id')!, region);
+    }
+    if (enter) component.ionViewDidEnter();
+    else reactionNotification(encodeId('101'));
+    const snapshot = peer.expect('chats.listUnreadReactions', { chatId: wireChat.id });
+    if (enter) peer.expect('chats.listMentions', { chatId: wireChat.id }).flush({ messageIds: [] });
+    return { regions, snapshot };
+  }
+
+  it('removes only the reaction region actually seen, retaining offscreen and unloaded targets', async () => {
+    const { regions, snapshot } = await reactionViewport();
+    const oldRegion = regions.get('101')!;
+    const visibleRegion = regions.get('102')!;
+    vi.mocked(oldRegion.getBoundingClientRect).mockReturnValue(new DOMRect(20, -100, 180, 30));
+    snapshot.flush({ messageIds: ['103', '102', '101'], readThrough: reactionBoundary });
+    await fixture.whenStable();
+    intersections.get(oldRegion)!(0);
+    intersections.get(visibleRegion)!(1);
+    expect(component['reactionJumpIds']()).toEqual([encodeId('103'), encodeId('102'), encodeId('101')]);
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    expect(component['reactionJumpIds']()).toEqual([encodeId('103'), encodeId('101')]);
+    expect(component['canJumpReaction']()).toBe(true);
+    peer.expectNone('chats.acknowledgeReactions');
+  });
+
+  it('observes an already visible reaction when its unread snapshot arrives late', async () => {
+    const { regions, snapshot } = await reactionViewport();
+    const region = regions.get('101')!;
+    expect(intersections.has(region)).toBe(false);
+    snapshot.flush({ messageIds: ['101'], readThrough: reactionBoundary });
+    await fixture.whenStable();
+    intersections.get(region)!(1);
+    peer.expectNone('chats.acknowledgeReactions');
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    expect(component['canJumpReaction']()).toBe(false);
+    peer
+      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
+      .flush({ unreadReactions: 0 });
+    await fixture.whenStable();
+  });
+
+  it('scrolls a long message to its reaction region and waits for visibility after a FAB jump', async () => {
+    const { regions, snapshot } = await reactionViewport();
+    snapshot.flush({ messageIds: ['102', '101'], readThrough: reactionBoundary });
+    await fixture.whenStable();
+    const region = regions.get('101')!;
+    scroll.scrollTop = 0;
+    vi.mocked(region.getBoundingClientRect).mockImplementation(() => new DOMRect(20, 900 - scroll.scrollTop, 180, 30));
+    const row = region.closest('app-message')!;
+    vi.spyOn(row, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, -scroll.scrollTop, 300, 1000));
+    intersections.get(region)!(0);
+    await component['jumpToNextReaction']();
+    await fixture.whenStable();
+    expect(scroll.scrollTop).toBe(815);
+    expect(component['reactionJumpIds']()).toEqual([encodeId('102'), encodeId('101')]);
+    intersections.get(region)!(1);
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    expect(component['reactionJumpIds']()).toEqual([encodeId('102')]);
+    peer.expectNone('chats.acknowledgeReactions');
+  });
+
+  it('cancels a visibility dwell in the background and starts a new one on return', async () => {
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    const { regions, snapshot } = await reactionViewport();
+    snapshot.flush({ messageIds: ['102', '101'], readThrough: reactionBoundary });
+    await fixture.whenStable();
+    const region = regions.get('101')!;
+    intersections.get(region)!(1);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    hidden.mockReturnValue(true);
+    component['visibilityChanged']();
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    expect(component['reactionJumpIds']()).toEqual([encodeId('102'), encodeId('101')]);
+    expect(intersections.has(region)).toBe(false);
+    peer.expectNone('chats.acknowledgeReactions');
+    hidden.mockReturnValue(false);
+    component['visibilityChanged']();
+    peer.expectNone('chats.listMentions');
+    await fixture.whenStable();
+    intersections.get(region)!(1);
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    expect(component['reactionJumpIds']()).toEqual([encodeId('102')]);
+  });
+
+  it('cancels visibility behind a panel and resumes after closing it', async () => {
+    const { regions, snapshot } = await reactionViewport();
+    snapshot.flush({ messageIds: ['102', '101'], readThrough: reactionBoundary });
+    await fixture.whenStable();
+    const region = regions.get('101')!;
+    intersections.get(region)!(1);
+    const router = TestBed.inject(Router);
+    const url = vi.spyOn(router, 'url', 'get');
+    const cover = (covered: boolean) => {
+      const path = `/chats/chat/${wireChat.id}` + (covered ? '?profile=2' : '');
+      url.mockReturnValue(path);
+      (router.events as Subject<NavigationEnd>).next(new NavigationEnd(1, path, path));
+      fixture.detectChanges();
+    };
+    cover(true);
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    expect(component['reactionJumpIds']()).toEqual([encodeId('102'), encodeId('101')]);
+    expect(intersections.has(region)).toBe(false);
+    peer.expectNone('chats.acknowledgeReactions');
+    cover(false);
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id, after: reactionBoundary }).flush({
+      messageIds: [],
+      readThrough: '2026-10-20T00:00:01Z',
+    });
+    await fixture.whenStable();
+    intersections.get(region)!(1);
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    expect(component['reactionJumpIds']()).toEqual([encodeId('102')]);
+  });
+
+  it('does not observe reactions during the page entry transition', async () => {
+    const { regions, snapshot } = await reactionViewport(false);
+    snapshot.flush({ messageIds: ['102', '101'], readThrough: reactionBoundary });
+    await fixture.whenStable();
+    const region = regions.get('101')!;
+    expect(intersections.has(region)).toBe(false);
+    expect(component['reactionJumpIds']()).toEqual([encodeId('102'), encodeId('101')]);
+    component.ionViewDidEnter();
+    peer.expect('chats.listMentions', { chatId: wireChat.id }).flush({ messageIds: [] });
+    await fixture.whenStable();
+    expect(intersections.has(region)).toBe(true);
+    peer.expectNone('chats.acknowledgeReactions');
+  });
+
+  it('restarts the visibility dwell when a new reaction arrives on the same visible message', async () => {
+    const { regions, snapshot } = await reactionViewport();
+    snapshot.flush({ messageIds: ['102', '101'], readThrough: reactionBoundary });
+    await fixture.whenStable();
+    const region = regions.get('101')!;
+    intersections.get(region)!(1);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    reactionNotification(encodeId('101'));
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id, after: reactionBoundary }).flush({
+      messageIds: ['101'],
+      readThrough: '2026-10-20T00:00:01Z',
+    });
+    await notificationSettled();
+    await fixture.whenStable();
+    intersections.get(region)!(1);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(component['reactionJumpIds']()).toEqual([encodeId('102'), encodeId('101')]);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(component['reactionJumpIds']()).toEqual([encodeId('102')]);
+    peer.expectNone('chats.acknowledgeReactions');
+  });
+
+  it('keeps the FAB until every target is seen, then acknowledges the snapshot once', async () => {
+    reactionNotification(encodeId('101'));
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id }).flush({
+      messageIds: ['102', '101'],
+      readThrough: reactionBoundary,
+    });
+    await notificationSettled();
+    component['dismissReaction'](encodeId('101'));
+    expect(component['reactionJumpIds']()).toEqual([encodeId('102')]);
+    expect(component['canJumpReaction']()).toBe(true);
+    peer.expectNone('chats.acknowledgeReactions');
+    component['dismissReaction'](encodeId('102'));
+    expect(component['canJumpReaction']()).toBe(false);
+    const ack = peer.expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary });
+    await component['jumpToNextReaction']();
+    peer.expectNone('chats.acknowledgeReactions');
+    ack.flush({ unreadReactions: 0 });
+    await notificationSettled();
+    await component['enterReactionSession']();
+    peer.expectNone('chats.acknowledgeReactions');
+  });
+
+  it('does not restore visited targets from later snapshots unless they receive a new reaction', async () => {
+    reactionNotification(encodeId('101'));
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id }).flush({
+      messageIds: ['102', '101'],
+      readThrough: reactionBoundary,
+    });
+    await notificationSettled();
+    component['dismissReaction'](encodeId('101'));
+    reactionNotification(encodeId('103'));
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id, after: reactionBoundary }).flush({
+      messageIds: ['103'],
+      readThrough: '2026-10-20T00:00:01Z',
+    });
+    await notificationSettled();
+    expect(component['reactionJumpIds']()).toEqual([encodeId('103'), encodeId('102')]);
+    reactionNotification(encodeId('101'));
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id, after: '2026-10-20T00:00:01Z' }).flush({
+      messageIds: ['101'],
+      readThrough: '2026-10-20T00:00:02Z',
+    });
+    await notificationSettled();
+    expect(component['reactionJumpIds']()).toEqual([encodeId('103'), encodeId('102'), encodeId('101')]);
+    peer.expectNone('chats.acknowledgeReactions');
+  });
+
+  it('advances an empty reaction delta without restoring viewed targets or dropping pending ones', async () => {
+    reactionNotification(encodeId('101'));
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id }).flush({
+      messageIds: ['102', '101'],
+      readThrough: reactionBoundary,
+    });
+    await notificationSettled();
+    component['dismissReaction'](encodeId('101'));
+    // A delayed notification or removal need not produce a new target.
+    reactionNotification(encodeId('101'));
+    const nextBoundary = '2026-10-20T00:00:01Z';
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id, after: reactionBoundary }).flush({
+      messageIds: [],
+      readThrough: nextBoundary,
+    });
+    await notificationSettled();
+    expect(component['reactionJumpIds']()).toEqual([encodeId('102')]);
+    peer.expectNone('chats.acknowledgeReactions');
+    reactionNotification(encodeId('103'));
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id, after: nextBoundary }).flush({
+      messageIds: ['103'],
+      readThrough: '2026-10-20T00:00:02Z',
+    });
+    await notificationSettled();
+    expect(component['reactionJumpIds']()).toEqual([encodeId('103'), encodeId('102')]);
+  });
+
+  it('retries a failed reaction delta from the last successful boundary', async () => {
+    reactionNotification(encodeId('101'));
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id }).flush({
+      messageIds: ['101'],
+      readThrough: reactionBoundary,
+    });
+    await notificationSettled();
+    reactionNotification(encodeId('102'));
+    peer
+      .expect('chats.listUnreadReactions', { chatId: wireChat.id, after: reactionBoundary })
+      .error(RpcErrorCode.Unavailable);
+    await notificationSettled();
+    component['dismissReaction'](encodeId('101'));
+    peer.expectNone('chats.acknowledgeReactions');
+    const retry = component['enterReactionSession']();
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id, after: reactionBoundary }).flush({
+      messageIds: ['102'],
+      readThrough: '2026-10-20T00:00:01Z',
+    });
+    await retry;
+    expect(component['reactionJumpIds']()).toEqual([encodeId('102')]);
+    peer.expectNone('chats.acknowledgeReactions');
+  });
+
+  it('rearms a viewed message returned by a reaction delta even before its notification arrives', async () => {
+    reactionNotification(encodeId('101'));
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id }).flush({
+      messageIds: ['102', '101'],
+      readThrough: reactionBoundary,
+    });
+    await notificationSettled();
+    component['dismissReaction'](encodeId('101'));
+    reactionNotification(encodeId('102'));
+    const delta = peer.expect('chats.listUnreadReactions', { chatId: wireChat.id, after: reactionBoundary });
+    component['dismissReaction'](encodeId('102'));
+    // A newer reaction on 101 was committed before this snapshot; its notification is delayed.
+    const nextBoundary = '2026-10-20T00:00:01Z';
+    delta.flush({ messageIds: ['101'], readThrough: nextBoundary });
+    await notificationSettled();
+    expect(component['reactionJumpIds']()).toEqual([encodeId('101')]);
+    peer.expectNone('chats.acknowledgeReactions');
+    component['dismissReaction'](encodeId('101'));
+    peer
+      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: nextBoundary })
+      .flush({ unreadReactions: 0 });
+    await notificationSettled();
+  });
+
+  it('does not advance the reaction boundary from a response received in the background', async () => {
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    reactionNotification(encodeId('101'));
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id }).flush({
+      messageIds: ['101'],
+      readThrough: reactionBoundary,
+    });
+    await notificationSettled();
+    reactionNotification(encodeId('102'));
+    const delta = peer.expect('chats.listUnreadReactions', { chatId: wireChat.id, after: reactionBoundary });
+    hidden.mockReturnValue(true);
+    component['visibilityChanged']();
+    delta.flush({ messageIds: ['102'], readThrough: '2026-10-20T00:00:01Z' });
+    await notificationSettled();
+    hidden.mockReturnValue(false);
+    component['visibilityChanged']();
+    peer.expect('chats.listMentions', { chatId: wireChat.id }).flush({ messageIds: [] });
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id, after: reactionBoundary }).flush({
+      messageIds: ['103', '102'],
+      readThrough: '2026-10-20T00:00:02Z',
+    });
+    await notificationSettled();
+    expect(component['reactionJumpIds']()).toEqual([encodeId('103'), encodeId('102'), encodeId('101')]);
+  });
+
+  it('restores visited reaction targets on reconnect before acknowledging a newer snapshot', async () => {
+    reactionNotification(encodeId('101'));
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id }).flush({
+      messageIds: ['102', '101'],
+      readThrough: reactionBoundary,
+    });
+    await notificationSettled();
+    component['dismissReaction'](encodeId('101'));
+    expect(component['reactionJumpIds']()).toEqual([encodeId('102')]);
+    reactionNotification(encodeId('103'));
+    const obsolete = peer.expect('chats.listUnreadReactions', { chatId: wireChat.id, after: reactionBoundary });
+
+    // A new reaction on 101 arrives while disconnected, without a notification on this client.
+    vi.spyOn(component['conversation'], 'reconnect').mockResolvedValue();
+    resync.next(ResyncReason.Connected);
+    peer.expect('users.getNotificationSettings').flush(testUser);
+    peer.expect('groups.get', { chatId: wireChat.id }).flush({ ...wireChat, myRole: GroupRole.member });
+    const nextBoundary = '2026-10-20T00:00:02Z';
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id }).flush({
+      messageIds: ['102', '101'],
+      readThrough: nextBoundary,
+    });
+    await notificationSettled();
+    await settleMetadata();
+    obsolete.flush({ messageIds: ['103'], readThrough: '2026-10-20T00:00:01Z' });
+    await notificationSettled();
+    expect(component['reactionJumpIds']()).toEqual([encodeId('102'), encodeId('101')]);
+
+    component['dismissReaction'](encodeId('102'));
+    peer.expectNone('chats.acknowledgeReactions');
+    expect(component['reactionJumpIds']()).toEqual([encodeId('101')]);
+    component['dismissReaction'](encodeId('101'));
+    peer
+      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: nextBoundary })
+      .flush({ unreadReactions: 0 });
+    await notificationSettled();
+  });
+
+  it('waits for a pending snapshot before acknowledging the last visited target', async () => {
+    reactionNotification(encodeId('101'));
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id }).flush({
+      messageIds: ['101'],
+      readThrough: reactionBoundary,
+    });
+    await notificationSettled();
+    reactionNotification(encodeId('102'));
+    const snapshot = peer.expect('chats.listUnreadReactions', { chatId: wireChat.id, after: reactionBoundary });
+    component['dismissReaction'](encodeId('101'));
+    peer.expectNone('chats.acknowledgeReactions');
+    const nextBoundary = '2026-10-20T00:00:01Z';
+    snapshot.flush({ messageIds: ['102'], readThrough: nextBoundary });
+    await notificationSettled();
+    expect(component['reactionJumpIds']()).toEqual([encodeId('102')]);
+    peer.expectNone('chats.acknowledgeReactions');
+    component['dismissReaction'](encodeId('102'));
+    peer
+      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: nextBoundary })
+      .flush({ unreadReactions: 0 });
+    await notificationSettled();
+  });
+
+  it('keeps a new reaction on the same target when it arrives during a FAB jump', async () => {
+    reactionNotification(encodeId('101'));
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id }).flush({
+      messageIds: ['101'],
+      readThrough: reactionBoundary,
+    });
+    await notificationSettled();
+    let finish!: (reached: boolean) => void;
+    component['goTo'] = vi.fn().mockReturnValue(
+      new Promise<boolean>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const jumping = component['jumpToNextReaction']();
+    reactionNotification(encodeId('101'));
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id, after: reactionBoundary }).flush({
+      messageIds: ['101'],
+      readThrough: '2026-10-20T00:00:01Z',
+    });
+    await notificationSettled();
+    finish(true);
+    await jumping;
+    expect(component['reactionJumpIds']()).toEqual([encodeId('101')]);
+    peer.expectNone('chats.acknowledgeReactions');
+  });
+
+  it('fetches reactions newer than the completed snapshot instead of acknowledging them unseen', async () => {
+    reactionNotification(encodeId('101'));
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id }).flush({
+      messageIds: ['101'],
+      readThrough: reactionBoundary,
+    });
+    await notificationSettled();
+    component['dismissReaction'](encodeId('101'));
+    peer
+      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
+      .flush({ unreadReactions: 1 });
+    await notificationSettled();
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id, after: reactionBoundary }).flush({
+      messageIds: ['101'],
+      readThrough: '2026-10-20T00:00:01Z',
+    });
+    await notificationSettled();
+    expect(component['reactionJumpIds']()).toEqual([encodeId('101')]);
+    peer.expectNone('chats.acknowledgeReactions');
+  });
+
+  it('defers notifications during acknowledgement until only newer targets can be queried', async () => {
+    reactionNotification(encodeId('101'));
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id }).flush({
+      messageIds: ['101'],
+      readThrough: reactionBoundary,
+    });
+    await notificationSettled();
+    component['dismissReaction'](encodeId('101'));
+    const ack = peer.expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary });
+    reactionNotification(encodeId('101'));
+    peer.expectNone('chats.listUnreadReactions');
+    ack.flush({ unreadReactions: 1 });
+    await notificationSettled();
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id, after: reactionBoundary }).flush({
+      messageIds: ['101'],
+      readThrough: '2026-10-20T00:00:01Z',
+    });
+    await notificationSettled();
+    expect(component['reactionJumpIds']()).toEqual([encodeId('101')]);
+    peer.expectNone('chats.acknowledgeReactions');
+  });
+
+  it('retains a failed jump and skips a confirmed missing target on the next FAB press', async () => {
+    reactionNotification(encodeId('101'));
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id }).flush({
+      messageIds: ['102', '101'],
+      readThrough: reactionBoundary,
+    });
+    await notificationSettled();
+    const jump = vi.fn().mockResolvedValue(false);
+    component['goTo'] = jump;
+    await component['jumpToNextReaction']();
+    expect(component['reactionJumpIds']()).toEqual([encodeId('102'), encodeId('101')]);
+    peer.expectNone('chats.acknowledgeReactions');
+    vi.spyOn(component['conversation'], 'error')
+      .mockReturnValueOnce(ConversationError.Missing)
+      .mockReturnValue(undefined);
+    jump.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    await component['jumpToNextReaction']();
+    expect(component['reactionJumpIds']()).toEqual([encodeId('102')]);
+    peer.expectNone('chats.acknowledgeReactions');
+    component['dismissReaction'](encodeId('102'));
+    expect(component['canJumpReaction']()).toBe(false);
+    peer
+      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
+      .flush({ unreadReactions: 0 });
+    await notificationSettled();
+  });
+
+  it('retries a failed completion acknowledgement on foreground without restoring visited targets', async () => {
+    reactionNotification(encodeId('101'));
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id }).flush({
+      messageIds: ['101'],
+      readThrough: reactionBoundary,
+    });
+    await notificationSettled();
+    component['dismissReaction'](encodeId('101'));
+    peer
+      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
+      .error(RpcErrorCode.Unavailable);
+    await notificationSettled();
+    expect(component['canJumpReaction']()).toBe(false);
+    component['visibilityChanged']();
+    peer.expect('chats.listMentions', { chatId: wireChat.id }).flush({ messageIds: [] });
+    peer
+      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
+      .flush({ unreadReactions: 0 });
+    await notificationSettled();
+  });
+
+  it('discards a late snapshot after leaving and acknowledges the whole saved scope', async () => {
+    reactionNotification(encodeId('101'));
+    const snapshot = peer.expect('chats.listUnreadReactions', { chatId: wireChat.id });
+    component.ionViewWillLeave();
+    peer.expect('chats.acknowledgeReactions', { chatId: wireChat.id }).flush({ unreadReactions: 0 });
+    snapshot.flush({ messageIds: ['101'], readThrough: reactionBoundary });
+    await notificationSettled();
+    expect(component['reactionJumpIds']()).toEqual([]);
+    peer.expectNone('chats.acknowledgeReactions');
+  });
+
+  it('acknowledges the previous chat scope when the cached component switches to a thread', async () => {
+    reactionNotification(encodeId('101'));
+    const snapshot = peer.expect('chats.listUnreadReactions', { chatId: wireChat.id });
+    await enterThread();
+    peer.expect('chats.acknowledgeReactions', { chatId: wireChat.id }).flush({ unreadReactions: 0 });
+    snapshot.flush({ messageIds: ['101'], readThrough: reactionBoundary });
+    await settleMetadata();
+    expect(component['reactionJumpIds']()).toEqual([]);
+    component.ionViewDidEnter();
+    peer.expect('chats.listUnreadReactions', { chatId: wireChat.id, threadId: '100' }).flush({
+      messageIds: ['102'],
+      readThrough: reactionBoundary,
+    });
+    peer.expect('chats.listMentions', { chatId: wireChat.id, threadId: '100' }).flush({ messageIds: [] });
+    await notificationSettled();
+    component['dismissReaction'](encodeId('102'));
+    peer
+      .expect('chats.acknowledgeReactions', {
+        chatId: wireChat.id,
+        threadId: '100',
+        readThrough: reactionBoundary,
+      })
+      .flush({ unreadReactions: 0 });
+    await notificationSettled();
   });
 
   it('fetches mention IDs on entry without acknowledging', async () => {
@@ -3657,7 +4209,7 @@ describe('ConversationPage', () => {
     peer.expectNone('chats.acknowledgeReactions');
   });
 
-  it('acknowledges a reaction notification received while the conversation is active', async () => {
+  it('adds reaction notifications without acknowledging while the conversation is active', async () => {
     const chatInfo = TestBed.inject(ChatStore);
     vi.spyOn(chatInfo, 'applyReactionRead').mockImplementation(() => {});
 
@@ -3677,15 +4229,13 @@ describe('ConversationPage', () => {
       .flush({ messageIds: [decodeId(testMessage.id)], readThrough: reactionBoundary });
     await Promise.resolve();
     await Promise.resolve();
-    peer
-      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
-      .flush({ unreadReactions: 0 });
+    peer.expectNone('chats.acknowledgeReactions');
     await Promise.resolve();
 
     expect(component['reactionJumpIds']()).toEqual([testMessage.id]);
   });
 
-  it('acknowledges reactions again when leaving the conversation', async () => {
+  it('acknowledges reactions when leaving without using the FAB', async () => {
     const chatInfo = TestBed.inject(ChatStore);
     vi.spyOn(chatInfo, 'unreadReactions').mockReturnValue(2);
     vi.spyOn(chatInfo, 'applyReactionRead').mockImplementation(() => {});
@@ -3698,9 +4248,7 @@ describe('ConversationPage', () => {
     peer.expect('chats.listMentions', { chatId: wireChat.id }).flush({ messageIds: [] });
     await Promise.resolve();
     await Promise.resolve();
-    peer
-      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
-      .flush({ unreadReactions: 0 });
+    peer.expectNone('chats.acknowledgeReactions');
     await Promise.resolve();
 
     component.ionViewWillLeave();
@@ -3709,33 +4257,20 @@ describe('ConversationPage', () => {
     await Promise.resolve();
   });
 
-  it('discards a delayed reaction target cleared by reading, but allows a later reaction on that message', async () => {
+  it('retains loaded and delayed reaction targets after reading newer messages', async () => {
     reactionNotification(encodeId('101'));
     const snapshot = peer.expect('chats.listUnreadReactions', { chatId: wireChat.id });
     component['reactionJumpIds'].set([encodeId('101')]);
     const changes = TestBed.inject(ChatStore) as unknown as {
       changes: { next: (change: object) => void };
     };
-    changes.changes.next({ kind: ChatChangeKind.Read, chatId: testChat.id, readThrough: encodeId('101') });
-    expect(component['reactionJumpIds']()).toEqual([]);
+    changes.changes.next({ kind: ChatChangeKind.Read, chatId: testChat.id, readThrough: encodeId('300') });
+    expect(component['reactionJumpIds']()).toEqual([encodeId('101')]);
     snapshot.flush({ messageIds: ['101', '102'], readThrough: reactionBoundary });
     await notificationSettled();
-    peer
-      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
-      .flush({ unreadReactions: 0 });
-    await notificationSettled();
-    expect(component['reactionJumpIds']()).toEqual([encodeId('102')]);
-
-    reactionNotification(encodeId('101'));
-    peer
-      .expect('chats.listUnreadReactions', { chatId: wireChat.id })
-      .flush({ messageIds: ['101'], readThrough: reactionBoundary });
-    await notificationSettled();
-    peer
-      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
-      .flush({ unreadReactions: 0 });
-    await notificationSettled();
     expect(component['reactionJumpIds']()).toEqual([encodeId('102'), encodeId('101')]);
+    expect(component['canJumpReaction']()).toBe(true);
+    peer.expectNone('chats.acknowledgeReactions');
   });
 
   it('preserves unvisited reaction targets when another notification arrives', async () => {
@@ -3744,18 +4279,14 @@ describe('ConversationPage', () => {
       .expect('chats.listUnreadReactions', { chatId: wireChat.id })
       .flush({ messageIds: ['101'], readThrough: reactionBoundary });
     await notificationSettled();
-    peer
-      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
-      .flush({ unreadReactions: 0 });
+    peer.expectNone('chats.acknowledgeReactions');
     await notificationSettled();
     reactionNotification(encodeId('102'));
     peer
-      .expect('chats.listUnreadReactions', { chatId: wireChat.id })
-      .flush({ messageIds: ['102'], readThrough: reactionBoundary });
+      .expect('chats.listUnreadReactions', { chatId: wireChat.id, after: reactionBoundary })
+      .flush({ messageIds: ['102'], readThrough: '2026-10-20T00:00:01Z' });
     await notificationSettled();
-    peer
-      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
-      .flush({ unreadReactions: 0 });
+    peer.expectNone('chats.acknowledgeReactions');
     await notificationSettled();
     expect(component['reactionJumpIds']()).toEqual([encodeId('102'), encodeId('101')]);
   });
@@ -3768,9 +4299,7 @@ describe('ConversationPage', () => {
     snapshot.flush({ messageIds: ['101'], readThrough: reactionBoundary });
     await notificationSettled();
     component['visibilityChanged']();
-    peer
-      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
-      .flush({ unreadReactions: 0 });
+    peer.expectNone('chats.acknowledgeReactions');
     await notificationSettled();
     component['visibilityChanged']();
     peer.expectNone('chats.listUnreadReactions');
@@ -3787,34 +4316,23 @@ describe('ConversationPage', () => {
       .expect('chats.listUnreadReactions', { chatId: wireChat.id })
       .flush({ messageIds: ['101'], readThrough: reactionBoundary });
     await notificationSettled();
-    peer
-      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
-      .flush({ unreadReactions: 0 });
+    peer.expectNone('chats.acknowledgeReactions');
     await notificationSettled();
   });
 
-  it('requeries a notification received between the reaction snapshot and its acknowledgement', async () => {
+  it('requeries notifications received during a reaction snapshot without acknowledging', async () => {
     reactionNotification(encodeId('101'));
-    peer
-      .expect('chats.listUnreadReactions', { chatId: wireChat.id })
-      .flush({ messageIds: ['101'], readThrough: reactionBoundary });
+    const snapshot = peer.expect('chats.listUnreadReactions', { chatId: wireChat.id });
     reactionNotification(encodeId('102'));
-    await notificationSettled();
-    const ack = peer.expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary });
-    expect(ack.params?.['readThrough']).toBe(reactionBoundary);
-    ack.flush({ unreadReactions: 1 });
+    reactionNotification(encodeId('102'));
+    reactionNotification(encodeId('102'));
+    snapshot.flush({ messageIds: ['101'], readThrough: reactionBoundary });
     await notificationSettled();
     peer
-      .expect('chats.listUnreadReactions', { chatId: wireChat.id })
+      .expect('chats.listUnreadReactions', { chatId: wireChat.id, after: reactionBoundary })
       .flush({ messageIds: ['102'], readThrough: '2026-10-20T00:00:01Z' });
     await notificationSettled();
-    const nextAck = peer.expect('chats.acknowledgeReactions', {
-      chatId: wireChat.id,
-      readThrough: '2026-10-20T00:00:01Z',
-    });
-    expect(nextAck.params?.['readThrough']).toBe('2026-10-20T00:00:01Z');
-    nextAck.flush({ unreadReactions: 0 });
-    await notificationSettled();
+    peer.expectNone('chats.acknowledgeReactions');
     expect(component['reactionJumpIds']()).toEqual([encodeId('102'), encodeId('101')]);
   });
 
@@ -3830,9 +4348,7 @@ describe('ConversationPage', () => {
       .flush({ messageIds: [wireMessage.id], readThrough: reactionBoundary });
     peer.expect('chats.listMentions', { chatId: wireChat.id }).flush({ messageIds: [] });
     await notificationSettled();
-    peer
-      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
-      .flush({ unreadReactions: 0 });
+    peer.expectNone('chats.acknowledgeReactions');
     await notificationSettled();
   });
 
@@ -3852,9 +4368,7 @@ describe('ConversationPage', () => {
       .expect('chats.listUnreadReactions', { chatId: wireChat.id })
       .flush({ messageIds: [wireMessage.id], readThrough: reactionBoundary });
     await notificationSettled();
-    peer
-      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
-      .flush({ unreadReactions: 0 });
+    peer.expectNone('chats.acknowledgeReactions');
     await notificationSettled();
     vi.mocked(TestBed.inject(Router).isActive).mockReturnValue(false);
     component.ionViewWillLeave();
@@ -3879,13 +4393,7 @@ describe('ConversationPage', () => {
       messageIds: ['102'],
     });
     await notificationSettled();
-    const ack = peer.expect('chats.acknowledgeReactions', {
-      chatId: wireChat.id,
-      readThrough: reactionBoundary,
-      threadId: wireMessage.id,
-    });
-    expect(ack.params?.['threadId']).toBe(wireMessage.id);
-    ack.flush({ unreadReactions: 0 });
+    peer.expectNone('chats.acknowledgeReactions');
     await notificationSettled();
     expect(component['reactionRemaining']()).toBe(1);
     expect(component['mentionRemaining']()).toBe(1);
@@ -3913,13 +4421,7 @@ describe('ConversationPage', () => {
       messageIds: [],
     });
     await notificationSettled();
-    peer
-      .expect('chats.acknowledgeReactions', {
-        chatId: wireChat.id,
-        readThrough: reactionBoundary,
-        threadId: wireMessage.id,
-      })
-      .flush({ unreadReactions: 0 });
+    peer.expectNone('chats.acknowledgeReactions');
     await notificationSettled();
     (await peer.expectAsync('pins.listForThread', { chatId: wireChat.id, threadRootId: wireMessage.id })).flush({
       pins: [],
@@ -4039,9 +4541,7 @@ describe('ConversationPage', () => {
       .flush({ messageIds: [], readThrough: reactionBoundary });
     peer.expect('chats.listMentions', { chatId: wireChat.id }).flush({ messageIds: [] });
     await notificationSettled();
-    peer
-      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
-      .flush({ unreadReactions: 0 });
+    peer.expectNone('chats.acknowledgeReactions');
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
     const message = { ...testMessage, id: encodeId('9007199254741004'), clientGeneratedId: 'background' };
     incoming.next(message);
@@ -4134,9 +4634,7 @@ describe('ConversationPage', () => {
       readThrough: reactionBoundary,
     });
     await notificationSettled();
-    peer
-      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
-      .flush({ unreadReactions: 0 });
+    peer.expectNone('chats.acknowledgeReactions');
     await fixture.whenStable();
     peer.expectNone('chats.getReadReceipt');
     expect(component['isReadByPeer'](testMessage)).toBe(true);
@@ -4163,9 +4661,7 @@ describe('ConversationPage', () => {
       .flush({ messageIds: [], readThrough: reactionBoundary });
     peer.expect('chats.listMentions', { chatId: wireChat.id }).flush({ messageIds: [] });
     await notificationSettled();
-    peer
-      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
-      .flush({ unreadReactions: 0 });
+    peer.expectNone('chats.acknowledgeReactions');
     document.dispatchEvent(new Event('visibilitychange'));
     await fixture.whenStable();
     expect(data.getReadState).not.toHaveBeenCalled();
@@ -4184,9 +4680,7 @@ describe('ConversationPage', () => {
     });
     (await peer.expectAsync('chats.listMentions', { chatId: wireChat.id })).flush({ messageIds: [] });
     await notificationSettled();
-    peer
-      .expect('chats.acknowledgeReactions', { chatId: wireChat.id, readThrough: reactionBoundary })
-      .flush({ unreadReactions: 0 });
+    peer.expectNone('chats.acknowledgeReactions');
     await fixture.whenStable();
     expect(data.getReadState).toHaveBeenCalledOnce();
     expect(data.getReadState).toHaveBeenCalledWith(testChat.id);

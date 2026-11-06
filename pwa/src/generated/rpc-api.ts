@@ -167,6 +167,7 @@ import type {
   ThreadsUnarchiveParams,
   ThreadsUnsubscribeParams,
   UnreadMentionsQuery,
+  UnreadReactionsQuery,
   UsersClearNotificationExceptionsParams,
   UsersGetMeParams,
   UsersGetNotificationSettingsParams,

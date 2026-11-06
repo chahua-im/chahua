@@ -131,6 +131,7 @@ import {
 } from '../conversation-navigation';
 import { ConversationError, ConversationStore, PageDirection } from '../conversation-store';
 import { ConversationViewportHeader } from '../conversation-viewport-header';
+import { ReactionVisibility } from '../reaction-visibility';
 import { DraftStore } from '../draft-store';
 import { messageRows } from '../message-rows';
 
@@ -142,6 +143,7 @@ const enum PositionKind {
   Bottom,
   Unread,
   Message,
+  Reaction,
   Anchor,
 }
 
@@ -162,7 +164,7 @@ type ScrollPosition =
   | { type: PositionKind.Bottom }
   // Unread anchors on the divider captured on entry unless a messageId names the live unread start.
   | { type: PositionKind.Unread; messageId?: SnowflakeID }
-  | { type: PositionKind.Message; messageId: SnowflakeID }
+  | { type: PositionKind.Message | PositionKind.Reaction; messageId: SnowflakeID }
   | { type: PositionKind.Anchor; messageId: SnowflakeID; offset: number };
 
 @Component({
@@ -878,7 +880,7 @@ export class ConversationPage {
     return this.messageElements().filter((_, index) => !!rows[index]?.confirmed);
   });
   /** Message node by id; messageElements stays index-aligned with messages. */
-  private messageElement(messageId: SnowflakeID) {
+  private messageElement(messageId: SnowflakeID): HTMLElement | undefined {
     const index = this.messages().findIndex((message) => message.message().id === messageId);
     return this.messageElements()[index]?.nativeElement;
   }
@@ -940,7 +942,11 @@ export class ConversationPage {
   );
   private readonly stateWatchVisible = signal(!document.hidden);
   private reactionSessionEntered = false;
-  private reactionRequest?: { again: boolean; readThrough?: SnowflakeID };
+  private reactionRequest?: { again: boolean };
+  private reactionReadThrough?: string;
+  private reactionAck?: { readThrough: string };
+  private reactionVisibility?: ReactionVisibility;
+  private readonly visitedReactions = new Set<SnowflakeID>();
   private reactionFresh = false;
   private reactionChanged = false;
   private mentionRequest?: { cancel: Subject<void>; promise: Promise<void> };
@@ -1068,7 +1074,13 @@ export class ConversationPage {
       const id = this.id();
       const threadId = this.threadId();
       untracked(() => this.activate(id, threadId));
-      onCleanup(() => untracked(() => this.saveDraft({ chatId: id, threadId })));
+      const entry = untracked(this.entryKey);
+      onCleanup(() =>
+        untracked(() => {
+          this.saveDraft({ chatId: id, threadId });
+          void this.leaveReactionSession(entry);
+        }),
+      );
     });
     effect(() => {
       if (this.active() && this.pendingForward()) {
@@ -1169,7 +1181,7 @@ export class ConversationPage {
         event.payload.chatId === this.id() &&
         (event.payload.threadRootId ?? null) === (this.threadId() ?? null)
       )
-        this.invalidateReactions();
+        this.invalidateReactions(event.payload.messageId);
       if (
         this.accessible() &&
         event.type === ServerWsMessageType.threadUpdate &&
@@ -1204,6 +1216,11 @@ export class ConversationPage {
     });
     this.realtime.resync$.pipe(takeUntilDestroyed()).subscribe((reason) => {
       if (reason !== ResyncReason.Foreground) {
+        // Missed notifications can add new reactions to previously visited messages.
+        this.visitedReactions.clear();
+        this.reactionVisibility?.watch(new Map());
+        this.reactionReadThrough = undefined;
+        this.reactionRequest = undefined;
         this.invalidateReactions();
         this.mentionDirty = true;
         this.mentionChanged = true;
@@ -1258,6 +1275,8 @@ export class ConversationPage {
       if (target && 'delivery' in target && target.cancelled()) untracked(() => this.cancelEdit());
     });
     afterNextRender(() => void this.observeResize());
+    afterNextRender(() => void this.observeReactionVisibility());
+    afterRenderEffect({ read: () => this.syncReactionVisibility() });
     afterNextRender(() => this.observeComposer());
     afterNextRender(() => this.observeToolbar());
     effect(() => {
@@ -1284,9 +1303,8 @@ export class ConversationPage {
     });
     effect(() => {
       if (this.panels.covered()) {
-        // Retain jump targets, but end the visible session and discard its pending snapshot.
-        // A later primary-page exit must not acknowledge reactions received behind the panel.
-        this.reactionSessionEntered = false;
+        // Retain the session and jump targets; discard the covered snapshot until the panel closes.
+        this.reactionVisibility?.watch(new Map());
         this.reactionFresh = false;
         this.reactionRequest = undefined;
       } else if (this.entered) untracked(() => void this.enterReactionSession());
@@ -1354,6 +1372,7 @@ export class ConversationPage {
 
   ionViewDidEnter() {
     this.entered = true;
+    this.syncReactionVisibility();
     void this.positionAndRead();
     void this.enterReactionSession();
     void this.enterMentionSession();
@@ -1435,6 +1454,7 @@ export class ConversationPage {
   protected async goTo(target: ConversationTarget, replying = false, fromId?: SnowflakeID) {
     const entry = this.entryKey();
     const version = ++this.navigationVersion;
+    this.reactionVisibility?.watch(new Map());
     this.pendingNavigation.set(target);
     try {
       this.retryAction = () => void this.goTo(target, replying, fromId);
@@ -1564,6 +1584,7 @@ export class ConversationPage {
   protected visibilityChanged() {
     this.stateWatchVisible.set(!this.document.hidden);
     if (this.document.hidden) {
+      this.reactionVisibility?.watch(new Map());
       this.saveDraft();
       this.resetMentionSession(true);
     } else {
@@ -1572,52 +1593,63 @@ export class ConversationPage {
     }
   }
 
-  private invalidateReactions() {
+  private invalidateReactions(messageId?: SnowflakeID) {
+    if (messageId != null) {
+      this.visitedReactions.delete(messageId);
+      this.reactionVisibility?.forget(messageId);
+    }
     this.reactionFresh = false;
     this.reactionChanged = true;
     if (this.reactionRequest) this.reactionRequest.again = true;
   }
 
   private resetReactionSession() {
+    this.reactionVisibility?.watch(new Map());
     this.reactionFresh = false;
     this.reactionChanged = false;
     this.reactionSessionEntered = false;
     this.reactionRequest = undefined;
+    this.reactionReadThrough = undefined;
+    this.reactionAck = undefined;
+    this.visitedReactions.clear();
     this.reactionJumpIds.set([]);
   }
 
   private async enterReactionSession() {
-    if (this.document.hidden || this.panels.covered() || !this.isCurrent()) return;
-    if (this.reactionRequest || this.reactionFresh) return;
+    if (!this.isCurrent()) return;
+    this.reactionSessionEntered = true;
+    if (this.document.hidden || this.panels.covered() || this.reactionRequest || this.reactionAck) return;
+    if (this.reactionFresh) {
+      void this.completeReactionViewing();
+      return;
+    }
     if (!this.reactionChanged && this.chatInfo.cachedUnreadReactions(this.id(), this.threadId()) === 0) {
-      this.reactionSessionEntered = true;
       this.reactionFresh = true;
+      void this.completeReactionViewing();
       return;
     }
     const entry = this.entryKey();
     const chatId = this.id();
     const threadId = this.threadId();
-    this.reactionSessionEntered = true;
     const request: NonNullable<ConversationPage['reactionRequest']> = { again: false };
     this.reactionRequest = request;
     try {
       do {
         request.again = false;
-        request.readThrough = undefined;
         const response = await firstValueFrom(
-          this.api.chats.listUnreadReactions({ chatId, threadId }).pipe(takeUntilDestroyed(this.destroyRef)),
+          this.api.chats
+            .listUnreadReactions({ chatId, threadId, after: this.reactionReadThrough })
+            .pipe(takeUntilDestroyed(this.destroyRef)),
         );
         if (this.reactionRequest !== request || !this.isCurrent(entry) || this.document.hidden || this.panels.covered())
           return;
-        this.reactionJumpIds.update((ids) =>
-          [...new Set([...ids, ...response.messageIds])]
-            .filter((id) => request.readThrough == null || id > request.readThrough)
-            .sort((a, b) => b - a),
-        );
-        const unread = await this.ackReactions(entry, chatId, threadId, response.readThrough);
-        if (this.reactionRequest !== request || !this.isCurrent(entry)) return;
-        if (unread == null) return;
-        if (unread > 0) request.again = true;
+        // A returned id has a reaction newer than the previous snapshot, even if already visited.
+        for (const id of response.messageIds) {
+          this.visitedReactions.delete(id);
+          this.reactionVisibility?.forget(id);
+        }
+        this.reactionJumpIds.update((ids) => [...new Set([...ids, ...response.messageIds])].sort((a, b) => b - a));
+        this.reactionReadThrough = response.readThrough;
         if (!request.again) {
           this.reactionFresh = true;
           this.reactionChanged = false;
@@ -1626,16 +1658,44 @@ export class ConversationPage {
     } catch {
       // Keep the server cursor and session targets on failure; entry/resync retries.
     } finally {
-      if (this.reactionRequest === request) this.reactionRequest = undefined;
+      if (this.reactionRequest === request) {
+        this.reactionRequest = undefined;
+        void this.completeReactionViewing();
+      }
     }
   }
 
-  private async ackReactions(
-    entry = this.entryKey(),
-    chatId = this.id(),
-    threadId = this.threadId(),
-    readThrough?: string,
-  ) {
+  private async completeReactionViewing() {
+    const readThrough = this.reactionReadThrough;
+    if (
+      !readThrough ||
+      !this.visitedReactions.size ||
+      this.reactionJumpIds().length ||
+      this.reactionRequest ||
+      this.reactionAck ||
+      !this.reactionFresh ||
+      !this.isCurrent() ||
+      this.document.hidden ||
+      this.panels.covered()
+    )
+      return;
+    const ack = { readThrough };
+    this.reactionAck = ack;
+    const unread = await this.ackReactions(this.entryKey(), readThrough);
+    if (this.reactionAck !== ack) return;
+    this.reactionAck = undefined;
+    if (unread == null) {
+      if (!this.reactionFresh) void this.enterReactionSession();
+      return;
+    }
+    // Queries wait for this acknowledgement, so their targets now refer only to newer reactions.
+    this.visitedReactions.clear();
+    if (unread > 0) this.invalidateReactions();
+    void this.enterReactionSession();
+  }
+
+  private async ackReactions(entry: ReturnType<ConversationPage['entryKey']>, readThrough?: string) {
+    const { chatId, threadId } = entry;
     try {
       const response = await firstValueFrom(this.api.chats.acknowledgeReactions({ chatId, threadId, readThrough }));
       if (entry === this.entryKey()) this.chatInfo.applyReactionRead(chatId, threadId, response.unreadReactions);
@@ -1646,14 +1706,11 @@ export class ConversationPage {
     }
   }
 
-  private async leaveReactionSession() {
+  private async leaveReactionSession(entry = this.entryKey()) {
     const entered = this.reactionSessionEntered;
-    const entry = this.entryKey();
-    const chatId = this.id();
-    const threadId = this.threadId();
     this.resetReactionSession();
     // The router already points at the destination during ionViewWillLeave.
-    if (entered && !this.document.hidden && !this.panels.covered()) await this.ackReactions(entry, chatId, threadId);
+    if (entered) await this.ackReactions(entry);
   }
 
   protected async jumpToNextReaction() {
@@ -1661,11 +1718,64 @@ export class ConversationPage {
       const target = this.reactionJumpIds().at(-1)!;
       const entry = this.entryKey();
       const reached = await this.goTo({ type: ConversationTargetKind.Message, messageId: target });
-      if (entry !== this.entryKey()) return;
+      if (entry !== this.entryKey() || !this.reactionSessionEntered) return;
+      const message = this.conversation.items().find((item) => item.id === target);
       const missing = this.conversation.error() === ConversationError.Missing;
-      if (reached === true || missing) this.reactionJumpIds.update((ids) => ids.filter((id) => id !== target));
-      if (reached === true || !missing) return;
+      if (missing || (reached === true && message && (message.isDeleted || !message.reactions?.length))) {
+        this.dismissReaction(target);
+        continue;
+      }
+      if (reached === true) this.position.set({ type: PositionKind.Reaction, messageId: target });
+      return;
     }
+  }
+
+  private dismissReaction(id: SnowflakeID) {
+    this.reactionVisibility?.forget(id);
+    this.visitedReactions.add(id);
+    this.reactionJumpIds.update((ids) => ids.filter((target) => target !== id));
+    void this.completeReactionViewing();
+  }
+
+  private canReadReactions() {
+    return (
+      this.isCurrent() &&
+      this.positioned() &&
+      this.stateWatchVisible() &&
+      !this.document.hidden &&
+      !this.panels.covered() &&
+      !this.conversation.loading() &&
+      !this.pendingNavigation() &&
+      !this.position() &&
+      this.entered &&
+      this.reactionSessionEntered
+    );
+  }
+
+  private async observeReactionVisibility() {
+    const scroll = await this.content()?.getScrollElement();
+    if (!scroll || this.destroyRef.destroyed) return;
+    this.reactionVisibility = new ReactionVisibility(scroll, (id) => {
+      if (this.canReadReactions()) this.dismissReaction(id);
+    });
+    this.destroyRef.onDestroy(() => this.reactionVisibility?.disconnect());
+    this.syncReactionVisibility();
+  }
+
+  private syncReactionVisibility() {
+    const ids = new Set(this.reactionJumpIds());
+    const elements = this.messageElements();
+    const rows = this.rows();
+    const targets = new Map<Element, SnowflakeID>();
+    if (this.canReadReactions() && rows.length === elements.length) {
+      rows.forEach((row, index) => {
+        const id = row.confirmed?.id;
+        if (id == null || !ids.has(id)) return;
+        const reactions = elements[index].nativeElement.querySelector('app-message-reactions');
+        if (reactions) targets.set(reactions, id);
+      });
+    }
+    this.reactionVisibility?.watch(targets);
   }
 
   private resetMentionSession(retain = false) {
@@ -1687,15 +1797,9 @@ export class ConversationPage {
     this.mentionJumpIds.update((targets) => targets.filter((id) => !this.dismissedMentions.has(id)));
   }
 
-  /** Scrolling advances the shared read cursor; targets at or below it are no longer unread. */
+  /** Ordinary message reads dismiss mentions; reactions use their own viewport visibility. */
   private dismissReadThrough(readThrough: SnowflakeID) {
-    // Only discard targets from snapshots already in flight. A later reaction
-    // on an old message is a new notification, even when that message is read.
-    const request = this.reactionRequest;
-    if (request && (request.readThrough == null || readThrough > request.readThrough))
-      request.readThrough = readThrough;
     this.mentionJumpIds.update((ids) => ids.filter((id) => id > readThrough));
-    this.reactionJumpIds.update((ids) => ids.filter((id) => id > readThrough));
   }
 
   private enterMentionSession(): Promise<void> {
@@ -1842,7 +1946,11 @@ export class ConversationPage {
           scroll.scrollTop = Math.max(0, Math.min(top, scroll.scrollHeight - scroll.clientHeight));
         }
       } else {
-        const element = this.messageElement(position.messageId);
+        const message = this.messageElement(position.messageId);
+        const element =
+          position.type === PositionKind.Reaction
+            ? (message?.querySelector<HTMLElement>('app-message-reactions') ?? message)
+            : message;
         if (element) {
           const rect = element.getBoundingClientRect();
           const edge = position.type === PositionKind.Anchor ? rect.bottom : rect.top;
@@ -1851,7 +1959,7 @@ export class ConversationPage {
               ? position.offset
               : Math.max(0, (scroll.clientHeight - element.offsetHeight) / 2);
           scroll.scrollTop += edge - scroll.getBoundingClientRect().top - inset;
-          if (position.type === PositionKind.Message)
+          if (position.type === PositionKind.Message || position.type === PositionKind.Reaction)
             element.animate(
               [{ backgroundColor: 'var(--ion-color-primary-tint)' }, { backgroundColor: 'transparent' }],
               { duration: 1200 },

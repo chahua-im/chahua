@@ -16,4 +16,8 @@ export type GetChatReactionsParams = {
    * Max ids to return (default 1000, capped at 1000)
    */
   max?: number;
+  /**
+   * Previous snapshot readThrough; return only reactions created strictly after it
+   */
+  after?: string;
 };

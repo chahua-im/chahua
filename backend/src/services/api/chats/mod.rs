@@ -13,7 +13,7 @@ use crate::dto::chats::{
     AcknowledgeReactionsBody, ChatListItem, ListChatsQuery, ListChatsResponse, MarkAsReadBody,
     MarkAsUnreadBody, MarkChatReadStateResponse, ReadReceiptQuery, UnreadCountResponse,
     UnreadMentionIdsResponse, UnreadMentionsQuery, UnreadReactionIdsResponse,
-    UnreadReactionsAckResponse,
+    UnreadReactionsAckResponse, UnreadReactionsQuery,
 };
 use crate::dto::read_receipts::ReadReceiptResponse;
 use crate::errors::AppError;
@@ -412,7 +412,7 @@ pub fn get_chat_mentions(
 pub fn get_chat_reactions(
     uid: i32,
     chat_id: i64,
-    query: UnreadMentionsQuery,
+    query: UnreadReactionsQuery,
     conn: &mut PgConnection,
     unread_service: &UnreadService,
 ) -> Result<UnreadReactionIdsResponse, AppError> {
@@ -425,6 +425,7 @@ pub fn get_chat_reactions(
         chat_id,
         query.thread_id,
         limit,
+        query.after,
     )?;
     Ok(snapshot)
 }
