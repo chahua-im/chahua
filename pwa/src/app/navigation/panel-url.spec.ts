@@ -28,6 +28,8 @@ describe('Readable panel URLs', () => {
     [['/chats/chat/100/info?view=image'], 'info=images'],
     [['/chats/chat/100/info?view=3'], 'info=management'],
     [['/profile/2?view=2'], 'profile=2/privacy'],
+    [['/profile/2/request/9007199254740993'], 'profile=2/request/9007199254740993'],
+    [['/profile/2/request/9007199254740993?view=2'], 'profile=2/request/9007199254740993/privacy'],
     [['/chats/chat/200/info'], 'info=chats/chat/200/info'],
     [['/chats/chat/100/thread/300/info?view=3'], 'info=thread/300/info/management'],
     [['/stickers/123'], 'stickers=123'],

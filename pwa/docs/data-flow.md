@@ -63,6 +63,8 @@ flowchart TD
   PUSH[Web Push] --> WORKER
 ```
 
+好友请求详情路径 `/profile/:uid/request/:requestId` 保留请求定位，刷新或直接进入时可恢复。PanelPage 从请求方向选择对方资料；请求不存在或与路径中的用户不匹配时沿用面板加载失败反馈。
+
 ## 启动存储迁移
 
 LegacyMigration 通过 Angular 初始化器先于组件和偏好服务运行，只读取旧数据库 `wetty`。不存在旧库时中止创建；有旧库时将 Token 补入 `jwt_token`，把 `draft:聊天ID_thread_话题ID` 转为按原 Token uid 归属的 `chahua.drafts.uid` 与 `聊天ID/话题ID` 键，回复字段转为 `replyTo`，保留保存时间和更晚的新草稿。话题显示、全部头像、最近表情转换为 Preferences 的 localStorage 格式；已有新偏好不覆盖。
@@ -121,6 +123,7 @@ Diagnostics 在应用初始化时启用，记录构建版本、时间、脱敏�
 | 话题 tab，或消息 tab 开启话题        | `threads.list({limit: 20})`，archived 与 before 时间游标                                                            | ChatListStore → ChatStore → ChatListContent                                    |
 | 消息/好友列表显示请求                | `friends.listRequests({archived: false})`                                                                           | ChatListStore → ChatListContent                                                |
 | 打开请求历史                         | 同接口 archived=true；无前端续页                                                                                    | 独立历史查询                                                                   |
+| 打开好友请求详情 | 优先复用已加载请求，缺失时读取 `friends.listRequests()` | PanelPage 按请求 ID 定位，传递对方资料与请求快照 |
 | 显示 tab、归档计数或系统角标         | `conversations.watchUnread`，包含对应 tab 的普通/archived 集合与 appBadge                                           | 消费者共享订阅，服务端推送变化                                                 |
 | 被覆盖的列表收到消息                 | 保留共享预览并标记读状态过期；返回后用逐会话快照校准，尚无快照时合并 RPC 读取，窗口外的新聊天从首页补读至原覆盖边界 | ChatListStore → ChatStore                                                      |
 | 列表失效（断线重连、手动刷新）       | `chats.list({limit: 50})`，读取到已加载条数或末尾                                                                   | ChatListStore → ChatStore → ChatListContent                                    |

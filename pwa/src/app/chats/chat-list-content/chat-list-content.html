@@ -50,6 +50,8 @@
         @for (row of requestRows(); track row.request.id) {
           @let name = row.peer.username ?? ('chats.content.userWithUid' | transloco: { uid: row.peer.uid });
           <app-chat-list-item
+            [button]="true"
+            (selected)="row.open()"
             [entry]="{
               title: name,
               subtitle: row.request.question

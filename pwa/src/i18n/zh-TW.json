@@ -276,6 +276,13 @@
         "forever": "永久"
       }
     },
+    "requestDetails": {
+      "title": "好友請求詳情",
+      "question": "驗證問題",
+      "answer": "回答",
+      "message": "驗證訊息",
+      "empty": "未填寫"
+    },
     "content": {
       "archivedSubtitle": "查看已封存的會話",
       "requestHistorySubtitle": "查看好友請求記錄",

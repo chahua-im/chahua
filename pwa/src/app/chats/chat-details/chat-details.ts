@@ -74,6 +74,7 @@ import {
   MembershipMessageVisibility,
   PrivacyExceptionKind,
   SpeakingMode,
+  type FriendRequestHistoryEntry,
   type MemberSummary,
   type MessagePreview as MessagePreviewData,
   type MessageResponse,
@@ -175,6 +176,7 @@ export class ChatDetails {
   readonly panelPath = input<string>();
   readonly view = input<DetailPage>(DetailView.Info);
   readonly user = input<MemberSummary>();
+  readonly friendRequest = input<FriendRequestHistoryEntry>();
   readonly currentConversation = input(false);
   readonly threadId = input<SnowflakeID>();
   readonly threadRoot = input<MessageResponse | MessagePreviewData>();

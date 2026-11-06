@@ -73,6 +73,7 @@ export const panelDefinitions: readonly PanelDefinition[] = [
   },
   { path: 'profile', kind: PanelKind.Profile, content: PanelContent.Profile },
   { path: 'profile/:uid', kind: PanelKind.Profile, content: PanelContent.Profile },
+  { path: 'profile/:uid/request/:requestId', kind: PanelKind.Profile, content: PanelContent.Profile },
   {
     path: 'stickers/:packId',
     kind: PanelKind.Stickers,

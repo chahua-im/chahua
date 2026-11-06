@@ -923,11 +923,39 @@ describe('ChatListContent', () => {
       ['拒绝', FriendRequestAction.Reject],
       ['归档', FriendRequestAction.Archive],
     ] as const)('submits %s for an incoming pending request', async (label, action) => {
+      const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
       expect(requestList().nativeElement.textContent).toContain('小李');
       expect(requestList().nativeElement.textContent).toContain('一起聊天吧');
-      button(label).triggerEventHandler('click', new Event('click'));
+      button(label).nativeElement.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
       await fixture.whenStable();
       expect(inbox.decideRequest).toHaveBeenCalledWith(incoming.id, action);
+      expect(navigate).not.toHaveBeenCalled();
+    });
+
+    it.each(['ion-avatar', 'ion-label', 'ion-item'])(
+      'opens request details when clicking %s outside the action buttons',
+      async (target) => {
+        const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+        const row = requestList()
+          .queryAll(By.directive(ChatListItem))
+          .find((row) => (row.componentInstance as ChatListItem).entry().title === '小李')!;
+        row.nativeElement.querySelector(target).click();
+        await fixture.whenStable();
+        expect(navigate).toHaveBeenCalledExactlyOnceWith(['/profile', 2, 'request', decodeId(incoming.id)]);
+        expect(inbox.decideRequest).not.toHaveBeenCalled();
+      },
+    );
+
+    it('opens the recipient profile for an outgoing historical request', async () => {
+      const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+      history.items.set([
+        { ...incoming, direction: FriendRequestDirection.outgoing, from: incoming.to, to: incoming.from },
+      ]);
+      fixture.componentRef.setInput('selection', { ...fixture.componentInstance['list'](), requestHistory: true });
+      fixture.detectChanges();
+      await fixture.whenStable();
+      requestList().nativeElement.querySelector('ion-item').click();
+      expect(navigate).toHaveBeenCalledExactlyOnceWith(['/profile', 2, 'request', decodeId(incoming.id)]);
     });
 
     it('uses shared two-line rows with the peer, verification preview and status or actions', async () => {

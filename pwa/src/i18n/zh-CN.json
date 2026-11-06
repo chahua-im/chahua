@@ -276,6 +276,13 @@
         "forever": "永久"
       }
     },
+    "requestDetails": {
+      "title": "好友请求详情",
+      "question": "验证问题",
+      "answer": "回答",
+      "message": "验证信息",
+      "empty": "未填写"
+    },
     "content": {
       "archivedSubtitle": "查看已归档的会话",
       "requestHistorySubtitle": "查看好友请求记录",
