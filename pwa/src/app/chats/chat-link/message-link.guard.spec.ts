@@ -1,14 +1,23 @@
 import { Location } from '@angular/common';
 import { provideLocationMocks } from '@angular/common/testing';
 import { TestBed } from '@angular/core/testing';
-import { NavigationSkipped, NavigationSkippedCode, provideRouter, Router } from '@angular/router';
+import {
+  GuardsCheckStart,
+  NavigationEnd,
+  NavigationSkipped,
+  NavigationSkippedCode,
+  provideRouter,
+  Router,
+} from '@angular/router';
 import { ToastController } from '@ionic/angular';
 import { TranslocoService } from '@jsverse/transloco';
-import { firstValueFrom } from 'rxjs';
+import { filter, firstValueFrom } from 'rxjs';
 import { RpcErrorCode } from '../../api/rpc-error';
 import { provideRpcTesting, RpcTestPeer, type RpcTestRequest } from '../../api/rpc-testing';
-import { wireMessage } from '../../api/testing';
+import { RpcTransport } from '../../api/rpc-transport';
+import { testUser, wireMessage } from '../../api/testing';
 import { routes } from '../../app.routes';
+import { SessionStore } from '../../session/session-store';
 
 const link = '/m/ACAAAAAAAAEAIAAAAAAACw';
 const messageParams = { chatId: '9007199254740993', messageId: '9007199254741003' };
@@ -41,6 +50,7 @@ describe('Message permalink navigation', () => {
     router.setUpLocationChangeListener();
     peer = TestBed.inject(RpcTestPeer);
     peer.authenticate();
+    TestBed.inject(SessionStore).user.set(testUser);
     await firstValueFrom(TestBed.inject(TranslocoService).load('zh-CN'));
   });
 
@@ -60,6 +70,117 @@ describe('Message permalink navigation', () => {
     });
     return { navigation, request };
   }
+
+  describe('cold browser entry', () => {
+    let session: SessionStore;
+
+    beforeEach(() => {
+      const storage = new Map<string, string>();
+      vi.stubGlobal('localStorage', {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+        removeItem: (key: string) => storage.delete(key),
+      });
+      session = TestBed.inject(SessionStore);
+      TestBed.tick();
+      session.user.set(undefined);
+      TestBed.inject(RpcTransport).close();
+      history.replaceState(null, '', link + '?token=link-token');
+      session.restoreToken();
+      TestBed.inject(Location).go(link);
+    });
+
+    afterEach(() => {
+      try {
+        session.logout();
+      } finally {
+        vi.unstubAllGlobals();
+        history.replaceState(null, '', '/');
+      }
+    });
+
+    async function startNavigation() {
+      const guarding = firstValueFrom(router.events.pipe(filter((event) => event instanceof GuardsCheckStart)));
+      const navigation = firstValueFrom(router.events.pipe(filter((event) => event instanceof NavigationEnd)));
+      router.initialNavigation();
+      await guarding;
+      TestBed.tick();
+      return { navigation };
+    }
+
+    function openSession() {
+      const initialization = session.initialize();
+      peer.open();
+      peer.expect('session.open').flush({
+        protocolVersion: 1,
+        authenticated: true,
+        uid: testUser.uid,
+        clientId: 'fixture-client',
+      });
+      return { initialization };
+    }
+
+    async function finishLogin() {
+      (await peer.expectAsync('auth.refresh')).flush({ token: 'refreshed-token' });
+      (await peer.expectAsync('users.getMe')).flush(testUser);
+      (await peer.expectAsync('users.search')).flush({ members: [], excluded: [] });
+    }
+
+    it.each([undefined, '9007199254740995'])(
+      'waits for login before resolving the initial link (%s)',
+      async (replyRootId) => {
+        const { navigation } = await startNavigation();
+        peer.expectNone('messages.get');
+        expect(create).not.toHaveBeenCalled();
+        expect(TestBed.inject(Location).path()).toBe(link);
+
+        const { initialization } = openSession();
+        // A negotiated socket alone is insufficient: refresh and profile loading are still pending.
+        peer.expectNone('messages.get');
+        await finishLogin();
+        await initialization;
+        TestBed.tick();
+        (await peer.expectAsync('messages.get', messageParams)).flush({ ...wireMessage, replyRootId });
+        await navigation;
+        expect(router.url).toBe(conversation + (replyRootId ? '/thread/' + replyRootId : '') + '#msg=9007199254741003');
+        expect(create).not.toHaveBeenCalled();
+      },
+    );
+
+    it('preserves the initial link across a failed login and resolves it after retry', async () => {
+      const { navigation } = await startNavigation();
+      const { initialization } = openSession();
+      const failed = expect(initialization).rejects.toMatchObject({ code: RpcErrorCode.Unavailable });
+      (await peer.expectAsync('auth.refresh')).error(RpcErrorCode.Unavailable);
+      await failed;
+      TestBed.tick();
+      peer.expectNone('messages.get');
+      expect(create).not.toHaveBeenCalled();
+      expect(TestBed.inject(Location).path()).toBe(link);
+
+      const retry = openSession();
+      await finishLogin();
+      await retry.initialization;
+      TestBed.tick();
+      (await peer.expectAsync('messages.get', messageParams)).flush(wireMessage);
+      await navigation;
+      expect(router.url).toBe(conversation + '#msg=9007199254741003');
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('cancels the login wait when another navigation supersedes the link', async () => {
+      const { navigation } = await startNavigation();
+      await router.navigateByUrl('/settings');
+      await navigation;
+      const { initialization } = openSession();
+      await finishLogin();
+      await initialization;
+      TestBed.tick();
+      peer.expectNone('messages.get');
+      expect(router.url).toBe('/settings');
+      expect(create).not.toHaveBeenCalled();
+    });
+  });
 
   it.each([RpcErrorCode.NotFound, RpcErrorCode.Forbidden, RpcErrorCode.Internal, 'disconnected'] as const)(
     'keeps the current URL and history on failure (%s), showing one toast',
