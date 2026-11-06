@@ -1149,11 +1149,16 @@ describe('ConversationPage', () => {
     expect(navigate).toHaveBeenCalledWith(['/chats/chat', wireChat.id], { replaceUrl: true });
   });
 
-  it('returns a thread to its root message on desktop', async () => {
+  it('returns a thread to its root message from the top-right desktop button', async () => {
     await enterThread();
     await settleMetadata();
     const navigate = vi.spyOn(TestBed.inject(NavController), 'navigateRoot').mockResolvedValue(true);
-    component['backToChat']();
+    const button = fixture.nativeElement.querySelector(
+      'ion-buttons.ion-hide-md-down[slot="end"] .parent-chat-button',
+    ) as HTMLElement;
+    expect(button).toBeTruthy();
+    expect(fixture.nativeElement.querySelector('ion-buttons[slot="start"] .parent-chat-button')).toBeNull();
+    button.click();
     expect(navigate).toHaveBeenCalledWith(['/chats/chat', wireChat.id], {
       replaceUrl: true,
       fragment: 'msg=100',
