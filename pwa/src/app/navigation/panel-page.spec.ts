@@ -5,7 +5,13 @@ import { decodeId, encodeId } from '../api/snowflake-id';
 import { testMessage } from '../api/testing';
 import { ChatDetails } from '../chats/chat-details/chat-details';
 import { ConversationPage } from '../conversations/conversation/conversation.page';
-import { GroupKind } from '../../generated/models';
+import {
+  FriendRequestDirection,
+  FriendRequestStatus,
+  GroupKind,
+  type FriendRequestHistoryEntry,
+} from '../../generated/models';
+import { ChatListStore } from '../chats/chat-list-store';
 import { StartChat, StartChatKind } from '../chats/start-chat/start-chat';
 import { StickerPicker } from '../messages/sticker-picker/sticker-picker';
 import { NotificationCategoryPage } from '../settings/notification-settings/notification-category-page';
@@ -22,8 +28,25 @@ class ResumablePage {
 
 describe('Panel preloading', () => {
   let peer: RpcTestPeer;
+  const requests = signal<FriendRequestHistoryEntry[]>([]);
+  const request: FriendRequestHistoryEntry = {
+    id: encodeId('9007199254740993'),
+    direction: FriendRequestDirection.incoming,
+    status: FriendRequestStatus.pending,
+    createdAt: '2026-11-07T00:00:00Z',
+    from: { uid: 2, username: 'Alice', gender: 0 },
+    to: { uid: 1, username: 'Me', gender: 0 },
+    question: '在哪里认识的？',
+    message: '同学\n一起上过课',
+  };
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideRpcTesting()] });
+    requests.set([]);
+    TestBed.configureTestingModule({
+      providers: [
+        provideRpcTesting(),
+        { provide: ChatListStore, useValue: { friendRequests: () => ({ items: requests }) } },
+      ],
+    });
     TestBed.overrideComponent(PanelPage, { set: { template: '' } });
     peer = TestBed.inject(RpcTestPeer);
     peer.authenticate();
@@ -131,6 +154,60 @@ describe('Panel preloading', () => {
     const request = peer.expect('users.search', { q: '2', limit: 20 });
     fixture.destroy();
     request.flush({ members: [{ uid: 2, username: 'Alice', gender: 0 }] });
+    await Promise.resolve();
+    expect(fixture.componentInstance['content']()).toBeUndefined();
+  });
+
+  it('opens an already loaded request with its peer and full verification snapshot', () => {
+    requests.set([request]);
+    const fixture = TestBed.createComponent(PanelPage);
+    fixture.componentRef.setInput('path', '/profile/2/request/9007199254740993');
+    fixture.detectChanges();
+    expect(fixture.componentInstance['content']()?.props).toMatchObject({ user: request.from, friendRequest: request });
+    peer.expectNone('friends.listRequests');
+    peer.expectNone('users.search');
+  });
+
+  it.each([FriendRequestDirection.incoming, FriendRequestDirection.outgoing])(
+    'restores an uncached %s request from its URL',
+    async (direction) => {
+      const fixture = TestBed.createComponent(PanelPage);
+      fixture.componentRef.setInput('path', '/profile/2/request/9007199254740993');
+      fixture.detectChanges();
+      const restored =
+        direction === FriendRequestDirection.incoming
+          ? request
+          : { ...request, direction, from: request.to, to: request.from, status: FriendRequestStatus.accepted };
+      peer.expect('friends.listRequests', {}).flush({ requests: [restored] });
+      await fixture.whenStable();
+      expect(fixture.componentInstance['content']()?.props).toMatchObject({
+        user: request.from,
+        friendRequest: restored,
+      });
+    },
+  );
+
+  it('keeps an unavailable request in the panel and supports retry', async () => {
+    const fixture = TestBed.createComponent(PanelPage);
+    fixture.componentRef.setInput('path', '/profile/2/request/9007199254740993');
+    fixture.detectChanges();
+    peer.expect('friends.listRequests', {}).flush({ requests: [] });
+    await fixture.whenStable();
+    expect(fixture.componentInstance['failed']()).toBe(true);
+    const retry = fixture.componentInstance['load']();
+    peer.expect('friends.listRequests', {}).flush({ requests: [request] });
+    await retry;
+    expect(fixture.componentInstance['failed']()).toBe(false);
+    expect(fixture.componentInstance['content']()?.props['friendRequest']).toEqual(request);
+  });
+
+  it('does not restore a request after its panel has closed', async () => {
+    const fixture = TestBed.createComponent(PanelPage);
+    fixture.componentRef.setInput('path', '/profile/2/request/9007199254740993');
+    fixture.detectChanges();
+    const pending = peer.expect('friends.listRequests', {});
+    fixture.destroy();
+    pending.flush({ requests: [request] });
     await Promise.resolve();
     expect(fixture.componentInstance['content']()).toBeUndefined();
   });

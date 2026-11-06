@@ -9,6 +9,8 @@ import {
   ChatAttachmentKindFilter,
   FriendPresenceOverride,
   FriendReadReceiptOverride,
+  FriendRequestDirection,
+  FriendRequestStatus,
   GroupKind,
   GroupRole,
   MembershipMessageVisibility,
@@ -95,6 +97,41 @@ describe('ChatDetails', () => {
     fixture.detectChanges();
     return fixture;
   }
+
+  it.each([
+    { question: '你在哪里认识我？\n请详细说明', message: '同学\n一起上过课' },
+    { question: undefined, message: '你好\n想和你聊聊' },
+    { question: undefined, message: undefined },
+  ])('shows full request details alongside the profile: %j', async ({ question, message }) => {
+    const fixture = createDetails();
+    const user = { uid: 2, username: '小李', gender: 0 };
+    fixture.componentRef.setInput('user', user);
+    fixture.componentRef.setInput('friendRequest', {
+      id: encodeId('9007199254740993'),
+      createdAt: '2026-11-07T00:00:00Z',
+      direction: FriendRequestDirection.incoming,
+      status: FriendRequestStatus.pending,
+      from: user,
+      to: testUser,
+      question,
+      message,
+    });
+    fixture.detectChanges();
+    await vi.waitFor(() => peer.expect('friends.getRelationship', { uid: 2 }).flush({ peerUid: 2, isFriend: false }));
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.profile').textContent).toContain('小李');
+    const details = fixture.nativeElement.querySelector('.request-details');
+    expect(details.textContent).toContain('好友请求详情');
+    expect([...details.querySelectorAll('p')].map((p: Element) => p.textContent)).toEqual(
+      question ? [question, message] : [message ?? '未填写'],
+    );
+    expect(details.textContent).toContain(question ? '回答' : '验证信息');
+    expect(fixture.nativeElement.querySelector('.quick-actions').textContent).toContain('个人空间');
+    fixture.componentRef.setInput('friendRequest', undefined);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.request-details')).toBeNull();
+  });
 
   it('keeps a management deep link while the group role loads, including a failed read and retry', async () => {
     TestBed.inject(ChatStore).remember([testChat]);

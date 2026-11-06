@@ -77,6 +77,29 @@
           }
         }
       </div>
+      @if (friendRequest(); as request) {
+        <ion-list class="request-details" [inset]="true">
+          <ion-list-header>
+            <ion-label>{{ 'chats.requestDetails.title' | transloco }}</ion-label>
+          </ion-list-header>
+          @if (request.question) {
+            <ion-item>
+              <ion-label class="ion-text-wrap">
+                <h3>{{ 'chats.requestDetails.question' | transloco }}</h3>
+                <p>{{ request.question }}</p>
+              </ion-label>
+            </ion-item>
+          }
+          <ion-item>
+            <ion-label class="ion-text-wrap">
+              <h3>
+                {{ (request.question ? 'chats.requestDetails.answer' : 'chats.requestDetails.message') | transloco }}
+              </h3>
+              <p>{{ request.message || ('chats.requestDetails.empty' | transloco) }}</p>
+            </ion-label>
+          </ion-item>
+        </ion-list>
+      }
       @if (person() || threadId() || canManage()) {
         <div class="quick-actions ion-padding-horizontal">
           @if (person(); as user) {

@@ -18,9 +18,11 @@ import { IonButton, IonContent, IonSpinner } from '@ionic/angular';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { firstValueFrom } from 'rxjs';
 import { RpcApi } from '../../generated/rpc-api';
+import { FriendRequestDirection } from '../../generated/models';
 import { ContentScrollbars } from '../scrolling/content-scrollbars';
 import { encodeId } from '../api/snowflake-id';
 import { ChatDetails, DetailView } from '../chats/chat-details/chat-details';
+import { ChatListStore } from '../chats/chat-list-store';
 import { ConversationPage } from '../conversations/conversation/conversation.page';
 import type { ViewerMedia } from '../messages/media-viewer/media-viewer';
 import { panelComponents } from '../panel-routes';
@@ -54,6 +56,7 @@ export class PanelPage {
   protected readonly panels = inject(PanelNavigation);
   private readonly router = inject(Router);
   private readonly api = inject(RpcApi);
+  private readonly lists = inject(ChatListStore);
   private readonly destroy = inject(DestroyRef);
   private readonly outlet = viewChild(NgComponentOutlet);
   protected readonly content = signal<{ component: Type<unknown>; props: Record<string, unknown> } | undefined>(
@@ -112,12 +115,30 @@ export class PanelPage {
       if (definition.content === PanelContent.Profile) {
         const uid = Number(params['uid'] ?? url.queryParams['uid']);
         if (!uid) throw new Error('User unavailable');
-        const response = await firstValueFrom(
-          this.api.users.search({ q: String(uid), limit: 20 }).pipe(takeUntilDestroyed(this.destroy)),
-        );
-        const user = response.members.find((user) => user.uid === uid);
-        if (!user) throw new Error('User unavailable');
-        props['user'] = user;
+        if (params['requestId']) {
+          const id = encodeId(params['requestId']);
+          let request = [false, true]
+            .flatMap((history) => this.lists.friendRequests(history).items())
+            .find((request) => request.id === id);
+          if (!request) {
+            const response = await firstValueFrom(
+              this.api.friends.listRequests().pipe(takeUntilDestroyed(this.destroy)),
+            );
+            request = response.requests.find((request) => request.id === id);
+          }
+          if (!request) throw new Error('Request unavailable');
+          const user = request.direction === FriendRequestDirection.incoming ? request.from : request.to;
+          if (user.uid !== uid) throw new Error('Request peer unavailable');
+          props['user'] = user;
+          props['friendRequest'] = request;
+        } else {
+          const response = await firstValueFrom(
+            this.api.users.search({ q: String(uid), limit: 20 }).pipe(takeUntilDestroyed(this.destroy)),
+          );
+          const user = response.members.find((user) => user.uid === uid);
+          if (!user) throw new Error('User unavailable');
+          props['user'] = user;
+        }
       } else if (definition.content === PanelContent.ChatDetails) {
         if (params['id'] && params['threadId']) {
           const source = this.source();

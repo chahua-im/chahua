@@ -17,6 +17,7 @@ import {
   viewChild,
   viewChildren,
 } from '@angular/core';
+import { Router } from '@angular/router';
 import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonContent,
@@ -105,6 +106,7 @@ export class ChatListContent {
   private readonly drafts = inject(DraftStore);
   protected readonly lists = inject(ChatListStore);
   protected readonly navigation = inject(ConversationNavigation);
+  private readonly router = inject(Router);
   private readonly preferences = inject(Preferences);
   private readonly metadata = inject(ChatStore);
   protected readonly presence = inject(Presence);
@@ -326,10 +328,12 @@ export class ChatListContent {
     const requests = this.friendRequests().items();
     return requests.map((request) => {
       const incoming = request.direction === FriendRequestDirection.incoming;
+      const peer = incoming ? request.from : request.to;
       return {
         request,
         incoming,
-        peer: incoming ? request.from : request.to,
+        peer,
+        open: () => this.router.navigate(['/profile', peer.uid, 'request', decodeId(request.id)]),
         canDecide:
           incoming &&
           (request.status === FriendRequestStatus.pending || request.status === FriendRequestStatus.archived),

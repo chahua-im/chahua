@@ -276,6 +276,13 @@
         "forever": "Forever"
       }
     },
+    "requestDetails": {
+      "title": "Friend request details",
+      "question": "Verification question",
+      "answer": "Answer",
+      "message": "Verification message",
+      "empty": "Not provided"
+    },
     "content": {
       "archivedSubtitle": "View archived conversations",
       "requestHistorySubtitle": "View friend request history",

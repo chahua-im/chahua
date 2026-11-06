@@ -89,6 +89,10 @@ ion-content {
   display: flex;
   gap: 8px;
 }
+.request-details p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .quick-actions ion-button {
   flex: 1;
   min-width: 0;
