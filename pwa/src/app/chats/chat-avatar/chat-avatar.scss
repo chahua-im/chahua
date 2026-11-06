@@ -14,8 +14,8 @@ ion-avatar {
   display: grid;
   place-items: center;
   color: var(--ion-color-light-contrast);
-  font-weight: 600;
-  font-size: round(var(--avatar-size) / 3, 1px);
+  font-weight: var(--avatar-font-weight, 600);
+  font-size: var(--avatar-font-size, round(var(--avatar-size) / 3, 1px));
 }
 
 ion-avatar img {
@@ -24,7 +24,7 @@ ion-avatar img {
   visibility: hidden;
 
   &.loaded {
-    visibility: visible;
+    visibility: inherit;
   }
 }
 

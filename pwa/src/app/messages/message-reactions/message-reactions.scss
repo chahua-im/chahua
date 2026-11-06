@@ -57,9 +57,6 @@ button.reaction {
 }
 
 .reactor {
-  &.placeholder {
-    color: var(--ion-color-primary-contrast);
-  }
   display: grid;
   place-items: center;
   position: relative;
@@ -74,10 +71,11 @@ button.reaction {
     margin-left: -9px;
   }
 
-  img {
+  app-chat-avatar {
+    --avatar-font-size: 11px;
+    --avatar-font-weight: 400;
     width: 100%;
     height: 100%;
-    object-fit: cover;
   }
 }
 

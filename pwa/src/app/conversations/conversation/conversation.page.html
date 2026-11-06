@@ -115,14 +115,12 @@
         class="sticky-avatar"
         [avatarMention]="!selecting() && !speakingRestriction()"
         (mentionRequested)="composer()?.insertMention(sender)"
-        [avatarColor]="sender.avatarUrl ? null : (sender.name ?? sender.uid.toString())"
         [style.transform]="'translateY(' + stickyOffset() + 'px)'"
         [routerLink]="['/profile', sender.uid]">
-        @if (sender.avatarUrl; as src) {
-          <img [src]="src" width="34" height="34" decoding="async" />
-        } @else {
-          {{ (sender.name ?? sender.uid.toString() | avatarText: 2).toUpperCase() }}
-        }
+        <app-chat-avatar
+          [size]="34"
+          [textLength]="2"
+          [entry]="{ avatar: sender.avatarUrl, avatarName: sender.name ?? sender.uid.toString() }" />
       </button>
     }
   </div>

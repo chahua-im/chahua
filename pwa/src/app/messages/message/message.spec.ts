@@ -215,6 +215,30 @@ describe('Message', () => {
     expect(element.querySelector('ion-avatar img')?.getAttribute('src')).toBe('https://example.com/avatar.jpg');
   });
 
+  it('keeps the sender identifiable while the avatar loads or fails', async () => {
+    const fixture = await render();
+    fixture.componentRef.setInput('last', true);
+    fixture.detectChanges();
+    const avatar = fixture.nativeElement.querySelector('.avatar ion-avatar') as HTMLElement;
+    expect(avatar.textContent?.trim()).toBe('小茶');
+    expect(avatar.classList.contains('placeholder')).toBe(true);
+    const image = avatar.querySelector('img')!;
+    image.dispatchEvent(new Event('error'));
+    fixture.detectChanges();
+    expect(avatar.classList.contains('placeholder')).toBe(true);
+    expect(image.classList.contains('loaded')).toBe(false);
+    image.dispatchEvent(new Event('load'));
+    fixture.detectChanges();
+    expect(avatar.classList.contains('placeholder')).toBe(false);
+    expect(image.classList.contains('loaded')).toBe(true);
+    fixture.componentRef.setInput('stickyAvatar', true);
+    fixture.detectChanges();
+    expect(getComputedStyle(image).visibility).toBe('hidden');
+    fixture.componentRef.setInput('stickyAvatar', false);
+    fixture.detectChanges();
+    expect(getComputedStyle(image).visibility).toBe('visible');
+  });
+
   it('renders a quote, emits reply selection, and hides deleted quotes', async () => {
     const fixture = await render();
     const quote: MessagePreview = {
@@ -675,6 +699,24 @@ describe('Message', () => {
     fixture.componentInstance.react.subscribe(react);
     element.querySelector<HTMLImageElement>('.reactor img')!.click();
     expect(react).toHaveBeenCalledExactlyOnceWith('👍');
+  });
+
+  it('uses the reactor UID as a placeholder until the reaction avatar loads', async () => {
+    const fixture = await render();
+    fixture.componentRef.setInput('message', {
+      ...testMessage,
+      reactions: [{ emoji: '❤️', count: 1, reactors: [{ uid: 42, avatarUrl: '/reactor.png' }] }],
+    });
+    fixture.detectChanges();
+    const avatar = fixture.nativeElement.querySelector('.reactor ion-avatar') as HTMLElement;
+    expect(avatar.textContent?.trim()).toBe('4');
+    expect(avatar.classList.contains('placeholder')).toBe(true);
+    avatar.querySelector('img')!.dispatchEvent(new Event('error'));
+    fixture.detectChanges();
+    expect(avatar.classList.contains('placeholder')).toBe(true);
+    avatar.querySelector('img')!.dispatchEvent(new Event('load'));
+    fixture.detectChanges();
+    expect(avatar.classList.contains('placeholder')).toBe(false);
   });
 
   it.each([false, true])(

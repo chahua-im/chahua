@@ -64,19 +64,15 @@
     @if (showDetails()) {
       <span class="avatar-slot">
         @if (showAvatar()) {
-          <ion-avatar
+          <app-chat-avatar
             [avatarMention]="canMention() && !preview() && !selecting() && !record()"
             (mentionRequested)="mention.emit(message().sender)"
             (click)="profile()"
             class="avatar"
             [style.visibility]="stickyAvatar() ? 'hidden' : null"
-            [class.placeholder]="!message().sender.avatarUrl">
-            @if (message().sender.avatarUrl; as src) {
-              <img [src]="src" width="34" height="34" decoding="async" />
-            } @else {
-              {{ (name() | avatarText: 2).toUpperCase() }}
-            }
-          </ion-avatar>
+            [size]="34"
+            [textLength]="2"
+            [entry]="{ avatar: message().sender.avatarUrl, avatarName: name() }" />
         }
       </span>
     }

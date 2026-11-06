@@ -315,6 +315,21 @@ describe('ChatList', () => {
     expect(selected().tab).toBe(ListTab.Threads);
   });
 
+  it('keeps the toolbar identity visible before its image loads and after failure', () => {
+    TestBed.inject(SessionStore).user.set({ ...testUser, username: '小茶', avatarUrl: '/me.png' });
+    fixture.detectChanges();
+    const avatar = fixture.nativeElement.querySelector('ion-toolbar ion-avatar') as HTMLElement;
+    const image = avatar.querySelector('img')!;
+    expect(avatar.textContent?.trim()).toBe('小');
+    expect(avatar.classList.contains('placeholder')).toBe(true);
+    image.dispatchEvent(new Event('error'));
+    fixture.detectChanges();
+    expect(avatar.classList.contains('placeholder')).toBe(true);
+    image.dispatchEvent(new Event('load'));
+    fixture.detectChanges();
+    expect(avatar.classList.contains('placeholder')).toBe(false);
+  });
+
   it('opens the avatar menu without navigating or requesting notification permission', async () => {
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl');
     const menu = fixture.nativeElement.querySelectorAll('ion-popover')[1];

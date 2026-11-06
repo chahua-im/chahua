@@ -2,6 +2,48 @@ import { TestBed } from '@angular/core/testing';
 import { ChatAvatar } from './chat-avatar';
 
 describe('ChatAvatar', () => {
+  it('shows text and color until each image loads, then removes both without changing size', () => {
+    const fixture = TestBed.createComponent(ChatAvatar);
+    fixture.componentRef.setInput('size', 34);
+    fixture.componentRef.setInput('textLength', 2);
+    fixture.componentRef.setInput('entry', {
+      avatarName: '👩🏽‍💻小茶',
+      avatar: '/avatar.png',
+      badgeName: 'Bob',
+      badgeAvatar: '/badge.png',
+    });
+    fixture.detectChanges();
+    const host = fixture.nativeElement as HTMLElement;
+    const avatars = Array.from(host.querySelectorAll('ion-avatar'));
+    expect(avatars[0].textContent?.trim()).toBe('👩🏽‍💻小');
+    expect(avatars[1].textContent?.trim()).toBe('B');
+    for (const avatar of avatars) {
+      const image = avatar.querySelector('img')!;
+      const text = avatar.querySelector('span')!;
+      expect(getComputedStyle(image).visibility).toBe('hidden');
+      expect(getComputedStyle(text).visibility).toBe('visible');
+      expect(avatar.style.background).toBe('var(--avatar-background)');
+      image.dispatchEvent(new Event('load'));
+      fixture.detectChanges();
+      expect(getComputedStyle(image).visibility).toBe('visible');
+      expect(getComputedStyle(text).visibility).toBe('hidden');
+      expect(avatar.style.background).toBe('');
+      expect(host.style.getPropertyValue('--avatar-size')).toBe('34px');
+    }
+  });
+
+  it('keeps a visible fallback when the name is missing, including an image-only badge', () => {
+    const fixture = TestBed.createComponent(ChatAvatar);
+    fixture.componentRef.setInput('entry', { avatar: '/avatar.png', badgeAvatar: '/badge.png' });
+    fixture.detectChanges();
+    for (const avatar of fixture.nativeElement.querySelectorAll('ion-avatar') as NodeListOf<HTMLElement>) {
+      expect(avatar.textContent?.trim()).toBe('?');
+      avatar.querySelector('img')!.dispatchEvent(new Event('error'));
+    }
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('ion-avatar.placeholder')).toHaveLength(2);
+  });
+
   it('renders full emoji for both the chat and topic badge, and updates when the name changes', async () => {
     const fixture = TestBed.createComponent(ChatAvatar);
     fixture.componentRef.setInput('entry', { title: '🕊️ 7版鸽舍 🕊️', badgeName: '👩🏽‍💻小茶' });

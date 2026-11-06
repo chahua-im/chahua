@@ -22,15 +22,11 @@
   (ionScrollEnd)="scrolling.scrollEnd()">
   <div slot="fixed" class="sticky-avatar-container" [class.sent]="stickySender()?.uid === session.user()?.uid">
     @if (!preferences.showAllAvatars() && stickySender(); as sender) {
-      <div
-        class="sticky-avatar"
-        [avatarColor]="sender.avatarUrl ? null : (sender.name ?? sender.uid.toString())"
-        [style.transform]="'translateY(' + stickyOffset() + 'px)'">
-        @if (sender.avatarUrl; as src) {
-          <img [src]="src" width="34" height="34" decoding="async" />
-        } @else {
-          {{ (sender.name ?? sender.uid.toString() | avatarText: 2).toUpperCase() }}
-        }
+      <div class="sticky-avatar" [style.transform]="'translateY(' + stickyOffset() + 'px)'">
+        <app-chat-avatar
+          [size]="34"
+          [textLength]="2"
+          [entry]="{ avatar: sender.avatarUrl, avatarName: sender.name ?? sender.uid.toString() }" />
       </div>
     }
   </div>

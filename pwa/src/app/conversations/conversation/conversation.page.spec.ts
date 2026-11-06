@@ -4979,6 +4979,29 @@ describe('ConversationPage', () => {
     peer.expectNone('reactions.add');
   });
 
+  it('resets the sticky avatar placeholder when scrolling to another sender and ignores late loads', () => {
+    component['stickySender'].set({ ...testMessage.sender, name: '小茶', avatarUrl: '/first.png' });
+    component['stickyRow'].set(0);
+    fixture.detectChanges();
+    const avatar = fixture.nativeElement.querySelector('.sticky-avatar ion-avatar') as HTMLElement;
+    const previous = avatar.querySelector('img')!;
+    expect(avatar.textContent?.trim()).toBe('小茶');
+    expect(avatar.classList.contains('placeholder')).toBe(true);
+    previous.dispatchEvent(new Event('load'));
+    fixture.detectChanges();
+    expect(avatar.classList.contains('placeholder')).toBe(false);
+    component['stickySender'].set({ ...testMessage.sender, uid: 99, name: '小花', avatarUrl: '/second.png' });
+    fixture.detectChanges();
+    expect(avatar.textContent?.trim()).toBe('小花');
+    expect(avatar.classList.contains('placeholder')).toBe(true);
+    previous.dispatchEvent(new Event('load'));
+    fixture.detectChanges();
+    expect(avatar.classList.contains('placeholder')).toBe(true);
+    avatar.querySelector('img')!.dispatchEvent(new Event('error'));
+    fixture.detectChanges();
+    expect(avatar.classList.contains('placeholder')).toBe(true);
+  });
+
   it('passes reactive avatar preferences to message children', () => {
     component['stickySender'].set(testMessage.sender);
     component['stickyRow'].set(0);

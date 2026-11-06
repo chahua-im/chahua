@@ -1,12 +1,6 @@
-ion-avatar {
-  position: relative;
-  width: 26px;
-  height: 26px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  color: var(--ion-color-primary-contrast);
-  font-size: 15px;
+app-chat-avatar {
+  --avatar-font-size: 15px;
+  --avatar-font-weight: 400;
 }
 
 ion-segment {

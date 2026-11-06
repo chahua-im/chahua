@@ -1,11 +1,11 @@
 import { NgTemplateOutlet } from '@angular/common';
 import { Component, input, output } from '@angular/core';
 import type { ReactionSummary } from '../../../generated/models';
-import { AvatarColor, AvatarTextPipe } from '../../chats/avatar-text.pipe';
+import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
 
 @Component({
   selector: 'app-message-reactions',
-  imports: [AvatarColor, AvatarTextPipe, NgTemplateOutlet],
+  imports: [ChatAvatar, NgTemplateOutlet],
   templateUrl: './message-reactions.html',
   styleUrl: './message-reactions.scss',
   host: {

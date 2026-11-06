@@ -1,11 +1,11 @@
 <ion-avatar
   [class.placeholder]="!avatarLoaded()"
   [class.icon-avatar]="!!entry().icon"
-  [avatarColor]="entry().icon || avatarLoaded() ? null : (entry().avatarName ?? entry().title ?? '')">
+  [avatarColor]="entry().icon || avatarLoaded() ? null : name()">
   @if (entry().icon; as icon) {
     <ion-icon [icon]="icon"></ion-icon>
   } @else {
-    <span [class.image-loaded]="avatarLoaded()">{{ entry().avatarName ?? entry().title | avatarText }}</span>
+    <span [class.image-loaded]="avatarLoaded()">{{ name() | avatarText: textLength() }}</span>
     @for (src of [entry().avatar]; track src) {
       @if (src) {
         <img
@@ -24,11 +24,11 @@
     class="avatar-badge"
     [class.placeholder]="!badgeLoaded()"
     [class.icon-avatar]="!!entry().badgeIcon"
-    [avatarColor]="entry().badgeIcon || badgeLoaded() ? null : (entry().badgeName ?? '')">
+    [avatarColor]="entry().badgeIcon || badgeLoaded() ? null : entry().badgeName || '?'">
     @if (entry().badgeIcon; as icon) {
       <ion-icon [icon]="icon"></ion-icon>
     } @else {
-      <span [class.image-loaded]="badgeLoaded()">{{ entry().badgeName | avatarText }}</span>
+      <span [class.image-loaded]="badgeLoaded()">{{ entry().badgeName || '?' | avatarText }}</span>
       @for (src of [entry().badgeAvatar]; track src) {
         @if (src) {
           <img
