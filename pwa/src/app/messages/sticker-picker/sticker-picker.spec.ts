@@ -492,7 +492,7 @@ describe('StickerPicker selection during requests', () => {
     TestBed.inject(StickerUpdates).stickerRemoved.next({ pack, stickerId: sticker.id });
     response.next({ packs: [pack] });
     if (pending) await pending;
-    await vi.waitFor(() => expect(picker['busy']()).toBe(false));
+    await vi.waitFor(() => expect(picker['libraryLoading']()).toBe(false));
     expect(picker['packs']()[0].stickerCount).toBe(0);
     expect(picker['packs']()[0].previewSticker).toBeUndefined();
   });
@@ -598,6 +598,191 @@ describe('StickerPicker selection during requests', () => {
     expect(picker['packs']().map((item) => item.id)).toEqual([pack.id, secondPack.id]);
     expect(viewport.scrollTop).toBe(100);
     expect(api.getPack).toHaveBeenCalledTimes(reads);
+  });
+
+  it.each([false, true])(
+    'keeps the latest uncached pack selected after an older response (failed: %s)',
+    async (failed) => {
+      api.getMySubscribedPacks.mockReturnValueOnce(of({ packs: [pack, secondPack] }));
+      const { fixture } = await render();
+      const picker = fixture.componentInstance;
+      const first = new Subject<StickerPackDetailResponse>();
+      const second = new Subject<StickerPackDetailResponse>();
+      api.getPack.mockReturnValueOnce(first).mockReturnValueOnce(second);
+      const tabs = fixture.nativeElement.querySelectorAll('.pack-tabs button');
+      tabs[1].click();
+      fixture.detectChanges();
+      expect(picker['activeId']()).toBe(pack.id);
+      expect(tabs[1].classList.contains('selected')).toBe(true);
+      expect(tabs[2].disabled).toBe(false);
+      expect(fixture.nativeElement.querySelector('.sticker-item')).toBeNull();
+      expect(fixture.nativeElement.querySelector('.sticker-skeleton')).not.toBeNull();
+      tabs[2].click();
+      fixture.detectChanges();
+      expect(picker['activeId']()).toBe(secondPack.id);
+      expect(tabs[2].classList.contains('selected')).toBe(true);
+      second.next(secondPack);
+      await fixture.whenStable();
+      fixture.detectChanges();
+      const tile = fixture.nativeElement.querySelector('.sticker-item');
+      expect(tile).not.toBeNull();
+      if (failed) first.error(new Error('offline'));
+      else first.next(pack);
+      await fixture.whenStable();
+      fixture.detectChanges();
+      expect(picker['activeId']()).toBe(secondPack.id);
+      expect(fixture.nativeElement.querySelector('.sticker-item')).toBe(tile);
+      expect(fixture.nativeElement.querySelector('app-load-error')).toBeNull();
+    },
+  );
+
+  it.each([false, true])(
+    'selects uncached favorites immediately and ignores a late library response (failed: %s)',
+    async (failed) => {
+      const fixture = TestBed.createComponent(StickerPicker);
+      fixture.componentRef.setInput('embedded', true);
+      fixture.componentRef.setInput('packId', pack.id);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      const picker = fixture.componentInstance;
+      const response = new Subject<{ stickers: StickerSummary[] }>();
+      api.getMyFavorites.mockReturnValueOnce(response);
+      const pending = picker['selectFavorites']();
+      fixture.detectChanges();
+      expect(picker['activeId']()).toBeUndefined();
+      expect(picker['busy']()).toBe(false);
+      expect(fixture.nativeElement.querySelector('.sticker-item')).toBeNull();
+      expect(fixture.nativeElement.querySelector('.sticker-skeleton')).not.toBeNull();
+      expect(fixture.nativeElement.querySelector('.pack-tabs button').disabled).toBe(false);
+      await picker['selectPack'](pack.id);
+      fixture.detectChanges();
+      const tile = fixture.nativeElement.querySelector('.sticker-item');
+      if (failed) response.error(new Error('offline'));
+      else response.next({ stickers: [sticker] });
+      await pending;
+      fixture.detectChanges();
+      expect(picker['activeId']()).toBe(pack.id);
+      expect(fixture.nativeElement.querySelector('.sticker-item')).toBe(tile);
+      expect(fixture.nativeElement.querySelector('app-load-error')).toBeNull();
+    },
+  );
+
+  it('shares an uncached favorites read across repeated clicks and keeps its failure retryable', async () => {
+    const fixture = TestBed.createComponent(StickerPicker);
+    fixture.componentRef.setInput('embedded', true);
+    fixture.componentRef.setInput('packId', pack.id);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const picker = fixture.componentInstance;
+    const response = new Subject<{ stickers: StickerSummary[] }>();
+    api.getMyFavorites.mockReturnValueOnce(response);
+    const pending = picker['selectFavorites']();
+    picker['selectFavorites']();
+    expect(api.getMyFavorites).toHaveBeenCalledOnce();
+    response.error(new Error('offline'));
+    await pending;
+    fixture.detectChanges();
+    expect(picker['activeId']()).toBeUndefined();
+    expect(fixture.nativeElement.querySelector('app-load-error')).not.toBeNull();
+    await picker['retry']();
+    fixture.detectChanges();
+    expect(api.getMyFavorites).toHaveBeenCalledTimes(2);
+    expect(fixture.nativeElement.querySelector('app-load-error')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.sticker-item')).not.toBeNull();
+  });
+
+  it('switches to a cached pack immediately and refreshes its tiles without blocking the tabs', async () => {
+    api.getMySubscribedPacks.mockReturnValueOnce(of({ packs: [pack, secondPack] }));
+    api.getPack.mockImplementation((id) => of(id === secondPack.id ? secondPack : pack));
+    const { fixture } = await render();
+    const picker = fixture.componentInstance;
+    await picker['selectPack'](pack.id);
+    await picker['selectPack'](secondPack.id);
+    fixture.detectChanges();
+    const response = new Subject<StickerPackDetailResponse>();
+    api.getPack.mockReturnValueOnce(response);
+    const pending = picker['selectPack'](pack.id);
+    fixture.detectChanges();
+    expect(picker['activeId']()).toBe(pack.id);
+    expect(picker['busy']()).toBe(false);
+    const tile = fixture.nativeElement.querySelector('.sticker-item');
+    expect(tile).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.sticker-skeleton')).toBeNull();
+    for (const tab of fixture.nativeElement.querySelectorAll('.pack-tabs button')) expect(tab.disabled).toBe(false);
+    response.next({ ...pack, stickers: [{ ...sticker, isFavorited: true }] });
+    await pending;
+    fixture.detectChanges();
+    expect(picker['stickers']()[0].isFavorited).toBe(true);
+    expect(fixture.nativeElement.querySelector('.sticker-item')).toBe(tile);
+  });
+
+  it('keeps cached pack tiles usable after a failed refresh and retries in place', async () => {
+    const { fixture, selected } = await render();
+    const picker = fixture.componentInstance;
+    await picker['selectPack'](pack.id);
+    fixture.detectChanges();
+    const tile = fixture.nativeElement.querySelector('.sticker-item');
+    api.getPack.mockReturnValueOnce(throwError(() => new Error('offline')));
+    await picker['selectPack'](pack.id);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.sticker-item')).toBe(tile);
+    expect(fixture.nativeElement.querySelector('app-load-error')).not.toBeNull();
+    tile.click();
+    expect(selected).toHaveBeenCalledExactlyOnceWith(sticker);
+    const response = new Subject<StickerPackDetailResponse>();
+    api.getPack.mockReturnValueOnce(response);
+    const retry = picker['retry']();
+    fixture.detectChanges();
+    expect(picker['busy']()).toBe(false);
+    expect(fixture.nativeElement.querySelector('.sticker-item')).toBe(tile);
+    response.next(pack);
+    await retry;
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-load-error')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.sticker-item')).toBe(tile);
+  });
+
+  it.each([false, true])('keeps favorites selected after a late pack refresh (failed: %s)', async (failed) => {
+    const { fixture } = await render();
+    const picker = fixture.componentInstance;
+    await picker['selectPack'](pack.id);
+    const response = new Subject<StickerPackDetailResponse>();
+    api.getPack.mockReturnValueOnce(response);
+    const pending = picker['selectPack'](pack.id);
+    fixture.detectChanges();
+    const favoritesTab = fixture.nativeElement.querySelector('.pack-tabs button');
+    expect(favoritesTab.disabled).toBe(false);
+    favoritesTab.click();
+    fixture.detectChanges();
+    expect(picker['activeId']()).toBeUndefined();
+    const favorite = fixture.nativeElement.querySelector('.sticker-item');
+    if (failed) response.error(new Error('offline'));
+    else response.next(pack);
+    await pending;
+    fixture.detectChanges();
+    expect(picker['activeId']()).toBeUndefined();
+    expect(picker['error']()).toBe(false);
+    expect(fixture.nativeElement.querySelector('.sticker-item')).toBe(favorite);
+    expect(fixture.nativeElement.querySelector('app-load-error')).toBeNull();
+    expect(api.getMyFavorites).toHaveBeenCalledOnce();
+    expect(api.getMySubscribedPacks).toHaveBeenCalledOnce();
+    expect(api.getMyOwnedPacks).toHaveBeenCalledOnce();
+  });
+
+  it.each([false, true])('switches to cached favorites without reloading the library (empty: %s)', async (empty) => {
+    const { fixture } = await render();
+    const picker = fixture.componentInstance;
+    await picker['selectPack'](pack.id);
+    if (empty) TestBed.inject(StickerUpdates).favoriteChanged.next({ ...sticker, isFavorited: false });
+    picker['selectFavorites']();
+    expect(picker['activeId']()).toBeUndefined();
+    expect(picker['busy']()).toBe(false);
+    expect(picker['stickers']()).toHaveLength(empty ? 0 : 1);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.sticker-skeleton')).toBeNull();
+    expect(api.getMyFavorites).toHaveBeenCalledOnce();
+    expect(api.getMySubscribedPacks).toHaveBeenCalledOnce();
+    expect(api.getMyOwnedPacks).toHaveBeenCalledOnce();
   });
 
   it('adds a created sticker to an open pack and preserves it across a delayed pack read', async () => {
@@ -1320,47 +1505,46 @@ describe('StickerPicker selection during requests', () => {
     expect(media.classList.contains('loaded')).toBe(true);
   });
 
-  it('emits an already displayed sticker while favorites reload, keeping navigation busy', async () => {
+  it('keeps cached favorites interactive without reloading when their tab is clicked', async () => {
     const { fixture, button, selected } = await render();
-    const response = new Subject<{ stickers: StickerSummary[] }>();
-    api.getMyFavorites.mockReturnValueOnce(response);
     const tab = fixture.nativeElement.querySelector('.pack-tab') as HTMLButtonElement;
     tab.click();
     fixture.detectChanges();
-    expect(tab.disabled).toBe(true);
+    expect(tab.disabled).toBe(false);
     expect(fixture.nativeElement.querySelector('.sticker-skeleton')).toBeNull();
-    expect(fixture.nativeElement.querySelector('ion-spinner')).toBeNull();
-    expect(button.disabled).toBe(false);
+    expect(fixture.nativeElement.querySelector('.sticker-item')).toBe(button);
     button.click();
     expect(selected).toHaveBeenCalledExactlyOnceWith(sticker);
     expect(modals.dismiss).not.toHaveBeenCalled();
-    response.next({ stickers: [sticker] });
-    fixture.detectChanges();
-    await fixture.whenStable();
-    fixture.detectChanges();
-    await vi.waitFor(() => {
-      fixture.detectChanges();
-      expect(tab.disabled).toBe(false);
-    });
+    expect(api.getMyFavorites).toHaveBeenCalledOnce();
+    expect(api.getMySubscribedPacks).toHaveBeenCalledOnce();
+    expect(api.getMyOwnedPacks).toHaveBeenCalledOnce();
   });
 
-  it('sends the displayed sticker from a modal while another pack is loading', async () => {
-    const { fixture, button, selected } = await render(false);
+  it('shows the selected pack placeholder immediately and allows returning to favorites during loading', async () => {
+    const { fixture, button } = await render(false);
     const response = new Subject<StickerPackDetailResponse>();
     api.getPack.mockReturnValueOnce(response);
-    fixture.nativeElement.querySelectorAll('.pack-tab')[1].click();
+    const tabs = fixture.nativeElement.querySelectorAll('.pack-tabs button');
+    tabs[1].click();
     fixture.detectChanges();
     expect(api.getPack).toHaveBeenCalledExactlyOnceWith(pack.id);
-    expect(fixture.nativeElement.querySelector('.sticker-skeleton')).toBeNull();
-    expect(fixture.nativeElement.querySelector('ion-spinner')).toBeNull();
-    expect(button.disabled).toBe(false);
-    button.click();
-    expect(modals.dismiss).toHaveBeenCalledExactlyOnceWith(sticker, 'send');
-    expect(selected).not.toHaveBeenCalled();
-    response.next(pack);
+    expect(fixture.componentInstance['activeId']()).toBe(pack.id);
+    expect(tabs[1].classList.contains('selected')).toBe(true);
+    expect(button.isConnected).toBe(false);
+    expect(fixture.nativeElement.querySelector('.sticker-item')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.sticker-skeleton')).not.toBeNull();
+    expect(tabs[0].disabled).toBe(false);
+    tabs[0].click();
     fixture.detectChanges();
+    expect(fixture.componentInstance['activeId']()).toBeUndefined();
+    const favorite = fixture.nativeElement.querySelector('.sticker-item');
+    expect(favorite).not.toBeNull();
+    response.next(pack);
     await fixture.whenStable();
     fixture.detectChanges();
+    expect(fixture.componentInstance['activeId']()).toBeUndefined();
+    expect(fixture.nativeElement.querySelector('.sticker-item')).toBe(favorite);
   });
 
   it.each([false, true])('sends while changing favorite status from %s', async (isFavorited) => {

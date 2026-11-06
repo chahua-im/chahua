@@ -150,7 +150,7 @@ export class StickerPicker {
   private readonly libraryReads = new Set<Map<SnowflakeID, StickerPackSummary>>();
   private selectionVersion = 0;
   private favoritesLoaded = false;
-  private readonly selectingPack = signal(false);
+  private readonly libraryLoading = signal(false);
   private readonly libraryScroll = viewChild<ElementRef<HTMLElement>>('libraryScroll');
   private readonly groupElements = viewChildren<ElementRef<HTMLElement>>('groupSection');
   private readonly packTabViewport = viewChild<ElementRef<HTMLElement>>('packTabViewport');
@@ -163,7 +163,9 @@ export class StickerPicker {
           id: this.activeId(),
           content: this.contents().get(this.activeId()),
           uploadError: this.activeId() != null && this.uploadErrors().has(this.activeId()!),
-          loading: this.busy() || (this.activeId() != null && this.groupLoading().has(this.activeId()!)),
+          loading:
+            this.busy() ||
+            (this.activeId() == null ? this.libraryLoading() : this.groupLoading().has(this.activeId()!)),
           error: this.error() || (this.activeId() != null && this.groupErrors().has(this.activeId()!)),
           ownerUid: this.pack()?.ownerUid,
         },
@@ -174,7 +176,7 @@ export class StickerPicker {
         content: this.contents().get(undefined),
         placeholderRows: Math.ceil((this.contents().get(undefined)?.stickers.length ?? 0) / 4),
         uploadError: false,
-        loading: this.busy(),
+        loading: this.busy() || this.libraryLoading(),
         error: this.error(),
       },
       ...this.packs().map((pack) => ({
@@ -210,11 +212,10 @@ export class StickerPicker {
     () => this.stickers().find((sticker) => sticker.id === this.chosenId()) ?? this.stickers().at(0),
   );
   private retryPackId?: SnowflakeID;
-  private readonly operationBusy = signal(false);
+  protected readonly busy = signal(false);
   protected readonly pendingUpload = signal<{ file: File; packId: SnowflakeID } | undefined>(undefined);
   protected readonly uploadError = signal<string | undefined>(undefined);
   private readonly editor = viewChild(StickerEditor);
-  protected readonly busy = computed(() => this.operationBusy() || this.selectingPack());
   protected readonly error = signal(false);
   protected readonly favoriteFailed = signal(false);
   protected readonly scroll = new StickerLibraryScroll({
@@ -354,7 +355,6 @@ export class StickerPicker {
   }
 
   private beginSelection() {
-    this.selectingPack.set(false);
     return ++this.selectionVersion;
   }
 
@@ -378,7 +378,11 @@ export class StickerPicker {
 
   protected selectFavorites() {
     if (this.grouped()) return this.jumpToGroup();
-    else return this.load();
+    this.beginSelection();
+    this.retryPackId = undefined;
+    this.error.set(false);
+    this.activeId.set(undefined);
+    if (!this.contents().has(undefined) && !this.libraryLoading()) return this.load();
   }
 
   protected loadGroup(id: SnowflakeID, refresh = false): Promise<boolean> {
@@ -463,7 +467,7 @@ export class StickerPicker {
     const pack = this.contents().get(pending.packId);
     if (!pack || !('id' in pack)) return;
     const uid = this.session.user()?.uid;
-    this.operationBusy.set(true);
+    this.busy.set(true);
     this.uploadError.set(undefined);
     this.uploadErrors.update((ids) => {
       const next = new Set(ids);
@@ -486,13 +490,13 @@ export class StickerPicker {
       this.uploadErrors.update((ids) => new Set(ids).add(pending.packId));
       this.uploadError.set(this.transloco.translate('stickers.addFailed'));
     } finally {
-      if (this.session.user()?.uid === uid) this.operationBusy.set(false);
+      if (this.session.user()?.uid === uid) this.busy.set(false);
     }
   }
   protected async load() {
     const overrides = this.beginFavoriteRead();
     const selection = this.grouped() ? undefined : this.beginSelection();
-    this.operationBusy.set(true);
+    this.libraryLoading.set(true);
     this.error.set(false);
     // A library response started before a creation must not remove the new pack or its count.
     const additions = new Map<SnowflakeID, StickerPackSummary>();
@@ -570,12 +574,12 @@ export class StickerPicker {
       else this.setContent(favoritesContent);
       this.libraryPacks.set([...merged.values()]);
     } catch {
-      this.error.set(true);
+      if (this.grouped() || this.activeId() == null) this.error.set(true);
     } finally {
       this.favoriteReads.delete(overrides);
       this.libraryReads.delete(changes);
       subscription.unsubscribe();
-      this.operationBusy.set(false);
+      this.libraryLoading.set(false);
     }
   }
   protected selectPack(id: SnowflakeID) {
@@ -586,20 +590,15 @@ export class StickerPicker {
   private async openPack(id: SnowflakeID) {
     this.retryPackId = id;
     const selection = this.beginSelection();
-    this.selectingPack.set(true);
+    this.activeId.set(id);
     this.error.set(false);
     const loaded = await this.loadGroup(id, true);
     if (this.destroyRef.destroyed || selection !== this.selectionVersion) return;
-    this.selectingPack.set(false);
-    if (loaded) {
-      if (!this.contents().has(id)) return;
-      if (this.grouped()) this.jumpToGroup(id);
-      else this.activeId.set(id);
-    } else if (!this.grouped()) this.error.set(true);
+    if (!loaded && !this.grouped()) this.error.set(true);
   }
   private async openSticker(id: SnowflakeID) {
     this.retryPackId = undefined;
-    this.operationBusy.set(true);
+    this.busy.set(true);
     this.error.set(false);
     try {
       const sticker = await firstValueFrom(this.api.stickers.get({ stickerId: id }));
@@ -613,11 +612,11 @@ export class StickerPicker {
     } catch {
       this.error.set(true);
     } finally {
-      this.operationBusy.set(false);
+      this.busy.set(false);
     }
   }
   protected retry() {
-    const pack = this.activeId() ?? this.packId() ?? this.retryPackId;
+    const pack = this.activeId() ?? this.retryPackId;
     const sticker = this.stickerId();
     return pack ? this.openPack(pack) : sticker ? this.openSticker(sticker) : this.load();
   }
@@ -664,7 +663,7 @@ export class StickerPicker {
   protected async favorite(sticker: StickerSummary) {
     if (this.busy()) return;
     const uid = this.session.user()?.uid;
-    this.operationBusy.set(true);
+    this.busy.set(true);
     this.favoriteFailed.set(false);
     const previousFavorites = this.favoritesLoaded ? this.contents().get(undefined) : undefined;
     this.pendingFavorite = { ...sticker, isFavorited: !sticker.isFavorited };
@@ -683,7 +682,7 @@ export class StickerPicker {
       this.favoriteFailed.set(true);
     } finally {
       this.pendingFavorite = undefined;
-      this.operationBusy.set(false);
+      this.busy.set(false);
     }
   }
   protected async subscribe() {
@@ -704,7 +703,7 @@ export class StickerPicker {
   }
   private async updateContent(optimistic: StickerContent, request: Observable<unknown>) {
     if (this.busy()) return false;
-    this.operationBusy.set(true);
+    this.busy.set(true);
     this.error.set(false);
     const previous = this.content();
     this.setContent(optimistic);
@@ -718,7 +717,7 @@ export class StickerPicker {
       }
       return false;
     } finally {
-      this.operationBusy.set(false);
+      this.busy.set(false);
     }
   }
   protected send(sticker: StickerSummary, sourceId: SnowflakeID | null = this.pack()?.id ?? null) {

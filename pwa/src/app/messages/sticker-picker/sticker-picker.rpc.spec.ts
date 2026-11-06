@@ -293,41 +293,45 @@ describe('StickerPicker selection during RPC requests', () => {
     expect(media.classList.contains('loaded')).toBe(true);
   });
 
-  it('emits an already displayed sticker while favorites reload, keeping navigation busy', async () => {
-    const { fixture, rpc, button, selected } = await render();
+  it('keeps cached favorites interactive without reloading when their tab is clicked', async () => {
+    const { fixture, button, selected, rpc } = await render();
     const tab = fixture.nativeElement.querySelector('.pack-tab') as HTMLButtonElement;
     tab.click();
     fixture.detectChanges();
-    const favorites = rpc.expect('stickers.listFavorites');
-    rpc.expect('stickers.listSubscribedPacks').flush({ packs: [wireSummary(pack)] });
-    rpc.expect('stickers.listOwnedPacks').flush({ packs: [] });
-    expect(tab.disabled).toBe(true);
+    expect(tab.disabled).toBe(false);
     expect(fixture.nativeElement.querySelector('.sticker-skeleton')).toBeNull();
-    expect(fixture.nativeElement.querySelector('ion-spinner')).toBeNull();
-    expect(button.disabled).toBe(false);
+    expect(fixture.nativeElement.querySelector('.sticker-item')).toBe(button);
     button.click();
     expect(selected).toHaveBeenCalledExactlyOnceWith(sticker);
     expect(modals.dismiss).not.toHaveBeenCalled();
-    favorites.flush({ stickers: [wireSticker] });
-    await vi.waitFor(() => {
-      fixture.detectChanges();
-      expect(tab.disabled).toBe(false);
-    });
+    rpc.expectNone('stickers.listFavorites');
+    rpc.expectNone('stickers.listSubscribedPacks');
+    rpc.expectNone('stickers.listOwnedPacks');
   });
 
-  it('sends the displayed sticker from a modal while another pack is loading', async () => {
-    const { fixture, rpc, button, selected } = await render(false);
-    fixture.nativeElement.querySelectorAll('.pack-tab')[1].click();
+  it('shows the selected pack placeholder immediately and allows returning to favorites during loading', async () => {
+    const { fixture, button, rpc } = await render(false);
+
+    const tabs = fixture.nativeElement.querySelectorAll('.pack-tabs button');
+    tabs[1].click();
     fixture.detectChanges();
     const request = rpc.expect('stickers.getPack', { packId: '103' });
-    expect(fixture.nativeElement.querySelector('.sticker-skeleton')).toBeNull();
-    expect(fixture.nativeElement.querySelector('ion-spinner')).toBeNull();
-    expect(button.disabled).toBe(false);
-    button.click();
-    expect(modals.dismiss).toHaveBeenCalledExactlyOnceWith(sticker, 'send');
-    expect(selected).not.toHaveBeenCalled();
+    expect(fixture.componentInstance['activeId']()).toBe(pack.id);
+    expect(tabs[1].classList.contains('selected')).toBe(true);
+    expect(button.isConnected).toBe(false);
+    expect(fixture.nativeElement.querySelector('.sticker-item')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.sticker-skeleton')).not.toBeNull();
+    expect(tabs[0].disabled).toBe(false);
+    tabs[0].click();
+    fixture.detectChanges();
+    expect(fixture.componentInstance['activeId']()).toBeUndefined();
+    const favorite = fixture.nativeElement.querySelector('.sticker-item');
+    expect(favorite).not.toBeNull();
     request.flush(wirePack);
     await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.componentInstance['activeId']()).toBeUndefined();
+    expect(fixture.nativeElement.querySelector('.sticker-item')).toBe(favorite);
   });
 
   it.each([false, true])('sends while changing favorite status from %s', async (isFavorited) => {
