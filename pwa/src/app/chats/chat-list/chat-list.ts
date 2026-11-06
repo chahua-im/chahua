@@ -12,7 +12,6 @@ import {
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import {
-  IonAvatar,
   IonBadge,
   IonButton,
   IonButtons,
@@ -39,7 +38,7 @@ import { AppInstall } from '../../pwa/app-install';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
-import { AvatarColor, AvatarTextPipe } from '../avatar-text.pipe';
+import { ChatAvatar } from '../chat-avatar/chat-avatar';
 import { ChatListContent } from '../chat-list-content/chat-list-content';
 import { ChatListStore } from '../chat-list-store';
 import { DirectorySearch } from '../directory-search/directory-search';
@@ -52,12 +51,10 @@ import { isListTab, ListTab, type ListSelection } from '../list-tabs';
   host: { class: 'ion-page' },
   imports: [
     RouterLink,
-    AvatarTextPipe,
-    AvatarColor,
+    ChatAvatar,
     ChatListContent,
     ContentScrollbars,
     DirectorySearch,
-    IonAvatar,
     IonBadge,
     IonButton,
     IonButtons,

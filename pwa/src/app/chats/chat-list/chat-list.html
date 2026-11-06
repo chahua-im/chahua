@@ -20,13 +20,12 @@
       } @else {
         <ion-buttons slot="start">
           <ion-button (click)="profileMenu.present($event)">
-            <ion-avatar [avatarColor]="session.user()?.avatarUrl ? null : (session.user()?.username ?? '')">
-              @if (session.user()?.avatarUrl; as src) {
-                <img [src]="src" width="26" height="26" decoding="async" />
-              } @else {
-                {{ session.user()?.username | avatarText }}
-              }
-            </ion-avatar>
+            <app-chat-avatar
+              [size]="26"
+              [entry]="{
+                avatar: session.user()?.avatarUrl,
+                title: session.user()?.username,
+              }" />
           </ion-button>
         </ion-buttons>
         <ion-segment mode="ios" [value]="list().tab" (ionChange)="selectTab($event)">

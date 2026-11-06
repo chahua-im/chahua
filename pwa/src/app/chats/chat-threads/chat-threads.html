@@ -2,7 +2,11 @@
   @for (root of items(); track root.id) {
     <app-chat-list-item
       [button]="true"
-      [entry]="{ avatar: root.sender.avatarUrl, avatarName: root.sender.name, time: root.createdAt }"
+      [entry]="{
+        avatar: root.sender.avatarUrl,
+        avatarName: root.sender.name ?? root.sender.uid.toString(),
+        time: root.createdAt,
+      }"
       (selected)="open(root)">
       <span slot="title">
         @if (root.isDeleted) {

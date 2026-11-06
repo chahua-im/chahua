@@ -88,7 +88,6 @@ import {
 } from '../../../generated/models';
 import { Connection, ResyncReason } from '../../api/connection';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
-import { AvatarColor, AvatarTextPipe } from '../../chats/avatar-text.pipe';
 import { ChatAvatar, conversationAvatar } from '../../chats/chat-avatar/chat-avatar';
 import { ChatMute } from '../../chats/chat-mute/chat-mute';
 import { ChatChangeKind, ChatStore } from '../../chats/chat-store';
@@ -183,8 +182,6 @@ type ScrollPosition =
     ForwardPicker,
     ForwardedLabel,
     AvatarMention,
-    AvatarColor,
-    AvatarTextPipe,
     ContentScrollbars,
     MessageDatePipe,
     TranslocoPipe,

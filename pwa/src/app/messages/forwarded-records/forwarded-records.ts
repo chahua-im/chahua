@@ -36,7 +36,7 @@ import { RpcError, RpcErrorCode } from '../../api/rpc-error';
 import { Connection, ResyncReason } from '../../api/connection';
 import { ChatChangeKind, ChatStore } from '../../chats/chat-store';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
-import { AvatarColor, AvatarTextPipe } from '../../chats/avatar-text.pipe';
+import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { scrollActivity } from '../../scrolling/scroll-activity';
 import { LoadError } from '../../ui/load-error/load-error';
@@ -54,8 +54,7 @@ import { VoicePlayback } from '../voice-player/voice-playback';
   host: { class: 'ion-page' },
   imports: [
     Message,
-    AvatarColor,
-    AvatarTextPipe,
+    ChatAvatar,
     ContentScrollbars,
     LoadError,
     TranslocoPipe,

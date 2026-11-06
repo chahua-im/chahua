@@ -3,14 +3,14 @@ import { Router } from '@angular/router';
 import { Component, computed, DestroyRef, ElementRef, inject, input, output, signal } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { LocalDatePipe } from '../../i18n/local-date.pipe';
-import { IonAvatar, IonIcon, IonSpinner } from '@ionic/angular';
+import { IonIcon, IonSpinner } from '@ionic/angular';
 import { alertCircleOutline, arrowUndoOutline } from 'ionicons/icons';
 import { ForwardedLabel } from '../forwarded-label';
 import { ForwardedCard } from '../forwarded-card';
 import { showsForwardOrigin } from '../forwarding';
 import { MessageType, type MessageResponse, type MessagePreview as Quote } from '../../../generated/models';
 import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
-import { AvatarTextPipe } from '../../chats/avatar-text.pipe';
+import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
 import { InviteCard } from '../invite-card/invite-card';
 import { mediaOverlay } from '../media-overlay';
 import { MessageAttachments, type MessageAttachmentSource } from '../message-attachments/message-attachments';
@@ -61,11 +61,10 @@ export interface MessageMenuSelection {
     AvatarMention,
     ForwardedLabel,
     ForwardedCard,
-    AvatarTextPipe,
+    ChatAvatar,
     InviteCard,
     LocalDatePipe,
     TranslocoPipe,
-    IonAvatar,
     IonIcon,
     IonSpinner,
     MessageAttachments,

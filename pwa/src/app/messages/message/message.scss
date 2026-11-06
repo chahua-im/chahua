@@ -102,19 +102,10 @@
 }
 
 .avatar {
+  --avatar-font-size: 13px;
   position: absolute;
   bottom: 0;
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  color: var(--ion-color-primary-contrast);
-  font-size: 13px;
-  font-weight: 600;
-
-  &.placeholder {
-    background: var(--sender-color);
-  }
+  text-transform: uppercase;
 }
 
 .bubble {

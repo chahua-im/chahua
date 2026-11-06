@@ -25,7 +25,9 @@ export interface ChatAvatarData {
 export class ChatAvatar {
   readonly entry = input.required<ChatAvatarData>();
   readonly size = input<number>();
+  readonly textLength = input(1);
   readonly online = input(false);
+  protected readonly name = computed(() => this.entry().avatarName || this.entry().title || '?');
   private readonly avatarUrl = computed(() => this.entry().avatar);
   private readonly badgeUrl = computed(() => this.entry().badgeAvatar);
   protected readonly avatarLoaded = linkedSignal({ source: this.avatarUrl, computation: () => false });
@@ -45,7 +47,7 @@ export function conversationAvatar(
   const dm = chat?.kind === GroupKind.dm;
   return {
     avatar: dm ? chat.peer?.avatarUrl : chat?.avatar,
-    avatarName: dm ? chat.peer?.username : chat?.name,
+    avatarName: dm ? (chat.peer?.username ?? chat.peer?.uid.toString()) : chat?.name,
     badgeName: thread && !dm && root ? (root.sender.name ?? String(root.sender.uid)) : undefined,
     badgeAvatar: thread && !dm ? root?.sender.avatarUrl : undefined,
     badgeIcon: thread && dm ? chatbubbles : undefined,

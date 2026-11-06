@@ -108,6 +108,25 @@ describe('ForwardedRecords', () => {
     expect(fixture.nativeElement.textContent).toContain('captured content');
   });
 
+  it('keeps a text placeholder for the sticky record avatar while loading or on failure', async () => {
+    const { fixture, peer } = create({ id: wireChat.id, messageId: wireMessage.id });
+    peer
+      .expect('messages.listForwardedMessages', { chatId: wireChat.id, messageId: wireMessage.id })
+      .flush({ total: 1, messages: [record] });
+    await fixture.whenStable();
+    fixture.componentInstance['stickySender'].set({ ...testMessage.sender, name: '小茶', avatarUrl: '/record.png' });
+    fixture.detectChanges();
+    const avatar = fixture.nativeElement.querySelector('.sticky-avatar ion-avatar') as HTMLElement;
+    expect(avatar.textContent?.trim()).toBe('小茶');
+    expect(avatar.classList.contains('placeholder')).toBe(true);
+    avatar.querySelector('img')!.dispatchEvent(new Event('error'));
+    fixture.detectChanges();
+    expect(avatar.classList.contains('placeholder')).toBe(true);
+    avatar.querySelector('img')!.dispatchEvent(new Event('load'));
+    fixture.detectChanges();
+    expect(avatar.classList.contains('placeholder')).toBe(false);
+  });
+
   it('uses browser history and an authorized fallback', async () => {
     const { fixture, peer } = create({ id: wireChat.id, messageId: wireMessage.id });
     peer
