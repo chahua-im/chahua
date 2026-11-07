@@ -1,6 +1,8 @@
+import { NgTemplateOutlet } from '@angular/common';
+import { Component, contentChild, input, output, TemplateRef } from '@angular/core';
 import { By } from '@angular/platform-browser';
 import { TestBed } from '@angular/core/testing';
-import { AlertController, provideIonicAngular } from '@ionic/angular';
+import { AlertController, IonModal, IonToast, provideIonicAngular } from '@ionic/angular';
 import { GroupKind, InviteType, SpeakingMode, type InviteResponse } from '../../../generated/models';
 import { RpcErrorCode } from '../../api/rpc-error';
 import { provideRpcTesting, RpcTestPeer } from '../../api/rpc-testing';
@@ -9,6 +11,28 @@ import { ChatListStore } from '../chat-list-store';
 import { ChatStore } from '../chat-store';
 import { ChatInvites } from './chat-invites';
 import { ChatPicker, ChatPickerScope } from '../chat-picker/chat-picker';
+
+@Component({
+  selector: 'ion-modal',
+  imports: [NgTemplateOutlet],
+  template: '@if (isOpen()) { <ng-container [ngTemplateOutlet]="content() ?? null" /> }',
+})
+class ModalStub {
+  readonly content = contentChild(TemplateRef);
+  readonly isOpen = input(false);
+  readonly canDismiss = input(true);
+  readonly didPresent = output<void>();
+  readonly willDismiss = output<void>();
+  readonly didDismiss = output<void>();
+}
+
+@Component({ selector: 'ion-toast', template: '' })
+class ToastStub {
+  readonly isOpen = input(false);
+  readonly message = input<string>();
+  readonly duration = input(0);
+  readonly didDismiss = output<void>();
+}
 
 describe('Invite management', () => {
   const invite: InviteResponse = {
@@ -63,6 +87,12 @@ describe('Invite management', () => {
         },
       ],
     });
+    // Keep Ionic presentation tasks from outliving the fixture and its browser mocks.
+    TestBed.overrideComponent(ChatInvites, {
+      remove: { imports: [IonModal, IonToast] },
+      add: { imports: [ModalStub, ToastStub] },
+    });
+    TestBed.overrideComponent(ChatPicker, { set: { template: '' } });
     peer = TestBed.inject(RpcTestPeer);
     peer.authenticate();
   });
@@ -582,7 +612,11 @@ describe('Invite management', () => {
     await component['create']();
     peer.expectNone('invites.create');
     component['picker'].set(component['Picker'].User);
-    component['editorReady'].set(true);
+    fixture.detectChanges();
+    const modal = fixture.debugElement.query(By.directive(ModalStub)).componentInstance as ModalStub;
+    expect(modal.isOpen()).toBe(true);
+    expect(fixture.debugElement.query(By.directive(ChatPicker))).toBeNull();
+    modal.didPresent.emit();
     fixture.detectChanges();
     const picker = fixture.debugElement.query(By.directive(ChatPicker)).componentInstance as ChatPicker;
     expect(picker.scope()).toBe(ChatPickerScope.Users);
@@ -600,6 +634,8 @@ describe('Invite management', () => {
     request.flush({ ...wire, inviteType: 'targeted', targetUid: 9 });
     await created;
     expect(component['list']().rows[0].targetName).toBe('小张');
+    fixture.detectChanges();
+    expect(modal.isOpen()).toBe(false);
   });
   it('ignores a list response after switching chats', async () => {
     const fixture = TestBed.createComponent(ChatInvites);
