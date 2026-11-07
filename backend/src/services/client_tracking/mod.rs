@@ -95,20 +95,28 @@ pub(crate) fn active_app_version_snapshot(
     conn: &mut PgConnection,
     now: NaiveDateTime,
 ) -> QueryResult<HashMap<String, i64>> {
-    let rows = clients::table
-        .filter(clients::last_active.ge(now - chrono::Duration::hours(24)))
-        .group_by(clients::last_app_version)
-        .select((clients::last_app_version, diesel::dsl::count_star()))
-        .load::<(Option<String>, i64)>(conn)?;
-    let mut snapshot = HashMap::new();
-    for (version, count) in rows {
-        let version = version
-            .as_deref()
-            .filter(|v| !v.trim().is_empty())
-            .unwrap_or("unknown");
-        *snapshot.entry(version.to_owned()).or_insert(0) += count;
+    let started = Instant::now();
+    let query_metrics = crate::metrics::queries::connection_metrics(conn);
+    let result = (|| {
+        let rows = clients::table
+            .filter(clients::last_active.ge(now - chrono::Duration::hours(24)))
+            .group_by(clients::last_app_version)
+            .select((clients::last_app_version, diesel::dsl::count_star()))
+            .load::<(Option<String>, i64)>(conn)?;
+        let mut snapshot = HashMap::new();
+        for (version, count) in rows {
+            let version = version
+                .as_deref()
+                .filter(|v| !v.trim().is_empty())
+                .unwrap_or("unknown");
+            *snapshot.entry(version.to_owned()).or_insert(0) += count;
+        }
+        Ok(snapshot)
+    })();
+    if let Some(metrics) = query_metrics {
+        metrics.record_app_version_aggregation(started, result.is_ok());
     }
-    Ok(snapshot)
+    result
 }
 
 /// Publish only after the query succeeds, preserving the previous snapshot on failure.
@@ -932,6 +940,11 @@ mod tests {
             .build(ConnectionManager::<PgConnection>::new(url))
             .expect("create test database pool");
         let mut conn = pool.get().expect("test connection");
+        let query_registry = prometheus::Registry::new();
+        crate::metrics::queries::attach_connection_metrics(
+            &mut conn,
+            Arc::new(crate::metrics::queries::QueryMetrics::new(&query_registry)),
+        );
         // Shadow the real table, so unrelated test data cannot affect the snapshot.
         conn.batch_execute(
             "CREATE TEMP TABLE clients (
@@ -989,6 +1002,11 @@ mod tests {
             .unwrap();
         assert!(refresh_app_version_snapshot(&mut conn, &metrics, now).is_err());
         assert_eq!(crate::metrics::encode(&registry).unwrap(), before_failure);
+        let query_metrics = crate::metrics::encode(&query_registry).unwrap();
+        assert!(query_metrics
+            .contains("app_version_aggregation_duration_seconds_count{outcome=\"success\"} 5"));
+        assert!(query_metrics
+            .contains("app_version_aggregation_duration_seconds_count{outcome=\"error\"} 1"));
     }
 
     /// Requires a migrated test database (`WETTY_TEST_DATABASE_URL`); skipped

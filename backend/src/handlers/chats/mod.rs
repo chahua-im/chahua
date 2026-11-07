@@ -67,8 +67,16 @@ async fn get_chats(
     State(state): State<AppState>,
     Query(query): Query<ListChatsQuery>,
 ) -> Result<Json<ListChatsResponse>, AppError> {
+    let queue = state
+        .metrics
+        .api
+        .start_stage("http", "chats.list", "blocking_queue");
     let response = tokio::task::spawn_blocking(move || -> Result<_, AppError> {
+        drop(queue);
+        let stages = state.metrics.api.stages("http", "chats.list");
+        let pool = stages.start("pool_acquire");
         let mut conn = state.db.get()?;
+        drop(pool);
         futures::executor::block_on(crate::services::api::chats::get_chats(
             uid,
             query,
@@ -76,6 +84,7 @@ async fn get_chats(
             state.unread_service.as_ref(),
             &state.media,
             state.avatars.as_ref(),
+            stages,
         ))
     })
     .await

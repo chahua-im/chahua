@@ -13,7 +13,10 @@ pub async fn list(
     params: ChatsListParams,
 ) -> Result<ListChatsResponse, AppError> {
     let uid = context.uid()?;
+    let stages = services.metrics.api.stages("rpc", "chats.list");
+    let pool = stages.start("pool_acquire");
     let mut conn = services.db.get()?;
+    drop(pool);
     crate::services::api::chats::get_chats(
         uid,
         params.query,
@@ -21,6 +24,7 @@ pub async fn list(
         services.unread_service.as_ref(),
         &services.media,
         services.avatars.as_ref(),
+        stages,
     )
     .await
 }

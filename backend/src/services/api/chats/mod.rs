@@ -41,13 +41,17 @@ pub async fn get_chats(
     unread_service: &UnreadService,
     media: &MediaStore,
     avatars: &AvatarService,
+    stages: crate::metrics::ApiStages<'_>,
 ) -> Result<ListChatsResponse, AppError> {
     let limit = validate_limit(query.limit, MAX_CHATS_LIMIT);
     let archived = query.archived.unwrap_or(false);
+    let phase = stages.start("settings");
     let defaults = load_notification_defaults(conn, uid)?;
     let now = Utc::now();
 
     let chat_settings = crate::services::user::load_chat_settings(conn, uid)?;
+    drop(phase);
+    let phase = stages.start("page");
     let rows = crate::services::chat_list::load_chat_page(
         conn,
         uid,
@@ -57,6 +61,7 @@ pub async fn get_chats(
         limit + 1,
         !chat_settings.show_membership_messages,
     )?;
+    drop(phase);
     let has_more = rows.len() as i64 > limit;
     let mut items_to_process: Vec<_> = rows.into_iter().take(limit as usize).collect();
 
@@ -74,11 +79,18 @@ pub async fn get_chats(
             is_muted: row.notification_setting.is_muted(row.kind, defaults, now),
         })
         .collect::<Vec<_>>();
+    let phase = stages.start("unread_counts");
     let unread_counts = unread_service.count_membership_unreads(conn, &memberships)?;
+    drop(phase);
+    let phase = stages.start("mention_counts");
     let mention_counts =
         unread_service.count_chat_unread_mentions_for_memberships(conn, uid, &memberships)?;
+    drop(phase);
+    let phase = stages.start("reaction_counts");
     let reaction_counts =
         unread_service.count_chat_unread_reactions_for_memberships(conn, uid, &memberships)?;
+    drop(phase);
+    let phase = stages.start("message_previews");
 
     let messages_to_process = items_to_process
         .iter_mut()
@@ -86,6 +98,8 @@ pub async fn get_chats(
         .collect();
     let mut message_previews =
         crate::services::chat_list::load_last_message_previews(conn, messages_to_process, avatars);
+    drop(phase);
+    let phase = stages.start("dm_peers");
 
     let dm_peer_uids: Vec<i32> = items_to_process
         .iter()
@@ -102,9 +116,13 @@ pub async fn get_chats(
         })
         .collect();
     let dm_peer_summaries = build_member_summary_map(conn, avatars, &dm_peer_uids)?;
+    drop(phase);
+    let phase = stages.start("read_receipts");
     let chat_ids: Vec<i64> = items_to_process.iter().map(|row| row.chat_id).collect();
     let peer_receipts =
         crate::services::read_receipts::visible_chat_receipts(conn, uid, &chat_ids)?;
+    drop(phase);
+    let _phase = stages.start("response_build");
 
     let chats: Vec<ChatListItem> = items_to_process
         .into_iter()

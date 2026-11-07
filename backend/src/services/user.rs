@@ -219,54 +219,93 @@ pub fn lookup_user_profiles(
     conn: &mut diesel::PgConnection,
     uids: &[i32],
 ) -> QueryResult<HashMap<i32, UserProfile>> {
-    use crate::schema::discuz::discuz::common_member::dsl as cm_dsl;
-    use crate::schema::discuz::discuz::common_usergroup::dsl as cug_dsl;
-    use crate::schema::discuz_manual::discuz::common_member_profile::dsl as cmp_dsl;
-    use crate::schema::usergroup_extra::dsl as uge_dsl;
+    let started = std::time::Instant::now();
+    let metrics = crate::metrics::queries::connection_metrics(conn);
+    let result = (|| {
+        use crate::schema::discuz::discuz::common_member::dsl as cm_dsl;
+        use crate::schema::discuz::discuz::common_usergroup::dsl as cug_dsl;
+        use crate::schema::discuz_manual::discuz::common_member_profile::dsl as cmp_dsl;
+        use crate::schema::usergroup_extra::dsl as uge_dsl;
 
-    if uids.is_empty() {
-        return Ok(HashMap::new());
+        if uids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let rows = cm_dsl::common_member
+            .left_join(cmp_dsl::common_member_profile.on(cm_dsl::uid.eq(cmp_dsl::uid)))
+            .left_join(cug_dsl::common_usergroup.on(cm_dsl::groupid.eq(cug_dsl::groupid)))
+            .left_join(uge_dsl::usergroup_extra.on(cm_dsl::groupid.eq(uge_dsl::groupid)))
+            .filter(cm_dsl::uid.eq_any(uids))
+            .select((
+                cm_dsl::uid,
+                cm_dsl::username,
+                cmp_dsl::gender.nullable(),
+                cm_dsl::groupid,
+                cug_dsl::grouptitle.nullable(),
+                uge_dsl::chat_group_color.nullable(),
+                uge_dsl::chat_group_color_dark.nullable(),
+            ))
+            .load::<DiscuzUserProfileRow>(conn)?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                (
+                    row.uid,
+                    UserProfile {
+                        username: Some(normalize_discuz_username(&row.username)),
+                        gender: row.gender.unwrap_or(0),
+                        user_group: Some(UserGroupTagInfo {
+                            group_id: row.group_id,
+                            name: row.group_name,
+                            chat_group_color: row.chat_group_color,
+                            chat_group_color_dark: row.chat_group_color_dark,
+                        }),
+                    },
+                )
+            })
+            .collect())
+    })();
+    if let Some(metrics) = metrics {
+        metrics.record_profile_lookup(uids.len(), started, result.is_ok());
     }
-
-    let rows = cm_dsl::common_member
-        .left_join(cmp_dsl::common_member_profile.on(cm_dsl::uid.eq(cmp_dsl::uid)))
-        .left_join(cug_dsl::common_usergroup.on(cm_dsl::groupid.eq(cug_dsl::groupid)))
-        .left_join(uge_dsl::usergroup_extra.on(cm_dsl::groupid.eq(uge_dsl::groupid)))
-        .filter(cm_dsl::uid.eq_any(uids))
-        .select((
-            cm_dsl::uid,
-            cm_dsl::username,
-            cmp_dsl::gender.nullable(),
-            cm_dsl::groupid,
-            cug_dsl::grouptitle.nullable(),
-            uge_dsl::chat_group_color.nullable(),
-            uge_dsl::chat_group_color_dark.nullable(),
-        ))
-        .load::<DiscuzUserProfileRow>(conn)?;
-
-    Ok(rows
-        .into_iter()
-        .map(|row| {
-            (
-                row.uid,
-                UserProfile {
-                    username: Some(normalize_discuz_username(&row.username)),
-                    gender: row.gender.unwrap_or(0),
-                    user_group: Some(UserGroupTagInfo {
-                        group_id: row.group_id,
-                        name: row.group_name,
-                        chat_group_color: row.chat_group_color,
-                        chat_group_color_dark: row.chat_group_color_dark,
-                    }),
-                },
-            )
-        })
-        .collect())
+    result
 }
 
 #[cfg(test)]
 mod tests {
     use super::normalize_discuz_username;
+
+    #[test]
+    fn profile_lookup_records_empty_success_and_database_failure() {
+        use diesel::connection::SimpleConnection;
+        use diesel::prelude::*;
+        use std::sync::Arc;
+
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        let mut conn = PgConnection::establish(&url).unwrap();
+        let registry = prometheus::Registry::new();
+        crate::metrics::queries::attach_connection_metrics(
+            &mut conn,
+            Arc::new(crate::metrics::queries::QueryMetrics::new(&registry)),
+        );
+        assert!(super::lookup_user_profiles(&mut conn, &[])
+            .unwrap()
+            .is_empty());
+        conn.batch_execute("BEGIN").unwrap();
+        assert!(conn.batch_execute("SELECT 1 / 0").is_err());
+        assert!(super::lookup_user_profiles(&mut conn, &[42, 42]).is_err());
+        conn.batch_execute("ROLLBACK").unwrap();
+
+        let rendered = crate::metrics::encode(&registry).unwrap();
+        assert!(rendered.contains("profile_lookup_duration_seconds_count{outcome=\"success\"} 1"));
+        assert!(rendered.contains("profile_lookup_duration_seconds_count{outcome=\"error\"} 1"));
+        assert!(rendered.contains("profile_lookup_batch_size_count 2"));
+        assert!(rendered.contains("profile_lookup_batch_size_sum 2"));
+    }
 
     #[test]
     fn account_chat_settings_persist_without_changing_other_accounts_or_settings() {

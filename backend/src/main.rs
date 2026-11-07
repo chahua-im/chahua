@@ -85,13 +85,19 @@ async fn main() {
     }
 
     let config = Arc::new(AppConfig::from_env());
+    let metrics = Arc::new(metrics::Metrics::new());
 
     let manager = ConnectionManager::<PgConnection>::new(&config.database_url);
 
     // TODO: consider deadpool for pool
     let pool = DbPool::builder()
+        .event_handler(Box::new(metrics.pool_events()))
+        .connection_customizer(Box::new(metrics::queries::QueryConnectionCustomizer::new(
+            metrics.queries.clone(),
+        )))
         .build(manager)
         .expect("Failed to create pool");
+    metrics.register_pool_state(pool.clone());
 
     {
         let mut conn = pool.get().expect("Failed to get connection for migrations");
@@ -99,7 +105,6 @@ async fn main() {
             .expect("Failed to run database migrations");
     }
 
-    let metrics = Arc::new(metrics::Metrics::new());
     if matches!(command, Some(BackendCommand::MessageSearchReindex)) {
         if let Err(err) =
             run_message_search_reindex(pool.clone(), metrics.message_search.clone()).await

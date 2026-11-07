@@ -9,8 +9,13 @@ use diesel::{connection::SimpleConnection, prelude::*, r2d2::ConnectionManager};
 use super::{RpcServiceHandles, RpcServices};
 use crate::{config::AppConfig, metrics::Metrics, services, state::DbPool};
 
-#[derive(Debug)]
-struct IsolatedTables;
+struct IsolatedTables(Arc<crate::metrics::queries::QueryMetrics>);
+
+impl std::fmt::Debug for IsolatedTables {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IsolatedTables").finish_non_exhaustive()
+    }
+}
 
 #[derive(QueryableByName)]
 struct TableName {
@@ -20,6 +25,7 @@ struct TableName {
 
 impl diesel::r2d2::CustomizeConnection<PgConnection, diesel::r2d2::Error> for IsolatedTables {
     fn on_acquire(&self, connection: &mut PgConnection) -> Result<(), diesel::r2d2::Error> {
+        crate::metrics::queries::attach_connection_metrics(connection, self.0.clone());
         let names = diesel::sql_query(
             "SELECT tablename::text AS name FROM pg_catalog.pg_tables \
              WHERE schemaname = 'public' AND tablename <> '__diesel_schema_migrations' \
@@ -51,12 +57,12 @@ pub(crate) async fn services() -> Option<RpcServices> {
     let mut config = AppConfig::from_env();
     config.database_url = database_url.clone();
     let config = Arc::new(config);
+    let metrics = Arc::new(Metrics::new());
     let db = DbPool::builder()
         .max_size(1)
-        .connection_customizer(Box::new(IsolatedTables))
+        .connection_customizer(Box::new(IsolatedTables(metrics.queries.clone())))
         .build(ConnectionManager::<PgConnection>::new(database_url))
         .expect("connect isolated RPC test tables");
-    let metrics = Arc::new(Metrics::new());
     let ws_registry = Arc::new(services::ws_registry::ConnectionRegistry::new(
         metrics.ws.clone(),
     ));
