@@ -1,7 +1,9 @@
 mod api;
 mod http;
+mod pool;
+pub mod queries;
 
-pub use api::ApiMetrics;
+pub use api::{ApiMetrics, ApiStages};
 
 use axum::extract::State;
 use axum::http::{header, HeaderValue, StatusCode};
@@ -34,11 +36,18 @@ pub struct Metrics {
     pub message_search: Arc<MessageSearchMetrics>,
     pub background: Arc<BackgroundMetrics>,
     pub audio_transcode: Arc<AudioTranscodeMetrics>,
+    pub queries: Arc<queries::QueryMetrics>,
 }
 
 impl Metrics {
     pub fn new() -> Self {
         let registry = Registry::new();
+        #[cfg(target_os = "linux")]
+        registry
+            .register(Box::new(
+                prometheus::process_collector::ProcessCollector::for_self(),
+            ))
+            .expect("process collector registration should succeed");
         Self {
             api: Arc::new(ApiMetrics::new(&registry)),
             chat: Arc::new(ChatMetrics::new(&registry)),
@@ -50,8 +59,17 @@ impl Metrics {
             message_search: Arc::new(MessageSearchMetrics::new(&registry)),
             background: Arc::new(BackgroundMetrics::new(&registry)),
             audio_transcode: Arc::new(AudioTranscodeMetrics::new(&registry)),
+            queries: Arc::new(queries::QueryMetrics::new(&registry)),
             registry,
         }
+    }
+
+    pub fn pool_events(&self) -> pool::PoolEvents {
+        pool::PoolEvents::new(&self.registry)
+    }
+
+    pub fn register_pool_state(&self, pool: crate::state::DbPool) {
+        pool::register_pool_state(&self.registry, pool);
     }
 
     pub fn render(&self) -> Result<String, prometheus::Error> {

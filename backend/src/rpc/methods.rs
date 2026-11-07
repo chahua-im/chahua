@@ -276,7 +276,15 @@ pub async fn dispatch_call(
                 let context = context.clone();
                 let services = services.clone();
                 let runtime = tokio::runtime::Handle::current();
+                let queue =
+                    services
+                        .metrics
+                        .api
+                        .start_stage("rpc", registered_method, "blocking_queue");
                 tokio::task::spawn_blocking(move || {
+                    drop(queue);
+                    let stages = services.metrics.api.stages("rpc", registered_method);
+                    let authentication = stages.start("authentication");
                     let session = context.verified_session().map_err(RpcError::from)?;
                     if let Err(failure) =
                         crate::services::authentication::check_session_generation_cause(
@@ -293,10 +301,14 @@ pub async fn dispatch_call(
                         }
                         return Err(RpcError::from(failure));
                     }
+                    drop(authentication);
+                    let activity = stages.start("activity");
                     services
                         .client_tracking
                         .record_activity(session.uid, &session.client_id, None)
                         .map_err(RpcError::from)?;
+                    drop(activity);
+                    let _handler = stages.start("handler");
                     runtime.block_on(dispatch_registered(&context, &services, &method, params))
                 })
                 .await

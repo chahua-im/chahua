@@ -6,9 +6,9 @@ The backend exposes Prometheus metrics from a **metrics-only** listener. It bind
 format. The metrics listener only exposes that route, separate from the API
 listener.
 
-The registry is explicitly constructed in `src/metrics/mod.rs`. The application
-does not register built-in runtime or process collectors, so those series are
-not part of this endpoint unless source code registers them later.
+The registry is explicitly constructed in `src/metrics/mod.rs`. On Linux it
+registers Prometheus's standard process collector; these process series are
+absent on other platforms. No Tokio runtime collector is registered.
 
 ## Reading this catalog
 
@@ -40,6 +40,122 @@ not part of this endpoint unless source code registers them later.
 | `H9` | `1, 5, 15, 30, 60, 300, 900, 1800, 3600` seconds |
 | `H10` | `0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60` seconds |
 | `H11` | `0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120` seconds |
+| `H12` | `0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30` seconds |
+| `H13` | `0, 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 5000` requested IDs |
+
+## Backend process
+
+Linux process metrics are sampled when `/metrics` is scraped. They describe the
+backend process, not PostgreSQL or container limits. Values can be unavailable
+when `/proc` cannot be read.
+
+| Family | Type / labels | Meaning |
+| --- | --- | --- |
+| `process_cpu_seconds_total` | Counter; none | Cumulative user and system CPU seconds; `rate(...[5m])` is CPU cores consumed, not a percent of the container limit. |
+| `process_resident_memory_bytes` | Gauge; none | Resident process memory in bytes. |
+| `process_virtual_memory_bytes` | Gauge; none | Virtual address space in bytes, not physical memory consumption. |
+| `process_open_fds` | Gauge; none | Open file descriptors. |
+| `process_max_fds` | Gauge; none | File-descriptor soft limit. |
+| `process_threads` | Gauge; none | OS thread count, not Tokio task count. |
+| `process_start_time_seconds` | Gauge; none | Process start time as Unix seconds. |
+
+CPU throttling, host I/O, PostgreSQL CPU, and PostgreSQL wait events require
+separate infrastructure/database monitoring; these metrics do not infer them.
+The standard collector reports CPU time in whole seconds; use a multi-minute
+rate window rather than interpreting single-scrape increments as CPU spikes.
+
+```promql
+rate(process_cpu_seconds_total{job="wetty-chat-backend"}[5m])
+```
+
+```promql
+process_resident_memory_bytes{job="wetty-chat-backend"}
+```
+
+## Shared database pool
+
+These metrics cover the production pool shared by HTTP, RPC, and background
+workers, including migration/startup checkouts. They are collected through r2d2
+events and pool state, without issuing diagnostic SQL.
+
+| Family | Type / labels | Meaning | Buckets |
+| --- | --- | --- | --- |
+| `db_pool_checkout_duration_seconds` | Histogram; none | Elapsed time of successful `get`/`get_timeout` calls, including waiting and checkout validation. | `H12` |
+| `db_pool_checkout_timeouts_total` | Counter; none | `get`/`get_timeout` attempts ending in timeout, including exhaustion or inability to obtain a healthy connection. | — |
+| `db_pool_connections_active` | Gauge; none | Established connections not idle at scrape time; includes checkout validation, not just executing SQL. | — |
+| `db_pool_connections_idle` | Gauge; none | Established idle connections at scrape time. | — |
+| `db_pool_connections_max` | Gauge; none | Configured pool capacity, not the current established connection count. | — |
+
+Gauges come from one pool-state snapshot per scrape. Pending connections being
+created are not established connections. Failed checkout elapsed time is **not**
+recorded in the duration histogram: r2d2's timeout event exposes only the requested
+timeout, not actual elapsed time. Monitor the timeout counter alongside successful
+checkout latency. Nonblocking `try_get` calls and initial pool-construction
+failures do not emit checkout events. No per-request or per-user labels are used.
+
+```promql
+histogram_quantile(0.95,
+  sum by (instance, le) (
+    rate(db_pool_checkout_duration_seconds_bucket{job="wetty-chat-backend"}[$__rate_interval])
+  )
+)
+```
+
+```promql
+increase(db_pool_checkout_timeouts_total{job="wetty-chat-backend"}[5m])
+```
+
+```promql
+db_pool_connections_active{job="wetty-chat-backend"}
+/
+db_pool_connections_max{job="wetty-chat-backend"}
+```
+
+## Profile and app-version operations
+
+| Family | Type / labels | Meaning | Buckets |
+| --- | --- | --- | --- |
+| `profile_lookup_duration_seconds` | Histogram; `outcome=success\|error` | Shared profile lookup elapsed time, including SQL round trip, row decoding, and profile-map assembly. | `H12` |
+| `profile_lookup_batch_size` | Histogram; none | Number of IDs supplied to each completed profile lookup, including duplicates and failed attempts; not returned row count. | `H13` |
+| `app_version_aggregation_duration_seconds` | Histogram; `outcome=success\|error` | Active-client version aggregation SQL round trip, row decoding, and version-count normalization. Excludes gauge publication. | `H12` |
+
+The production pool attaches the metric context to each new connection, so these
+shared operations record across HTTP, RPC, and background callers. Diesel's
+existing SQL tracing is preserved. Connections created outside that pool must
+explicitly attach the context; isolated tests use their own registries.
+
+Durations exclude pool acquisition and blocking-worker scheduling; compare with
+pool and API-stage metrics for those waits. These are client-side operation
+timings, not PostgreSQL execution-only timings. They cannot distinguish database
+CPU, network latency, lock waits, or I/O waits.
+
+An empty profile batch records size zero and a successful duration without issuing
+SQL. A missing user is not a database error. Both outcome series exist at startup.
+Each operation records once when returning `Ok` or `Err`; panic/abort is not
+recorded as a completed outcome. No IDs, SQL text, query parameters, or versions
+are used as labels in these three families.
+
+```promql
+histogram_quantile(0.95,
+  sum by (instance, outcome, le) (
+    rate(profile_lookup_duration_seconds_bucket{job="wetty-chat-backend"}[$__rate_interval])
+  )
+)
+```
+
+The background app-version job runs once per minute per instance. Its low volume
+makes short-window percentiles noisy; count slow completions instead:
+
+```promql
+sum by (instance, outcome) (
+  increase(app_version_aggregation_duration_seconds_count{job="wetty-chat-backend"}[15m])
+)
+-
+sum by (instance, outcome) (
+  increase(app_version_aggregation_duration_seconds_bucket{job="wetty-chat-backend",le="0.5"}[15m])
+)
+```
+
 
 ## Unified API
 
@@ -97,6 +213,72 @@ malformed, oversized or otherwise unparsed envelope rejection is counted once as
 `413`/`1013`, and serialization errors are `500`/`-32603`. Supervised admitted
 work still records if it completes after disconnect; cancellation before
 preparation is not a completion.
+
+### API stage diagnostics
+
+| Family | Type / labels | Meaning and recording boundary | Buckets / cardinality |
+| --- | --- | --- | --- |
+| `api_stage_duration_seconds` | Histogram; `transport`, `api`, `stage` | Elapsed wall time for each instrumented stage, including attempts ending in errors. | `H12`; canonical API names and fixed stage literals only; no request parameters, user IDs, or SQL. |
+
+Ordinary RPC read/mutation calls record `blocking_queue` (submission through
+blocking-worker start), `authentication` (session-generation check),
+`activity` (activity bookkeeping), and `handler` (decoded dispatch through result
+conversion to JSON). Session/control operations do not record these stages.
+The authentication and activity stages can themselves include database waits.
+
+`chats.list` additionally records the following stages on both HTTP and RPC:
+
+| Stage | Boundary |
+| --- | --- |
+| `pool_acquire` | Connection acquisition, including failed attempts. |
+| `settings` | Notification defaults and chat settings loading. |
+| `page` | Chat page loading, including cursor lookup. |
+| `unread_counts` | Membership unread counts. |
+| `mention_counts` | Unread mention counts. |
+| `reaction_counts` | Unread reaction counts. |
+| `message_previews` | Last-message hydration, including avatar lookup and database work. |
+| `dm_peers` | DM peer selection and member-summary loading, including avatars. |
+| `read_receipts` | Visible peer receipt loading. |
+| `response_build` | Chat response assembly, excluding transport serialization. |
+
+HTTP `chats.list` also records `blocking_queue`; its authentication/activity
+middleware is outside these stages. Database-backed stages include SQL execution
+and lock waits, not just database CPU time.
+
+Timers record on scope exit, including errors and unwinding. A cancelled queued
+task can record elapsed queue time without executing; stages not reached have no
+observation. Series appear on first use. RPC `handler` contains the detailed chat
+stages: do not add parent and child durations, or add independently calculated
+percentiles. These metrics do not measure RPC admission waits before dispatch or
+socket transmission. Existing API turnaround covers pre-dispatch admission waits.
+
+**Per-stage p95 for chat listing (seconds):**
+
+```promql
+histogram_quantile(0.95,
+  sum by (transport, stage, le) (
+    rate(api_stage_duration_seconds_bucket{job="wetty-chat-backend",api="chats.list"}[$__rate_interval])
+  )
+)
+```
+
+**Stage observations exceeding 500 ms per second:**
+
+```promql
+sum by (api, transport, stage) (
+  rate(api_stage_duration_seconds_count{job="wetty-chat-backend"}[$__rate_interval])
+)
+-
+sum by (api, transport, stage) (
+  rate(api_stage_duration_seconds_bucket{job="wetty-chat-backend",le="0.5"}[$__rate_interval])
+)
+```
+
+Use the second query to locate intermittent slow stages without relying solely
+on low-volume percentile estimates. Neither query separates successful and failed
+attempts. Counts and sums are additive across instances; retain `instance` in
+aggregations when checking for an instance-specific stall.
+
 
 ## API PromQL
 
