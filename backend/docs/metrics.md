@@ -156,6 +156,33 @@ sum by (instance, outcome) (
 )
 ```
 
+## Read-receipt query diagnostics
+
+| Family | Type / labels | Meaning | Buckets |
+| --- | --- | --- | --- |
+| `read_receipt_query_duration_seconds` | Histogram; `query`, `outcome=success\|error` | SQL round trip and row decoding for each attempted batched receipt query, excluding pool waits and post-query map construction. | `H12` |
+
+The fixed `query` values are `dm_peers`, `friendships`, `blocks`, `visibility`,
+`chat_receipts`, and `thread_receipts`. Chat and thread receipt loading share the
+first four queries; the fifth fetch uses the corresponding scope-specific value.
+All pooled callers share these metrics, without transport or account labels.
+Queries skipped by empty input, no DM peers, or privacy filtering have no
+observation. Errors are recorded before propagation; later queries are not run.
+Both outcomes are registered at startup. Panic/abort is not a completed outcome.
+The query label contains a fixed operation name, never SQL or parameters.
+
+The API `read_receipts` stage includes these SQL operations and in-memory privacy
+checks; do not add its duration to the nested query durations or add percentiles.
+These timings do not distinguish PostgreSQL execution, network, locks, or I/O.
+
+```promql
+histogram_quantile(0.95,
+  sum by (instance, query, outcome, le) (
+    rate(read_receipt_query_duration_seconds_bucket{job="wetty-chat-backend"}[5m])
+  )
+)
+```
+
 
 ## Unified API
 

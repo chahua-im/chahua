@@ -472,12 +472,20 @@ impl UnreadService {
         }
         // Keep membership estimates out of the reaction/message join: otherwise
         // some pages favor hashing entire chat histories before checking reads.
+        // Any unread reaction must be newer than the earliest cursor on this
+        // page. Apply that safe bound before loading historical message rows;
+        // the per-chat cursor below remains the authoritative read check.
         let rows = sql_query(
             "WITH reacted_messages AS MATERIALIZED (
                  SELECT m.chat_id, mr.message_id, mr.created_at
                  FROM message_reactions mr
                  JOIN messages m ON m.id = mr.message_id
                  WHERE mr.message_author_uid = $1 AND m.chat_id = ANY($2)
+                   AND mr.created_at > (
+                       SELECT MIN(last_reactions_read_at)
+                       FROM group_membership
+                       WHERE uid = $1 AND chat_id = ANY($2)
+                   )
                    AND mr.user_uid <> $1
                    AND m.deleted_at IS NULL AND m.is_published = TRUE
                    AND m.reply_root_id IS NULL
@@ -1831,6 +1839,71 @@ mod tests {
             let (chat_id, root_id, last) = saturated_scopes[1];
             fixture.read(conn, chat_id, root_id, last)?;
             fixture.assert_summary(conn, 4, [false, true, false], [true; 3])
+        });
+    }
+
+    #[test]
+    fn reaction_page_cutoff_preserves_distinct_messages_and_per_chat_boundaries() {
+        use diesel::connection::SimpleConnection;
+        use diesel::{Connection, PgConnection};
+        use std::collections::HashMap;
+        use std::sync::atomic::{AtomicI64, Ordering};
+
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        let mut conn = PgConnection::establish(&url).unwrap();
+        static NEXT: AtomicI64 = AtomicI64::new(9_876_820_000);
+        let base = NEXT.fetch_add(10, Ordering::SeqCst);
+        let (first, second, outside) = (base, base + 1, base + 2);
+        let (a, b, c, boundary) = (base + 3, base + 4, base + 5, base + 6);
+        let author = -548_101;
+        let actor = -548_102;
+        let service = UnreadService::new();
+        conn.test_transaction::<_, diesel::result::Error, _>(|conn| {
+            conn.batch_execute(&format!(
+                "INSERT INTO groups (id, name) VALUES
+                    ({first}, 'cursor-first'), ({second}, 'cursor-second'), ({outside}, 'cursor-outside');
+                 INSERT INTO group_membership (chat_id, uid, last_reactions_read_at) VALUES
+                    ({first}, {author}, '2020-01-01'),
+                    ({second}, {author}, '2020-01-03'),
+                    ({outside}, {author}, '2030-01-01'),
+                    ({first}, {actor}, '2040-01-01');
+                 INSERT INTO messages (id, message_type, client_generated_id, sender_uid, chat_id, created_at) VALUES
+                    ({a}, 'text', 'cutoff-{a}', {author}, {first}, '2020-01-01'),
+                    ({b}, 'text', 'cutoff-{b}', {author}, {second}, '2020-01-01'),
+                    ({c}, 'text', 'cutoff-{c}', {author}, {second}, '2020-01-01'),
+                    ({boundary}, 'text', 'cutoff-{boundary}', {author}, {second}, '2020-01-01');
+                 INSERT INTO message_reactions (message_id, user_uid, emoji, created_at, message_author_uid) VALUES
+                    ({a}, {actor}, 'a', '2020-01-02', {author}),
+                    ({a}, {actor}, 'b', '2020-01-02', {author}),
+                    ({b}, {actor}, 'a', '2020-01-02', {author}),
+                    ({c}, {actor}, 'a', '2020-01-04', {author}),
+                    ({boundary}, {actor}, 'a', '2020-01-03', {author}),
+                    ({boundary}, {author}, 'self', '2020-01-04', {author});"
+            ))?;
+            let page = [
+                membership(first, None, false, None),
+                membership(second, None, false, None),
+            ];
+            assert_eq!(
+                service.count_chat_unread_reactions_for_memberships(conn, author, &page)?,
+                HashMap::from([(first, 1), (second, 1)])
+            );
+            conn.batch_execute(&format!(
+                "UPDATE group_membership SET last_reactions_read_at = '2020-01-05'
+                 WHERE chat_id = {first} AND uid = {author}"
+            ))?;
+            assert_eq!(
+                service.count_chat_unread_reactions_for_memberships(conn, author, &page)?,
+                HashMap::from([(second, 1)])
+            );
+            conn.batch_execute(&format!(
+                "DELETE FROM group_membership WHERE uid = {author} AND chat_id IN ({first}, {second})"
+            ))?;
+            assert!(service.count_chat_unread_reactions_for_memberships(conn, author, &page)?.is_empty());
+            Ok(())
         });
     }
 

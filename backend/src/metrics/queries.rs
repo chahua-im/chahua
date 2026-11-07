@@ -12,8 +12,18 @@ pub struct QueryMetrics {
     profile_lookup_duration_seconds: [Histogram; 2],
     profile_lookup_batch_size: Histogram,
     app_version_aggregation_duration_seconds: [Histogram; 2],
+    read_receipt_query_duration_seconds: [[Histogram; 2]; 6],
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum ReceiptQuery {
+    DmPeers,
+    Friendships,
+    Blocks,
+    Visibility,
+    ChatReceipts,
+    ThreadReceipts,
+}
 impl QueryMetrics {
     pub fn new(registry: &Registry) -> Self {
         let buckets = vec![
@@ -32,10 +42,18 @@ impl QueryMetrics {
             "app_version_aggregation_duration_seconds",
             "Elapsed active app-version aggregation time in seconds, including failed attempts",
             &["outcome"],
-            buckets,
+            buckets.clone(),
             registry
         )
         .expect("app version aggregation duration registration should succeed");
+        let receipt_duration = register_histogram_vec_with_registry!(
+            "read_receipt_query_duration_seconds",
+            "Read-receipt SQL round trip and row decoding time in seconds",
+            &["query", "outcome"],
+            buckets,
+            registry
+        )
+        .expect("read receipt query duration registration should succeed");
         Self {
             profile_lookup_duration_seconds: [
                 profile_duration.with_label_values(&["error"]),
@@ -51,6 +69,11 @@ impl QueryMetrics {
                 version_duration.with_label_values(&["error"]),
                 version_duration.with_label_values(&["success"]),
             ],
+            read_receipt_query_duration_seconds: [
+                "dm_peers", "friendships", "blocks", "visibility", "chat_receipts", "thread_receipts",
+            ].map(|query| {
+                ["error", "success"].map(|outcome| receipt_duration.with_label_values(&[query, outcome]))
+            }),
         }
     }
 
@@ -92,6 +115,21 @@ pub(crate) fn connection_metrics(conn: &mut PgConnection) -> Option<Arc<QueryMet
     conn.instrumentation()
         .downcast_ref::<QueryInstrumentation>()
         .map(|instrumentation| Arc::clone(&instrumentation.metrics))
+}
+
+pub(crate) fn measure_receipt_query<T>(
+    conn: &mut PgConnection,
+    query: ReceiptQuery,
+    operation: impl FnOnce(&mut PgConnection) -> diesel::QueryResult<T>,
+) -> diesel::QueryResult<T> {
+    let metrics = connection_metrics(conn);
+    let start = Instant::now();
+    let result = operation(conn);
+    if let Some(metrics) = metrics {
+        metrics.read_receipt_query_duration_seconds[query as usize][usize::from(result.is_ok())]
+            .observe(start.elapsed().as_secs_f64());
+    }
+    result
 }
 
 pub struct QueryConnectionCustomizer {
