@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use crate::dto::ws::{ReadReceiptChangedPayload, ServerWsMessage};
 use crate::errors::AppError;
+use crate::metrics::queries::{measure_receipt_query, ReceiptQuery};
 use crate::models::{GroupKind, ReadReceiptVisibility};
 use crate::schema::{
     blocks, friendships, group_membership, groups, messages, thread_user_states, user_extra,
@@ -301,11 +302,13 @@ fn visible_dm_peers(
     if chat_ids.is_empty() {
         return Ok(HashMap::new());
     }
-    let rows = groups::table
-        .filter(groups::id.eq_any(chat_ids))
-        .filter(groups::kind.eq(GroupKind::Dm))
-        .select((groups::id, groups::dm_uid1, groups::dm_uid2))
-        .load::<(i64, Option<i32>, Option<i32>)>(conn)?;
+    let rows = measure_receipt_query(conn, ReceiptQuery::DmPeers, |conn| {
+        groups::table
+            .filter(groups::id.eq_any(chat_ids))
+            .filter(groups::kind.eq(GroupKind::Dm))
+            .select((groups::id, groups::dm_uid1, groups::dm_uid2))
+            .load::<(i64, Option<i32>, Option<i32>)>(conn)
+    })?;
     let mut peers = HashMap::new();
     for (chat_id, first, second) in rows {
         let (Some(first), Some(second)) = (first, second) else {
@@ -330,49 +333,57 @@ fn visible_dm_peers(
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
-    let friend_rows = friendships::table
-        .filter(
-            friendships::uid1
-                .eq(viewer_uid)
-                .and(friendships::uid2.eq_any(&peer_uids))
-                .or(friendships::uid2
+    let friend_rows = measure_receipt_query(conn, ReceiptQuery::Friendships, |conn| {
+        friendships::table
+            .filter(
+                friendships::uid1
                     .eq(viewer_uid)
-                    .and(friendships::uid1.eq_any(&peer_uids))),
-        )
-        .select((
-            friendships::uid1,
-            friendships::uid2,
-            friendships::uid1_shares_read_receipts,
-            friendships::uid2_shares_read_receipts,
-        ))
-        .load::<(i32, i32, Option<bool>, Option<bool>)>(conn)?;
+                    .and(friendships::uid2.eq_any(&peer_uids))
+                    .or(friendships::uid2
+                        .eq(viewer_uid)
+                        .and(friendships::uid1.eq_any(&peer_uids))),
+            )
+            .select((
+                friendships::uid1,
+                friendships::uid2,
+                friendships::uid1_shares_read_receipts,
+                friendships::uid2_shares_read_receipts,
+            ))
+            .load::<(i32, i32, Option<bool>, Option<bool>)>(conn)
+    })?;
     let friendship_map: HashMap<(i32, i32), (Option<bool>, Option<bool>)> = friend_rows
         .into_iter()
         .map(|(uid1, uid2, uid1_override, uid2_override)| {
             ((uid1, uid2), (uid1_override, uid2_override))
         })
         .collect();
-    let blocked_pairs: HashSet<(i32, i32)> = blocks::table
-        .filter(
-            blocks::blocker_uid
-                .eq(viewer_uid)
-                .and(blocks::blocked_uid.eq_any(&peer_uids))
-                .or(blocks::blocker_uid
-                    .eq_any(&peer_uids)
-                    .and(blocks::blocked_uid.eq(viewer_uid))),
-        )
-        .select((blocks::blocker_uid, blocks::blocked_uid))
-        .load::<(i32, i32)>(conn)?
+    let blocked_pairs: HashSet<(i32, i32)> =
+        measure_receipt_query(conn, ReceiptQuery::Blocks, |conn| {
+            blocks::table
+                .filter(
+                    blocks::blocker_uid
+                        .eq(viewer_uid)
+                        .and(blocks::blocked_uid.eq_any(&peer_uids))
+                        .or(blocks::blocker_uid
+                            .eq_any(&peer_uids)
+                            .and(blocks::blocked_uid.eq(viewer_uid))),
+                )
+                .select((blocks::blocker_uid, blocks::blocked_uid))
+                .load::<(i32, i32)>(conn)
+        })?
         .into_iter()
         .map(|(blocker, blocked)| canonical_pair(blocker, blocked))
         .collect();
 
     let mut visibility_uids = peer_uids;
     visibility_uids.push(viewer_uid);
-    let visibility_map: HashMap<i32, ReadReceiptVisibility> = user_extra::table
-        .filter(user_extra::uid.eq_any(&visibility_uids))
-        .select((user_extra::uid, user_extra::read_receipt_visibility))
-        .load::<(i32, ReadReceiptVisibility)>(conn)?
+    let visibility_map: HashMap<i32, ReadReceiptVisibility> =
+        measure_receipt_query(conn, ReceiptQuery::Visibility, |conn| {
+            user_extra::table
+                .filter(user_extra::uid.eq_any(&visibility_uids))
+                .select((user_extra::uid, user_extra::read_receipt_visibility))
+                .load::<(i32, ReadReceiptVisibility)>(conn)
+        })?
         .into_iter()
         .collect();
     let viewer_visibility = visibility_map
@@ -422,15 +433,17 @@ pub fn visible_chat_receipts(
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
-    let rows = group_membership::table
-        .filter(group_membership::chat_id.eq_any(&chat_ids))
-        .filter(group_membership::uid.eq_any(&peer_uids))
-        .select((
-            group_membership::chat_id,
-            group_membership::uid,
-            group_membership::last_read_receipt_message_id,
-        ))
-        .load::<(i64, i32, Option<i64>)>(conn)?;
+    let rows = measure_receipt_query(conn, ReceiptQuery::ChatReceipts, |conn| {
+        group_membership::table
+            .filter(group_membership::chat_id.eq_any(&chat_ids))
+            .filter(group_membership::uid.eq_any(&peer_uids))
+            .select((
+                group_membership::chat_id,
+                group_membership::uid,
+                group_membership::last_read_receipt_message_id,
+            ))
+            .load::<(i64, i32, Option<i64>)>(conn)
+    })?;
     Ok(rows
         .into_iter()
         .filter(|(chat_id, uid, _)| peers.get(chat_id) == Some(uid))
@@ -462,17 +475,19 @@ pub fn visible_thread_receipts(
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
-    let rows = thread_user_states::table
-        .filter(thread_user_states::chat_id.eq_any(&chat_ids))
-        .filter(thread_user_states::thread_root_id.eq_any(&root_ids))
-        .filter(thread_user_states::uid.eq_any(&peer_uids))
-        .select((
-            thread_user_states::chat_id,
-            thread_user_states::thread_root_id,
-            thread_user_states::uid,
-            thread_user_states::last_read_receipt_message_id,
-        ))
-        .load::<(i64, i64, i32, Option<i64>)>(conn)?;
+    let rows = measure_receipt_query(conn, ReceiptQuery::ThreadReceipts, |conn| {
+        thread_user_states::table
+            .filter(thread_user_states::chat_id.eq_any(&chat_ids))
+            .filter(thread_user_states::thread_root_id.eq_any(&root_ids))
+            .filter(thread_user_states::uid.eq_any(&peer_uids))
+            .select((
+                thread_user_states::chat_id,
+                thread_user_states::thread_root_id,
+                thread_user_states::uid,
+                thread_user_states::last_read_receipt_message_id,
+            ))
+            .load::<(i64, i64, i32, Option<i64>)>(conn)
+    })?;
     Ok(rows
         .into_iter()
         .filter(|(chat_id, _, uid, _)| peers.get(chat_id) == Some(uid))
@@ -608,6 +623,39 @@ pub fn broadcast_pair_privacy_changed(
 mod tests {
     use super::read_receipt_is_visible;
     use crate::models::ReadReceiptVisibility;
+
+    #[test]
+    fn receipt_query_error_records_only_the_attempted_operation() {
+        use diesel::{connection::SimpleConnection, Connection, PgConnection};
+        use std::sync::Arc;
+
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        let mut conn = PgConnection::establish(&url).unwrap();
+        let registry = prometheus::Registry::new();
+        crate::metrics::queries::attach_connection_metrics(
+            &mut conn,
+            Arc::new(crate::metrics::queries::QueryMetrics::new(&registry)),
+        );
+        conn.batch_execute("BEGIN").unwrap();
+        assert!(conn.batch_execute("SELECT 1 / 0").is_err());
+        assert!(super::visible_chat_receipts(&mut conn, 42, &[])
+            .unwrap()
+            .is_empty());
+        assert!(super::visible_chat_receipts(&mut conn, 42, &[1]).is_err());
+        conn.batch_execute("ROLLBACK").unwrap();
+        let rendered = crate::metrics::encode(&registry).unwrap();
+        assert!(rendered.contains(
+            "read_receipt_query_duration_seconds_count{outcome=\"error\",query=\"dm_peers\"} 1"
+        ));
+        for query in ["friendships", "blocks", "visibility", "chat_receipts"] {
+            assert!(rendered.contains(&format!(
+                "read_receipt_query_duration_seconds_count{{outcome=\"error\",query=\"{query}\"}} 0"
+            )));
+        }
+    }
 
     #[test]
     fn receipts_require_reciprocal_friend_visibility_without_blocks() {
