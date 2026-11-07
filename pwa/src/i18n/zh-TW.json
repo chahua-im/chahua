@@ -252,7 +252,6 @@
     "list": {
       "startChat": "開始聊天",
       "selectConversation": "從左側選擇一個會話",
-      "searchGroupsAndUsers": "搜尋群組和使用者",
       "friendRequests": "好友請求",
       "archived": "已封存",
       "tabs": {
@@ -262,10 +261,7 @@
         "threads": "話題"
       },
       "add": {
-        "createGroup": "建立群聊",
-        "joinGroup": "加入群聊",
-        "addFriend": "加入好友",
-        "search": "搜尋"
+        "createGroup": "建立群聊"
       },
       "mute": {
         "title": "靜音通知",
@@ -457,7 +453,8 @@
       "moreGroups": "載入更多群組",
       "failed": "搜尋失敗",
       "noResults": "找不到結果",
-      "prompt": "搜尋群組和使用者"
+      "prompt": "輸入群組名稱、使用者名稱、UID、邀請碼或邀請連結",
+      "invites": "邀請"
     },
     "search": {
       "title": "搜尋",

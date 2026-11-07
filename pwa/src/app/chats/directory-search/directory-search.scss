@@ -1,0 +1,15 @@
+.invite-result {
+  display: block;
+  width: calc(100% - 32px);
+  margin: 0 auto 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.invite-result app-invite-card {
+  width: 100%;
+}

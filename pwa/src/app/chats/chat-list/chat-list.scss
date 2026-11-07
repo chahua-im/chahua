@@ -3,6 +3,14 @@ app-chat-avatar {
   --avatar-font-weight: 400;
 }
 
+.search-toolbar ion-buttons {
+  align-self: center;
+}
+
+.search-toolbar ion-searchbar.ios {
+  padding-block: 8px;
+}
+
 ion-segment {
   width: 100%;
   max-width: 400px;

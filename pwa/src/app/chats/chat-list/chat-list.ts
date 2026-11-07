@@ -32,7 +32,15 @@ import {
   type SegmentCustomEvent,
 } from '@ionic/angular';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { addCircleOutline, bookmarkOutline, chevronBack, downloadOutline, settingsOutline } from 'ionicons/icons';
+import {
+  bookmarkOutline,
+  chatbubblesOutline,
+  chevronBack,
+  closeOutline,
+  downloadOutline,
+  searchOutline,
+  settingsOutline,
+} from 'ionicons/icons';
 import { VoiceBar } from '../../messages/voice-player/voice-bar';
 import { AppInstall } from '../../pwa/app-install';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
@@ -130,7 +138,9 @@ export class ChatList {
   protected readonly outlet = inject(IonRouterOutlet, { optional: true });
   private readonly nav = inject(NavController);
   protected readonly backIcon = chevronBack;
-  protected readonly addIcon = addCircleOutline;
+  protected readonly searchIcon = searchOutline;
+  protected readonly closeIcon = closeOutline;
+  protected readonly createGroupIcon = chatbubblesOutline;
   protected readonly installer = inject(AppInstall);
   protected readonly savedIcon = bookmarkOutline;
   protected readonly settingsIcon = settingsOutline;

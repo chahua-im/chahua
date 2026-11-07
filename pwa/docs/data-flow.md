@@ -143,7 +143,7 @@ Diagnostics 在应用初始化时启用，记录构建版本、时间、脱敏�
 | 进入会话/话题（mention）             | `chats.listMentions`（话题加 threadId）                                                                             | 保留本次会话的跳转 ID；mention 计数由消息已读游标派生，不单独 ack              |
 | 置顶栏、置顶页、消息菜单             | `pins.list`／`pins.listForThread`                                                                                   | 共享 ChatPins                                                                  |
 | 全局收藏                             | `savedMessages.list({limit: 50})`，续页加 before                                                                    | SavedMessageList 快照                                                          |
-| 全局目录搜索                         | `groups.list`（joined）和 `users.search`，300ms 防抖                                                                | DirectorySearch；群有游标，用户无游标                                          |
+| 全局目录搜索                         | `groups.list`（joined）、`users.search` 及候选邀请码的 `invites.getByCode`，300ms 防抖                                                                | DirectorySearch；群有游标，用户与邀请无游标                                          |
 | 群资料中的成员标签                   | `groups.listMembers`，chatId、limit、after、q、mode                                                                 | ChatMembers 局部分页                                                           |
 | 资料中的话题标签                     | `threads.listForChat({chatId: c, limit: 50, order: 'newest'})`，cursor 根 ID                                        | ChatThreads 局部分页                                                           |
 | 话题资料中的成员列表                 | `threads.listParticipants({chatId: c, threadRootId: t, limit: 100})`，cursor 用户 UID                               | ThreadParticipants 局部分页                                                    |
@@ -381,6 +381,8 @@ ChatStore 维护一份摘要；隐藏成员变动推送不覆盖摘要或推动�
 ChatStore 共享群模式、本人身份与个人模式，按更严格者派生有效模式，管理员豁免。进入群会话和打开详情使用去重的 `groups.get` 补齐权限；私聊会话复用已有资料缓存，不为群发言权限额外读取详情。列表行不逐项请求权限，转发与邀请卡片只在选定群目的地后读取详情；转发到已知私聊或私聊话题跳过群权限查询。管理员通过 `groups.updateSpeakingMode` 或 `groups.updateMemberSpeakingMode` 保存，成功响应进入共享状态。
 
 `groupSpeakingModeChanged` 更新群模式；`memberSpeakingModeChanged` 更新目标成员身份和个人模式，并通知已打开的成员列表。群与本人字段分别记录版本，迟到的详情和保存响应不能覆盖更新的推送；保存期间的详情读取不能恢复旧群模式。账号切换清空权限缓存。重连使详情失效并校准当前会话、信息面板和成员列表；成员列表保持已有行，读到原加载深度后原位合并，期间的实时变更优先。
+
+目录搜索对群与用户并行查询，8–12 位字母数字输入及可解析邀请链接同时查询邀请；仅用户模式不查询群或邀请。普通关键词未匹配邀请码时不显示邀请结果，明确邀请链接不存在或邀请已过期时显示对应状态卡片。各类别响应到达后立即展示，不等待其他类别请求结束；尚未完成时保留加载反馈，不显示空结果，群续页按钮仅在实际续页时显示等待；失败不丢弃其他类别结果；同条件重试保留已知内容，修改条件、清空输入或切换账号后旧回包不得覆盖新结果。群续页只请求群，不重复查用户或邀请；各类别分别保存错误状态，群续页只更新群错误，其他类别的失败提示保留到重新搜索或重试；请求期间禁用重复重试。邀请卡片复用搜索结果，不重复发起预览请求。
 
 StartChat 从邀请卡片或链接获得 code 时立即调用 `invites.getByCode`；手动输入先解析邀请码或邀请链接，停止输入 300ms 后自动查询，空值或不能解析的链接不请求。同一邀请码的格式变化不重复查询；修改邀请码、切换账号或销毁组件会取消等待和旧订阅，迟到回包不恢复旧预览。邀请预览由后端先检查邀请码是否存在、是否过期或撤销：NotFound 表示不存在，Gone 表示已过期或撤销，空码返回 BadRequest；只要有效，就返回群资料及独立的 alreadyMember、canJoin，不因当前用户未受邀或定向邀请已使用而拒绝预览。InviteCard 忽略成员身份、canJoin 和 usedAt；BadRequest 与 NotFound 均显示不存在，Gone 显示已过期，网络或服务异常单独显示加载失败。StartChat 使用 alreadyMember 显示打开群聊，使用 canJoin 控制加入按钮，未受邀时保留群资料与禁用按钮。兑换遇到 403/409 时保留已知群资料并重查邀请资格，以处理成员条件变化、已入群或邀请被使用；重查结果原位更新。详情只使用邀请响应中的群资料及字段，不补发群资料、成员、在线人数或历史消息请求。
 

@@ -332,7 +332,7 @@ describe('ChatList', () => {
 
   it('opens the avatar menu without navigating or requesting notification permission', async () => {
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl');
-    const menu = fixture.nativeElement.querySelectorAll('ion-popover')[1];
+    const menu = fixture.nativeElement.querySelector('ion-popover');
     const present = vi.spyOn(menu, 'present').mockResolvedValue(undefined);
     fixture.debugElement
       .query(By.css('ion-buttons[slot="start"] ion-button'))

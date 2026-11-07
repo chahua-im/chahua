@@ -252,7 +252,6 @@
     "list": {
       "startChat": "Start chatting",
       "selectConversation": "Select a conversation",
-      "searchGroupsAndUsers": "Search groups and users",
       "friendRequests": "Friend requests",
       "archived": "Archived",
       "tabs": {
@@ -262,10 +261,7 @@
         "threads": "Threads"
       },
       "add": {
-        "createGroup": "Create group",
-        "joinGroup": "Join group",
-        "addFriend": "Add friend",
-        "search": "Search"
+        "createGroup": "Create group"
       },
       "mute": {
         "title": "Mute notifications",
@@ -457,7 +453,8 @@
       "moreGroups": "Load more groups",
       "failed": "Search failed",
       "noResults": "No results found",
-      "prompt": "Search groups and users"
+      "prompt": "Enter a group name, username, UID, invite code or invite link",
+      "invites": "Invites"
     },
     "search": {
       "title": "Search",

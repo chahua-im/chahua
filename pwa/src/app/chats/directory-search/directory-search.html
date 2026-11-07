@@ -1,5 +1,11 @@
 @if (query().trim()) {
   <ion-list>
+    @if (invitation(); as invite) {
+      <ion-list-header>{{ 'chats.directory.invites' | transloco }}</ion-list-header>
+      <button type="button" class="invite-result" (click)="openInvite(invite.code)">
+        <app-invite-card [code]="invite.code" [result]="invite" />
+      </button>
+    }
     @if (groups().length) {
       <ion-list-header>{{ 'chats.directory.groups' | transloco }}</ion-list-header>
     }
@@ -14,9 +20,9 @@
     }
     @if (cursor()) {
       <ion-button fill="clear" [disabled]="loading()" (click)="search(true)">
-        <span class="action-content" [class.busy]="loading()">
+        <span class="action-content" [class.busy]="loadingMore()">
           <span class="action-label">{{ 'chats.directory.moreGroups' | transloco }}</span>
-          @if (loading()) {
+          @if (loadingMore()) {
             <ion-spinner />
           }
         </span>
@@ -31,17 +37,28 @@
           slot="start"
           [size]="40"
           [entry]="{ avatar: person.avatarUrl, title: person.username ?? person.uid.toString() }" />
-        <ion-label>{{ person.username || person.uid }}</ion-label>
+        <ion-label>
+          {{ person.username || person.uid }}
+          @if (person.username) {
+            <p>{{ person.uid }}</p>
+          }
+        </ion-label>
       </ion-item>
     }
   </ion-list>
-  @if (loading() && cursor() == null) {
+  @if (loading() && !loadingMore()) {
     <div class="page-loading"><ion-spinner /></div>
   } @else if (error()) {
-    <app-load-error compact [message]="'chats.directory.failed' | transloco" (retry)="search()" />
-  } @else if (!groups().length && !people().length) {
+    <app-load-error
+      compact
+      [message]="'chats.directory.failed' | transloco"
+      [disabled]="loading()"
+      (retry)="search()" />
+  } @else if (!groups().length && !people().length && !invitation()) {
     <p class="ion-padding ion-text-center">{{ 'chats.directory.noResults' | transloco }}</p>
   }
 } @else {
-  <p class="ion-padding ion-text-center">{{ 'chats.directory.prompt' | transloco }}</p>
+  <p class="ion-padding ion-text-center">
+    {{ (usersOnly() ? 'chats.start.searchUsers' : 'chats.directory.prompt') | transloco }}
+  </p>
 }
