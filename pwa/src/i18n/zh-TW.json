@@ -472,6 +472,7 @@
       "noParticipants": "尚無參與者資訊"
     },
     "link": {
+      "notMember": "你不是此聊天的成員，無法查看此訊息",
       "failed": "無法開啟此連結",
       "backToMessages": "返回訊息",
       "messageUnavailable": "訊息已撤回或不存在"

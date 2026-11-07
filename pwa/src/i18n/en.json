@@ -472,6 +472,7 @@
       "noParticipants": "No participants yet"
     },
     "link": {
+      "notMember": "You're not a member of this chat, so you can't view this message",
       "failed": "This link can't be opened.",
       "backToMessages": "Back to messages",
       "messageUnavailable": "This message was deleted or no longer exists"

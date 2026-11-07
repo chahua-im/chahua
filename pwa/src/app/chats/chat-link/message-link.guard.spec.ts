@@ -182,31 +182,33 @@ describe('Message permalink navigation', () => {
     });
   });
 
-  it.each([RpcErrorCode.NotFound, RpcErrorCode.Forbidden, RpcErrorCode.Internal, 'disconnected'] as const)(
-    'keeps the current URL and history on failure (%s), showing one toast',
-    async (code) => {
-      await router.navigateByUrl('/chats');
-      await router.navigateByUrl(conversation + '#msg=123');
-      const location = TestBed.inject(Location);
-      const { navigation, request } = await requestLink();
-      expect(router.url).toBe(conversation + '#msg=123');
-      expect(location.path(true)).toBe(conversation + '#msg=123');
-      if (code === 'disconnected') {
-        peer.disconnect();
-        request.flush(wireMessage);
-      } else request.error(code);
-      expect(await navigation).toBe(false);
-      expect(router.url).toBe(conversation + '#msg=123');
-      expect(location.path(true)).toBe(conversation + '#msg=123');
-      expect(create).toHaveBeenCalledExactlyOnceWith({
-        message: code === RpcErrorCode.NotFound ? '消息已撤回或不存在' : '链接无法打开',
-        duration: 3000,
-      });
-      expect(toast.present).toHaveBeenCalledOnce();
-      location.back();
-      await vi.waitFor(() => expect(router.url).toBe('/chats'));
-    },
-  );
+  it.each([
+    [RpcErrorCode.NotFound, '消息已撤回或不存在'],
+    [RpcErrorCode.Forbidden, '你不是该聊天的成员，无法查看此消息'],
+    [RpcErrorCode.Internal, '链接无法打开'],
+    ['disconnected', '链接无法打开'],
+  ] as const)('keeps the current URL and history on failure (%s), showing one toast', async (code, message) => {
+    await router.navigateByUrl('/chats');
+    await router.navigateByUrl(conversation + '#msg=123');
+    const location = TestBed.inject(Location);
+    const { navigation, request } = await requestLink();
+    expect(router.url).toBe(conversation + '#msg=123');
+    expect(location.path(true)).toBe(conversation + '#msg=123');
+    if (code === 'disconnected') {
+      peer.disconnect();
+      request.flush(wireMessage);
+    } else request.error(code);
+    expect(await navigation).toBe(false);
+    expect(router.url).toBe(conversation + '#msg=123');
+    expect(location.path(true)).toBe(conversation + '#msg=123');
+    expect(create).toHaveBeenCalledExactlyOnceWith({
+      message,
+      duration: 3000,
+    });
+    expect(toast.present).toHaveBeenCalledOnce();
+    location.back();
+    await vi.waitFor(() => expect(router.url).toBe('/chats'));
+  });
 
   it.each([undefined, '9007199254740995'])('opens a valid message in its actual scope (%s)', async (replyRootId) => {
     await router.navigateByUrl('/chats');
@@ -231,13 +233,20 @@ describe('Message permalink navigation', () => {
     await vi.waitFor(() => expect(router.url).toBe('/chats'));
   });
 
-  it('opens the chat list with a toast when an unavailable link is the initial URL', async () => {
-    const { navigation, request } = await requestLink();
-    request.error(RpcErrorCode.NotFound);
-    expect(await navigation).toBe(true);
-    expect(router.url).toBe('/chats');
-    expect(toast.present).toHaveBeenCalledOnce();
-  });
+  it.each([
+    [RpcErrorCode.NotFound, '消息已撤回或不存在'],
+    [RpcErrorCode.Forbidden, '你不是该聊天的成员，无法查看此消息'],
+  ] as const)(
+    'opens the chat list with a toast when an unavailable link is the initial URL (%s)',
+    async (code, message) => {
+      const { navigation, request } = await requestLink();
+      request.error(code);
+      expect(await navigation).toBe(true);
+      expect(router.url).toBe('/chats');
+      expect(create).toHaveBeenCalledExactlyOnceWith({ message, duration: 3000 });
+      expect(toast.present).toHaveBeenCalledOnce();
+    },
+  );
 
   it('cancels a pending lookup when the user navigates elsewhere', async () => {
     await router.navigateByUrl(conversation);
