@@ -51,12 +51,20 @@ export const openMessageLink: CanActivateFn = (route) => {
     );
   }).pipe(
     catchError(async (error: unknown) => {
+      let messageKey = 'chats.link.failed';
+      if (error instanceof RpcError) {
+        switch (error.code) {
+          case RpcErrorCode.Forbidden:
+            messageKey = 'chats.link.notMember';
+            break;
+          case RpcErrorCode.NotFound:
+          case RpcErrorCode.Gone:
+            messageKey = 'chats.link.messageUnavailable';
+            break;
+        }
+      }
       const toast = await toasts.create({
-        message: i18n.translate(
-          error instanceof RpcError && (error.code === RpcErrorCode.NotFound || error.code === RpcErrorCode.Gone)
-            ? 'chats.link.messageUnavailable'
-            : 'chats.link.failed',
-        ),
+        message: i18n.translate(messageKey),
         duration: 3000,
       });
       // Toast creation can finish after another navigation has superseded this one.

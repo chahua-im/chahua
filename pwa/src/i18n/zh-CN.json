@@ -473,6 +473,7 @@
     },
     "link": {
       "failed": "链接无法打开",
+      "notMember": "你不是该聊天的成员，无法查看此消息",
       "backToMessages": "返回消息",
       "messageUnavailable": "消息已撤回或不存在"
     },
