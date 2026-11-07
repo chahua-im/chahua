@@ -1,0 +1,26 @@
+.invite-actions {
+  display: flex;
+  align-items: center;
+  margin-block: 8px;
+  ion-button {
+    width: 40px;
+    height: 40px;
+    margin: 0;
+    --padding-start: 8px;
+    --padding-end: 8px;
+  }
+  ion-icon {
+    font-size: 24px;
+  }
+}
+.invite-code {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  color: var(--ion-color-medium);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+  ion-button {
+    margin: 0;
+  }
+}

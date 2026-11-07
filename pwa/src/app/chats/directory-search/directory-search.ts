@@ -1,5 +1,5 @@
 import { ChatAvatar } from '../chat-avatar/chat-avatar';
-import { Component, DestroyRef, effect, inject, input, output, signal } from '@angular/core';
+import { Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { Router } from '@angular/router';
@@ -23,8 +23,6 @@ import { LoadError } from '../../ui/load-error/load-error';
 export class DirectorySearch {
   readonly query = input('');
   readonly usersOnly = input(false);
-  readonly selecting = input(false);
-  readonly selected = output<MemberSummary>();
   private readonly api = inject(RpcApi);
   private readonly router = inject(Router);
   private readonly destroy = inject(DestroyRef);
@@ -87,10 +85,6 @@ export class DirectorySearch {
     void this.router.navigate(['/chats/chat', decodeId(id)]);
   }
   protected async profile(user: MemberSummary) {
-    if (this.selecting()) {
-      this.selected.emit(user);
-      return;
-    }
     await this.router.navigate(['/profile', user.uid]);
   }
 }

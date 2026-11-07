@@ -310,10 +310,12 @@ pub fn get_invites(
     query: ListInvitesQuery,
     conn: &mut PgConnection,
 ) -> Result<ListInvitesResponse, AppError> {
+    let limit = invite_limit(query.limit);
+    let now = Utc::now();
     let mut base_query = invites::table
         .into_boxed()
         .order((invites::created_at.desc(), invites::id.desc()))
-        .limit(invite_limit(query.limit));
+        .limit(limit + 1);
 
     if let Some(group_id) = query.group_id {
         require_admin_role(conn, group_id, uid)?;
@@ -322,17 +324,76 @@ pub fn get_invites(
         base_query = base_query.filter(invites::creator_uid.eq(Some(uid)));
     }
 
-    let rows = base_query
+    if query.active_only.unwrap_or(false) {
+        base_query = base_query.filter(
+            invites::revoked_at
+                .is_null()
+                .and(invites::used_at.is_null())
+                .and(
+                    invites::expires_at
+                        .is_null()
+                        .or(invites::expires_at.gt(now)),
+                ),
+        );
+    }
+    if let Some(after) = query.after {
+        let (created_at, id) = parse_invite_cursor(&after)?;
+        base_query = base_query.filter(
+            invites::created_at
+                .lt(created_at)
+                .or(invites::created_at.eq(created_at).and(invites::id.lt(id))),
+        );
+    }
+    // Existing chat/creator + created_at indexes bound this scan to the selected scope.
+    let mut rows = base_query
         .select(Invite::as_select())
         .load::<Invite>(conn)?;
-
+    let has_more = rows.len() > limit as usize;
+    rows.truncate(limit as usize);
+    let next_cursor = if has_more {
+        rows.last()
+            .map(|row| format!("{}|{}", row.created_at.to_rfc3339(), row.id))
+    } else {
+        None
+    };
+    let target_uids: Vec<_> = rows.iter().filter_map(|row| row.target_uid).collect();
+    let profiles = crate::services::user::lookup_user_profiles(conn, &target_uids)?;
+    let required_ids: Vec<_> = rows.iter().filter_map(|row| row.required_chat_id).collect();
+    use crate::schema::groups;
+    let names: std::collections::HashMap<i64, String> = groups::table
+        .filter(groups::id.eq_any(required_ids))
+        .select((groups::id, groups::name))
+        .load::<(i64, String)>(conn)?
+        .into_iter()
+        .collect();
     Ok(ListInvitesResponse {
         invites: rows
             .into_iter()
-            .map(invite_service::invite_to_response)
+            .map(|row| {
+                let mut response = invite_service::invite_to_response(row);
+                response.target_name = response
+                    .target_uid
+                    .and_then(|uid| profiles.get(&uid))
+                    .and_then(|profile| profile.username.clone());
+                response.required_chat_name = response
+                    .required_chat_id
+                    .and_then(|id| names.get(&id).cloned());
+                response
+            })
             .collect(),
+        next_cursor,
     })
 }
+
+fn parse_invite_cursor(value: &str) -> Result<(DateTime<Utc>, i64), AppError> {
+    let invalid = || AppError::BadRequest("Invalid invite cursor");
+    let (time, id) = value.split_once('|').ok_or_else(invalid)?;
+    Ok((
+        time.parse().map_err(|_| invalid())?,
+        id.parse().map_err(|_| invalid())?,
+    ))
+}
+
 pub fn get_invite(
     uid: i32,
     invite_id: i64,
@@ -588,4 +649,88 @@ pub async fn post_redeem_invite(
     crate::services::chat::publish_membership_changed(ws_registry, uid, chat_id);
     let chat = load_group_info(conn, media, avatars, chat_id, uid)?;
     Ok(RedeemInviteResponse { chat })
+}
+
+#[cfg(test)]
+mod list_tests {
+    use super::*;
+    use diesel::connection::SimpleConnection;
+
+    #[test]
+    fn invite_cursor_preserves_time_and_id_and_rejects_bad_input() {
+        let time: DateTime<Utc> = "2026-11-05T12:00:00.123456Z".parse().unwrap();
+        let cursor = format!("{}|{}", time.to_rfc3339(), i64::MAX);
+        assert_eq!(parse_invite_cursor(&cursor).unwrap(), (time, i64::MAX));
+        for value in [
+            "",
+            "abc|2",
+            "2026-11-05T00:00:00Z|x",
+            "2026-11-05T00:00:00Z|1|2",
+        ] {
+            assert!(parse_invite_cursor(value).is_err());
+        }
+    }
+
+    #[test]
+    fn active_filter_keeps_old_invites_and_unfiltered_pagination_stays_compatible() {
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        let mut conn = PgConnection::establish(&url).unwrap();
+        conn.batch_execute(
+            "CREATE TEMP TABLE invites (LIKE public.invites INCLUDING ALL);
+             INSERT INTO invites (id, code, chat_id, invite_type, creator_uid, created_at, expires_at)
+             SELECT n, 'code' || lpad(n::text, 8, '0'), 10, 'generic', 1,
+                    '2020-01-01'::timestamptz, '2021-01-01'::timestamptz
+             FROM generate_series(2, 122) n;
+             INSERT INTO invites (id, code, chat_id, invite_type, creator_uid, created_at)
+             VALUES (1, 'old-valid', 10, 'generic', 1, '2019-01-01'),
+                    (123, 'otheruser', 10, 'generic', 2, '2020-01-01');
+             UPDATE invites SET expires_at = NULL, revoked_at = NOW() WHERE id = 122;
+             UPDATE invites SET expires_at = NULL, used_at = NOW(), invite_type = 'targeted', target_uid = 1 WHERE id = 121;"
+        ).unwrap();
+        let active = get_invites(
+            1,
+            ListInvitesQuery {
+                group_id: None,
+                limit: Some(30),
+                active_only: Some(true),
+                after: None,
+            },
+            &mut conn,
+        )
+        .unwrap();
+        assert_eq!(
+            active.invites.iter().map(|row| row.id).collect::<Vec<_>>(),
+            vec![1]
+        );
+        assert!(active.next_cursor.is_none());
+        // Avoid depending on identity-provider fixtures for the used targeted record.
+        conn.batch_execute(
+            "UPDATE invites SET invite_type = 'generic', target_uid = NULL WHERE id = 121",
+        )
+        .unwrap();
+        let mut ids = Vec::new();
+        let mut after = None;
+        loop {
+            let page = get_invites(
+                1,
+                ListInvitesQuery {
+                    group_id: None,
+                    limit: Some(30),
+                    active_only: None,
+                    after,
+                },
+                &mut conn,
+            )
+            .unwrap();
+            ids.extend(page.invites.iter().map(|row| row.id));
+            after = page.next_cursor;
+            if after.is_none() {
+                break;
+            }
+        }
+        assert_eq!(ids, (1..=122).rev().collect::<Vec<_>>());
+    }
 }

@@ -1,194 +1,253 @@
+<ion-button class="ion-margin" expand="block" [disabled]="busy() || reading()" (click)="startCreate()">
+  {{ 'chats.invites.create' | transloco }}
+</ion-button>
+@let list = this.list();
 <ion-list [inset]="true">
-  <ion-list-header>{{ 'chats.invites.create' | transloco }}</ion-list-header>
-  <ion-item>
-    <ion-select [label]="'chats.invites.type' | transloco" [value]="type()" (ionChange)="change($event.detail.value)">
-      <ion-select-option [value]="Type.generic">{{ 'chats.invites.typeGeneric' | transloco }}</ion-select-option>
-      <ion-select-option [value]="Type.targeted">{{ 'chats.invites.typeTargeted' | transloco }}</ion-select-option>
-      <ion-select-option [value]="Type.membership">{{ 'chats.invites.typeMembership' | transloco }}</ion-select-option>
-    </ion-select>
-  </ion-item>
-  @if (type() === Type.targeted) {
-    @if (target(); as person) {
-      <ion-item>
-        <ion-label>{{ person.username || person.uid }}</ion-label>
-        <ion-button fill="clear" (click)="target.set(undefined)">{{ 'chats.invites.change' | transloco }}</ion-button>
-      </ion-item>
-    } @else {
-      <ion-searchbar
-        [placeholder]="'chats.start.searchUsers' | transloco"
-        [debounce]="300"
-        (ionInput)="targetQuery.set($event.detail.value || '')" />
-      <app-directory-search
-        [query]="targetQuery()"
-        [usersOnly]="true"
-        [selecting]="true"
-        (selected)="target.set($event)" />
-    }
-  }
-  @if (type() === Type.membership) {
+  @for (invite of list.rows; track invite.id) {
     <ion-item>
-      <ion-select
-        [label]="'chats.invites.requiredGroup' | transloco"
-        [value]="requiredGroup()"
-        (ionChange)="requiredGroup.set($event.detail.value)">
-        @for (group of groups(); track group.id) {
-          <ion-select-option [value]="group.id">{{ group.name }}</ion-select-option>
-        }
-      </ion-select>
+      <ion-label class="ion-text-wrap">
+        <h3>
+          @switch (invite.inviteType) {
+            @case (Type.generic) {
+              {{ 'chats.invites.inviteEveryone' | transloco }}
+            }
+            @case (Type.targeted) {
+              {{ 'chats.invites.inviteUser' | transloco: { name: invite.targetName || invite.targetUid } }}
+            }
+            @case (Type.membership) {
+              {{
+                'chats.invites.inviteMembers'
+                  | transloco: { group: invite.requiredChatName || decodeId(invite.requiredChatId!) }
+              }}
+            }
+          }
+        </h3>
+        <p>
+          {{
+            invite.expiresAt
+              ? ('chats.invites.expiresOn' | transloco: { date: (invite.expiresAt | localDate: 'dateTime') })
+              : ('chats.invites.permanent' | transloco)
+          }}
+        </p>
+        <div class="invite-code">
+          <span>{{ 'chats.invites.code' | transloco: { code: invite.code } }}</span>
+          <ion-button
+            fill="clear"
+            [title]="'chats.invites.copyCode' | transloco"
+            [disabled]="busy() || status(invite) !== Status.Active"
+            (click)="copy(invite, true)">
+            <ion-icon slot="icon-only" [icon]="icons.copyOutline" />
+          </ion-button>
+        </div>
+      </ion-label>
+      <div slot="end" class="invite-actions">
+        <ion-button fill="clear" [title]="'chats.invites.copy' | transloco" [disabled]="busy()" (click)="copy(invite)">
+          <ion-icon slot="icon-only" [icon]="icons.linkOutline" />
+        </ion-button>
+        <ion-button
+          fill="clear"
+          [title]="'chats.invites.share' | transloco"
+          [disabled]="busy()"
+          (click)="startShare(invite)">
+          @if (pending()?.id === invite.id && pending()?.action === Action.Share) {
+            <ion-spinner />
+          } @else {
+            <ion-icon slot="icon-only" [icon]="icons.paperPlaneOutline" />
+          }
+        </ion-button>
+        <ion-button
+          fill="clear"
+          color="danger"
+          [title]="'chats.invites.revoke' | transloco"
+          [disabled]="busy() || reading()"
+          (click)="revoke(invite)">
+          @if (pending()?.id === invite.id && pending()?.action === Action.Revoke) {
+            <ion-spinner />
+          } @else {
+            <ion-icon slot="icon-only" [icon]="icons.trashOutline" />
+          }
+        </ion-button>
+      </div>
     </ion-item>
   }
-  <ion-item>
-    <ion-label>{{ 'chats.invites.expiry' | transloco }}</ion-label>
-    <input
-      #expiryInput
-      class="field"
-      type="datetime-local"
-      [formField]="fields.expiry"
-      (input)="inputInvalid.set(!expiryInput.validity.valid); expiryRejected.set(false)" />
-  </ion-item>
-  @if (expiryInvalid() || expiryRejected() || inputInvalid()) {
-    <ion-item lines="none">
-      <ion-note color="danger">{{ 'chats.invites.invalidExpiry' | transloco }}</ion-note>
-    </ion-item>
-  }
-  <ion-button
-    class="ion-margin"
-    [disabled]="
-      busy() ||
-      expiryInvalid() ||
-      inputInvalid() ||
-      (type() === Type.membership && !requiredGroup()) ||
-      (type() === Type.targeted && !target())
-    "
-    (click)="create()">
-    <span class="action-content" [class.busy]="pending()?.action === Action.Create">
-      <span class="action-label">{{ 'chats.invites.create' | transloco }}</span>
-      @if (pending()?.action === Action.Create) {
+</ion-list>
+@if (list.loading && !list.loaded) {
+  <div class="ion-text-center"><ion-spinner /></div>
+}
+@if (list.error) {
+  <p class="ion-padding">
+    {{ 'chats.invites.listFailed' | transloco }}
+    <ion-button fill="clear" [disabled]="list.loading || busy()" (click)="load(list.failedMore)">
+      {{ 'common.retry' | transloco }}
+    </ion-button>
+  </p>
+} @else if (list.loaded && !list.rows.length) {
+  <p class="ion-padding ion-text-center">
+    {{ 'chats.invites.emptyActive' | transloco }}
+  </p>
+}
+@if (list.cursor && !list.error) {
+  <ion-button fill="clear" [disabled]="list.loading || busy()" (click)="load(true)">
+    <span class="action-content" [class.busy]="list.loading && list.failedMore">
+      <span class="action-label">{{ 'chats.invites.loadMore' | transloco }}</span>
+      @if (list.loading && list.failedMore) {
         <ion-spinner />
       }
     </span>
   </ion-button>
-</ion-list>
-<ion-list [inset]="true">
-  <ion-list-header>{{ 'chats.invites.shareTo' | transloco }}</ion-list-header>
-  <ion-searchbar
-    [placeholder]="'chats.invites.groupSearch' | transloco"
-    [debounce]="300"
-    (ionInput)="groupQuery.set($event.detail.value || '')" />
-  <ion-item>
-    <ion-select
-      [label]="'chats.invites.shareTo' | transloco"
-      [value]="destination()"
-      (ionChange)="destination.set($event.detail.value)">
-      @for (group of groups(); track group.id) {
-        <ion-select-option [value]="group.id">{{ group.name }}</ion-select-option>
-      }
-    </ion-select>
-  </ion-item>
-  @if (cursor()) {
-    <ion-button fill="clear" [disabled]="loadingGroups()" (click)="loadGroups(true)">
-      <span class="action-content" [class.busy]="loadingGroups()">
-        <span class="action-label">{{ 'chats.invites.moreGroups' | transloco }}</span>
-        @if (loadingGroups()) {
-          <ion-spinner />
-        }
-      </span>
-    </ion-button>
-  }
-  @if (groupsError()) {
-    <ion-item lines="none">
-      <ion-note color="danger">{{ 'chats.invites.groupsFailed' | transloco }}</ion-note>
-      <ion-button slot="end" fill="clear" [disabled]="loadingGroups()" (click)="loadGroups()">
-        {{ 'common.retry' | transloco }}
-      </ion-button>
-    </ion-item>
-  } @else if (loadingGroups() && !groups().length) {
-    <ion-item lines="none"><ion-spinner /></ion-item>
-  }
-</ion-list>
-<ion-list [inset]="true">
-  <ion-list-header>{{ 'chats.invites.listTitle' | transloco }}</ion-list-header>
-  @if (loading()) {
-    <div class="page-loading"><ion-spinner /></div>
-  }
-  @for (invite of invites(); track invite.id) {
-    <ion-item>
-      <ion-label>
-        {{ invite.code }}
-        <p>
-          @switch (invite.inviteType) {
-            @case (Type.generic) {
-              {{ 'chats.invites.generic' | transloco }}
-            }
-            @case (Type.targeted) {
-              {{ 'chats.invites.targetedUid' | transloco: { uid: invite.targetUid } }}
-            }
-            @case (Type.membership) {
-              {{ 'chats.invites.membershipGroup' | transloco: { group: groupName(invite.requiredChatId!) } }}
-            }
-          }
-        </p>
-        <p>
-          @switch (status(invite)) {
-            @case (Status.Expired) {
-              {{ 'chats.inviteStatus.expired' | transloco }}
-            }
-            @case (Status.Revoked) {
-              {{ 'chats.inviteStatus.revoked' | transloco }}
-            }
-            @case (Status.Used) {
-              {{ 'chats.inviteStatus.used' | transloco }}
-            }
-            @default {
-              {{
-                invite.expiresAt
-                  ? (invite.expiresAt | localDate: 'short')
-                  : ('chats.inviteStatus.neverExpires' | transloco)
-              }}
-            }
-          }
-        </p>
-      </ion-label>
-      <ion-button fill="clear" [disabled]="status(invite) !== Status.Active" (click)="copy(invite)">
-        {{ 'chats.invites.copy' | transloco }}
-      </ion-button>
-      <ion-button
-        fill="clear"
-        [disabled]="busy() || !destination() || status(invite) !== Status.Active"
-        (click)="share(invite)">
-        <span class="action-content" [class.busy]="pending()?.action === Action.Share && pending()?.id === invite.id">
-          <span class="action-label">{{ 'chats.invites.share' | transloco }}</span>
-          @if (pending()?.action === Action.Share && pending()?.id === invite.id) {
-            <ion-spinner />
-          }
-        </span>
-      </ion-button>
-      <ion-button
-        fill="clear"
-        color="danger"
-        [disabled]="busy() || status(invite) !== Status.Active"
-        (click)="revoke(invite)">
-        <span class="action-content" [class.busy]="pending()?.action === Action.Revoke && pending()?.id === invite.id">
-          <span class="action-label">{{ 'chats.invites.revoke' | transloco }}</span>
-          @if (pending()?.action === Action.Revoke && pending()?.id === invite.id) {
-            <ion-spinner />
-          }
-        </span>
-      </ion-button>
-    </ion-item>
-  }
-</ion-list>
-@if (copied()) {
-  <p class="ion-padding">{{ 'chats.invites.copied' | transloco }}</p>
-}
-@if (error()) {
-  <p class="ion-padding">
-    {{ 'chats.invites.failed' | transloco }}
-    <ion-button fill="clear" (click)="load()">{{ 'chats.invites.refresh' | transloco }}</ion-button>
-  </p>
-}
-@if (restriction(); as mode) {
-  <p class="ion-padding">{{ 'speaking.blocked.' + mode | transloco }}</p>
 }
 
-<ion-toast [isOpen]="!!notice()" [message]="notice()" [duration]="2000" (didDismiss)="notice.set(undefined)" />
+<ion-modal
+  [isOpen]="creating()"
+  [canDismiss]="!busy()"
+  (didPresent)="editorReady.set(true)"
+  (willDismiss)="picker.set(undefined); editorReady.set(false)"
+  (didDismiss)="creating.set(false)">
+  <ng-template>
+    <ion-header>
+      <ion-toolbar>
+        <ion-buttons slot="start">
+          <ion-button [disabled]="busy()" (click)="close()">{{ 'common.cancel' | transloco }}</ion-button>
+        </ion-buttons>
+        <ion-title>{{ 'chats.invites.create' | transloco }}</ion-title>
+      </ion-toolbar>
+    </ion-header>
+    <ion-content appScrollbars>
+      <ion-list [inset]="true">
+        <ion-item>
+          <ion-select
+            [cancelText]="'common.cancel' | transloco"
+            [okText]="'common.confirm' | transloco"
+            [disabled]="busy()"
+            [label]="'chats.invites.type' | transloco"
+            [value]="type()"
+            (ionChange)="change($event.detail.value)">
+            <ion-select-option [value]="Type.generic">
+              {{ 'chats.invites.typeGeneric' | transloco }}
+            </ion-select-option>
+            <ion-select-option [value]="Type.targeted">
+              {{ 'chats.invites.typeTargeted' | transloco }}
+            </ion-select-option>
+            <ion-select-option [value]="Type.membership">
+              {{ 'chats.invites.typeMembership' | transloco }}
+            </ion-select-option>
+          </ion-select>
+        </ion-item>
+        @if (type() === Type.targeted) {
+          @if (target(); as person) {
+            <ion-item>
+              <app-chat-avatar
+                slot="start"
+                [size]="40"
+                [entry]="{ avatar: person.avatarUrl, title: person.username || person.uid.toString() }" />
+              <ion-label>
+                {{ person.username || person.uid }}
+                <p>{{ 'chats.invites.uid' | transloco: { uid: person.uid } }}</p>
+              </ion-label>
+              <ion-button fill="clear" [disabled]="busy()" (click)="picker.set(Picker.User)">
+                {{ 'chats.invites.change' | transloco }}
+              </ion-button>
+            </ion-item>
+          } @else {
+            <ion-item [button]="true" [disabled]="busy()" (click)="picker.set(Picker.User)">
+              <ion-label>{{ 'chats.invites.chooseUser' | transloco }}</ion-label>
+            </ion-item>
+          }
+        }
+        @if (type() === Type.membership) {
+          @if (requiredGroup(); as group) {
+            <ion-item>
+              <ion-label>
+                {{
+                  'chats.invites.membershipGroup'
+                    | transloco: { group: group.name || ('conversation.chat' | transloco) }
+                }}
+              </ion-label>
+              <ion-button fill="clear" [disabled]="busy()" (click)="picker.set(Picker.GroupCondition)">
+                {{ 'chats.invites.change' | transloco }}
+              </ion-button>
+            </ion-item>
+          } @else {
+            <ion-item [button]="true" [disabled]="busy()" (click)="picker.set(Picker.GroupCondition)">
+              <ion-label>{{ 'chats.invites.chooseGroup' | transloco }}</ion-label>
+            </ion-item>
+          }
+        }
+        <ion-item>
+          <ion-select
+            [cancelText]="'common.cancel' | transloco"
+            [okText]="'common.confirm' | transloco"
+            [disabled]="busy()"
+            [label]="'chats.invites.expiry' | transloco"
+            [value]="expiry()"
+            (ionChange)="changeExpiry($event.detail.value)">
+            <ion-select-option [value]="Expiry.Day">{{ 'chats.invites.expiries.day' | transloco }}</ion-select-option>
+            <ion-select-option [value]="Expiry.Week">
+              {{ 'chats.invites.expiries.week' | transloco }}
+            </ion-select-option>
+            <ion-select-option [value]="Expiry.Never">
+              {{ 'chats.invites.expiries.never' | transloco }}
+            </ion-select-option>
+            <ion-select-option [value]="Expiry.Custom">
+              {{ 'chats.invites.expiries.custom' | transloco }}
+            </ion-select-option>
+          </ion-select>
+        </ion-item>
+        @if (expiry() === Expiry.Custom) {
+          <ion-item>
+            <ion-label position="stacked">{{ 'chats.invites.expiresAt' | transloco }}</ion-label>
+            <input
+              #expiryInput
+              class="field"
+              type="datetime-local"
+              [formField]="fields.expiry"
+              (input)="inputInvalid.set(!expiryInput.validity.valid)" />
+          </ion-item>
+          @if (expiryPast()) {
+            <ion-item lines="none">
+              <ion-note color="danger">{{ 'chats.invites.invalidExpiry' | transloco }}</ion-note>
+            </ion-item>
+          }
+        }
+      </ion-list>
+      <ion-button expand="block" class="ion-margin" [disabled]="!canCreate()" (click)="create()">
+        <span class="action-content" [class.busy]="busy()">
+          <span class="action-label">{{ 'chats.invites.generate' | transloco }}</span>
+          @if (busy()) {
+            <ion-spinner />
+          }
+        </span>
+      </ion-button>
+      @if (operationError(); as message) {
+        <p class="ion-padding">
+          <ion-note color="danger">{{ message | transloco }}</ion-note>
+        </p>
+      }
+    </ion-content>
+  </ng-template>
+</ion-modal>
+<ion-toast [isOpen]="!!notice()" [message]="notice()" [duration]="2500" (didDismiss)="notice.set(undefined)" />
+
+@if (picker() != null && (picker() === Picker.Destination || editorReady())) {
+  <app-chat-picker
+    [scope]="
+      picker() === Picker.User
+        ? PickerScope.Users
+        : picker() === Picker.GroupCondition
+          ? PickerScope.JoinedGroups
+          : PickerScope.Chats
+    "
+    [title]="
+      (picker() === Picker.User
+        ? 'chats.invites.chooseUser'
+        : picker() === Picker.GroupCondition
+          ? 'chats.invites.chooseGroup'
+          : 'chats.invites.chooseChat'
+      ) | transloco
+    "
+    [excludedId]="chatId()"
+    [choose]="chooseChat"
+    [submitted]="busy()"
+    (userSelected)="target.set($event)"
+    (closed)="picker.set(undefined)" />
+}

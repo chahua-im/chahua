@@ -21,6 +21,8 @@ pub fn invite_to_response(invite: Invite) -> InviteResponse {
         invite_type: invite.invite_type,
         creator_uid: invite.creator_uid,
         target_uid: invite.target_uid,
+        target_name: None,
+        required_chat_name: None,
         required_chat_id: invite.required_chat_id,
         created_at: invite.created_at,
         expires_at: invite.expires_at,

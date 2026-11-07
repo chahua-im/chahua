@@ -9,4 +9,5 @@ import type { InviteResponse } from '../inviteResponse';
 
 export interface ListInvitesResponse {
   invites: InviteResponse[];
+  nextCursor?: string;
 }

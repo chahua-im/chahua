@@ -486,8 +486,9 @@ app-panel-page[hidden] {
   display: none;
 }
 
-// Recall is destructive; keep cancellation and explanatory text neutral.
-ion-alert.recall-confirmation {
+// Destructive confirmations keep cancellation and explanatory text neutral.
+ion-alert.recall-confirmation,
+ion-alert.invite-revoke-confirmation {
   .alert-title,
   .alert-button.confirm-action {
     color: var(--ion-color-danger);
