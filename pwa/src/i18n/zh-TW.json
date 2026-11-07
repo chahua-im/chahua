@@ -322,6 +322,24 @@
       "used": "邀請已使用",
       "neverExpires": "長期有效"
     },
+    "invitePreviewIssues": {
+      "invalid": {
+        "title": "無效的邀請碼",
+        "description": "請檢查邀請碼或邀請連結。"
+      },
+      "missing": {
+        "title": "邀請不存在",
+        "description": "找不到此邀請，請檢查邀請碼或邀請連結。"
+      },
+      "inactive": {
+        "title": "邀請已過期",
+        "description": "此邀請已過期或被撤銷。"
+      },
+      "restricted": {
+        "title": "無法使用此邀請",
+        "description": "此邀請僅限指定使用者或指定群組的成員使用。"
+      }
+    },
     "start": {
       "createTitle": "建立群聊",
       "joinTitle": "加入群聊",
@@ -329,11 +347,13 @@
       "searchUsers": "搜尋使用者名稱或 UID",
       "groupName": "群聊名稱",
       "inviteCode": "邀請碼或邀請連結",
-      "viewInvite": "查看邀請",
       "submitCreate": "建立",
       "submitOpen": "開啟群組",
       "submitJoin": "加入",
-      "failed": "操作失敗，請檢查後重試。"
+      "failed": "操作失敗，請檢查後重試。",
+      "groupCreatedOn": "群組建立於 {{ date }}",
+      "inviteNeverExpires": "邀請長期有效",
+      "notInvited": "未受邀"
     },
     "invites": {
       "type": "誰可以透過連結加入",
@@ -383,7 +403,11 @@
       "permanent": "有效期：永久",
       "copyCode": "複製邀請碼",
       "codeCopied": "邀請碼已複製",
-      "noPrivateChat": "無法直接傳送給該使用者：尚無可用私聊。請複製邀請連結分享。"
+      "noPrivateChat": "無法直接傳送給此使用者：尚無可用私聊。請透過邀請連結分享。",
+      "generateAndSend": "直接傳送邀請",
+      "cannotSend": "無法傳送邀請",
+      "sendUnavailable": "目前沒有權限向此聊天傳送邀請，或該邀請已失效。",
+      "sendCheckFailed": "暫時無法檢查傳送權限，請稍後重試。"
     },
     "details": {
       "topic": "話題",
@@ -611,7 +635,6 @@
     "invite": {
       "groupInvite": "群聊邀請",
       "failed": "邀請載入失敗",
-      "joined": "已加入，開啟群組",
       "view": "查看群組資訊並加入"
     },
     "voice": {

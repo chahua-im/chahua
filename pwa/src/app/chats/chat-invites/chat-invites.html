@@ -49,7 +49,7 @@
           [title]="'chats.invites.share' | transloco"
           [disabled]="busy()"
           (click)="startShare(invite)">
-          @if (pending()?.id === invite.id && pending()?.action === Action.Share) {
+          @if (progress()?.id === invite.id && progress()?.action === Action.Share) {
             <ion-spinner />
           } @else {
             <ion-icon slot="icon-only" [icon]="icons.paperPlaneOutline" />
@@ -61,7 +61,7 @@
           [title]="'chats.invites.revoke' | transloco"
           [disabled]="busy() || reading()"
           (click)="revoke(invite)">
-          @if (pending()?.id === invite.id && pending()?.action === Action.Revoke) {
+          @if (progress()?.id === invite.id && progress()?.action === Action.Revoke) {
             <ion-spinner />
           } @else {
             <ion-icon slot="icon-only" [icon]="icons.trashOutline" />
@@ -210,14 +210,26 @@
           }
         }
       </ion-list>
-      <ion-button expand="block" class="ion-margin" [disabled]="!canCreate()" (click)="create()">
-        <span class="action-content" [class.busy]="busy()">
-          <span class="action-label">{{ 'chats.invites.generate' | transloco }}</span>
-          @if (busy()) {
-            <ion-spinner />
-          }
-        </span>
-      </ion-button>
+      <div class="create-actions ion-margin">
+        <ion-button [disabled]="!canCreate()" (click)="create()">
+          <span class="action-content" [class.busy]="progress()?.action === Action.Create">
+            <span class="action-label">{{ 'chats.invites.generate' | transloco }}</span>
+            @if (progress()?.action === Action.Create) {
+              <ion-spinner />
+            }
+          </span>
+        </ion-button>
+        @if (type() === Type.targeted || type() === Type.membership) {
+          <ion-button [disabled]="!canCreate()" (click)="create(true)">
+            <span class="action-content" [class.busy]="progress()?.action === Action.CreateAndSend">
+              <span class="action-label">{{ 'chats.invites.generateAndSend' | transloco }}</span>
+              @if (progress()?.action === Action.CreateAndSend) {
+                <ion-spinner />
+              }
+            </span>
+          </ion-button>
+        }
+      </div>
       @if (operationError(); as message) {
         <p class="ion-padding">
           <ion-note color="danger">{{ message | transloco }}</ion-note>

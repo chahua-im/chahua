@@ -3,7 +3,7 @@ import { Router } from '@angular/router';
 import { Component, computed, DestroyRef, ElementRef, inject, input, output, signal } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { LocalDatePipe } from '../../i18n/local-date.pipe';
-import { IonIcon, IonSpinner } from '@ionic/angular';
+import { IonBadge, IonIcon, IonSpinner } from '@ionic/angular';
 import { alertCircleOutline, arrowUndoOutline } from 'ionicons/icons';
 import { ForwardedLabel } from '../forwarded-label';
 import { ForwardedCard } from '../forwarded-card';
@@ -65,6 +65,7 @@ export interface MessageMenuSelection {
     InviteCard,
     LocalDatePipe,
     TranslocoPipe,
+    IonBadge,
     IonIcon,
     IonSpinner,
     MessageAttachments,

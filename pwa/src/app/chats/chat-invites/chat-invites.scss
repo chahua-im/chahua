@@ -1,3 +1,15 @@
+.create-actions {
+  display: flex;
+  gap: 8px;
+
+  ion-button {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    white-space: normal;
+  }
+}
+
 .invite-actions {
   display: flex;
   align-items: center;

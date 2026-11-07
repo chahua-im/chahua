@@ -119,7 +119,10 @@ async fn get_invite(
     tag = "invites",
     params(GetInviteByCodeQuery),
     responses(
-        (status = 200, description = "Invite preview", body = InvitePreviewResponse)
+        (status = 200, description = "Invite preview", body = InvitePreviewResponse),
+        (status = 400, description = "Invalid invitation code"),
+        (status = 404, description = "Invitation does not exist"),
+        (status = 410, description = "Invitation expired or revoked")
     ),
     security(("bearer_jwt" = []))
 )]
@@ -188,7 +191,12 @@ async fn delete_invite(
     tag = "invites",
     request_body = RedeemInviteBody,
     responses(
-        (status = 200, description = "Invite redeemed", body = RedeemInviteResponse)
+        (status = 200, description = "Invite redeemed", body = RedeemInviteResponse),
+        (status = 400, description = "Empty invitation code"),
+        (status = 403, description = "Not eligible for this invitation"),
+        (status = 404, description = "Invitation does not exist"),
+        (status = 409, description = "Already a member or targeted invitation already used"),
+        (status = 410, description = "Invitation expired or revoked")
     ),
     security(("bearer_jwt" = []))
 )]

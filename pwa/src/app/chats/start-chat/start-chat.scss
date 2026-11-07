@@ -1,0 +1,50 @@
+.invite-profile {
+  max-width: 32rem;
+  margin-inline: auto;
+  padding-block: var(--app-profile-padding);
+  overflow-wrap: anywhere;
+
+  app-chat-avatar {
+    margin-inline: auto;
+  }
+}
+
+.invite-description {
+  margin-block: 20px 0;
+  line-height: var(--app-line-body);
+  white-space: pre-wrap;
+}
+
+.invite-meta {
+  color: var(--ion-color-medium);
+  font-size: var(--app-font-caption);
+  line-height: var(--app-line-caption);
+}
+
+.invite-restriction {
+  color: var(--ion-color-primary);
+  font-size: var(--app-font-caption);
+  margin-bottom: 0;
+}
+
+.invite-submit {
+  max-width: 20rem;
+  margin: 0 auto 16px;
+  width: calc(100% - 32px);
+}
+
+.invite-validity {
+  margin-block: 0 24px;
+}
+
+ion-skeleton-text {
+  margin-inline: auto;
+}
+
+.name-placeholder {
+  width: 60%;
+}
+
+.meta-placeholder {
+  width: 12rem;
+}

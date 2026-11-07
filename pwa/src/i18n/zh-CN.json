@@ -322,6 +322,24 @@
       "used": "邀请已使用",
       "neverExpires": "长期有效"
     },
+    "invitePreviewIssues": {
+      "invalid": {
+        "title": "无效的邀请码",
+        "description": "请检查邀请码或邀请链接。"
+      },
+      "missing": {
+        "title": "邀请不存在",
+        "description": "未找到该邀请，请检查邀请码或邀请链接。"
+      },
+      "inactive": {
+        "title": "邀请已过期",
+        "description": "该邀请已过期或被撤销。"
+      },
+      "restricted": {
+        "title": "无法使用此邀请",
+        "description": "此邀请仅限指定用户或指定群聊的成员使用。"
+      }
+    },
     "start": {
       "createTitle": "创建群聊",
       "joinTitle": "加入群聊",
@@ -329,11 +347,13 @@
       "searchUsers": "搜索用户名或 UID",
       "groupName": "群聊名称",
       "inviteCode": "邀请码或邀请链接",
-      "viewInvite": "查看邀请",
       "submitCreate": "创建",
       "submitOpen": "打开群组",
       "submitJoin": "加入",
-      "failed": "操作失败，请检查后重试。"
+      "failed": "操作失败，请检查后重试。",
+      "groupCreatedOn": "群聊创建于 {{ date }}",
+      "inviteNeverExpires": "邀请长期有效",
+      "notInvited": "未受邀"
     },
     "invites": {
       "type": "谁可以通过链接加入",
@@ -383,7 +403,11 @@
       "permanent": "有效期：永久",
       "copyCode": "复制邀请码",
       "codeCopied": "邀请码已复制",
-      "noPrivateChat": "无法直接发送给该用户：尚无可用私聊。请复制邀请链接分享。"
+      "noPrivateChat": "无法直接发送给该用户：尚无可用私聊。请通过邀请链接分享。",
+      "generateAndSend": "直接发送邀请",
+      "cannotSend": "无法发送邀请",
+      "sendUnavailable": "当前没有权限向此聊天发送邀请，或该邀请已失效。",
+      "sendCheckFailed": "暂时无法检查发送权限，请稍后重试。"
     },
     "details": {
       "topic": "话题",
@@ -611,7 +635,6 @@
     "invite": {
       "groupInvite": "群聊邀请",
       "failed": "邀请加载失败",
-      "joined": "已加入，打开群组",
       "view": "查看群资料并加入"
     },
     "voice": {

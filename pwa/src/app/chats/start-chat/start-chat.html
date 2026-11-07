@@ -23,71 +23,112 @@
       (ionInput)="query.set($event.detail.value || '')" />
     <app-directory-search [query]="query()" [usersOnly]="true" />
   } @else {
-    <ion-list>
-      @if (kind() === Kind.Create) {
+    @if (kind() === Kind.Create) {
+      <ion-list>
         <ion-item>
           <input class="field" [placeholder]="'chats.start.groupName' | transloco" [formField]="fields.name" />
         </ion-item>
-      } @else {
-        <ion-item>
-          <input class="field" [placeholder]="'chats.start.inviteCode' | transloco" [formField]="fields.code" />
-        </ion-item>
-        <ion-button fill="clear" [disabled]="busy() || !values().code.trim()" (click)="lookup()">
-          <span class="action-content" [class.busy]="pending() === Action.Lookup">
-            <span class="action-label">{{ 'chats.start.viewInvite' | transloco }}</span>
-            @if (pending() === Action.Lookup) {
-              <ion-spinner />
-            }
-          </span>
-        </ion-button>
-        @if (preview(); as invite) {
+      </ion-list>
+    } @else {
+      @if (!code()) {
+        <ion-list>
           <ion-item>
-            <app-chat-avatar
-              slot="start"
-              [size]="40"
-              [entry]="{ avatar: invite.chat.avatar, title: invite.chat.name }" />
-            <ion-label>
-              <h2>{{ invite.chat.name }}</h2>
-              <p>{{ invite.chat.description }}</p>
-              @switch (status(invite.invite)) {
-                @case (Status.Expired) {
-                  <p>{{ 'chats.inviteStatus.expired' | transloco }}</p>
-                }
-                @case (Status.Revoked) {
-                  <p>{{ 'chats.inviteStatus.revoked' | transloco }}</p>
-                }
-                @case (Status.Used) {
-                  <p>{{ 'chats.inviteStatus.used' | transloco }}</p>
-                }
-              }
-            </ion-label>
+            <input
+              class="field"
+              [placeholder]="'chats.start.inviteCode' | transloco"
+              [formField]="fields.code"
+              [readOnly]="pending() === Action.Submit" />
           </ion-item>
-        }
+        </ion-list>
       }
-    </ion-list>
-    <ion-button
-      class="ion-margin"
-      expand="block"
-      [disabled]="busy() || (kind() === Kind.Create ? !values().name.trim() : !previewValid())"
-      (click)="submit()">
-      <span class="action-content" [class.busy]="pending() === Action.Submit">
-        <span class="action-label">
-          {{
-            (kind() === Kind.Create
-              ? 'chats.start.submitCreate'
-              : preview()?.alreadyMember
-                ? 'chats.start.submitOpen'
-                : 'chats.start.submitJoin'
-            ) | transloco
-          }}
+      @if (preview(); as invite) {
+        <div class="invite-profile ion-text-center ion-padding">
+          <app-chat-avatar [size]="88" [entry]="{ avatar: invite.chat.avatar, title: invite.chat.name }" />
+          <h2>{{ invite.chat.name }}</h2>
+          <p class="invite-meta">
+            {{ 'chats.start.groupCreatedOn' | transloco: { date: (invite.chat.createdAt | localDate) } }}
+          </p>
+          @if (invite.chat.description) {
+            <p class="invite-description">{{ invite.chat.description }}</p>
+          }
+          @if (invite.chat.speakingMode !== SpeakingMode.unrestricted) {
+            <p class="invite-restriction">{{ 'speaking.modes.' + invite.chat.speakingMode | transloco }}</p>
+          }
+          @switch (status(invite.invite)) {
+            @case (Status.Expired) {
+              <p class="invite-meta">{{ 'chats.inviteStatus.expired' | transloco }}</p>
+            }
+            @case (Status.Revoked) {
+              <p class="invite-meta">{{ 'chats.inviteStatus.revoked' | transloco }}</p>
+            }
+            @case (Status.Used) {
+              <p class="invite-meta">{{ 'chats.inviteStatus.used' | transloco }}</p>
+            }
+          }
+        </div>
+      } @else if (pending() === Action.Lookup) {
+        <div class="invite-profile ion-text-center ion-padding">
+          <app-chat-avatar [size]="88" [entry]="{ icon: defaultAvatarIcon }" />
+          <h2><ion-skeleton-text class="name-placeholder" [animated]="true" /></h2>
+          <p class="invite-meta"><ion-skeleton-text class="meta-placeholder" [animated]="true" /></p>
+          <p class="invite-description">
+            <ion-skeleton-text [animated]="true" />
+            <ion-skeleton-text [animated]="true" />
+          </p>
+        </div>
+      } @else if (previewIssue(); as issue) {
+        <div class="invite-profile ion-text-center ion-padding">
+          <app-chat-avatar [size]="88" [entry]="{ icon: defaultAvatarIcon }" />
+          <h2>{{ 'chats.invitePreviewIssues.' + issue + '.title' | transloco }}</h2>
+          <p class="invite-meta">{{ 'chats.invitePreviewIssues.' + issue + '.description' | transloco }}</p>
+        </div>
+      } @else if (error()) {
+        <app-load-error compact [message]="'chats.start.failed' | transloco" (retry)="retryLookup()" />
+      }
+    }
+    @if (kind() === Kind.Create || !previewIssue()) {
+      <ion-button
+        [class.ion-margin]="kind() === Kind.Create"
+        [class.invite-submit]="kind() === Kind.Join"
+        expand="block"
+        [disabled]="busy() || (kind() === Kind.Create ? !values().name.trim() : !previewValid())"
+        (click)="submit()">
+        <span class="action-content" [class.busy]="pending() === Action.Submit">
+          <span class="action-label">
+            {{
+              (kind() === Kind.Create
+                ? 'chats.start.submitCreate'
+                : preview()?.alreadyMember
+                  ? 'chats.start.submitOpen'
+                  : preview() && !preview()!.canJoin
+                    ? preview()!.invite.usedAt && preview()!.invite.targetUid === uid()
+                      ? 'chats.inviteStatus.used'
+                      : 'chats.start.notInvited'
+                    : 'chats.start.submitJoin'
+              ) | transloco
+            }}
+          </span>
+          @if (pending() === Action.Submit) {
+            <ion-spinner />
+          }
         </span>
-        @if (pending() === Action.Submit) {
-          <ion-spinner />
-        }
-      </span>
-    </ion-button>
+      </ion-button>
+    }
+    @if (kind() === Kind.Join) {
+      @if (preview(); as invite) {
+        <p class="invite-meta invite-validity ion-text-center ion-padding-horizontal">
+          {{
+            invite.invite.expiresAt
+              ? ('chats.invites.expiresOn' | transloco: { date: (invite.invite.expiresAt | localDate: 'dateTime') })
+              : ('chats.start.inviteNeverExpires' | transloco)
+          }}
+        </p>
+      } @else if (pending() === Action.Lookup) {
+        <p class="invite-meta invite-validity"><ion-skeleton-text class="meta-placeholder" [animated]="true" /></p>
+      }
+    }
   }
-  @if (error()) {
+  @if (error() && (kind() !== Kind.Join || preview())) {
     <p class="ion-padding">{{ 'chats.start.failed' | transloco }}</p>
   }
 </ion-content>
