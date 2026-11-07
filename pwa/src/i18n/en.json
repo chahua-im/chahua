@@ -322,6 +322,24 @@
       "used": "Invite already used",
       "neverExpires": "Never expires"
     },
+    "invitePreviewIssues": {
+      "invalid": {
+        "title": "Invalid invite code",
+        "description": "Check the invite code or link."
+      },
+      "missing": {
+        "title": "Invite not found",
+        "description": "This invite does not exist. Check the invite code or link."
+      },
+      "inactive": {
+        "title": "Invite expired",
+        "description": "This invite has expired or been revoked."
+      },
+      "restricted": {
+        "title": "You cannot use this invite",
+        "description": "This invite is limited to a specific user or members of a specific group."
+      }
+    },
     "start": {
       "createTitle": "Create group",
       "joinTitle": "Join group",
@@ -329,11 +347,13 @@
       "searchUsers": "Search by username or UID",
       "groupName": "Group name",
       "inviteCode": "Invite code or link",
-      "viewInvite": "View invite",
       "submitCreate": "Create",
       "submitOpen": "Open group",
       "submitJoin": "Join",
-      "failed": "Something went wrong. Check and try again."
+      "failed": "Something went wrong. Check and try again.",
+      "groupCreatedOn": "Group created on {{ date }}",
+      "inviteNeverExpires": "This invite never expires",
+      "notInvited": "Not invited"
     },
     "invites": {
       "type": "Who can join using this link?",
@@ -383,7 +403,11 @@
       "permanent": "Validity: permanent",
       "copyCode": "Copy invitation code",
       "codeCopied": "Invitation code copied",
-      "noPrivateChat": "Cannot send directly to this user: no private chat is available. Copy the invitation link to share it."
+      "noPrivateChat": "There is no available private chat with this user. Share the invite link instead.",
+      "generateAndSend": "Send invite directly",
+      "cannotSend": "Cannot send invite",
+      "sendUnavailable": "You cannot send an invite to this chat, or the invite is no longer active.",
+      "sendCheckFailed": "Unable to check sending permissions. Please try again later."
     },
     "details": {
       "topic": "Thread",
@@ -611,7 +635,6 @@
     "invite": {
       "groupInvite": "Group invite",
       "failed": "Could not load invitation",
-      "joined": "Already joined. Open group.",
       "view": "View group info and join"
     },
     "voice": {

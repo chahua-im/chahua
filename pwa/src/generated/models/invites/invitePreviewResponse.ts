@@ -10,6 +10,8 @@ import type { InviteResponse } from '../inviteResponse';
 
 export interface InvitePreviewResponse {
   alreadyMember: boolean;
+  /** Whether the current user can redeem this invitation. Independent of preview availability. */
+  canJoin: boolean;
   chat: GroupInfoResponse;
   invite: InviteResponse;
 }

@@ -29,11 +29,11 @@ import {
   InviteType,
   GroupKind,
   type MemberSummary,
-  type SpeakingMode,
   type InviteResponse,
   type SnowflakeID,
 } from '../../../generated/models';
 import { decodeId } from '../../api/snowflake-id';
+import { RpcError, RpcErrorCode } from '../../api/rpc-error';
 import { copyText } from '../../api/clipboard';
 import { inviteStatus, InviteStatus } from '../invite';
 import { ChatStore } from '../chat-store';
@@ -49,6 +49,7 @@ enum InvitePicker {
 
 enum InviteAction {
   Create,
+  CreateAndSend,
   Share,
   Revoke,
 }
@@ -58,6 +59,8 @@ enum Expiry {
   Never = 'never',
   Custom = 'custom',
 }
+type InviteRecipient = ChatPickerTarget | Pick<MemberSummary, 'uid' | 'username'>;
+
 interface InviteList {
   rows: InviteResponse[];
   cursor?: string;
@@ -138,8 +141,9 @@ export class ChatInvites {
   protected readonly destination = signal<ChatPickerTarget | undefined>(undefined);
   protected readonly pending = signal<{ action: InviteAction; id?: SnowflakeID } | undefined>(undefined);
   protected readonly busy = computed(() => this.pending() != null);
+  private readonly sendDialogOpen = signal(false);
+  protected readonly progress = computed(() => (this.sendDialogOpen() ? undefined : this.pending()));
   protected readonly operationError = signal<string | undefined>(undefined);
-  protected readonly restriction = signal<SpeakingMode | undefined>(undefined);
   protected readonly notice = signal<string | undefined>(undefined);
   private readonly now = signal(Date.now());
   protected readonly expiryInvalid = computed(
@@ -171,6 +175,7 @@ export class ChatInvites {
         this.picker.set(undefined);
         this.editorReady.set(false);
         this.pending.set(undefined);
+        this.sendDialogOpen.set(false);
         void this.load();
       });
     });
@@ -244,12 +249,13 @@ export class ChatInvites {
   protected close() {
     if (!this.busy()) this.creating.set(false);
   }
-  protected async create() {
+  protected async create(andSend = false) {
     this.now.set(Date.now());
     if (!this.canCreate()) return;
     const context = this.context;
-    this.pending.set({ action: InviteAction.Create });
+    this.pending.set({ action: andSend ? InviteAction.CreateAndSend : InviteAction.Create });
     this.operationError.set(undefined);
+    this.notice.set(undefined);
     const expiry = this.expiry();
     const expiresAt =
       expiry === Expiry.Never
@@ -258,6 +264,13 @@ export class ChatInvites {
           ? new Date(this.values().expiry).toISOString()
           : new Date(Date.now() + (expiry === Expiry.Day ? 1 : 7) * 86400000).toISOString();
     try {
+      const available = () => this.current(context);
+      let destination: ChatPickerTarget | undefined;
+      if (andSend) {
+        const recipient = this.type() === InviteType.targeted ? this.target()! : this.requiredGroup()!;
+        destination = await this.checkRecipient(recipient, available);
+        if (!destination || !(await this.confirmDestination(destination, available))) return;
+      }
       const result = await firstValueFrom(
         this.api.invites.create({
           chatId: this.chatId(),
@@ -274,10 +287,12 @@ export class ChatInvites {
         requiredChatName: this.type() === InviteType.membership ? this.requiredGroup()?.name : undefined,
       };
       this.updateList({ rows: this.merge(this.list().rows, [invite]) });
-      this.creating.set(false);
-      this.notice.set(this.transloco.translate('chats.invites.created'));
+      if (destination) await this.share(invite, destination, available);
+      else this.notice.set(this.transloco.translate('chats.invites.created'));
+      if (this.current(context)) this.creating.set(false);
     } catch {
       if (this.current(context)) this.operationError.set('chats.invites.createFailed');
+      return;
     } finally {
       if (this.current(context)) this.pending.set(undefined);
     }
@@ -324,7 +339,6 @@ export class ChatInvites {
     if (this.busy() || inviteStatus(invite) !== InviteStatus.Active) return;
     this.selected.set(invite);
     this.operationError.set(undefined);
-    this.restriction.set(undefined);
     if (invite.inviteType === InviteType.generic) {
       this.picker.set(InvitePicker.Destination);
       return;
@@ -343,69 +357,150 @@ export class ChatInvites {
     await this.confirmShare();
   }
   private async confirmShare(available: () => boolean = () => true) {
+    const invite = this.selected();
+    if (!invite || this.busy()) return false;
     const context = this.context;
-    const invite = this.selected()!;
-    const name =
-      invite.inviteType === InviteType.targeted
-        ? invite.targetName || String(invite.targetUid)
-        : this.destination()?.name || this.transloco.translate('conversation.chat');
+    const current = () => this.current(context) && available();
+    this.pending.set({ action: InviteAction.Share, id: invite.id });
+    this.notice.set(undefined);
+    try {
+      const recipient =
+        invite.inviteType === InviteType.targeted
+          ? { uid: invite.targetUid!, username: invite.targetName }
+          : this.destination()!;
+      const destination = await this.checkRecipient(recipient, current);
+      if (!destination || !(await this.confirmDestination(destination, current))) return false;
+      return await this.share(invite, destination, current);
+    } finally {
+      if (this.current(context)) this.pending.set(undefined);
+    }
+  }
+  private async checkRecipient(recipient: InviteRecipient, available: () => boolean) {
+    try {
+      let destination: ChatPickerTarget;
+      if ('uid' in recipient || recipient.kind === GroupKind.dm) {
+        let uid: number | undefined;
+        if ('uid' in recipient) uid = recipient.uid;
+        else {
+          if (!this.store.get(recipient.chatId)?.peer) await this.store.ensureDetails(recipient.chatId);
+          if (!available()) return;
+          uid = this.store.get(recipient.chatId)?.peer?.uid;
+        }
+        if (uid == null) {
+          await this.sendProblem('chats.invites.sendUnavailable', available);
+          return;
+        }
+        const relationship = await firstValueFrom(this.api.friends.getRelationship({ uid }));
+        if (!available()) return;
+        if (!relationship.dmChatId) {
+          await this.sendProblem('chats.invites.noPrivateChat', available);
+          return;
+        }
+        if (!relationship.canDm) {
+          await this.sendProblem(
+            relationship.blocking
+              ? 'messages.composer.blockedSelf'
+              : relationship.blockedBy
+                ? 'messages.composer.blockedBy'
+                : 'messages.composer.notFriends',
+            available,
+          );
+          return;
+        }
+        destination = {
+          chatId: relationship.dmChatId,
+          kind: GroupKind.dm,
+          name: 'uid' in recipient ? recipient.username || String(uid) : recipient.name,
+          avatar: {},
+          time: 0,
+        };
+      } else {
+        destination = recipient;
+        await this.store.ensureDetails(destination.chatId);
+      }
+      if (!available()) return;
+      const problem = this.destinationProblem(destination);
+      if (problem) {
+        await this.sendProblem(problem, available);
+        return;
+      }
+      return destination;
+    } catch (error) {
+      await this.sendProblem(this.sendError(error, 'chats.invites.sendCheckFailed'), available);
+      return;
+    }
+  }
+  private destinationProblem(destination: ChatPickerTarget) {
+    if (!this.store.isAccessible(destination.chatId)) return 'chats.invites.sendUnavailable';
+    if (destination.kind !== GroupKind.dm && !this.store.canSpeak(destination.chatId, SpeakingAction.ChatMessage)) {
+      const mode = this.store.speakingMode(destination.chatId);
+      return mode ? `speaking.blocked.${mode}` : 'chats.invites.sendUnavailable';
+    }
+    return undefined;
+  }
+  private sendError(error: unknown, fallback: string) {
+    const mode = speakingErrorMode(error);
+    if (mode) return `speaking.blocked.${mode}`;
+    if (error instanceof RpcError && (error.code === RpcErrorCode.Forbidden || error.code === RpcErrorCode.NotFound))
+      return 'chats.invites.sendUnavailable';
+    return fallback;
+  }
+  private async sendProblem(message: string, available: () => boolean) {
+    if (!available()) return;
+    const alert = await this.alerts.create({
+      header: this.transloco.translate('chats.invites.cannotSend'),
+      message: this.transloco.translate(message),
+      buttons: [{ text: this.transloco.translate('common.confirm'), role: 'cancel' }],
+    });
+    await this.showSendDialog(alert, available);
+  }
+  private async confirmDestination(destination: ChatPickerTarget, available: () => boolean) {
+    if (!available()) return false;
     const alert = await this.alerts.create({
       header: this.transloco.translate('chats.invites.share'),
-      message: this.transloco.translate('chats.invites.sendConfirmation', { group: name }),
+      message: this.transloco.translate('chats.invites.sendConfirmation', {
+        group: destination.name || this.transloco.translate('conversation.chat'),
+      }),
       buttons: [
         { text: this.transloco.translate('common.cancel'), role: 'cancel' },
         { text: this.transloco.translate('chats.invites.send'), role: 'confirm' },
       ],
     });
-    if (!this.current(context) || !available()) return false;
+    return this.showSendDialog(alert, available);
+  }
+  private async showSendDialog(alert: HTMLIonAlertElement, available: () => boolean) {
+    if (!available()) return false;
+    const context = this.context;
+    this.sendDialogOpen.set(true);
     this.destroy.onDestroy(() => void alert.dismiss());
-    await alert.present();
-    if ((await alert.onDidDismiss()).role !== 'confirm' || !this.current(context) || !available() || this.busy())
-      return false;
-    return this.share();
+    try {
+      await alert.present();
+      return (await alert.onDidDismiss()).role === 'confirm' && available();
+    } finally {
+      if (this.current(context)) this.sendDialogOpen.set(false);
+    }
   }
   protected selectDestination(group: ChatPickerTarget) {
     this.destination.set(group);
     this.operationError.set(undefined);
-    this.restriction.set(undefined);
   }
-  protected async share() {
-    let destination = this.destination();
-    const invite = this.selected();
-    if (!invite || this.busy() || inviteStatus(invite) !== InviteStatus.Active) return false;
-    const context = this.context;
-    this.pending.set({ action: InviteAction.Share, id: invite.id });
-    this.operationError.set(undefined);
-    this.restriction.set(undefined);
+  private async share(invite: InviteResponse, destination: ChatPickerTarget, available: () => boolean) {
+    if (!available()) return false;
+    const problem =
+      inviteStatus(invite) !== InviteStatus.Active
+        ? 'chats.invites.sendUnavailable'
+        : this.destinationProblem(destination);
+    if (problem) {
+      await this.sendProblem(problem, available);
+      return false;
+    }
+    if (this.sendAttempt?.inviteId !== invite.id || this.sendAttempt.destinationId !== destination.chatId)
+      this.sendAttempt = {
+        inviteId: invite.id,
+        destinationId: destination.chatId,
+        clientGeneratedId: crypto.randomUUID(),
+      };
     try {
-      if (invite.inviteType === InviteType.targeted) {
-        const relationship = await firstValueFrom(this.api.friends.getRelationship({ uid: invite.targetUid! }));
-        if (!this.current(context)) return false;
-        if (!relationship.dmChatId) {
-          this.operationError.set('chats.invites.noPrivateChat');
-          return false;
-        }
-        destination = {
-          chatId: relationship.dmChatId,
-          kind: GroupKind.dm,
-          name: invite.targetName || String(invite.targetUid),
-          avatar: {},
-          time: 0,
-        };
-      }
-      if (!destination) return false;
-      if (this.sendAttempt?.inviteId !== invite.id || this.sendAttempt.destinationId !== destination.chatId)
-        this.sendAttempt = {
-          inviteId: invite.id,
-          destinationId: destination.chatId,
-          clientGeneratedId: crypto.randomUUID(),
-        };
-      if (destination.kind !== GroupKind.dm) await this.store.ensureDetails(destination.chatId);
-      if (!this.current(context)) return false;
-      if (!this.store.canSpeak(destination.chatId, SpeakingAction.ChatMessage)) {
-        this.restriction.set(this.store.speakingMode(destination.chatId));
-        return false;
-      }
       await firstValueFrom(
         this.api.invites.send({
           sourceChatId: this.chatId(),
@@ -414,7 +509,7 @@ export class ChatInvites {
           clientGeneratedId: this.sendAttempt.clientGeneratedId,
         }),
       );
-      if (!this.current(context)) return false;
+      if (!available()) return false;
       this.notice.set(
         this.transloco.translate('chats.invites.sharedTo', {
           group: destination.name || this.transloco.translate('conversation.chat'),
@@ -423,18 +518,8 @@ export class ChatInvites {
       this.sendAttempt = undefined;
       return true;
     } catch (error) {
-      if (!this.current(context)) return false;
-      const mode = speakingErrorMode(error);
-      if (mode) this.restriction.set(mode);
-      else this.operationError.set('chats.invites.shareFailed');
+      await this.sendProblem(this.sendError(error, 'chats.invites.shareFailed'), available);
       return false;
-    } finally {
-      if (this.current(context)) {
-        this.pending.set(undefined);
-        const error = this.operationError();
-        const mode = this.restriction();
-        if (error || mode) this.notice.set(this.transloco.translate(error || `speaking.blocked.${mode}`));
-      }
     }
   }
 }

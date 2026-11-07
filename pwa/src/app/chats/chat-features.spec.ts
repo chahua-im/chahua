@@ -240,13 +240,13 @@ describe('Chat feature requests', () => {
     fixture.componentRef.setInput('kind', StartChatKind.Join);
     fixture.detectChanges();
     fixture.componentInstance['values'].set({ name: '', code: 'abcdefghij' });
-    const loading = fixture.componentInstance['lookup']();
+    fixture.detectChanges();
     (await peer.expectAsync('invites.getByCode', { inviteCode: 'abcdefghij' })).flush({
       chat: { ...wireChat },
       invite: { code: 'abcdefghij' },
       alreadyMember: false,
+      canJoin: true,
     });
-    await loading;
     fixture.componentInstance['values'].update((v) => ({ ...v, code: '0123456789' }));
     await fixture.componentInstance['submit']();
     peer.expectNone('invites.redeem');

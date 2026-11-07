@@ -80,6 +80,7 @@
       #bubble
       [class]="isSticker() ? 'sticker-content' : 'bubble'"
       [class.media-only]="mediaOnly()"
+      [class.invitation]="message().messageType === Type.invite"
       (contextmenu)="showMenu($event, bubble)"
       (pointerdown)="startPress($event, bubble)">
       <div class="bubble-surface">
@@ -87,6 +88,7 @@
           first() &&
           !isSticker() &&
           message().messageType !== Type.forwarded &&
+          message().messageType !== Type.invite &&
           !message().forwardedFrom &&
           showDetails()
         ) {
@@ -176,6 +178,10 @@
                 } @else if (message().messageType === Type.invite) {
                   <button type="button" class="invite-card" [disabled]="!canInteract()" (click)="invite($event)">
                     <app-invite-card [code]="message().message ?? ''" />
+                    <ion-badge class="invite-time" color="medium">
+                      <time [attr.datetime]="message().createdAt">{{ message().createdAt | localDate: 'time' }}</time>
+                      <app-message-status [delivery]="status()" [read]="read()" />
+                    </ion-badge>
                   </button>
                 } @else if (message().message) {
                   <app-message-text
@@ -196,7 +202,7 @@
                   [profilesEnabled]="!record()" />
               </span>
             }
-            @if (!showForwardedCard) {
+            @if (!showForwardedCard && message().messageType !== Type.invite) {
               <ng-container [ngTemplateOutlet]="timestamp" />
             }
           </div>

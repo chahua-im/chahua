@@ -51,19 +51,16 @@ const MAX_INVITES_LIMIT: i64 = 100;
 const INVALID_INVITE_CODE_MESSAGE: &str = "Invalid invite code";
 const INVALID_INVITE_MESSAGE: &str = "Invalid invite";
 enum RedeemInviteError {
-    InvalidCode,
+    App(AppError),
     Db(diesel::result::Error),
 }
 
-enum PreviewInviteError {
-    InvalidCode,
-    Forbidden,
-    Db(diesel::result::Error),
-}
-
+#[derive(Debug, PartialEq, Eq)]
 enum PreviewEligibility {
     Eligible,
     AlreadyMember,
+    NotInvited,
+    Used,
 }
 
 enum RedeemInviteOutcome {
@@ -77,9 +74,9 @@ impl From<diesel::result::Error> for RedeemInviteError {
     }
 }
 
-impl From<diesel::result::Error> for PreviewInviteError {
-    fn from(error: diesel::result::Error) -> Self {
-        Self::Db(error)
+impl From<AppError> for RedeemInviteError {
+    fn from(error: AppError) -> Self {
+        Self::App(error)
     }
 }
 fn invite_limit(limit: Option<i64>) -> i64 {
@@ -154,7 +151,7 @@ fn preview_eligibility(
     conn: &mut PgConnection,
     invite: &Invite,
     uid: i32,
-) -> Result<PreviewEligibility, PreviewInviteError> {
+) -> Result<PreviewEligibility, AppError> {
     let already_member = group_membership::table
         .filter(
             group_membership::chat_id
@@ -171,16 +168,18 @@ fn preview_eligibility(
     match invite.invite_type {
         InviteType::Generic => Ok(PreviewEligibility::Eligible),
         InviteType::Targeted => {
-            if invite.target_uid == Some(uid) && invite.used_at.is_none() {
-                Ok(PreviewEligibility::Eligible)
+            if invite.target_uid != Some(uid) {
+                Ok(PreviewEligibility::NotInvited)
+            } else if invite.used_at.is_some() {
+                Ok(PreviewEligibility::Used)
             } else {
-                Err(PreviewInviteError::Forbidden)
+                Ok(PreviewEligibility::Eligible)
             }
         }
         InviteType::Membership => {
             let required_chat_id = invite
                 .required_chat_id
-                .ok_or(PreviewInviteError::InvalidCode)?;
+                .ok_or(AppError::Internal("Invalid membership invite"))?;
             let has_required_membership = group_membership::table
                 .filter(
                     group_membership::chat_id
@@ -193,7 +192,7 @@ fn preview_eligibility(
             if has_required_membership > 0 {
                 Ok(PreviewEligibility::Eligible)
             } else {
-                Err(PreviewInviteError::Forbidden)
+                Ok(PreviewEligibility::NotInvited)
             }
         }
     }
@@ -411,7 +410,23 @@ pub fn get_invite_by_code(
     media: &MediaStore,
     avatars: &AvatarService,
 ) -> Result<InvitePreviewResponse, AppError> {
-    let invite_code = query.invite_code.trim();
+    let (invite, eligibility) = load_preview_invite(conn, uid, &query.invite_code)?;
+    let chat = load_group_info(conn, media, avatars, invite.chat_id, uid)?;
+
+    Ok(InvitePreviewResponse {
+        invite: invite_service::invite_to_response(invite),
+        chat,
+        already_member: matches!(eligibility, PreviewEligibility::AlreadyMember),
+        can_join: matches!(eligibility, PreviewEligibility::Eligible),
+    })
+}
+
+fn load_preview_invite(
+    conn: &mut PgConnection,
+    uid: i32,
+    code: &str,
+) -> Result<(Invite, PreviewEligibility), AppError> {
+    let invite_code = code.trim();
     if invite_code.is_empty() {
         return Err(AppError::BadRequest(INVALID_INVITE_CODE_MESSAGE));
     }
@@ -421,28 +436,15 @@ pub fn get_invite_by_code(
         .select(Invite::as_select())
         .first::<Invite>(conn)
         .optional()?
-        .ok_or(AppError::BadRequest(INVALID_INVITE_CODE_MESSAGE))?;
+        .ok_or(AppError::NotFound("Invite not found"))?;
 
     if !validate_invite_is_active(&invite, Utc::now()) {
-        return Err(AppError::BadRequest(INVALID_INVITE_CODE_MESSAGE));
+        return Err(AppError::Gone("Invite is no longer active"));
     }
 
-    let eligibility = preview_eligibility(conn, &invite, uid).map_err(|error| match error {
-        PreviewInviteError::InvalidCode => AppError::BadRequest(INVALID_INVITE_CODE_MESSAGE),
-        PreviewInviteError::Forbidden => AppError::Forbidden("Not eligible for this invite"),
-        PreviewInviteError::Db(other) => {
-            tracing::error!("preview invite eligibility: {:?}", other);
-            AppError::Internal("Failed to load invite")
-        }
-    })?;
+    let eligibility = preview_eligibility(conn, &invite, uid)?;
 
-    let chat = load_group_info(conn, media, avatars, invite.chat_id, uid)?;
-
-    Ok(InvitePreviewResponse {
-        invite: invite_service::invite_to_response(invite),
-        chat,
-        already_member: matches!(eligibility, PreviewEligibility::AlreadyMember),
-    })
+    Ok((invite, eligibility))
 }
 pub fn patch_invite(
     uid: i32,
@@ -496,56 +498,18 @@ pub async fn post_redeem_invite(
 
     let outcome = conn
         .transaction::<RedeemInviteOutcome, RedeemInviteError, _>(|conn| {
-            let invite = invites::table
-                .filter(invites::code.eq(code))
-                .select(Invite::as_select())
-                .first::<Invite>(conn)
-                .optional()?
-                .ok_or(RedeemInviteError::InvalidCode)?;
-
+            let (invite, eligibility) = load_preview_invite(conn, uid, code)?;
+            match eligibility {
+                PreviewEligibility::AlreadyMember => return Ok(RedeemInviteOutcome::AlreadyMember),
+                PreviewEligibility::NotInvited => {
+                    return Err(AppError::Forbidden("Not eligible for this invite").into());
+                }
+                PreviewEligibility::Used => {
+                    return Err(AppError::Conflict("Invite already used").into());
+                }
+                PreviewEligibility::Eligible => {}
+            }
             let now = Utc::now();
-            if !validate_invite_is_active(&invite, now) {
-                return Err(RedeemInviteError::InvalidCode);
-            }
-
-            let already_member = group_membership::table
-                .filter(
-                    group_membership::chat_id
-                        .eq(invite.chat_id)
-                        .and(group_membership::uid.eq(uid)),
-                )
-                .count()
-                .get_result::<i64>(conn)?;
-
-            if already_member > 0 {
-                return Ok(RedeemInviteOutcome::AlreadyMember);
-            }
-
-            match invite.invite_type {
-                InviteType::Generic => {}
-                InviteType::Targeted => {
-                    if invite.target_uid != Some(uid) || invite.used_at.is_some() {
-                        return Err(RedeemInviteError::InvalidCode);
-                    }
-                }
-                InviteType::Membership => {
-                    let required_chat_id = invite
-                        .required_chat_id
-                        .ok_or(RedeemInviteError::InvalidCode)?;
-                    let has_required_membership = group_membership::table
-                        .filter(
-                            group_membership::chat_id
-                                .eq(required_chat_id)
-                                .and(group_membership::uid.eq(uid)),
-                        )
-                        .count()
-                        .get_result::<i64>(conn)?;
-
-                    if has_required_membership == 0 {
-                        return Err(RedeemInviteError::InvalidCode);
-                    }
-                }
-            }
 
             let (last_message_id, chat_kind): (Option<i64>, crate::models::GroupKind) =
                 crate::schema::groups::table
@@ -590,14 +554,14 @@ pub async fn post_redeem_invite(
                 .execute(conn)?;
 
                 if updated != 1 {
-                    return Err(RedeemInviteError::InvalidCode);
+                    return Err(AppError::Conflict("Invite already used").into());
                 }
             }
 
             Ok(RedeemInviteOutcome::Joined(invite.chat_id, chat_kind))
         })
         .map_err(|error| match error {
-            RedeemInviteError::InvalidCode => AppError::BadRequest(INVALID_INVITE_CODE_MESSAGE),
+            RedeemInviteError::App(error) => error,
             RedeemInviteError::Db(other) => {
                 tracing::error!("redeem invite: {:?}", other);
                 AppError::Internal("Failed to redeem invite")
@@ -652,9 +616,69 @@ pub async fn post_redeem_invite(
 }
 
 #[cfg(test)]
-mod list_tests {
+mod tests {
     use super::*;
     use diesel::connection::SimpleConnection;
+
+    #[test]
+    fn preview_availability_is_independent_of_join_permission() {
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        let mut conn = PgConnection::establish(&url).unwrap();
+        conn.batch_execute(
+            "CREATE TEMP TABLE invites (LIKE public.invites INCLUDING ALL);
+             CREATE TEMP TABLE group_membership (LIKE public.group_membership INCLUDING ALL);
+             INSERT INTO invites (id, code, chat_id, invite_type, created_at, target_uid, required_chat_id)
+             VALUES (1, 'expired1', 10, 'generic', NOW(), NULL, NULL),
+                    (2, 'revoked1', 10, 'generic', NOW(), NULL, NULL),
+                    (3, 'used0001', 10, 'targeted', NOW(), 9, NULL),
+                    (4, 'targeted', 10, 'targeted', NOW(), 9, NULL),
+                    (5, 'members1', 10, 'membership', NOW(), NULL, 20),
+                    (6, 'active01', 10, 'generic', NOW(), NULL, NULL);
+             UPDATE invites SET expires_at = NOW() - INTERVAL '1 day' WHERE id = 1;
+             UPDATE invites SET revoked_at = NOW() WHERE id = 2;
+             UPDATE invites SET used_at = NOW() WHERE id = 3;
+             INSERT INTO group_membership (chat_id, uid, role, joined_at)
+             VALUES (10, 7, 'member', NOW()), (20, 8, 'member', NOW());",
+        )
+        .unwrap();
+
+        use crate::rpc::error::{RpcError, RpcErrorCode};
+        for uid in [7, 8, 9] {
+            for (code, expected) in [
+                ("missing1", RpcErrorCode::NotFound),
+                ("expired1", RpcErrorCode::Gone),
+                ("revoked1", RpcErrorCode::Gone),
+                ("", RpcErrorCode::BadRequest),
+            ] {
+                let error = match load_preview_invite(&mut conn, uid, code) {
+                    Err(error) => error,
+                    Ok(_) => panic!("unexpected preview for {code}, uid {uid}"),
+                };
+                assert_eq!(RpcError::from(error).code, expected, "{code}, uid {uid}");
+            }
+        }
+        for (code, uid, expected) in [
+            ("active01", 7, PreviewEligibility::AlreadyMember),
+            ("active01", 8, PreviewEligibility::Eligible),
+            ("active01", 9, PreviewEligibility::Eligible),
+            ("targeted", 7, PreviewEligibility::AlreadyMember),
+            ("targeted", 8, PreviewEligibility::NotInvited),
+            ("targeted", 9, PreviewEligibility::Eligible),
+            ("members1", 7, PreviewEligibility::AlreadyMember),
+            ("members1", 8, PreviewEligibility::Eligible),
+            ("members1", 9, PreviewEligibility::NotInvited),
+            ("used0001", 7, PreviewEligibility::AlreadyMember),
+            ("used0001", 8, PreviewEligibility::NotInvited),
+            ("used0001", 9, PreviewEligibility::Used),
+        ] {
+            let (invite, eligibility) = load_preview_invite(&mut conn, uid, code).unwrap();
+            assert_eq!(invite.code, code);
+            assert_eq!(eligibility, expected, "{code}, uid {uid}");
+        }
+    }
 
     #[test]
     fn invite_cursor_preserves_time_and_id_and_rejects_bad_input() {

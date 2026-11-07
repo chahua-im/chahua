@@ -44,6 +44,8 @@ pub struct InvitePreviewResponse {
     pub invite: InviteResponse,
     pub chat: GroupInfoResponse,
     pub already_member: bool,
+    /// Whether the current user can redeem this invitation. Independent of preview availability.
+    pub can_join: bool,
 }
 
 #[derive(Serialize, ToSchema)]

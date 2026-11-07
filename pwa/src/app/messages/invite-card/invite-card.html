@@ -1,33 +1,39 @@
-<app-chat-avatar
-  [size]="44"
-  [entry]="{
-    avatar: preview()?.chat?.avatar,
-    title: preview()?.chat?.name ?? ('messages.invite.groupInvite' | transloco),
-  }" />
-<div>
-  <strong>{{ preview()?.chat?.name || ('messages.invite.groupInvite' | transloco) }}</strong>
-  <small>
-    @if (loading()) {
-      <ion-spinner />
-    } @else if (failed()) {
-      {{ 'messages.invite.failed' | transloco }}
-    } @else if (preview()?.alreadyMember) {
-      {{ 'messages.invite.joined' | transloco }}
-    } @else {
-      @switch (status(preview()!.invite)) {
-        @case (Status.Expired) {
-          {{ 'chats.inviteStatus.expired' | transloco }}
+<ion-card>
+  <ion-card-header>
+    <ion-card-subtitle>
+      <ion-icon [icon]="invitationIcon" />
+      {{ 'messages.invite.groupInvite' | transloco }}
+    </ion-card-subtitle>
+  </ion-card-header>
+  <div class="group">
+    <app-chat-avatar
+      [size]="44"
+      [entry]="{
+        avatar: preview() && !expired(preview()!.invite) ? preview()?.chat?.avatar : undefined,
+        title: preview()?.chat?.name ?? ('messages.invite.groupInvite' | transloco),
+        icon: preview() && !expired(preview()!.invite) ? undefined : defaultAvatarIcon,
+      }" />
+    <div>
+      <strong>
+        @if (preview() && expired(preview()!.invite)) {
+          {{ 'chats.invitePreviewIssues.inactive.title' | transloco }}
+        } @else if (issue(); as issue) {
+          {{ 'chats.invitePreviewIssues.' + issue + '.title' | transloco }}
+        } @else if (failed()) {
+          {{ 'messages.invite.failed' | transloco }}
+        } @else {
+          {{ preview()?.chat?.name }}
         }
-        @case (Status.Revoked) {
-          {{ 'chats.inviteStatus.revoked' | transloco }}
-        }
-        @case (Status.Used) {
-          {{ 'chats.inviteStatus.used' | transloco }}
-        }
-        @default {
-          {{ 'messages.invite.view' | transloco }}
-        }
+      </strong>
+      @if (loading() || (preview() && !expired(preview()!.invite))) {
+        <small>
+          @if (loading()) {
+            <ion-spinner />
+          } @else {
+            {{ preview()?.chat?.description?.trim() || ('messages.invite.view' | transloco) }}
+          }
+        </small>
       }
-    }
-  </small>
-</div>
+    </div>
+  </div>
+</ion-card>

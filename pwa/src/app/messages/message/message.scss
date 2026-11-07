@@ -424,12 +424,53 @@
 }
 
 .invite-card {
+  position: relative;
   display: block;
   max-width: 100%;
+  padding: 0;
+  border: 0;
   text-align: start;
   background: transparent;
   color: inherit;
   font: inherit;
+  cursor: pointer;
+}
+
+.invite-card:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+.bubble.invitation {
+  --thread-color: var(--ion-color-primary);
+  color: var(--ion-text-color);
+
+  &::after {
+    display: none;
+  }
+
+  > .bubble-surface {
+    padding: 0;
+    background: transparent;
+    clip-path: none;
+  }
+
+  .message-text {
+    display: block;
+  }
+}
+
+.invite-time {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  font-size: var(--app-font-micro);
+  line-height: var(--app-line-micro);
+  font-weight: 400;
+  pointer-events: none;
 }
 
 .forward-origin {
