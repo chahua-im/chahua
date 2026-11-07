@@ -1,12 +1,16 @@
 <ion-header>
   @if (searching()) {
-    <ion-toolbar>
+    <ion-toolbar class="search-toolbar">
       <ion-searchbar
-        [placeholder]="'chats.list.searchGroupsAndUsers' | transloco"
+        placeholder=""
         [debounce]="300"
-        showCancelButton="always"
-        (ionInput)="search.set($event.detail.value || '')"
-        (ionCancel)="searching.set(false); search.set('')" />
+        showCancelButton="never"
+        (ionInput)="search.set($event.detail.value || '')" />
+      <ion-buttons slot="end">
+        <ion-button (click)="searching.set(false); search.set('')">
+          <ion-icon slot="icon-only" [icon]="closeIcon" />
+        </ion-button>
+      </ion-buttons>
     </ion-toolbar>
   } @else {
     <ion-toolbar>
@@ -71,8 +75,8 @@
           </ion-segment-button>
         </ion-segment>
         <ion-buttons slot="end">
-          <ion-button (click)="addMenu.present($event)">
-            <ion-icon class="action-icon" slot="icon-only" [icon]="addIcon"></ion-icon>
+          <ion-button (click)="searching.set(true)">
+            <ion-icon class="action-icon" slot="icon-only" [icon]="searchIcon"></ion-icon>
           </ion-button>
         </ion-buttons>
       }
@@ -83,7 +87,9 @@
   }
 </ion-header>
 @if (searching()) {
-  <ion-content appScrollbars><app-directory-search [query]="search()" /></ion-content>
+  <ion-content appScrollbars>
+    <app-directory-search [query]="search()" />
+  </ion-content>
 } @else if (list().archived || list().requestHistory) {
   <app-chat-list-content [selection]="list()" [active]="active()" (openList)="openList.emit($event)" />
 } @else {
@@ -98,27 +104,6 @@
     }
   </div>
 }
-<ion-popover #addMenu [dismissOnSelect]="true">
-  <ng-template>
-    <ion-list>
-      @if (canCreateGroup()) {
-        <ion-item [button]="true" routerLink="/chats/new">
-          <ion-label>{{ 'chats.list.add.createGroup' | transloco }}</ion-label>
-        </ion-item>
-      }
-      <ion-item [button]="true" routerLink="/chats/join">
-        <ion-label>{{ 'chats.list.add.joinGroup' | transloco }}</ion-label>
-      </ion-item>
-      <ion-item [button]="true" routerLink="/chats/add-friend">
-        <ion-label>{{ 'chats.list.add.addFriend' | transloco }}</ion-label>
-      </ion-item>
-      <ion-item [button]="true" (click)="searching.set(true)">
-        <ion-label>{{ 'chats.list.add.search' | transloco }}</ion-label>
-      </ion-item>
-    </ion-list>
-  </ng-template>
-</ion-popover>
-
 <ion-popover #profileMenu side="bottom" alignment="start" [arrow]="false" [dismissOnSelect]="true">
   <ng-template>
     <ion-list>
@@ -130,6 +115,12 @@
         <ion-icon slot="start" [icon]="settingsIcon" color="primary"></ion-icon>
         <ion-label>{{ 'settings.title' | transloco }}</ion-label>
       </ion-item>
+      @if (canCreateGroup()) {
+        <ion-item [button]="true" [detail]="false" routerLink="/chats/new">
+          <ion-icon slot="start" [icon]="createGroupIcon" color="primary" />
+          <ion-label>{{ 'chats.list.add.createGroup' | transloco }}</ion-label>
+        </ion-item>
+      }
       @if (installer.available()) {
         <ion-item [button]="true" [detail]="false" (click)="installer.install()" lines="none">
           <ion-icon slot="start" [icon]="installIcon" color="primary"></ion-icon>

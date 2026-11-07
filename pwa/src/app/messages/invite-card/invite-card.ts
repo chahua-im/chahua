@@ -6,6 +6,12 @@ import { mailOutline, people } from 'ionicons/icons';
 import { RpcApi } from '../../../generated/rpc-api';
 import type { InvitePreviewResponse } from '../../../generated/models';
 import { inviteCode, inviteExpired, invitePreviewIssue, InvitePreviewIssue } from '../../chats/invite';
+
+export interface InviteCardResult {
+  preview?: InvitePreviewResponse;
+  issue?: InvitePreviewIssue;
+}
+
 @Component({
   selector: 'app-invite-card',
   imports: [ChatAvatar, IonCard, IonCardHeader, IonCardSubtitle, IonIcon, IonSpinner, TranslocoPipe],
@@ -14,6 +20,7 @@ import { inviteCode, inviteExpired, invitePreviewIssue, InvitePreviewIssue } fro
 })
 export class InviteCard {
   readonly code = input.required<string>();
+  readonly result = input<InviteCardResult>();
   protected readonly defaultAvatarIcon = people;
   protected readonly invitationIcon = mailOutline;
   private readonly api = inject(RpcApi);
@@ -24,6 +31,14 @@ export class InviteCard {
   protected readonly expired = inviteExpired;
   constructor() {
     effect((onCleanup) => {
+      const result = this.result();
+      if (result) {
+        this.preview.set(result.preview);
+        this.issue.set(result.issue);
+        this.failed.set(false);
+        this.loading.set(false);
+        return;
+      }
       const code = inviteCode(this.code());
       this.loading.set(true);
       this.failed.set(false);
