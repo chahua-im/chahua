@@ -17,7 +17,9 @@ export interface InviteResponse {
   id: SnowflakeID;
   inviteType: InviteType;
   requiredChatId?: SnowflakeID;
+  requiredChatName?: string;
   revokedAt?: string;
+  targetName?: string;
   targetUid?: number;
   usedAt?: string;
 }

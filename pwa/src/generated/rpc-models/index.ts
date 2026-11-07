@@ -371,7 +371,7 @@ export type InvitesCreateParams = {
 export type InvitesDeleteParams = { inviteId: Shared.SnowflakeID };
 export type InvitesGetByCodeParams = { inviteCode: string };
 export type InvitesGetParams = { inviteId: Shared.SnowflakeID };
-export type InvitesListParams = { groupId?: Shared.SnowflakeID; limit?: number };
+export type InvitesListParams = { activeOnly?: boolean; after?: string; groupId?: Shared.SnowflakeID; limit?: number };
 export type InvitesRedeemParams = { code: string };
 export type InvitesSendParams = {
   clientGeneratedId: string;
@@ -402,7 +402,7 @@ export type ListGroupsQuery = {
   q?: string;
   scope?: Shared.GroupSelectorScope;
 };
-export type ListInvitesQuery = { groupId?: Shared.SnowflakeID; limit?: number };
+export type ListInvitesQuery = { activeOnly?: boolean; after?: string; groupId?: Shared.SnowflakeID; limit?: number };
 export type ListMembersQuery = { after?: number; limit?: number; mode?: Shared.UserSearchMode; q?: string };
 export type ListMessagesQuery = {
   after?: Shared.SnowflakeID;

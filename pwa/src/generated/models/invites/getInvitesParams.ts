@@ -10,4 +10,6 @@ import type { SnowflakeID } from '../snowflakeID';
 export type GetInvitesParams = {
   groupId?: SnowflakeID;
   limit?: number;
+  activeOnly?: boolean;
+  after?: string;
 };

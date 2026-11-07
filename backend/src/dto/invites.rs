@@ -20,9 +20,11 @@ pub struct InviteResponse {
     pub invite_type: InviteType,
     pub creator_uid: Option<i32>,
     pub target_uid: Option<i32>,
+    pub target_name: Option<String>,
     #[serde(with = "crate::serde_i64_string::opt")]
     #[schema(schema_with = crate::serde_i64_string::schema_opt)]
     pub required_chat_id: Option<i64>,
+    pub required_chat_name: Option<String>,
     pub created_at: DateTime<Utc>,
     pub expires_at: Option<DateTime<Utc>>,
     pub revoked_at: Option<DateTime<Utc>>,
@@ -33,6 +35,7 @@ pub struct InviteResponse {
 #[serde(rename_all = "camelCase")]
 pub struct ListInvitesResponse {
     pub invites: Vec<InviteResponse>,
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -82,6 +85,8 @@ pub struct ListInvitesQuery {
     #[schema(schema_with = crate::serde_i64_string::schema_opt)]
     pub group_id: Option<i64>,
     pub limit: Option<i64>,
+    pub active_only: Option<bool>,
+    pub after: Option<String>,
 }
 
 #[derive(Deserialize, ToSchema, utoipa::IntoParams)]

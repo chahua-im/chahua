@@ -1,4 +1,7 @@
 import { computed, signal } from '@angular/core';
+import { By } from '@angular/platform-browser';
+import { TranslocoService } from '@jsverse/transloco';
+import { ChatPicker } from '../../chats/chat-picker/chat-picker';
 import { TestBed } from '@angular/core/testing';
 import { ToastController } from '@ionic/angular';
 import { chatbubbles } from 'ionicons/icons';
@@ -79,12 +82,22 @@ describe('ForwardPicker', () => {
         { provide: ToastController, useValue: { create: toasts } },
       ],
     });
-    TestBed.overrideComponent(ForwardPicker, { set: { template: '' } });
+    TestBed.overrideComponent(ChatPicker, { set: { template: '' } });
     const fixture = TestBed.createComponent(ForwardPicker);
     fixture.componentRef.setInput('messages', messages);
     if (load) fixture.componentRef.setInput('load', load);
     fixture.detectChanges();
-    return { fixture, picker: fixture.componentInstance, prepareForward, enqueueForward, toasts, chats, threads };
+    const picker = fixture.debugElement.query(By.directive(ChatPicker)).componentInstance as ChatPicker;
+    return {
+      fixture,
+      picker,
+      forward: fixture.componentInstance,
+      prepareForward,
+      enqueueForward,
+      toasts,
+      chats,
+      threads,
+    };
   }
   it('checks only the chosen destination and leaves the picker open when sending is restricted', async () => {
     const { picker, prepareForward, toasts } = setup();
@@ -95,7 +108,11 @@ describe('ForwardPicker', () => {
     expect(metadata.ensureDetails).toHaveBeenCalledExactlyOnceWith(target.chatId);
     expect(prepareForward).not.toHaveBeenCalled();
     expect(picker['open']()).toBe(true);
-    expect(toasts).toHaveBeenCalledWith(expect.objectContaining({ message: ForwardSelectionError.Restricted }));
+    expect(toasts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: TestBed.inject(TranslocoService).translate(ForwardSelectionError.Restricted),
+      }),
+    );
   });
 
   it.each([false, true])('skips group detail requests for a known DM destination (thread: %s)', async (thread) => {
@@ -185,23 +202,23 @@ describe('ForwardPicker', () => {
       .mockResolvedValueOnce({ error: ForwardSelectionError.LoadFailed })
       .mockResolvedValueOnce({ error: ForwardSelectionError.TooMany })
       .mockResolvedValueOnce({ sources: [testMessage] });
-    const { picker, prepareForward, toasts } = setup([], load);
+    const { picker, forward, prepareForward, toasts } = setup([], load);
     await picker['select'](picker['targets']()[0]);
-    expect(picker['failure']()).toBeUndefined();
-    expect(picker['invalid']()).toBe(false);
+    expect(forward['failure']()).toBeUndefined();
+    expect(forward['invalid']()).toBe(false);
     expect(toasts).toHaveBeenCalledOnce();
     await picker['select'](picker['targets']()[0]);
-    expect(picker['failure']()).toBeUndefined();
+    expect(forward['failure']()).toBeUndefined();
     expect(toasts).toHaveBeenCalledTimes(2);
     expect(prepareForward).not.toHaveBeenCalled();
     await picker['select'](picker['targets']()[0]);
     expect(prepareForward).toHaveBeenCalledOnce();
   });
   it('rejects a source recalled while the picker is open', async () => {
-    const { picker, prepareForward } = setup([testMessage]);
+    const { picker, forward, prepareForward } = setup([testMessage]);
     changes.next({ type: ServerWsMessageType.messageDeleted, payload: { ...testMessage, isDeleted: true } });
     await picker['select'](picker['targets']()[0]);
-    expect(picker['invalid']()).toBe(true);
+    expect(forward['invalid']()).toBe(true);
     expect(prepareForward).not.toHaveBeenCalled();
   });
   it('stages nested records without asking for replacement consent before send', async () => {
@@ -357,7 +374,7 @@ describe('ForwardPicker', () => {
   });
 
   it('allows cancellation while reading sources and prevents it during route submission', async () => {
-    const { picker, prepareForward } = setup();
+    const { picker, fixture, prepareForward } = setup();
     let resolve!: (opened: boolean) => void;
     prepareForward.mockImplementation(
       () =>
@@ -370,12 +387,14 @@ describe('ForwardPicker', () => {
     expect(picker['canDismiss']()).toBe(true);
     await Promise.resolve();
     await Promise.resolve();
+    fixture.detectChanges();
     expect(picker['canDismiss']()).toBe(false);
     expect(picker['canDismiss'](undefined, 'navigate')).toBe(true);
     picker['close']();
     expect(picker['open']()).toBe(true);
     resolve(false);
     await pending;
+    fixture.detectChanges();
     expect(picker['canDismiss']()).toBe(true);
   });
 
