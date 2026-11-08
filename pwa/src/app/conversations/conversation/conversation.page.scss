@@ -17,10 +17,21 @@ ion-content::part(scroll) {
 }
 
 .unread-separator {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   text-align: center;
+  white-space: nowrap;
   font-size: var(--app-font-caption);
   line-height: var(--app-line-caption);
   color: var(--ion-color-primary);
+
+  &::before,
+  &::after {
+    content: '';
+    flex: 1;
+    border-block-start: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  }
 }
 
 .history-navigation {

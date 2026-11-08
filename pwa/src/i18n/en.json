@@ -534,7 +534,7 @@
     "chat": "Conversation",
     "pinned": "Pinned message",
     "pinnedLoadFailed": "Could not load pinned messages",
-    "unreadBelow": "Unread messages",
+    "unreadBelow": "Unread messages below",
     "threadLoadFailed": "Could not load thread status",
     "threadUpdateFailed": "Could not update thread",
     "empty": "No messages yet",

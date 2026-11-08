@@ -534,7 +534,7 @@
     "chat": "會話",
     "pinned": "置頂訊息",
     "pinnedLoadFailed": "置頂訊息載入失敗",
-    "unreadBelow": "未讀訊息",
+    "unreadBelow": "以下為未讀訊息",
     "threadLoadFailed": "話題狀態載入失敗",
     "threadUpdateFailed": "話題更新失敗",
     "empty": "尚無訊息",
