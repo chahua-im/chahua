@@ -420,6 +420,7 @@
                     <input
                       class="profile-input"
                       [formField]="fields.name!.value"
+                      (focus)="editingField = Field.Name"
                       [readOnly]="pending() === Action.Name"
                       (keydown)="editKeydown($event, Field.Name)" />
                   }
@@ -437,7 +438,7 @@
                     }
                   </button>
                   @if (edits().name != null) {
-                    <button type="button" class="field-edit" [disabled]="busy()" (click)="cancelEdit(Field.Name)">
+                    <button type="button" class="field-edit" [disabled]="busy()" (click)="discardEdits([Field.Name])">
                       <ion-icon [icon]="icons.closeOutline" />
                     </button>
                   }
@@ -449,6 +450,7 @@
                     class="profile-input"
                     rows="3"
                     [formField]="fields.description!.value"
+                    (focus)="editingField = Field.Description"
                     [readOnly]="pending() === Action.Description"
                     (keydown)="editKeydown($event, Field.Description)"></textarea>
                 } @else {
@@ -471,7 +473,7 @@
                       type="button"
                       class="field-edit"
                       [disabled]="busy()"
-                      (click)="cancelEdit(Field.Description)">
+                      (click)="discardEdits([Field.Description])">
                       <ion-icon [icon]="icons.closeOutline" />
                     </button>
                   }

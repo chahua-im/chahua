@@ -3,8 +3,26 @@ import { IonModal } from '@ionic/angular';
 import { By } from '@angular/platform-browser';
 import { StickerPackVisibility } from '../../../generated/models';
 import { StickerEditor } from './sticker-editor';
+import { DiscardChanges } from '../../navigation/discard-changes';
 
 describe('StickerEditor dismissal', () => {
+  it.each([undefined, 'escape', 'back', 'backdrop'])(
+    'confirms changed fields on %s dismissal and retains cancelled edits',
+    async (role) => {
+      const fixture = TestBed.createComponent(StickerEditor);
+      fixture.componentRef.setInput('title', '贴纸');
+      fixture.componentRef.setInput('initialName', '茶');
+      const editor = fixture.componentInstance;
+      const confirm = vi.spyOn(TestBed.inject(DiscardChanges), 'confirm').mockResolvedValue(false);
+      expect(await editor['canDismiss'](undefined, role)).toBe(true);
+      expect(confirm).not.toHaveBeenCalled();
+      editor['value'].update((value) => ({ ...value, name: '新名称' }));
+      expect(await editor['canDismiss'](undefined, role)).toBe(false);
+      expect(editor['value']().name).toBe('新名称');
+      confirm.mockResolvedValue(true);
+      expect(await editor['canDismiss'](undefined, role)).toBe(true);
+    },
+  );
   it('offers visibility only when editing a pack, and submits it with the name on save', () => {
     vi.spyOn(IonModal.prototype, 'isOpen', 'set').mockImplementation(() => {});
     const fixture = TestBed.createComponent(StickerEditor);

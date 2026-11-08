@@ -20,6 +20,7 @@ import { RpcTestPeer, provideRpcTesting } from '../../api/rpc-testing';
 import { RpcErrorCode } from '../../api/rpc-error';
 import { StickerPicker } from '../../messages/sticker-picker/sticker-picker';
 import { PanelNavigation } from '../../navigation/panel-navigation';
+import { DiscardChanges, DiscardReason } from '../../navigation/discard-changes';
 import {
   AttachmentUploadPurpose,
   GroupKind,
@@ -808,12 +809,12 @@ describe('ConversationPage', () => {
     peer.expectNone('messages.send');
   });
 
-  it('Escape leaves multi-selection without reaching the page-level navigation shortcut', () => {
+  it('Escape leaves multi-selection without reaching the page-level navigation shortcut', async () => {
     component['beginSelection'](testMessage);
     const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
     fixture.nativeElement.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
-    expect(component['selecting']()).toBe(false);
+    await vi.waitFor(() => expect(component['selecting']()).toBe(false));
     expect(component['selectedMessages']().size).toBe(0);
   });
 
@@ -2335,25 +2336,48 @@ describe('ConversationPage', () => {
     expect(drafts.get(testChat.id)).toMatchObject({ text: '还没有发送', replyTo: wireMessage.id });
   });
 
-  it('Escape cancels an unchanged edit or the reply and blurs the composer otherwise', () => {
-    const blur = vi.spyOn(component['composer']()!, 'blur').mockImplementation(() => {});
+  it('Escape cancels reply/edit states, confirms changed edits and then allows page navigation', async () => {
+    const discard = vi.spyOn(TestBed.inject(DiscardChanges), 'confirm').mockResolvedValue(false);
     component['startReply'](testMessage);
-    component['escapeComposer']();
+    await component['escapeComposer']();
     expect(component['replyTo']()).toBeUndefined();
-    expect(blur).not.toHaveBeenCalled();
 
     component['startEdit'](testMessage);
-    component['escapeComposer']();
+    await component['escapeComposer']();
     expect(component['editTarget']()).toBeUndefined();
 
     component['startEdit'](testMessage);
     component['updateDraft']('改动过的编辑');
-    component['escapeComposer']();
+    await component['escapeComposer']();
     expect(component['editTarget']()).toBeDefined();
+    expect(discard).toHaveBeenCalledOnce();
+    discard.mockResolvedValue(true);
+    await component['escapeComposer']();
+    expect(component['editTarget']()).toBeUndefined();
+    expect(await component['escapeComposer']()).toBe(false);
+  });
 
-    component['cancelEdit']();
-    component['escapeComposer']();
-    expect(blur).toHaveBeenCalledOnce();
+  it('keeps unsent attachments until discarding is confirmed before Escape navigation', async () => {
+    const composer = component['composer']()!;
+    vi.spyOn(composer, 'hasUnsavedAttachments').mockReturnValue(true);
+    const discard = vi.spyOn(TestBed.inject(DiscardChanges), 'confirm').mockResolvedValue(false);
+    expect(await component['escapeComposer']()).toBe(true);
+    expect(discard).toHaveBeenCalledWith(DiscardReason.Attachments);
+    discard.mockResolvedValue(true);
+    expect(await component['escapeComposer']()).toBe(false);
+  });
+
+  it('cancels a recording on Escape only after confirmation, without leaving the chat', async () => {
+    const composer = component['composer']()!;
+    composer.voiceActive.set(true);
+    const cancel = vi.spyOn(composer, 'cancelRecording').mockImplementation(() => {});
+    const discard = vi.spyOn(TestBed.inject(DiscardChanges), 'confirm').mockResolvedValue(false);
+    expect(await component['escapeComposer']()).toBe(true);
+    expect(cancel).not.toHaveBeenCalled();
+    discard.mockResolvedValue(true);
+    expect(await component['escapeComposer']()).toBe(true);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(discard).toHaveBeenCalledWith(DiscardReason.Recording);
   });
 
   it.each(['background', 'transition', 'left'])(

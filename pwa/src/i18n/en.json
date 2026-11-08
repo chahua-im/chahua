@@ -56,6 +56,12 @@
     "copyFailed": "Could not copy diagnostics"
   },
   "common": {
+    "discard": {
+      "changes": "Discard unsaved changes?",
+      "attachments": "Discard unsent attachments and leave?",
+      "recording": "Discard this recording?",
+      "confirm": "Discard"
+    },
     "done": "Done",
     "save": "Save",
     "saved": "Saved",

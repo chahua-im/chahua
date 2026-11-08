@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, input, linkedSignal, signal } from '@angular/core';
+import { Component, computed, DestroyRef, effect, inject, input, linkedSignal, signal } from '@angular/core';
 import { form, FormField } from '@angular/forms/signals';
 import {
   IonButton,
@@ -38,6 +38,7 @@ import {
   InviteStatus,
 } from '../invite';
 import { StartChatKind } from './start-chat-kind';
+import { DiscardChanges } from '../../navigation/discard-changes';
 export { StartChatKind } from './start-chat-kind';
 
 enum StartChatAction {
@@ -71,6 +72,7 @@ enum StartChatAction {
   host: { class: 'ion-page' },
 })
 export class StartChat {
+  readonly panelPath = input<string>();
   readonly kind = input(StartChatKind.Create);
   readonly code = input('');
   protected readonly Kind = StartChatKind;
@@ -96,7 +98,15 @@ export class StartChat {
   protected readonly error = signal(false);
   protected readonly previewIssue = signal<InvitePreviewIssue | undefined>(undefined);
   protected readonly preview = signal<InvitePreviewResponse | undefined>(undefined);
+  private readonly discardChanges = inject(DiscardChanges);
+  private readonly destroy = inject(DestroyRef);
+  private leaveConfirmation?: Promise<boolean>;
+  private submitted = false;
   constructor() {
+    effect((onCleanup) => {
+      const path = this.panelPath();
+      if (path) onCleanup(this.panels.registerLeaveCheck(path, () => this.canLeave()));
+    });
     effect((onCleanup) => {
       if (this.kind() !== StartChatKind.Join) return;
       const code = this.resolvedCode();
@@ -124,6 +134,21 @@ export class StartChat {
       });
       onCleanup(() => subscription.unsubscribe());
     });
+  }
+  private canLeave() {
+    if (this.submitted) return true;
+    if (this.pending() === StartChatAction.Submit) return false;
+    this.leaveConfirmation ??= this.discardForm().finally(() => {
+      this.leaveConfirmation = undefined;
+    });
+    return this.leaveConfirmation;
+  }
+  private async discardForm() {
+    const values = this.values();
+    if ((values.name || values.code !== this.code()) && !(await this.discardChanges.confirm())) return false;
+    if (this.destroy.destroyed || this.values() !== values) return false;
+    this.values.set({ name: '', code: this.code() });
+    return true;
   }
   protected retryLookup() {
     this.lookupAttempt.update((attempt) => attempt + 1);
@@ -157,6 +182,7 @@ export class StartChat {
       }
       if (uid !== this.session.user()?.uid) return;
       this.lists.refreshChats();
+      this.submitted = true;
       await this.navigation.open(chatId);
     } catch (error) {
       if (uid !== this.session.user()?.uid || code !== this.resolvedCode()) return;

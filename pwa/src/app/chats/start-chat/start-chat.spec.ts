@@ -1,5 +1,7 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { DiscardChanges } from '../../navigation/discard-changes';
+import { PanelNavigation } from '../../navigation/panel-navigation';
 import { Subject } from 'rxjs';
 import { GroupRole, ServerWsMessageType, SpeakingMode, type ServerWsMessage } from '../../../generated/models';
 import { Connection } from '../../api/connection';
@@ -75,6 +77,45 @@ describe('StartChat', () => {
     fixture.detectChanges();
     return fixture;
   }
+
+  it('guards route exits and clears the form only after confirming discard', async () => {
+    const register = vi.spyOn(TestBed.inject(PanelNavigation), 'registerLeaveCheck');
+    const fixture = TestBed.createComponent(StartChat);
+    fixture.componentRef.setInput('panelPath', '/chats/new');
+    fixture.detectChanges();
+    const component = fixture.componentInstance;
+    const leave = register.mock.calls[0][1];
+    const confirm = vi.spyOn(TestBed.inject(DiscardChanges), 'confirm').mockResolvedValue(false);
+    component['values'].set({ name: '未提交群名', code: '' });
+    expect(await leave()).toBe(false);
+    expect(component['values']().name).toBe('未提交群名');
+    confirm.mockResolvedValue(true);
+    expect(await leave()).toBe(true);
+    expect(component['values']()).toEqual({ name: '', code: '' });
+    expect(await leave()).toBe(true);
+    expect(confirm).toHaveBeenCalledTimes(2);
+    fixture.destroy();
+    peer.expectNone('groups.create');
+  });
+
+  it('blocks exit during submission and allows successful creation to navigate without discard confirmation', async () => {
+    const fixture = TestBed.createComponent(StartChat);
+    fixture.detectChanges();
+    const component = fixture.componentInstance;
+    component['values'].set({ name: '新群', code: '' });
+    const confirm = vi.spyOn(TestBed.inject(DiscardChanges), 'confirm');
+    navigate.mockImplementationOnce(async () => {
+      expect(await component['canLeave']()).toBe(true);
+      return true;
+    });
+    const saving = component['submit']();
+    expect(await component['canLeave']()).toBe(false);
+    peer.expect('groups.create', { name: '新群' }).flush(wireChat);
+    await saving;
+    expect(navigate).toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
+    fixture.destroy();
+  });
 
   it('shows details immediately when opened from an invitation card or link', () => {
     const fixture = join('join-code');

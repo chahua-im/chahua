@@ -372,8 +372,7 @@
     [forwarding]="!!pendingForward()"
     (forwardSubmitted)="sendForward($event)"
     (submitted)="sendMessage($event)"
-    (editLast)="editLastMessage()"
-    (escape)="escapeComposer()">
+    (editLast)="editLastMessage()">
     @if (pendingForward(); as sources) {
       <div class="reply-context forward-context">
         <button

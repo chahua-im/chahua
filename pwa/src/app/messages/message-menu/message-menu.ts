@@ -117,6 +117,13 @@ export function pageSlots(actions: readonly MenuSlot[], page: number): readonly 
   providers: [MessageActions],
 })
 export class MessageMenu {
+  protected readonly canDismiss = (_data?: unknown, role?: string) => {
+    if (role === 'escape' && this.choosingEmoji()) {
+      this.choosingEmoji.set(false);
+      return false;
+    }
+    return true;
+  };
   readonly chatId = input.required<SnowflakeID>();
   readonly threadId = input<SnowflakeID>();
   readonly canReply = input(true);

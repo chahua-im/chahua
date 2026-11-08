@@ -98,16 +98,17 @@
 }
 
 <ion-modal
+  #createModal
   [isOpen]="creating()"
-  [canDismiss]="!busy()"
+  [canDismiss]="canDismiss"
   (didPresent)="editorReady.set(true)"
   (willDismiss)="picker.set(undefined); editorReady.set(false)"
-  (didDismiss)="creating.set(false)">
+  (didDismiss)="resetCreate()">
   <ng-template>
     <ion-header>
       <ion-toolbar>
         <ion-buttons slot="start">
-          <ion-button [disabled]="busy()" (click)="close()">{{ 'common.cancel' | transloco }}</ion-button>
+          <ion-button [disabled]="busy()" (click)="createModal.dismiss()">{{ 'common.cancel' | transloco }}</ion-button>
         </ion-buttons>
         <ion-title>{{ 'chats.invites.create' | transloco }}</ion-title>
       </ion-toolbar>

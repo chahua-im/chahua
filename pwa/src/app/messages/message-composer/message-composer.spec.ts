@@ -157,6 +157,7 @@ describe('Message composer upload ownership', () => {
       for (const request of peer.match('attachments.createUploadUrl')) request.error(RpcErrorCode.Unavailable);
       peer.verify();
     } finally {
+      for (const alert of document.querySelectorAll('ion-alert')) alert.remove();
       TestBed.resetTestingModule();
       vi.unstubAllGlobals();
       vi.restoreAllMocks();
@@ -1068,7 +1069,8 @@ describe('Message composer upload ownership', () => {
     composer['key'](new KeyboardEvent('keydown', { key: 'Enter' }));
     expect(mention).toHaveBeenCalledWith(second);
     expect(submitted).not.toHaveBeenCalled();
-    composer['key'](new KeyboardEvent('keydown', { key: 'Escape' }));
+    document.body.append(fixture.nativeElement);
+    fixture.nativeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(composer['suggestions']()).toEqual([]);
   });
 });

@@ -40,6 +40,7 @@ import { ChatStore } from '../chat-store';
 import { SpeakingAction, speakingErrorMode } from '../speaking';
 import { ChatAvatar } from '../chat-avatar/chat-avatar';
 import { ChatPicker, ChatPickerScope, type ChatPickerTarget, type ChooseChat } from '../chat-picker/chat-picker';
+import { DiscardChanges } from '../../navigation/discard-changes';
 
 enum InvitePicker {
   User,
@@ -141,6 +142,19 @@ export class ChatInvites {
   protected readonly destination = signal<ChatPickerTarget | undefined>(undefined);
   protected readonly pending = signal<{ action: InviteAction; id?: SnowflakeID } | undefined>(undefined);
   protected readonly busy = computed(() => this.pending() != null);
+  private readonly discardChanges = inject(DiscardChanges);
+  protected readonly canDismiss = (_data?: unknown, role?: string) => {
+    if (!this.creating() || role === 'navigate' || role === 'parent-dismissed' || role === 'parent-removed')
+      return true;
+    if (this.busy()) return false;
+    const changed =
+      this.type() !== InviteType.generic ||
+      this.expiry() !== Expiry.Week ||
+      !!this.values().expiry ||
+      !!this.target() ||
+      !!this.requiredGroup();
+    return !changed || this.discardChanges.confirm();
+  };
   private readonly sendDialogOpen = signal(false);
   protected readonly progress = computed(() => (this.sendDialogOpen() ? undefined : this.pending()));
   protected readonly operationError = signal<string | undefined>(undefined);
@@ -228,13 +242,7 @@ export class ChatInvites {
     }
   }
   protected startCreate() {
-    this.type.set(InviteType.generic);
-    this.expiry.set(Expiry.Week);
-    this.values.set({ expiry: '' });
-    this.target.set(undefined);
-    this.requiredGroup.set(undefined);
-    this.inputInvalid.set(false);
-    this.operationError.set(undefined);
+    this.resetCreate();
     this.selected.set(undefined);
     this.creating.set(true);
   }
@@ -246,8 +254,15 @@ export class ChatInvites {
       this.expiry.set(value as Expiry);
     }
   }
-  protected close() {
-    if (!this.busy()) this.creating.set(false);
+  protected resetCreate() {
+    this.creating.set(false);
+    this.type.set(InviteType.generic);
+    this.expiry.set(Expiry.Week);
+    this.values.set({ expiry: '' });
+    this.target.set(undefined);
+    this.requiredGroup.set(undefined);
+    this.inputInvalid.set(false);
+    this.operationError.set(undefined);
   }
   protected async create(andSend = false) {
     this.now.set(Date.now());

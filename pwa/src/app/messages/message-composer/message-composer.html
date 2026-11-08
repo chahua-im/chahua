@@ -142,7 +142,7 @@
   </div>
 </div>
 @if (stickersVisible()) {
-  <div class="sticker-panel" [class.docked]="dockStickers()">
+  <app-sidebar-frame class="sticker-panel" [docked]="dockStickers()">
     @if (dockStickers()) {
       <ion-toolbar>
         <ion-title>{{ 'stickers.title' | transloco }}</ion-title>
@@ -154,7 +154,7 @@
       </ion-toolbar>
     }
     <app-sticker-picker [embedded]="true" [grouped]="dockStickers()" (selected)="sticker($event)" />
-  </div>
+  </app-sidebar-frame>
 }
 
 <div #attachmentMenu popover="auto" class="attachment-menu" (pointerdown)="$event.preventDefault()">

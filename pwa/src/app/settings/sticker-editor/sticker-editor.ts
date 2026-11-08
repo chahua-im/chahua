@@ -1,5 +1,16 @@
 import { NgTemplateOutlet } from '@angular/common';
-import { Component, computed, input, linkedSignal, output, signal, TemplateRef, viewChild } from '@angular/core';
+import {
+  Component,
+  computed,
+  inject,
+  input,
+  linkedSignal,
+  output,
+  signal,
+  TemplateRef,
+  viewChild,
+} from '@angular/core';
+import { DiscardChanges } from '../../navigation/discard-changes';
 import { applyWhen, disabled, form, FormField, pattern, required } from '@angular/forms/signals';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { TranslocoPipe } from '@jsverse/transloco';
@@ -163,8 +174,15 @@ export class StickerEditor {
   readonly closed = output<void>();
   readonly confirmed = output<StickerEditorValue>();
   private readonly modal = viewChild.required(IonModal);
-  protected readonly canDismiss = async (_data?: unknown, role?: string) =>
-    !this.busy() || role === 'saved' || role === 'navigate' || role === 'parent-dismissed' || role === 'parent-removed';
+  private readonly discardChanges = inject(DiscardChanges);
+  protected readonly canDismiss = async (_data?: unknown, role?: string) => {
+    if (role === 'saved' || role === 'navigate' || role === 'parent-dismissed' || role === 'parent-removed')
+      return true;
+    if (this.busy()) return false;
+    const value = this.value();
+    const changed = value.name !== this.initialName() || !!value.emoji || value.visibility !== this.initialVisibility();
+    return !changed || this.discardChanges.confirm();
+  };
 
   dismiss() {
     return this.modal().dismiss(undefined, 'saved');

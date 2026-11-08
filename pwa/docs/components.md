@@ -69,6 +69,10 @@ panel-definitions 集中定义面板路径、类型、参数输入绑定、设�
 
 ChatLink 在应用壳中承载稳定的普通路由面板容器与独立媒体弹层；媒体弹层覆盖已有面板时保留底层实例、尺寸与滚动位置，关闭动画完成后释放媒体内容。PanelPage 使用同一协议匹配路径并绑定无损 ID 等输入，按 panel-routes 的组件映射加载 MediaViewer、ChatDetails、StartChat、StickerPicker 和设置页面；父页隐藏时保留组件，返回后恢复。PanelPage 仅在已挂载的隐藏页面变为可见时调用 panelResume，包括从复制链接创建后首次显示的父页；初始可见页面由组件自身加载。简单展示组件不为数据传递新建服务。
 
+SidebarFrame 是详情与贴纸共用的侧栏容器，通过内容投影保留内部组件；`docked` 控制右栏外观，`overlay` 表示由 Ionic 弹窗承载。组件统一定义侧栏表面、布局与动画，尺寸和时序见[外观](appearance.md#导航动画)。贴纸使用 Angular 的进出生命周期，关闭动画完成后移除内容；详情使用组件提供的 Ionic 动画，弹窗与路由关闭时机仍由 ChatLink 管理。窗口断点切换只更新容器呈现，不搬移或重建内容。
+
+EscapeNavigation 在捕获阶段统一接收 Esc，按当前可见弹层限定处理范围；组件通过 registerEscape 注册并随销毁注销局部状态处理。提及候选、侧栏、列表搜索、会话状态和最终页面导航依次处理，某一层消费按键后不再触发 Ionic 或其他组件的按键监听；Toast 不占用层级。等待放弃确认时锁定原操作，但新弹出的确认框仍可用 Esc 取消。群资料与创建／加入群表单使用 PanelNavigation 的退出检查覆盖页面按钮和历史导航，退出后重置本地编辑状态；邀请和贴纸编辑使用 Ionic canDismiss 检查局部弹窗退出。DiscardChanges 共用放弃修改、附件和录音的确认文案；状态归各组件所有，层级约定见[Esc 退出层级](requirements.md#esc-退出层级)。
+
 ## 根布局与聊天列表
 
 | 组件               | 输入、输出与局部字段                                                                                                                                   | 数据依赖                                                                                                                                   |

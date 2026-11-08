@@ -51,6 +51,7 @@ import { ChatListContent } from '../chat-list-content/chat-list-content';
 import { ChatListStore } from '../chat-list-store';
 import { DirectorySearch } from '../directory-search/directory-search';
 import { isListTab, ListTab, type ListSelection } from '../list-tabs';
+import { EscapePriority, registerEscape } from '../../navigation/escape-navigation';
 
 @Component({
   selector: 'app-chat-list',
@@ -97,6 +98,12 @@ export class ChatList {
   protected readonly tabBadges = computed(() => this.lists.tabBadges(this.preferences.showThreadsInMessages()));
 
   constructor() {
+    registerEscape(() => {
+      if (!this.active() || !this.searching()) return false;
+      this.searching.set(false);
+      this.search.set('');
+      return true;
+    }, EscapePriority.Search);
     effect((onCleanup) => {
       if (!this.active()) return;
       onCleanup(this.lists.viewUnread.activate());
