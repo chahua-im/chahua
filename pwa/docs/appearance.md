@@ -55,6 +55,10 @@ iOS 根布局保留 Ionic 默认 body 样式，不根据 VisualViewport 的 resi
 
 ## 消息布局与 Telegram 参考
 
+图片、视频和贴纸上的时间 pill 使用 Ionic medium 色，背景不透明度为 70%（透明度 30%）；文字和消息状态图标不额外降低不透明度。
+
+未读分界文案居中，两侧为等长的 1px 主题色横线，线条不透明度 35%，与文字间隔 12px。
+
 作者色使用旧版用户名 hash，用户组颜色直接使用后端字段；不把用户组色与作者色混为一项。
 
 同一台 iPhone、viewport 为 device-width 且无额外页面缩放时，UIKit 的布局点与 CSS px 按 1:1 对应；UIKit pt 不是 CSS 的排版单位 pt。桌面截图还受浏览器缩放与 iPhone 镜像窗口缩放影响，不能直接据此推导字号。

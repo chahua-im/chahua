@@ -1967,7 +1967,7 @@ export class ConversationPage {
           position.type === PositionKind.Reaction
             ? (message?.querySelector<HTMLElement>('app-message-reactions') ?? message)
             : message;
-        if (element) {
+        if (message && element) {
           const rect = element.getBoundingClientRect();
           const edge = position.type === PositionKind.Anchor ? rect.bottom : rect.top;
           const inset =
@@ -1976,7 +1976,7 @@ export class ConversationPage {
               : Math.max(0, (scroll.clientHeight - element.offsetHeight) / 2);
           scroll.scrollTop += edge - scroll.getBoundingClientRect().top - inset;
           if (position.type === PositionKind.Message || position.type === PositionKind.Reaction)
-            element.animate(
+            message.animate(
               [{ backgroundColor: 'var(--ion-color-primary-tint)' }, { backgroundColor: 'transparent' }],
               { duration: 1200 },
             );

@@ -3680,7 +3680,7 @@ describe('ConversationPage', () => {
     await fixture.whenStable();
   });
 
-  it('scrolls a long message to its reaction region and waits for visibility after a FAB jump', async () => {
+  it('scrolls to the reaction region, highlights the whole message row and waits for visibility after a FAB jump', async () => {
     const { regions, snapshot } = await reactionViewport();
     snapshot.flush({ messageIds: ['102', '101'], readThrough: reactionBoundary });
     await fixture.whenStable();
@@ -3693,6 +3693,11 @@ describe('ConversationPage', () => {
     await component['jumpToNextReaction']();
     await fixture.whenStable();
     expect(scroll.scrollTop).toBe(815);
+    expect(row.animate).toHaveBeenCalledWith(
+      [{ backgroundColor: 'var(--ion-color-primary-tint)' }, { backgroundColor: 'transparent' }],
+      { duration: 1200 },
+    );
+    expect(region.animate).not.toHaveBeenCalled();
     expect(component['reactionJumpIds']()).toEqual([encodeId('102'), encodeId('101')]);
     intersections.get(region)!(1);
     await new Promise((resolve) => setTimeout(resolve, 550));
