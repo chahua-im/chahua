@@ -115,65 +115,35 @@
     </ion-header>
     <ion-content appScrollbars>
       <ion-list [inset]="true">
-        <ion-item>
-          <ion-select
-            [cancelText]="'common.cancel' | transloco"
-            [okText]="'common.confirm' | transloco"
-            [disabled]="busy()"
-            [label]="'chats.invites.type' | transloco"
-            [value]="type()"
-            (ionChange)="change($event.detail.value)">
-            <ion-select-option [value]="Type.generic">
+        <ion-item [button]="true" [disabled]="busy()" (click)="inviteType.present($event)">
+          <ion-label>{{ 'chats.invites.type' | transloco }}</ion-label>
+          <ion-note slot="end">
+            @if (type() === Type.targeted && target(); as person) {
+              {{ person.username || person.uid }}
+            } @else if (type() === Type.membership && requiredGroup(); as group) {
+              {{
+                'chats.invites.membershipGroup' | transloco: { group: group.name || ('conversation.chat' | transloco) }
+              }}
+            } @else {
               {{ 'chats.invites.typeGeneric' | transloco }}
-            </ion-select-option>
-            <ion-select-option [value]="Type.targeted">
-              {{ 'chats.invites.typeTargeted' | transloco }}
-            </ion-select-option>
-            <ion-select-option [value]="Type.membership">
-              {{ 'chats.invites.typeMembership' | transloco }}
-            </ion-select-option>
-          </ion-select>
+            }
+          </ion-note>
         </ion-item>
-        @if (type() === Type.targeted) {
-          @if (target(); as person) {
-            <ion-item>
-              <app-chat-avatar
-                slot="start"
-                [size]="40"
-                [entry]="{ avatar: person.avatarUrl, title: person.username || person.uid.toString() }" />
-              <ion-label>
-                {{ person.username || person.uid }}
-                <p>{{ 'chats.invites.uid' | transloco: { uid: person.uid } }}</p>
-              </ion-label>
-              <ion-button fill="clear" [disabled]="busy()" (click)="picker.set(Picker.User)">
-                {{ 'chats.invites.change' | transloco }}
-              </ion-button>
-            </ion-item>
-          } @else {
-            <ion-item [button]="true" [disabled]="busy()" (click)="picker.set(Picker.User)">
-              <ion-label>{{ 'chats.invites.chooseUser' | transloco }}</ion-label>
-            </ion-item>
-          }
-        }
-        @if (type() === Type.membership) {
-          @if (requiredGroup(); as group) {
-            <ion-item>
-              <ion-label>
-                {{
-                  'chats.invites.membershipGroup'
-                    | transloco: { group: group.name || ('conversation.chat' | transloco) }
-                }}
-              </ion-label>
-              <ion-button fill="clear" [disabled]="busy()" (click)="picker.set(Picker.GroupCondition)">
-                {{ 'chats.invites.change' | transloco }}
-              </ion-button>
-            </ion-item>
-          } @else {
-            <ion-item [button]="true" [disabled]="busy()" (click)="picker.set(Picker.GroupCondition)">
-              <ion-label>{{ 'chats.invites.chooseGroup' | transloco }}</ion-label>
-            </ion-item>
-          }
-        }
+        <ion-popover #inviteType side="bottom" alignment="end" [arrow]="false">
+          <ng-template>
+            <ion-list>
+              <ion-item [button]="true" [detail]="false" (click)="change(Type.generic, inviteType)">
+                <ion-label>{{ 'chats.invites.typeGeneric' | transloco }}</ion-label>
+              </ion-item>
+              <ion-item [button]="true" [detail]="false" (click)="change(Type.targeted, inviteType)">
+                <ion-label>{{ 'chats.invites.typeTargeted' | transloco }}</ion-label>
+              </ion-item>
+              <ion-item [button]="true" [detail]="false" (click)="change(Type.membership, inviteType)">
+                <ion-label>{{ 'chats.invites.typeMembership' | transloco }}</ion-label>
+              </ion-item>
+            </ion-list>
+          </ng-template>
+        </ion-popover>
         <ion-item>
           <ion-select
             [cancelText]="'common.cancel' | transloco"
@@ -262,5 +232,5 @@
     [choose]="chooseChat"
     [submitted]="busy()"
     (userSelected)="target.set($event)"
-    (closed)="picker.set(undefined)" />
+    (closed)="closePicker()" />
 }

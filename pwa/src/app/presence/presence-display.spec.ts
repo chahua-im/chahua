@@ -5,7 +5,35 @@ import { LastSeenBucket } from '../../generated/models/lastSeenBucket';
 import type { UserPresenceResponse } from '../../generated/models/userPresenceResponse';
 import { Localization } from '../i18n/localization';
 import { Presence } from './presence';
-import { UserPresenceDisplay } from './presence-display';
+import { GroupPresenceDisplay, UserPresenceDisplay } from './presence-display';
+import { encodeId } from '../api/snowflake-id';
+
+describe('GroupPresenceDisplay', () => {
+  it('shows grouped member and online counts with members first', async () => {
+    const state = signal({ memberCount: 12345, onlineCount: 123 });
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: Presence,
+          useValue: {
+            group: state,
+            groupLoading: () => false,
+            groupFailed: () => false,
+            watch: () => () => {},
+          },
+        },
+      ],
+    });
+    const fixture = TestBed.createComponent(GroupPresenceDisplay);
+    fixture.componentRef.setInput('chatId', encodeId('100'));
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(fixture.nativeElement.textContent.trim()).toBe('12,345位成员，123人在线');
+    state.set({ memberCount: 12345, onlineCount: 1234 });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('1,234人在线');
+  });
+});
 
 describe('UserPresenceDisplay', () => {
   afterEach(() => TestBed.resetTestingModule());

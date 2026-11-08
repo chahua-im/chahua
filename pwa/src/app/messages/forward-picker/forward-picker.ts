@@ -24,7 +24,7 @@ import {
   template: `
     <app-chat-picker
       [scope]="Scope.ChatsAndThreads"
-      [title]="(moveFrom() ? 'messages.forward.changeTarget' : 'messages.forward.to') | transloco"
+      [title]="title() ?? ((moveFrom() ? 'messages.forward.changeTarget' : 'messages.forward.to') | transloco)"
       [(open)]="open"
       [choose]="select"
       [submitted]="submitted()"
@@ -36,6 +36,7 @@ import {
   `,
 })
 export class ForwardPicker {
+  readonly title = input<string>();
   readonly messages = input<readonly ForwardSource[]>([]);
   readonly moveFrom = input<ForwardDraftLocation>();
   readonly load = input<ForwardSourcesLoader>();
