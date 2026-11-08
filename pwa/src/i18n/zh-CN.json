@@ -56,6 +56,12 @@
     "copyFailed": "无法复制诊断信息"
   },
   "common": {
+    "discard": {
+      "changes": "放弃未保存的修改？",
+      "attachments": "放弃未发送的附件并离开？",
+      "recording": "放弃这段录音？",
+      "confirm": "放弃"
+    },
     "done": "完成",
     "save": "保存",
     "saved": "已保存",

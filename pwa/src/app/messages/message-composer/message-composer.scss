@@ -214,15 +214,7 @@ button:disabled {
 }
 
 .sticker-panel.docked {
-  position: fixed;
-  inset-block: 0;
-  inset-inline-end: 0;
-  width: 360px;
-  display: flex;
-  flex-direction: column;
   padding-bottom: var(--ion-safe-area-bottom, 0px);
-  border-inline-start: 1px solid var(--ion-background-color-step-200, var(--ion-color-light-shade));
-  background: var(--ion-background-color);
 
   app-sticker-picker {
     --sticker-picker-height: auto;

@@ -50,6 +50,17 @@ describe('Friend verification unsaved question', () => {
     expect(confirm).toHaveBeenCalledTimes(2);
     peer.expectNone('friends.updateSettings');
   });
+  it('confirms an immediate-save mode change that failed and restores the applied settings', async () => {
+    const component = await page();
+    component['chooseMode'](Mode.forbid);
+    peer.expect('friends.updateSettings', { mode: Mode.forbid }).error(1503);
+    await vi.waitFor(() => expect(component['saving']()).toBe(false));
+    expect(await component.canDismiss()).toBe(false);
+    confirm.mockResolvedValueOnce({ role: 'destructive' });
+    expect(await component.canDismiss()).toBe(true);
+    expect(component['verification']().mode).toBe(Mode.need_message);
+  });
+
   it('keeps a failed question editable and closes only after a successful retry', async () => {
     const component = await page();
     component['chooseMode'](Mode.question);

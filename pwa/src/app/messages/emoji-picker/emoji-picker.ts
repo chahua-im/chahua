@@ -21,6 +21,7 @@ import { Localization } from '../../i18n/localization';
 import { attachScrollbars } from '../../scrolling/overlay-scrollbars';
 import { PickerData, PickerSearch } from './picker-data';
 import { PickerFlags } from './picker-flags';
+import { EscapePriority, registerEscape } from '../../navigation/escape-navigation';
 
 @Component({
   selector: 'app-emoji-picker',
@@ -61,6 +62,11 @@ export class EmojiPicker {
   protected readonly height = signal(400);
 
   constructor() {
+    registerEscape(() => {
+      if (!this.active() || !this.picker()?.grid?.skinToneEmoji()) return false;
+      this.picker()!.grid!.skinToneEmoji.set(null);
+      return true;
+    }, EscapePriority.Suggestion);
     afterRenderEffect((onCleanup) => {
       const viewport = this.picker()?.grid?.scrollContainerRef.nativeElement;
       if (!viewport) return;

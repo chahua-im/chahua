@@ -3,6 +3,7 @@
   [enterAnimation]="enterAnimation"
   [leaveAnimation]="leaveAnimation"
   [isOpen]="!!message()"
+  [canDismiss]="canDismiss"
   (didDismiss)="selection.set(undefined)">
   <ng-template>
     @if (selection(); as selection) {

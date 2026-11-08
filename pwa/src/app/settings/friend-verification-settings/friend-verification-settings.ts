@@ -75,8 +75,8 @@ export class FriendVerificationSettings {
   protected readonly dirty = computed(() => {
     const value = this.verification();
     return (
-      value.mode === FriendAddVerificationMode.question &&
-      (value.mode !== this.applied().mode || value.question.trim() !== this.applied().question)
+      value.mode !== this.applied().mode ||
+      (value.mode === FriendAddVerificationMode.question && value.question.trim() !== this.applied().question)
     );
   });
   private discardConfirmation?: Promise<boolean>;
@@ -103,7 +103,10 @@ export class FriendVerificationSettings {
   async canDismiss(role?: string): Promise<boolean> {
     if (role === 'saved') return true;
     if (this.saving()) return false;
-    if (!this.dirty()) return true;
+    if (!this.dirty()) {
+      this.verification.set(this.applied());
+      return true;
+    }
     this.discardConfirmation ??= this.confirmDiscard().finally(() => {
       this.discardConfirmation = undefined;
     });

@@ -163,7 +163,7 @@ describe('App', () => {
       expect(router.url).toBe('/chats');
     });
 
-    it('defers to a focused input', async () => {
+    it('uses the same final navigation with a focused input', async () => {
       const { router, fixture } = await configure('/chats/chat/123');
       const input = document.createElement('input');
       document.body.append(input);
@@ -171,7 +171,7 @@ describe('App', () => {
       try {
         pressEscape();
         await fixture.whenStable();
-        expect(router.url).toBe('/chats/chat/123');
+        expect(router.url).toBe('/chats');
       } finally {
         input.remove();
       }
@@ -181,6 +181,9 @@ describe('App', () => {
       const { router, fixture } = await configure('/chats/chat/123');
       const modal = document.createElement('ion-modal');
       document.body.append(modal);
+      modal.overlayIndex = 1;
+      modal.backdropDismiss = false;
+      modal.classList.remove('overlay-hidden');
       try {
         pressEscape();
         await fixture.whenStable();

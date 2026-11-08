@@ -10,6 +10,7 @@ import { decodeId, encodeId } from '../../api/snowflake-id';
 import { ChatListStore } from '../chat-list-store';
 import { ChatStore } from '../chat-store';
 import { ChatInvites } from './chat-invites';
+import { DiscardChanges } from '../../navigation/discard-changes';
 import { ChatPicker, ChatPickerScope } from '../chat-picker/chat-picker';
 
 @Component({
@@ -637,6 +638,26 @@ describe('Invite management', () => {
     fixture.detectChanges();
     expect(modal.isOpen()).toBe(false);
   });
+  it('confirms cancel and browser back, then clears the dismissed invitation form', async () => {
+    const fixture = await page();
+    const component = fixture.componentInstance;
+    component['startCreate']();
+    component['expiry'].set(component['Expiry'].Never);
+    const confirm = vi.spyOn(TestBed.inject(DiscardChanges), 'confirm').mockResolvedValue(false);
+    expect(await component['canDismiss']()).toBe(false);
+    expect(component['creating']()).toBe(true);
+    expect(await component['canDismiss'](undefined, 'back')).toBe(false);
+    expect(component['expiry']()).toBe(component['Expiry'].Never);
+    confirm.mockResolvedValue(true);
+    expect(await component['canDismiss']()).toBe(true);
+    component['resetCreate']();
+    expect(component['creating']()).toBe(false);
+    expect(component['expiry']()).toBe(component['Expiry'].Week);
+    expect(component['type']()).toBe(InviteType.generic);
+    expect(component['values']()).toEqual({ expiry: '' });
+    peer.expectNone('invites.create');
+  });
+
   it('ignores a list response after switching chats', async () => {
     const fixture = TestBed.createComponent(ChatInvites);
     fixture.componentRef.setInput('chatId', invite.chatId);

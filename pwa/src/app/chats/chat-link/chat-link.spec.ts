@@ -19,6 +19,7 @@ import { filter, firstValueFrom } from 'rxjs';
 import { routes } from '../../app.routes';
 import { PanelNavigation, panelPaths } from '../../navigation/panel-navigation';
 import { ChatLink } from './chat-link';
+import { SidebarFrame } from '../../layout/sidebar-frame';
 import { ConversationNavigation, ConversationTargetKind } from '../../conversations/conversation-navigation';
 import { DraftStore } from '../../conversations/draft-store';
 import { encodeId } from '../../api/snowflake-id';
@@ -346,7 +347,7 @@ class ModalStub {
   readonly enterAnimation = input<AnimationBuilder>();
   readonly leaveAnimation = input<AnimationBuilder>();
   readonly keepContentsMounted = input(false);
-  readonly canDismiss = input<() => boolean>();
+  readonly canDismiss = input<(_data?: unknown, role?: string) => boolean>();
   readonly showBackdrop = input(true);
   readonly focusTrap = input(true);
   readonly didDismiss = output<void>();
@@ -389,14 +390,21 @@ describe('Panel presentation', () => {
     vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: wide }));
     const paths = signal(initialPaths);
     const close = vi.fn();
+    const back = vi.fn();
     TestBed.configureTestingModule({
       providers: [
         {
           provide: PanelNavigation,
-          useValue: { paths, media: computed(() => paths().at(-1) === '/media'), largeScreen: signal(wide), close },
+          useValue: {
+            paths,
+            media: computed(() => paths().at(-1) === '/media'),
+            largeScreen: signal(wide),
+            close,
+            back,
+          },
         },
       ],
-    }).overrideComponent(ChatLink, { set: { imports: [ModalStub, PanelPageStub] } });
+    }).overrideComponent(ChatLink, { set: { imports: [ModalStub, PanelPageStub, SidebarFrame] } });
     const fixture = TestBed.createComponent(ChatLink);
     fixture.detectChanges();
     const [panel, media] = fixture.debugElement
@@ -407,8 +415,18 @@ describe('Panel presentation', () => {
       await fixture.componentInstance['transition'];
       fixture.detectChanges();
     };
-    return { paths, close, fixture, panel, media, settle };
+    return { paths, close, back, fixture, panel, media, settle };
   }
+
+  it('goes back one page on Escape while other close actions close the panel flow', async () => {
+    const { panel, back, close, settle } = setup(['/settings', '/settings/privacy']);
+    await settle();
+    expect(panel.canDismiss()?.(undefined, 'escape')).toBe(false);
+    expect(back).toHaveBeenCalledOnce();
+    expect(close).not.toHaveBeenCalled();
+    expect(panel.canDismiss()?.(undefined, 'backdrop')).toBe(false);
+    expect(close).toHaveBeenCalledOnce();
+  });
 
   it('finishes closing when Back arrives during the opening animation', async () => {
     const { paths, fixture, panel, media, settle } = setup(['/profile/2']);

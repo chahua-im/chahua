@@ -9,6 +9,7 @@ import {
   effect,
   ElementRef,
   inject,
+  Injector,
   input,
   linkedSignal,
   signal,
@@ -49,6 +50,8 @@ import {
   NavController,
 } from '@ionic/angular';
 import { TranslocoPipe } from '@jsverse/transloco';
+import { registerEscape } from '../../navigation/escape-navigation';
+import { DiscardChanges, DiscardReason } from '../../navigation/discard-changes';
 import {
   archive,
   archiveOutline,
@@ -340,13 +343,40 @@ export class ConversationPage {
     const message = row?.outgoing ?? row?.confirmed;
     if (message) this.startEdit(message);
   }
-  protected escapeComposer() {
+  private readonly discardChanges = inject(DiscardChanges);
+  private readonly injector = inject(Injector);
+  protected async escapeComposer() {
+    const entry = this.entryKey();
+    const composer = this.composer();
+    if (this.selecting()) {
+      this.cancelSelection();
+      return true;
+    }
+    if (composer?.voiceActive()) {
+      if (await this.discardChanges.confirm(DiscardReason.Recording)) {
+        if (this.isCurrent(entry)) {
+          composer.cancelRecording();
+          afterNextRender(() => void composer.setFocus(), { injector: this.injector });
+        }
+      }
+      return true;
+    }
     if (this.pendingForward()) this.cancelForward();
     else if (this.editing()) {
-      if (this.editText() === (this.editing()?.message ?? '')) this.cancelEdit();
+      const target = this.editTarget();
+      const changed = this.editText() !== (this.editing()?.message ?? '') || composer?.hasAttachmentEdits();
+      if (changed && !(await this.discardChanges.confirm())) return true;
+      if (!this.isCurrent(entry) || target !== this.editTarget()) return true;
+      this.cancelEdit();
     } else if (this.replyTo() || this.savedReplyId()) this.cancelReply();
-    // Blur so the next Esc reaches the page-level navigation handler.
-    else this.composer()?.blur();
+    else {
+      if (composer?.hasUnsavedAttachments()) {
+        if (!(await this.discardChanges.confirm(DiscardReason.Attachments)) || !this.isCurrent(entry)) return true;
+      }
+      return false;
+    }
+    afterNextRender(() => void this.composer()?.setFocus(), { injector: this.injector });
+    return true;
   }
   protected cancelEdit() {
     this.editTarget.set(undefined);
@@ -1032,21 +1062,7 @@ export class ConversationPage {
   );
 
   constructor() {
-    // Selection is page state: Escape must leave it before the app-level shortcut leaves the chat.
-    const escapeSelection = (event: KeyboardEvent) => {
-      if (
-        event.key !== 'Escape' ||
-        !this.selecting() ||
-        this.panels.paths().length ||
-        this.document.querySelector('ion-modal:not(.overlay-hidden), ion-alert:not(.overlay-hidden)')
-      )
-        return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      this.cancelSelection();
-    };
-    this.document.addEventListener('keydown', escapeSelection, true);
-    this.destroyRef.onDestroy(() => this.document.removeEventListener('keydown', escapeSelection, true));
+    registerEscape(() => (this.active() ? this.escapeComposer() : false));
     this.chatInfo.receiptPrivacyChanges$.pipe(takeUntilDestroyed()).subscribe((peerUid) => {
       if (peerUid == null || peerUid === this.peerUid()) this.invalidateReadReceipt(true);
     });

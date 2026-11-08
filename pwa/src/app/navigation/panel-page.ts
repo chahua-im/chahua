@@ -22,6 +22,7 @@ import { FriendRequestDirection } from '../../generated/models';
 import { ContentScrollbars } from '../scrolling/content-scrollbars';
 import { encodeId } from '../api/snowflake-id';
 import { ChatDetails, DetailView } from '../chats/chat-details/chat-details';
+import { StartChat } from '../chats/start-chat/start-chat';
 import { ChatListStore } from '../chats/chat-list-store';
 import { ConversationPage } from '../conversations/conversation/conversation.page';
 import type { ViewerMedia } from '../messages/media-viewer/media-viewer';
@@ -65,7 +66,8 @@ export class PanelPage {
   protected readonly failed = signal(false);
   protected readonly inputs = computed<Record<string, unknown>>(() => {
     let props = this.content()?.props ?? {};
-    if (this.content()?.component === ChatDetails) props = { ...props, panelPath: panelIdentity(this.path()) };
+    if (this.content()?.component === ChatDetails || this.content()?.component === StartChat)
+      props = { ...props, panelPath: panelIdentity(this.path()) };
     const source = this.source();
     if (this.content()?.component === ChatDetails && source instanceof ConversationPage) {
       const context = source.detailsContext();

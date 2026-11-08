@@ -66,6 +66,8 @@ import { VoiceRecorder } from '../voice-recorder/voice-recorder';
 import { displayText, editText, wireText } from './mention-text';
 import { shortcutFormatKind, wrapInlineFormat, type InlineFormatKind } from './text-format';
 import { findCodeRegions } from '../../markdown/code-regions';
+import { SidebarFrame } from '../../layout/sidebar-frame';
+import { EscapePriority, registerEscape } from '../../navigation/escape-navigation';
 export interface Composition {
   messageType: MessageType;
   attachmentIds: SnowflakeID[];
@@ -82,6 +84,7 @@ enum Panel {
   templateUrl: './message-composer.html',
   styleUrl: './message-composer.scss',
   imports: [
+    SidebarFrame,
     ContentScrollbars,
     TranslocoPipe,
     NgTemplateOutlet,
@@ -133,7 +136,6 @@ export class MessageComposer {
   readonly forwardSubmitted = output<MentionInfo[]>();
   readonly submitted = output<Composition>();
   readonly editLast = output<void>();
-  readonly escape = output<void>();
   protected readonly icons = {
     attachOutline,
     happyOutline,
@@ -286,6 +288,17 @@ export class MessageComposer {
       this.panel.set(Panel.None);
   }
   constructor() {
+    registerEscape(() => {
+      if (!this.suggestions().length) return false;
+      this.cancelMentionSearch();
+      this.suggestions.set([]);
+      return true;
+    }, EscapePriority.Suggestion);
+    registerEscape(() => {
+      if (!this.stickersVisible()) return false;
+      this.closeStickers();
+      return true;
+    }, EscapePriority.Sidebar);
     effect(() => {
       if (this.forwarding()) this.panel.set(Panel.None);
     });
@@ -333,10 +346,20 @@ export class MessageComposer {
   setFocus() {
     return this.textarea()?.setFocus();
   }
-  blur() {
-    void this.textarea()
-      ?.getInputElement()
-      .then((input) => input.blur());
+  hasUnsavedAttachments() {
+    return this.uploads().length > 0;
+  }
+  hasAttachmentEdits() {
+    const original = this.editing()?.attachments ?? [];
+    return (
+      this.uploads().length > 0 ||
+      this.borrowedUploads().length !== this.editingUploads().length ||
+      this.existing().length !== original.length
+    );
+  }
+  cancelRecording() {
+    this.voice()?.reset();
+    this.discardVoice();
   }
   reset() {
     this.cancelAttachmentPicker?.();
@@ -592,14 +615,11 @@ export class MessageComposer {
   protected key(event: KeyboardEvent) {
     if (event.isComposing || event.keyCode === 229) return;
     const suggestions = this.suggestions();
-    if (suggestions.length && ['ArrowUp', 'ArrowDown', 'Enter', 'Escape'].includes(event.key)) {
+    if (suggestions.length && ['ArrowUp', 'ArrowDown', 'Enter'].includes(event.key)) {
       event.preventDefault();
       event.stopPropagation();
       if (event.key === 'Enter') void this.mention(suggestions[this.selectedSuggestion()]);
-      else if (event.key === 'Escape') {
-        this.cancelMentionSearch();
-        this.suggestions.set([]);
-      } else
+      else
         this.selectedSuggestion.update(
           (index) => (index + (event.key === 'ArrowDown' ? 1 : -1) + suggestions.length) % suggestions.length,
         );
@@ -612,12 +632,6 @@ export class MessageComposer {
         void this.applyFormat(kind);
         return;
       }
-    }
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      event.stopPropagation();
-      this.escape.emit();
-      return;
     }
     if (
       event.key === 'ArrowUp' &&

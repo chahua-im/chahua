@@ -25,6 +25,7 @@ import { RpcErrorCode } from '../../api/rpc-error';
 import { provideRpcTesting, RpcTestPeer } from '../../api/rpc-testing';
 import { mockRealtime, testChat, testMessage, testUser, wireChat, wireMessage } from '../../api/testing';
 import { PanelNavigation } from '../../navigation/panel-navigation';
+import { DiscardChanges } from '../../navigation/discard-changes';
 import { Presence } from '../../presence/presence';
 import { SessionStore } from '../../session/session-store';
 import { ChatListStore } from '../chat-list-store';
@@ -769,9 +770,51 @@ describe('ChatDetails', () => {
     component['fields'].name!.value().value.set('候选群名');
     component['editKeydown'](new KeyboardEvent('keydown', { key: 'Enter', isComposing: true }), field);
     expect(component['edits']().name?.value).toBe('候选群名');
-    component['editKeydown'](new KeyboardEvent('keydown', { key: 'Escape' }), field);
+    const discard = vi.spyOn(TestBed.inject(DiscardChanges), 'confirm').mockResolvedValue(false);
+    await component['escapeEdit'](field);
+    expect(component['edits']().name?.value).toBe('候选群名');
+    discard.mockResolvedValue(true);
+    await component['escapeEdit'](field);
     expect(component['edits']().name).toBeUndefined();
     peer.expectNone('groups.update');
+  });
+
+  it('checks all group edits before leaving, retains cancelled changes and clears confirmed edits', async () => {
+    const fixture = await open({ ...wireChat, myRole: GroupRole.admin, description: '原简介' });
+    const component = fixture.componentInstance;
+    const register = vi.spyOn(TestBed.inject(PanelNavigation), 'registerLeaveCheck');
+    fixture.componentRef.setInput('panelPath', '/chats/chat/100/info');
+    fixture.detectChanges();
+    const leave = register.mock.calls[0][1];
+    component['edit'](component['Field'].Name);
+    component['edit'](component['Field'].Description);
+    component['fields'].description!.value().value.set('未保存简介');
+    const confirm = vi.spyOn(TestBed.inject(DiscardChanges), 'confirm').mockResolvedValue(false);
+    expect(await leave()).toBe(false);
+    expect(component['edits']().description?.value).toBe('未保存简介');
+    confirm.mockResolvedValue(true);
+    expect(await leave()).toBe(true);
+    expect(component['edits']()).toEqual({ name: undefined, description: undefined });
+    component['edit'](component['Field'].Description);
+    expect(component['edits']().description?.value).toBe('原简介');
+    expect(await leave()).toBe(true);
+    expect(confirm).toHaveBeenCalledTimes(2);
+    fixture.destroy();
+    peer.expectNone('groups.update');
+  });
+
+  it('confirms the inline cancel button and does not discard edits made while confirmation is pending', async () => {
+    const fixture = await open({ ...wireChat, myRole: GroupRole.admin });
+    const component = fixture.componentInstance;
+    component['edit'](component['Field'].Name);
+    component['fields'].name!.value().value.set('修改');
+    let resolve!: (discard: boolean) => void;
+    vi.spyOn(TestBed.inject(DiscardChanges), 'confirm').mockReturnValue(new Promise((done) => (resolve = done)));
+    const discard = component['discardEdits']([component['Field'].Name]);
+    component['fields'].name!.value().value.set('后续修改');
+    resolve(true);
+    expect(await discard).toBe(false);
+    expect(component['edits']().name?.value).toBe('后续修改');
   });
 
   it.each([

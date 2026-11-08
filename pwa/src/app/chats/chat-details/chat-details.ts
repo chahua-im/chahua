@@ -1,4 +1,6 @@
 import { DetailView } from './detail-view';
+import { registerEscape } from '../../navigation/escape-navigation';
+import { DiscardChanges } from '../../navigation/discard-changes';
 import {
   afterNextRender,
   afterRenderEffect,
@@ -358,8 +360,23 @@ export class ChatDetails {
     computation: (): Record<GroupField, { value: string } | undefined> => ({ name: undefined, description: undefined }),
   });
   protected readonly fields = form(this.edits);
+  private readonly discardChanges = inject(DiscardChanges);
+  private leaveConfirmation?: Promise<boolean>;
+  protected editingField = GroupField.Name;
   protected readonly avatarProgress = linkedSignal({ source: this.scope, computation: () => 0 });
   constructor() {
+    effect((onCleanup) => {
+      const path = this.panelPath();
+      if (path) onCleanup(this.panels.registerLeaveCheck(path, () => this.canLeave()));
+    });
+    registerEscape(() => {
+      const edits = this.edits();
+      const field = edits[this.editingField]
+        ? this.editingField
+        : Object.values(GroupField).find((field) => edits[field]);
+      if (!field) return this.busy();
+      return this.escapeEdit(field);
+    });
     effect(() => {
       if (this.page() === DetailView.Info) this.overviewVisited.set(true);
     });
@@ -579,6 +596,7 @@ export class ChatDetails {
   protected edit(field: GroupField) {
     if (!this.canManage() || this.busy()) return;
     this.edits.update((edits) => ({ ...edits, [field]: { value: this.chat()?.[field] ?? '' } }));
+    this.editingField = field;
     afterNextRender(() => this.fields[field]?.value().focusBoundControl(), { injector: this.injector });
   }
   protected cancelEdit(field: GroupField) {
@@ -586,11 +604,31 @@ export class ChatDetails {
   }
   protected editKeydown(event: KeyboardEvent, field: GroupField) {
     if (event.isComposing || this.busy()) return;
-    if (event.key === 'Escape') this.cancelEdit(field);
-    else if (event.key === 'Enter' && field === GroupField.Name) {
+    if (event.key === 'Enter' && field === GroupField.Name) {
       event.preventDefault();
       void this.save(field);
     }
+  }
+  private async escapeEdit(field: GroupField) {
+    await this.discardEdits([field]);
+    return true;
+  }
+  private canLeave() {
+    this.leaveConfirmation ??= this.discardEdits().finally(() => {
+      this.leaveConfirmation = undefined;
+    });
+    return this.leaveConfirmation;
+  }
+  protected async discardEdits(fields = Object.values(GroupField)) {
+    const edits = this.edits();
+    if (!fields.some((field) => edits[field])) return true;
+    if (this.busy()) return false;
+    const scope = this.scope();
+    const changed = fields.some((field) => edits[field] && edits[field]!.value !== (this.chat()?.[field] ?? ''));
+    if (changed && !(await this.discardChanges.confirm())) return false;
+    if (!this.isCurrent(scope) || this.edits() !== edits) return false;
+    for (const field of fields) this.cancelEdit(field);
+    return true;
   }
   private isCurrent(scope: ReturnType<typeof this.scope>) {
     return !this.destroy.destroyed && scope === this.scope();

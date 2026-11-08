@@ -5,18 +5,21 @@ import { fromEvent, map } from 'rxjs';
 import { PanelNavigation, panelIdentity } from '../../navigation/panel-navigation';
 import { PanelPage } from '../../navigation/panel-page';
 import { panelDefinition, PanelKind } from '../../navigation/panel-definitions';
+import { SidebarFrame } from '../../layout/sidebar-frame';
 
 type PanelPresentation = { paths: string[]; sidebar: boolean };
 
 /** Route-owned panels and a separate media overlay retain their underlying pages. */
 @Component({
   selector: 'app-chat-link',
-  imports: [IonModal, PanelPage],
+  imports: [IonModal, PanelPage, SidebarFrame],
   template: `
     <ion-modal
       #panelModal
       class="route-panel"
       [class.panel-sidebar]="displayed().sidebar"
+      [enterAnimation]="displayed().sidebar ? sidebarEnter : undefined"
+      [leaveAnimation]="displayed().sidebar ? sidebarLeave : undefined"
       [keepContentsMounted]="true"
       (didDismiss)="clearClosed()"
       [showBackdrop]="!displayed().sidebar"
@@ -24,9 +27,11 @@ type PanelPresentation = { paths: string[]; sidebar: boolean };
       [canDismiss]="canDismiss"
     >
       <ng-template>
-        @for (path of displayed().paths; track identity(path); let last = $last) {
-          <app-panel-page [path]="path" [source]="source()" [active]="last && !panels.media()" [hidden]="!last" />
-        }
+        <app-sidebar-frame [docked]="displayed().sidebar" [overlay]="true">
+          @for (path of displayed().paths; track identity(path); let last = $last) {
+            <app-panel-page [path]="path" [source]="source()" [active]="last && !panels.media()" [hidden]="!last" />
+          }
+        </app-sidebar-frame>
       </ng-template>
     </ion-modal>
     <ion-modal
@@ -50,6 +55,8 @@ export class ChatLink {
   readonly source = input<unknown>();
   protected readonly panels = inject(PanelNavigation);
   protected readonly identity = panelIdentity;
+  protected readonly sidebarEnter = SidebarFrame.enterModal;
+  protected readonly sidebarLeave = SidebarFrame.leaveModal;
   protected readonly mediaEnter = (element: HTMLElement) => this.mediaAnimation(element, true);
   protected readonly mediaLeave = (element: HTMLElement) => this.mediaAnimation(element, false);
   private readonly panelPaths = computed(() =>
@@ -116,9 +123,9 @@ export class ChatLink {
     void this.panels.close();
     return false;
   };
-  protected readonly canDismiss = () => {
+  protected readonly canDismiss = (_data?: unknown, role?: string) => {
     if (!this.panelPaths().length) return true;
-    void this.panels.close();
+    void (role === 'escape' ? this.panels.back() : this.panels.close());
     return false;
   };
 }

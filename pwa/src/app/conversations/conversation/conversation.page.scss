@@ -1,6 +1,6 @@
 @use '../sticky-avatar';
 :host.details-open {
-  padding-inline-end: 360px;
+  padding-inline-end: var(--app-sidebar-width);
 }
 
 .sidebar-icon {

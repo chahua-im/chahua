@@ -26,6 +26,13 @@ import { StickerFavorites } from '../sticker-favorites';
 import { MessageAction, MessageMenu, pageSlots, type MenuSlot } from './message-menu';
 
 describe('MessageMenu', () => {
+  it('returns from emoji selection to the message menu before allowing Escape to close it', () => {
+    menu['choosingEmoji'].set(true);
+    expect(menu['canDismiss'](undefined, 'escape')).toBe(false);
+    expect(menu['choosingEmoji']()).toBe(false);
+    expect(menu['selection']()).toBeDefined();
+    expect(menu['canDismiss'](undefined, 'escape')).toBe(true);
+  });
   let fixture: ComponentFixture<MessageMenu>;
   let menu: MessageMenu;
   let authorWidth = 100;
