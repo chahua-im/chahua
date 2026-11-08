@@ -64,7 +64,7 @@
     }
   }
   @if (error() && !pageRequest()) {
-    <app-load-error [compact]="loaded()" [message]="'stickers.loadFailed' | transloco" (retry)="retry()" />
+    <app-load-error [compact]="loaded()" [message]="'stickers.packLoadFailed' | transloco" (retry)="retry()" />
   }
   @for (pack of packs(); track pack.id) {
     <section class="pack">
@@ -129,7 +129,7 @@
     </section>
   }
   @if (error() && pageRequest()) {
-    <app-load-error [compact]="loaded()" [message]="'stickers.loadFailed' | transloco" (retry)="retry()" />
+    <app-load-error [compact]="loaded()" [message]="'stickers.packLoadFailed' | transloco" (retry)="retry()" />
   } @else if (!error() && loaded() && !loading() && !packs().length) {
     <div class="ion-padding ion-text-center">
       <p>{{ (query().trim() ? 'stickers.discovery.empty' : 'stickers.discovery.noPacks') | transloco }}</p>

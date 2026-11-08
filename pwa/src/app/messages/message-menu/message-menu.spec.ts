@@ -889,7 +889,7 @@ describe('MessageMenu', () => {
       },
     ]);
     fixture.detectChanges();
-    expect(labels()).toEqual(['回复', '转发', '收藏表情', '链接', '撤回']);
+    expect(labels()).toEqual(['回复', '转发', '收藏贴纸', '链接', '撤回']);
     expect(fixture.nativeElement.querySelector('.reactions.panel')).toBeNull();
     await menu['choose'](MessageAction.FavoriteSticker);
     expect(favoriteStickers.set).toHaveBeenCalledWith(sticker, true);
@@ -954,7 +954,7 @@ describe('MessageMenu', () => {
     menu.reset();
     menu.open(selection());
     fixture.detectChanges();
-    expect(labels()).toContain('取消收藏表情');
+    expect(labels()).toContain('取消收藏贴纸');
     await menu['choose'](MessageAction.FavoriteSticker);
     expect(favoriteStickers.set).toHaveBeenCalledWith(sticker, false);
     expect(menu['notice']()).toBe(MessageNotice.Unsaved);

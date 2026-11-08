@@ -612,7 +612,7 @@ describe('Invite management', () => {
     component['change'](InviteType.targeted);
     await component['create']();
     peer.expectNone('invites.create');
-    component['picker'].set(component['Picker'].User);
+    expect(component['picker']()).toBe(component['Picker'].User);
     fixture.detectChanges();
     const modal = fixture.debugElement.query(By.directive(ModalStub)).componentInstance as ModalStub;
     expect(modal.isOpen()).toBe(true);
@@ -624,11 +624,8 @@ describe('Invite management', () => {
     picker.userSelected.emit({ uid: 9, username: '小张', gender: 0 });
     picker.closed.emit();
     expect(component['target']()?.uid).toBe(9);
-    component['picker'].set(component['Picker'].User);
     fixture.detectChanges();
-    const reopened = fixture.debugElement.query(By.directive(ChatPicker)).componentInstance as ChatPicker;
-    reopened.closed.emit();
-    expect(component['target']()?.uid).toBe(9);
+    expect(fixture.nativeElement.querySelector('ion-note[slot="end"]').textContent.trim()).toBe('小张');
     const created = component['create']();
     const request = peer.expect('invites.create');
     expect(request.params).toEqual({ chatId: '4', inviteType: 'targeted', targetUid: 9 });
@@ -658,6 +655,46 @@ describe('Invite management', () => {
     peer.expectNone('invites.create');
   });
 
+  it.each([InviteType.targeted, InviteType.membership])(
+    'opens the %s picker immediately, allows reselection and resets to anyone on cancel',
+    async (type) => {
+      const fixture = await page();
+      const component = fixture.componentInstance;
+      component['startCreate']();
+      fixture.detectChanges();
+      const modal = fixture.debugElement.query(By.directive(ModalStub)).componentInstance as ModalStub;
+      modal.didPresent.emit();
+      await component['change'](type);
+      fixture.detectChanges();
+      if (type === InviteType.membership) peer.expect('groups.list').flush({ groups: [] });
+      const picker = fixture.debugElement.query(By.directive(ChatPicker)).componentInstance as ChatPicker;
+      expect(picker.scope()).toBe(type === InviteType.targeted ? ChatPickerScope.Users : ChatPickerScope.JoinedGroups);
+      if (type === InviteType.targeted) picker.userSelected.emit({ uid: 9, username: '用户A', gender: 0 });
+      else
+        await component['chooseChat'](
+          { chatId: encodeId('12'), name: '群聊A', kind: GroupKind.group, avatar: { title: '群聊A' }, time: 0 },
+          () => true,
+        );
+      picker.closed.emit();
+      fixture.detectChanges();
+      expect(component['type']()).toBe(type);
+      expect(fixture.nativeElement.querySelector('ion-note[slot="end"]').textContent).toContain(
+        type === InviteType.targeted ? '用户A' : '群聊A',
+      );
+      await component['change'](type);
+      fixture.detectChanges();
+      if (type === InviteType.membership) peer.expect('groups.list').flush({ groups: [] });
+      const reopened = fixture.debugElement.query(By.directive(ChatPicker)).componentInstance as ChatPicker;
+      reopened.closed.emit();
+      fixture.detectChanges();
+      expect(component['type']()).toBe(InviteType.generic);
+      expect(component['target']()).toBeUndefined();
+      expect(component['requiredGroup']()).toBeUndefined();
+      expect(fixture.nativeElement.querySelector('ion-note[slot="end"]').textContent.trim()).toBe('任何获得链接的人');
+      expect(component['canCreate']()).toBe(true);
+      peer.expectNone('invites.create');
+    },
+  );
   it('ignores a list response after switching chats', async () => {
     const fixture = TestBed.createComponent(ChatInvites);
     fixture.componentRef.setInput('chatId', invite.chatId);

@@ -1389,7 +1389,7 @@ describe('StickerPicker selection during requests', () => {
     fixture.detectChanges();
     const sections = fixture.nativeElement.querySelectorAll('.sticker-group');
     expect(sections[0].querySelector('.upload-error')).toBeNull();
-    expect(sections[1].querySelector('.upload-error')?.textContent).toContain('添加表情失败');
+    expect(sections[1].querySelector('.upload-error')?.textContent).toContain('添加贴纸失败');
     expect(sections[2].querySelector('.upload-error')).toBeNull();
     expect(picker['error']()).toBe(false);
     expect(picker['activeId']()).toBe(secondPack.id);
@@ -1437,7 +1437,7 @@ describe('StickerPicker selection during requests', () => {
     favorite.click();
     await fixture.whenStable();
     expect(api.deleteFavorite).toHaveBeenCalledWith(other.id);
-    expect(favorite.textContent).toContain('收藏单个');
+    expect(favorite.textContent).toContain('收藏贴纸');
     expect(favorite.color).toBe('primary');
     favorite.click();
     await fixture.whenStable();
@@ -1452,7 +1452,7 @@ describe('StickerPicker selection during requests', () => {
     subscribe.click();
     await fixture.whenStable();
     expect(api.deleteSubscription).toHaveBeenCalledWith(pack.id);
-    expect(subscribe.textContent).toContain('订阅整组');
+    expect(subscribe.textContent).toContain('订阅贴纸包');
     expect(subscribe.color).toBe('primary');
   });
 

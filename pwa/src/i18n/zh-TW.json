@@ -86,7 +86,7 @@
   "presence": {
     "loadFailed": "狀態載入失敗",
     "online": "在線",
-    "groupCounts": "{{ online }} 人在線 · 共 {{ members }} 人",
+    "groupCounts": "{{ members }}位成員，{{ online }}人在線",
     "lastSeen": {
       "recently": "最近上線",
       "withinWeek": "1 週內上線",
@@ -199,30 +199,30 @@
       "pinnedReactions": "置頂表態表情 ({{ count }}/5)",
       "autoSortPacks": "按最近使用自動排序貼紙包",
       "autoSortFavorites": "按最近使用自動排序收藏貼紙",
-      "loadFailed": "貼圖包載入失敗",
+      "loadFailed": "貼紙包載入失敗",
       "sortDivider": "此行以下的貼紙包不會自動排序",
       "owned": "我的",
-      "orderFailed": "貼紙排序儲存失敗，請重試。"
+      "orderFailed": "貼紙包排序儲存失敗，請重試。"
     },
     "stickerPack": {
       "title": "貼紙包",
       "unsubscribe": "取消訂閱",
       "removeHint": "點按貼紙可將其從貼紙包中移除。",
-      "renameTitle": "編輯貼圖包",
+      "renameTitle": "編輯貼紙包",
       "namePlaceholder": "貼紙包名稱",
       "renamed": "貼紙包已重新命名",
-      "renameFailed": "儲存貼圖包失敗，請重試",
+      "renameFailed": "儲存貼紙包失敗，請重試",
       "visibility": "可見性",
       "public": "公開",
       "private": "私有",
       "visibilityHint": "設為私有會移除其他使用者的訂閱。",
       "deleteTitle": "刪除貼紙包",
-      "deleteMessage": "要刪除這個表情包嗎？表情本身會保留，但這個表情包及其中的收錄關係將被移除。",
+      "deleteMessage": "要刪除這個貼紙包嗎？貼紙本身會保留，但這個貼紙包及其中的收錄關係將被移除。",
       "deleteFailed": "刪除失敗，請重試",
-      "unsubscribeMessage": "要將這個貼紙包從你的收藏中移除嗎？",
+      "unsubscribeMessage": "要取消訂閱這個貼紙包嗎？",
       "unsubscribeFailed": "取消訂閱失敗，請重試",
       "removeStickerTitle": "移除貼紙",
-      "removeStickerMessage": "要從貼紙包中移除此表情嗎？",
+      "removeStickerMessage": "要從貼紙包中移除此貼紙嗎？",
       "removeStickerFailed": "移除失敗，請重試"
     },
     "privacy": {
@@ -358,14 +358,14 @@
       "notInvited": "未受邀"
     },
     "invites": {
-      "type": "誰可以透過連結加入",
+      "type": "邀請",
       "typeGeneric": "任何取得連結的人",
       "typeTargeted": "指定使用者",
       "typeMembership": "指定群組的成員",
       "change": "變更",
       "expiry": "有效期限",
       "create": "建立邀請",
-      "membershipGroup": "限定 {{ group }} 的成員",
+      "membershipGroup": "{{ group }} 的成員",
       "copy": "複製邀請連結",
       "share": "傳送到聊天",
       "revoke": "撤銷",
@@ -579,7 +579,7 @@
       "video": "[影片]",
       "audio": "[語音]",
       "file": "[檔案]",
-      "sticker": "[表情]",
+      "sticker": "[貼紙]",
       "other": "[非文字訊息]"
     },
     "menu": {
@@ -593,8 +593,8 @@
         "edit": "編輯",
         "save": "收藏",
         "unsave": "取消收藏",
-        "favoriteSticker": "收藏表情",
-        "unfavoriteSticker": "取消收藏表情",
+        "favoriteSticker": "收藏貼紙",
+        "unfavoriteSticker": "取消收藏貼紙",
         "link": "連結",
         "recall": "收回",
         "reactions": "查看表態"
@@ -678,6 +678,7 @@
       "records": "聊天記錄",
       "count": "{{count}} 則訊息",
       "to": "轉發到",
+      "topicTo": "合併轉發話題訊息記錄到",
       "invalid": "所選訊息已無法轉發，請關閉視窗後重新選擇。",
       "topicUnavailable": "話題中包含無法轉發的訊息。",
       "topicTooMany": "話題訊息超過 {{max}} 則，無法合併轉發。",
@@ -730,19 +731,18 @@
     "emojiPlaceholder": "對應表情，例如 🙂",
     "emojiExample": "例如 🙂",
     "optionalName": "名稱（選填）",
-    "loadFailed": "貼圖載入失敗",
+    "loadFailed": "貼紙載入失敗",
     "empty": "尚無貼紙",
     "add": "新增貼紙",
     "added": "貼紙已新增",
-    "addFailed": "新增表情失敗",
-    "favorite": "收藏表情",
-    "unfavorite": "取消收藏",
+    "addFailed": "新增貼紙失敗",
+    "favorite": "收藏貼紙",
+    "unfavorite": "取消收藏貼紙",
     "favoriteFailed": "收藏狀態更新失敗，請重試。",
-    "favoriteOne": "收藏單個",
-    "unsubscribe": "取消訂閱",
-    "subscribeAll": "訂閱整組",
-    "removePack": "移除貼紙包",
-    "addPack": "新增貼紙包",
+    "favoriteOne": "收藏貼紙",
+    "unsubscribe": "取消訂閱貼紙包",
+    "subscribeAll": "訂閱貼紙包",
+    "removePack": "取消訂閱貼紙包",
     "emojiLoadFailed": "表情載入失敗，請重新載入應用程式",
     "createPack": "建立貼紙包",
     "createFailed": "建立貼紙包失敗",
@@ -773,7 +773,8 @@
       "subscribed": "已訂閱",
       "subscribeFailed": "訂閱貼紙包失敗，請重試"
     },
-    "description": "簡介："
+    "description": "簡介：",
+    "packLoadFailed": "貼紙包載入失敗"
   },
   "emojiPicker": {
     "loadFailed": "表情載入失敗，請重新載入應用程式"
@@ -788,7 +789,7 @@
     },
     "notification": {
       "invite": "[邀請]",
-      "sticker": "[表情]",
+      "sticker": "[貼紙]",
       "audio": "[語音]",
       "file": "[檔案]",
       "image": "[圖片]",

@@ -86,7 +86,7 @@
   "presence": {
     "loadFailed": "Unable to load status",
     "online": "Online",
-    "groupCounts": "{{ online }} online · {{ members }} members",
+    "groupCounts": "{{ members }} members  {{ online }} online",
     "lastSeen": {
       "recently": "Last seen recently",
       "withinWeek": "Last seen within a week",
@@ -202,7 +202,7 @@
       "loadFailed": "Could not load sticker packs",
       "sortDivider": "Packs below this line are not auto-sorted",
       "owned": "Mine",
-      "orderFailed": "Could not save sticker order. Please retry."
+      "orderFailed": "Could not save sticker pack order. Please retry."
     },
     "stickerPack": {
       "title": "Sticker Pack",
@@ -219,7 +219,7 @@
       "deleteTitle": "Delete Sticker Pack",
       "deleteMessage": "Delete this sticker pack? Stickers will stay available elsewhere, but this pack and its contents list will be removed.",
       "deleteFailed": "Delete failed. Please try again.",
-      "unsubscribeMessage": "Remove this sticker pack from your collection?",
+      "unsubscribeMessage": "Unsubscribe from this sticker pack?",
       "unsubscribeFailed": "Unsubscribe failed. Please try again.",
       "removeStickerTitle": "Remove Sticker",
       "removeStickerMessage": "Remove this sticker from the pack?",
@@ -358,7 +358,7 @@
       "notInvited": "Not invited"
     },
     "invites": {
-      "type": "Who can join using this link?",
+      "type": "Invite",
       "typeGeneric": "Anyone with the link",
       "typeTargeted": "A specific user",
       "typeMembership": "Members of a specific group",
@@ -678,6 +678,7 @@
       "records": "Chat history",
       "count": "{{count}} messages",
       "to": "Forward to",
+      "topicTo": "Forward thread messages as a chat history to",
       "invalid": "This selection can no longer be forwarded. Close this window and select the messages again.",
       "topicUnavailable": "This topic contains messages that cannot be forwarded.",
       "topicTooMany": "This topic has more than {{max}} messages and cannot be forwarded as a chat history.",
@@ -736,13 +737,12 @@
     "added": "Sticker added",
     "addFailed": "Failed to add sticker",
     "favorite": "Favorite sticker",
-    "unfavorite": "Remove favorite",
+    "unfavorite": "Unfavorite sticker",
     "favoriteFailed": "Could not update favorite. Please try again.",
-    "favoriteOne": "Favorite",
-    "unsubscribe": "Unsubscribe",
+    "favoriteOne": "Favorite sticker",
+    "unsubscribe": "Unsubscribe from pack",
     "subscribeAll": "Subscribe to pack",
-    "removePack": "Remove pack",
-    "addPack": "Add pack",
+    "removePack": "Unsubscribe from pack",
     "emojiLoadFailed": "Could not load emoji. Reload the app to try again.",
     "createPack": "Create sticker pack",
     "createFailed": "Failed to create sticker pack",
@@ -773,7 +773,8 @@
       "subscribed": "Subscribed",
       "subscribeFailed": "Could not subscribe to sticker pack. Please try again."
     },
-    "description": "Description: "
+    "description": "Description: ",
+    "packLoadFailed": "Could not load sticker packs"
   },
   "emojiPicker": {
     "loadFailed": "Could not load emoji. Reload the app to try again."

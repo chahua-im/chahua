@@ -206,7 +206,7 @@ describe('StickerPicker selection during RPC requests', () => {
     rpc.expect('stickers.unfavorite', { stickerId: '104' }).flush(null);
     await unfavorite;
     fixture.detectChanges();
-    expect(favorite.textContent).toContain('收藏单个');
+    expect(favorite.textContent).toContain('收藏贴纸');
     expect(favorite.color).toBe('primary');
     const refavorite = picker['favorite'](picker['chosen']()!);
     rpc.expect('stickers.favorite', { stickerId: '104' }).flush(null);
@@ -224,7 +224,7 @@ describe('StickerPicker selection during RPC requests', () => {
     rpc.expect('stickers.unsubscribeFromPack', { packId: '103' }).flush(null);
     await unsubscribing;
     fixture.detectChanges();
-    expect(subscribe.textContent).toContain('订阅整组');
+    expect(subscribe.textContent).toContain('订阅贴纸包');
     expect(subscribe.color).toBe('primary');
   });
 

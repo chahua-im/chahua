@@ -564,7 +564,10 @@
 }
 
 @if (topicForwardOpen()) {
-  <app-forward-picker [load]="loadTopicSources" (closed)="topicForwardOpen.set(false)" />
+  <app-forward-picker
+    [title]="'messages.forward.topicTo' | transloco"
+    [load]="loadTopicSources"
+    (closed)="topicForwardOpen.set(false)" />
 }
 
 @if (forwardMove(); as move) {

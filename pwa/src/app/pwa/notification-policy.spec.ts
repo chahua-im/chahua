@@ -5,7 +5,7 @@ import { notificationText, shouldNotify } from './notification-policy';
 
 const zhCNPlaceholders: Record<string, string> = {
   'pwa.notification.invite': '[邀请]',
-  'pwa.notification.sticker': '[表情]',
+  'pwa.notification.sticker': '[贴纸]',
   'pwa.notification.audio': '[语音]',
   'pwa.notification.file': '[文件]',
   'pwa.notification.image': '[图片]',

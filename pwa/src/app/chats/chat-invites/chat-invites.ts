@@ -15,6 +15,7 @@ import {
   IonList,
   IonModal,
   IonNote,
+  IonPopover,
   IonToast,
   IonSelect,
   IonSelectOption,
@@ -38,7 +39,6 @@ import { copyText } from '../../api/clipboard';
 import { inviteStatus, InviteStatus } from '../invite';
 import { ChatStore } from '../chat-store';
 import { SpeakingAction, speakingErrorMode } from '../speaking';
-import { ChatAvatar } from '../chat-avatar/chat-avatar';
 import { ChatPicker, ChatPickerScope, type ChatPickerTarget, type ChooseChat } from '../chat-picker/chat-picker';
 import { DiscardChanges } from '../../navigation/discard-changes';
 
@@ -80,7 +80,7 @@ const emptyList = (): InviteList => ({ rows: [], loading: false, loaded: false, 
     ContentScrollbars,
     LocalDatePipe,
     FormField,
-    ChatAvatar,
+    IonPopover,
     ChatPicker,
     IonIcon,
     IonList,
@@ -246,8 +246,21 @@ export class ChatInvites {
     this.selected.set(undefined);
     this.creating.set(true);
   }
-  protected change(value: unknown) {
-    if (Object.values(InviteType).includes(value as InviteType)) this.type.set(value as InviteType);
+  protected async change(value: InviteType, menu?: IonPopover) {
+    if (menu) await menu.dismiss();
+    this.type.set(value);
+    this.target.set(undefined);
+    this.requiredGroup.set(undefined);
+    if (value === InviteType.targeted) this.picker.set(InvitePicker.User);
+    else if (value === InviteType.membership) this.picker.set(InvitePicker.GroupCondition);
+  }
+  protected closePicker() {
+    if (
+      (this.picker() === InvitePicker.User && !this.target()) ||
+      (this.picker() === InvitePicker.GroupCondition && !this.requiredGroup())
+    )
+      this.type.set(InviteType.generic);
+    this.picker.set(undefined);
   }
   protected changeExpiry(value: unknown) {
     if (Object.values(Expiry).includes(value as Expiry)) {

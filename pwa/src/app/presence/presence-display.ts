@@ -1,4 +1,5 @@
 import { Component, computed, effect, inject, input } from '@angular/core';
+import { DecimalPipe } from '@angular/common';
 import { TranslocoPipe } from '@jsverse/transloco';
 import type { SnowflakeID } from '../api/snowflake-id';
 import { Presence } from './presence';
@@ -66,7 +67,7 @@ export class UserPresenceDisplay {
   selector: 'app-group-presence',
   templateUrl: './group-presence-display.html',
   styleUrl: './presence-display.scss',
-  imports: [TranslocoPipe],
+  imports: [TranslocoPipe, DecimalPipe],
 })
 export class GroupPresenceDisplay {
   readonly chatId = input<SnowflakeID>();

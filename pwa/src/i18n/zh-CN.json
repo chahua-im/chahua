@@ -86,7 +86,7 @@
   "presence": {
     "loadFailed": "状态加载失败",
     "online": "在线",
-    "groupCounts": "{{ online }} 人在线 · 共 {{ members }} 人",
+    "groupCounts": "{{ members }}位成员，{{ online }}人在线",
     "lastSeen": {
       "recently": "最近上线",
       "withinWeek": "1 周内上线",
@@ -202,7 +202,7 @@
       "loadFailed": "贴纸包加载失败",
       "sortDivider": "此行以下的贴纸包不会自动排序",
       "owned": "我的",
-      "orderFailed": "贴纸排序保存失败，请重试。"
+      "orderFailed": "贴纸包排序保存失败，请重试。"
     },
     "stickerPack": {
       "title": "贴纸包",
@@ -219,10 +219,10 @@
       "deleteTitle": "删除贴纸包",
       "deleteMessage": "删除这个贴纸包吗？贴纸本身会保留，但这个贴纸包以及其中的收录关系将被移除。",
       "deleteFailed": "删除失败，请重试",
-      "unsubscribeMessage": "要将这个贴纸包从你的收藏中移除吗？",
+      "unsubscribeMessage": "取消订阅这个贴纸包吗？",
       "unsubscribeFailed": "取消订阅失败，请重试",
       "removeStickerTitle": "移除贴纸",
-      "removeStickerMessage": "要从贴纸包中移除此表情吗？",
+      "removeStickerMessage": "要从贴纸包中移除此贴纸吗？",
       "removeStickerFailed": "移除失败，请重试"
     },
     "privacy": {
@@ -358,14 +358,14 @@
       "notInvited": "未受邀"
     },
     "invites": {
-      "type": "谁可以通过链接加入",
+      "type": "邀请",
       "typeGeneric": "任何获得链接的人",
       "typeTargeted": "指定用户",
       "typeMembership": "指定群聊的成员",
       "change": "更改",
       "expiry": "有效期",
       "create": "创建邀请",
-      "membershipGroup": "限定 {{ group }} 的成员",
+      "membershipGroup": "{{ group }} 的成员",
       "copy": "复制邀请链接",
       "share": "发送到聊天",
       "revoke": "撤销",
@@ -579,7 +579,7 @@
       "video": "[视频]",
       "audio": "[语音]",
       "file": "[文件]",
-      "sticker": "[表情]",
+      "sticker": "[贴纸]",
       "other": "[非文本消息]"
     },
     "menu": {
@@ -593,8 +593,8 @@
         "edit": "编辑",
         "save": "收藏",
         "unsave": "取消收藏",
-        "favoriteSticker": "收藏表情",
-        "unfavoriteSticker": "取消收藏表情",
+        "favoriteSticker": "收藏贴纸",
+        "unfavoriteSticker": "取消收藏贴纸",
         "link": "链接",
         "recall": "撤回",
         "reactions": "查看表态"
@@ -678,6 +678,7 @@
       "records": "聊天记录",
       "count": "{{count}} 条消息",
       "to": "转发到",
+      "topicTo": "合并转发话题消息记录到",
       "invalid": "所选消息已无法转发，请关闭窗口后重新选择。",
       "topicUnavailable": "话题中包含无法转发的消息。",
       "topicTooMany": "话题消息超过 {{max}} 条，无法合并转发。",
@@ -734,15 +735,14 @@
     "empty": "暂无贴纸",
     "add": "添加贴纸",
     "added": "贴纸已添加",
-    "addFailed": "添加表情失败",
-    "favorite": "收藏表情",
-    "unfavorite": "取消收藏",
+    "addFailed": "添加贴纸失败",
+    "favorite": "收藏贴纸",
+    "unfavorite": "取消收藏贴纸",
     "favoriteFailed": "收藏状态更新失败，请重试。",
-    "favoriteOne": "收藏单个",
-    "unsubscribe": "取消订阅",
-    "subscribeAll": "订阅整组",
-    "removePack": "移除贴纸包",
-    "addPack": "添加贴纸包",
+    "favoriteOne": "收藏贴纸",
+    "unsubscribe": "取消订阅贴纸包",
+    "subscribeAll": "订阅贴纸包",
+    "removePack": "取消订阅贴纸包",
     "emojiLoadFailed": "表情加载失败，请重新加载应用",
     "createPack": "创建贴纸包",
     "createFailed": "创建贴纸包失败",
@@ -773,7 +773,8 @@
       "subscribed": "已订阅",
       "subscribeFailed": "订阅贴纸包失败，请重试"
     },
-    "description": "简介："
+    "description": "简介：",
+    "packLoadFailed": "贴纸包加载失败"
   },
   "emojiPicker": {
     "loadFailed": "表情加载失败，请重新加载应用"
@@ -788,7 +789,7 @@
     },
     "notification": {
       "invite": "[邀请]",
-      "sticker": "[表情]",
+      "sticker": "[贴纸]",
       "audio": "[语音]",
       "file": "[文件]",
       "image": "[图片]",

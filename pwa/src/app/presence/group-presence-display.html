@@ -3,5 +3,11 @@
 } @else if (failed()) {
   <span>{{ 'presence.loadFailed' | transloco }}</span>
 } @else if (state(); as presence) {
-  <span>{{ 'presence.groupCounts' | transloco: { members: presence.memberCount, online: presence.onlineCount } }}</span>
+  <span>
+    {{
+      'presence.groupCounts'
+        | transloco
+          : { members: (presence.memberCount | number: '1.0-0'), online: (presence.onlineCount | number: '1.0-0') }
+    }}
+  </span>
 }

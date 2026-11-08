@@ -9,7 +9,7 @@
         </ion-buttons>
       }
       <ion-title>
-        {{ pack()?.name || ('stickers.title' | transloco) }}
+        {{ pack()?.name || ((packId() ? 'settings.stickerPack.title' : 'stickers.title') | transloco) }}
         @if (!selectable() && pack(); as pack) {
           <p class="subtitle">{{ 'stickers.count' | transloco: { count: pack.stickerCount } }}</p>
         }
@@ -57,7 +57,7 @@
   }
   @if (selectable() && !embedded() && pack(); as pack) {
     <ion-button fill="clear" [disabled]="busy()" (click)="subscribe()">
-      {{ (pack.isSubscribed ? 'stickers.removePack' : 'stickers.addPack') | transloco }}
+      {{ (pack.isSubscribed ? 'stickers.removePack' : 'stickers.subscribeAll') | transloco }}
     </ion-button>
   }
   <div
@@ -133,7 +133,7 @@
             <app-load-error
               class="group-error"
               compact
-              [message]="'stickers.loadFailed' | transloco"
+              [message]="(group.id != null ? 'stickers.packLoadFailed' : 'stickers.loadFailed') | transloco"
               (retry)="retryGroup(group)" />
           } @else if (!canAdd && (group.content || !group.loading) && !group.content?.stickers?.length) {
             <p class="empty">{{ 'stickers.empty' | transloco }}</p>
