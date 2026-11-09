@@ -748,6 +748,7 @@ pub fn get_user_threads(
     };
     let sql = format!(
         "{THREAD_LIST_SELECT}
+        JOIN group_membership membership ON membership.chat_id = ts.chat_id AND membership.uid = ts.uid
         WHERE ts.uid = $1
           AND ts.archived = $2
           AND ts.subscribed = TRUE

@@ -8,6 +8,7 @@ pub mod groups;
 mod http_error;
 pub mod invites;
 pub mod members;
+mod message_search;
 mod notification_preferences;
 pub mod pins;
 pub mod push;
@@ -23,6 +24,7 @@ use utoipa_axum::router::OpenApiRouter;
 
 pub fn api_router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
+        .merge(message_search::router())
         .merge(friends::presence_settings_router())
         .nest("/auth", auth::router())
         .nest("/ws", ws::router())

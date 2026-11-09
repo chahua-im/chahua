@@ -58,10 +58,8 @@ pub(crate) fn check_membership(
     chat_id: i64,
     uid: i32,
 ) -> Result<(), AppError> {
-    use crate::schema::group_membership::dsl;
-
-    let exists = group_membership::table
-        .filter(dsl::chat_id.eq(chat_id).and(dsl::uid.eq(uid)))
+    let exists = crate::services::chat_access::accessible_chat_ids(uid)
+        .filter(group_membership::chat_id.eq(chat_id))
         .count()
         .get_result::<i64>(conn)?;
 
