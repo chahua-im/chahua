@@ -132,6 +132,7 @@ impl MessageSearchMetrics {
             "wrong_chat",
             "wrong_scope",
             "wrong_sender",
+            "wrong_date",
             "not_searchable",
             "stale_version",
         ] {

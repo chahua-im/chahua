@@ -706,7 +706,12 @@ pub struct ListMessagesQuery {
 #[derive(Debug, serde::Deserialize, utoipa::IntoParams, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchMessagesQuery {
-    pub q: String,
+    /// Optional text query. Without text, a date boundary or senderUid is required.
+    pub q: Option<String>,
+    /// Inclusive creation time, RFC 3339 with timezone; millisecond precision.
+    pub created_from: Option<DateTime<Utc>>,
+    /// Exclusive creation time, RFC 3339 with timezone; millisecond precision.
+    pub created_before: Option<DateTime<Utc>>,
     #[serde(default)]
     pub sort: Option<MessageSearchSort>,
     pub limit: Option<i64>,
@@ -727,7 +732,12 @@ pub enum ChatSearchScope {
 pub struct ChatSearchMessagesQuery {
     /// Group chats only: current member for all/main, thread participant for thread.
     pub sender_uid: Option<i32>,
-    pub q: String,
+    /// Optional text query. Without text, a date boundary or senderUid is required.
+    pub q: Option<String>,
+    /// Inclusive creation time, RFC 3339 with timezone; millisecond precision.
+    pub created_from: Option<DateTime<Utc>>,
+    /// Exclusive creation time, RFC 3339 with timezone; millisecond precision.
+    pub created_before: Option<DateTime<Utc>>,
     pub sort: Option<MessageSearchSort>,
     pub limit: Option<i64>,
     pub offset: Option<usize>,
@@ -762,6 +772,8 @@ impl ChatSearchMessagesQuery {
     pub fn into_query(self) -> SearchMessagesQuery {
         SearchMessagesQuery {
             q: self.q,
+            created_from: self.created_from,
+            created_before: self.created_before,
             sort: self.sort,
             limit: self.limit,
             offset: self.offset,

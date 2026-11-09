@@ -65,6 +65,17 @@ updates filterable attributes, but does not backfill existing documents. For oth
 environments, run the backend's `message-search-reindex` command with that
 environment's database and Meilisearch configuration.
 
+Message history filtering accepts optional `q`, inclusive `createdFrom`, and
+exclusive `createdBefore` (RFC 3339 timestamps with timezone, at most millisecond
+precision). Without a keyword, supply at least one date boundary or a permitted
+group `senderUid`; results include ordinary non-text messages, exclude system,
+deleted and unpublished messages, and sort by creation time then ID descending.
+Keyword-free requests query PostgreSQL directly, including when Meilisearch is
+disabled. Apply the `add_message_filter_indexes` migration before serving these
+queries. Keyword date filtering uses the existing `createdAtMillis` documents;
+startup updates its filterable setting without requiring a date-field backfill.
+Pagination remains `limit`/`offset` with a 1,000-result window, and no total count.
+
 ## Worktrees and configuration
 
 Once shared services have been initialized, a new worktree needs no additional `init`:
