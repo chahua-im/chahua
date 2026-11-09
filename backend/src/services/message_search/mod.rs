@@ -24,7 +24,7 @@ pub const DEFAULT_INDEX_UID: &str = "messages_v1";
 pub const REINDEX_BATCH_SIZE: i64 = 500;
 
 const SEARCHABLE_ATTRIBUTES: &[&str] = &["text"];
-const FILTERABLE_ATTRIBUTES: &[&str] = &["chatId"];
+const FILTERABLE_ATTRIBUTES: &[&str] = &["chatId", "messageId", "replyRootId"];
 const SORTABLE_ATTRIBUTES: &[&str] = &["createdAtMillis"];
 const RANKING_RULES: &[&str] = &[
     // `sort` is ignored for relevance searches that do not pass a sort parameter,
@@ -205,6 +205,7 @@ pub struct MessageSearchCandidatePage {
 pub struct SearchCandidateDropCounts {
     pub missing_db_row: usize,
     pub wrong_chat: usize,
+    pub wrong_scope: usize,
     pub not_searchable: usize,
     pub stale_version: usize,
 }
@@ -213,6 +214,31 @@ pub struct SearchCandidateDropCounts {
 pub struct AuthoritativeSearchHits {
     pub messages: Vec<Message>,
     pub drops: SearchCandidateDropCounts,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageSearchRange {
+    All,
+    Main,
+    Thread(i64),
+}
+impl MessageSearchRange {
+    fn filter(self, chats: &str) -> String {
+        match self {
+            Self::All => chats.to_owned(),
+            Self::Main => format!("{chats} AND replyRootId IS NULL"),
+            Self::Thread(id) => {
+                format!(r#"{chats} AND (messageId = "{id}" OR replyRootId = "{id}")"#)
+            }
+        }
+    }
+    fn contains(self, message: &Message) -> bool {
+        match self {
+            Self::All => true,
+            Self::Main => message.reply_root_id.is_none(),
+            Self::Thread(id) => message.id == id || message.reply_root_id == Some(id),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
@@ -302,6 +328,7 @@ impl MessageSearchService {
         &self,
         query: &str,
         chat_ids: &[i64],
+        range: MessageSearchRange,
         sort: MessageSearchSort,
         limit: usize,
         offset: usize,
@@ -318,6 +345,7 @@ impl MessageSearchService {
                 .collect::<Vec<_>>()
                 .join(",")
         );
+        let filter = range.filter(&filter);
         let sort_fields = ["createdAtMillis:desc"];
         let attributes_to_retrieve = DISPLAYED_ATTRIBUTES;
         let index = self.index();
@@ -672,8 +700,18 @@ fn filter_authoritative_hits_with_counts(
     filter_authoritative_hits_in_chats(&[chat_id], candidates, rows)
 }
 
-pub fn filter_authoritative_hits_in_chats(
+#[cfg(test)]
+fn filter_authoritative_hits_in_chats(
     chat_ids: &[i64],
+    candidates: &[SearchHitCandidate],
+    rows: Vec<Message>,
+) -> AuthoritativeSearchHits {
+    filter_authoritative_hits_in_range(chat_ids, MessageSearchRange::All, candidates, rows)
+}
+
+pub fn filter_authoritative_hits_in_range(
+    chat_ids: &[i64],
+    range: MessageSearchRange,
     candidates: &[SearchHitCandidate],
     rows: Vec<Message>,
 ) -> AuthoritativeSearchHits {
@@ -694,6 +732,11 @@ pub fn filter_authoritative_hits_in_chats(
 
             if !chat_ids.contains(&message.chat_id) {
                 drops.wrong_chat += 1;
+                return None;
+            }
+
+            if !range.contains(&message) {
+                drops.wrong_scope += 1;
                 return None;
             }
 
@@ -865,6 +908,56 @@ mod tests {
             transcode_status: TranscodeStatus::None,
             forwarded_bundle_id: None,
         }
+    }
+
+    #[test]
+    fn search_ranges_include_roots_and_isolate_replies() {
+        use super::{filter_authoritative_hits_in_range, MessageSearchRange as Range};
+        let root = message(1, Some("root"));
+        let mut reply = message(2, Some("reply"));
+        reply.reply_root_id = Some(1);
+        let mut other = message(3, Some("other"));
+        other.reply_root_id = Some(99);
+        let rows = vec![root, reply, other];
+        let candidates = rows
+            .iter()
+            .map(|m| SearchHitCandidate {
+                message_id: m.id,
+                version: project_message_document(m).unwrap().version,
+            })
+            .collect::<Vec<_>>();
+        for (range, ids) in [
+            (Range::All, vec![1, 2, 3]),
+            (Range::Main, vec![1]),
+            (Range::Thread(1), vec![1, 2]),
+        ] {
+            let result =
+                filter_authoritative_hits_in_range(&[10], range, &candidates, rows.clone());
+            assert_eq!(
+                result.messages.iter().map(|m| m.id).collect::<Vec<_>>(),
+                ids
+            );
+        }
+        let mut deleted = rows.clone();
+        deleted[0].deleted_at = Some(Utc::now());
+        let result =
+            filter_authoritative_hits_in_range(&[10], Range::Thread(1), &candidates, deleted);
+        assert_eq!(
+            result.messages.iter().map(|m| m.id).collect::<Vec<_>>(),
+            vec![2]
+        );
+        assert_eq!(
+            Range::Main.filter("chatId = 10"),
+            "chatId = 10 AND replyRootId IS NULL"
+        );
+        assert_eq!(
+            Range::Thread(i64::MAX).filter("chatId = 10"),
+            format!(
+                r#"chatId = 10 AND (messageId = "{}" OR replyRootId = "{}")"#,
+                i64::MAX,
+                i64::MAX
+            )
+        );
     }
 
     #[test]

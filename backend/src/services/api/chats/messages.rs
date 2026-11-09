@@ -22,8 +22,8 @@ use crate::services::avatars::AvatarService;
 use crate::services::forwarding::prepare_forward_message;
 use crate::services::media::MediaStore;
 use crate::services::message_search::{
-    filter_authoritative_hits_in_chats, validate_search_query, MessageSearchMetrics,
-    MessageSearchService, MessageSearchSort, SearchCandidateDropCounts,
+    filter_authoritative_hits_in_range, validate_search_query, MessageSearchMetrics,
+    MessageSearchRange, MessageSearchService, MessageSearchSort, SearchCandidateDropCounts,
 };
 use crate::services::messages::{
     attach_metadata, attachment_position, authorize_message_send, load_username_by_uid,
@@ -314,17 +314,29 @@ pub async fn get_messages(
 pub async fn search_messages(
     uid: i32,
     chat_id: i64,
-    params: SearchMessagesQuery,
+    params: crate::dto::messages::ChatSearchMessagesQuery,
     conn: &mut PgConnection,
     deps: SearchMessagesDeps<'_>,
 ) -> Result<SearchMessagesResponse, AppError> {
-    search_messages_in_scope(uid, Some(chat_id), params, conn, deps).await
+    let range = params.search_range()?;
+    search_messages_with_range(uid, Some(chat_id), params.into_query(), range, conn, deps).await
 }
 
 pub async fn search_messages_in_scope(
     uid: i32,
     chat_id: Option<i64>,
     params: SearchMessagesQuery,
+    conn: &mut PgConnection,
+    deps: SearchMessagesDeps<'_>,
+) -> Result<SearchMessagesResponse, AppError> {
+    search_messages_with_range(uid, chat_id, params, MessageSearchRange::All, conn, deps).await
+}
+
+async fn search_messages_with_range(
+    uid: i32,
+    chat_id: Option<i64>,
+    params: SearchMessagesQuery,
+    range: MessageSearchRange,
     conn: &mut PgConnection,
     deps: SearchMessagesDeps<'_>,
 ) -> Result<SearchMessagesResponse, AppError> {
@@ -344,6 +356,21 @@ pub async fn search_messages_in_scope(
     {
         record_search_query_metrics(&metrics.message_search, sort_label, "failure", started_at);
         return Err(err);
+    }
+
+    if let (Some(chat_id), MessageSearchRange::Thread(id)) = (chat_id, range) {
+        let valid = diesel::select(diesel::dsl::exists(
+            messages::table
+                .filter(dsl::id.eq(id))
+                .filter(dsl::chat_id.eq(chat_id))
+                .filter(dsl::reply_root_id.is_null())
+                .filter(dsl::has_thread.eq(true))
+                .filter(dsl::is_published.eq(true)),
+        ))
+        .get_result::<bool>(conn)?;
+        if !valid {
+            return Err(AppError::NotFound("Thread not found"));
+        }
     }
 
     let query = match validate_search_query(&params.q) {
@@ -382,7 +409,7 @@ pub async fn search_messages_in_scope(
     };
 
     let candidate_page = match search_service
-        .search_candidates(&query, &chat_ids, sort, limit, offset)
+        .search_candidates(&query, &chat_ids, range, sort, limit, offset)
         .await
     {
         Ok(page) => page,
@@ -428,8 +455,9 @@ pub async fn search_messages_in_scope(
         }
     };
 
-    let authoritative_hits = filter_authoritative_hits_in_chats(
+    let authoritative_hits = filter_authoritative_hits_in_range(
         &crate::services::chat_access::filter_accessible_chat_ids(conn, uid, &chat_ids)?,
+        range,
         &candidate_page.candidates,
         rows,
     );
@@ -459,6 +487,7 @@ fn record_search_query_metrics(
 fn record_search_candidate_drops(metrics: &MessageSearchMetrics, drops: SearchCandidateDropCounts) {
     metrics.record_candidate_drop("missing_db_row", drops.missing_db_row);
     metrics.record_candidate_drop("wrong_chat", drops.wrong_chat);
+    metrics.record_candidate_drop("wrong_scope", drops.wrong_scope);
     metrics.record_candidate_drop("not_searchable", drops.not_searchable);
     metrics.record_candidate_drop("stale_version", drops.stale_version);
 }

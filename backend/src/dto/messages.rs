@@ -635,3 +635,96 @@ pub struct SearchMessagesQuery {
     pub limit: Option<i64>,
     pub offset: Option<usize>,
 }
+
+#[derive(Debug, Default, Clone, Copy, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ChatSearchScope {
+    #[default]
+    All,
+    Main,
+    Thread,
+}
+
+#[derive(Debug, serde::Deserialize, utoipa::IntoParams, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatSearchMessagesQuery {
+    pub q: String,
+    pub sort: Option<MessageSearchSort>,
+    pub limit: Option<i64>,
+    pub offset: Option<usize>,
+    /// Defaults to all: main messages and all thread replies.
+    #[serde(default)]
+    pub scope: ChatSearchScope,
+    /// Required only for scope=thread; includes the root and its replies.
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[param(value_type = Option<String>)]
+    #[schema(schema_with = crate::serde_i64_string::schema_opt)]
+    pub thread_id: Option<i64>,
+}
+
+impl ChatSearchMessagesQuery {
+    pub fn search_range(
+        &self,
+    ) -> Result<crate::services::message_search::MessageSearchRange, crate::errors::AppError> {
+        use crate::services::message_search::MessageSearchRange;
+        match (self.scope, self.thread_id) {
+            (ChatSearchScope::All, None) => Ok(MessageSearchRange::All),
+            (ChatSearchScope::Main, None) => Ok(MessageSearchRange::Main),
+            (ChatSearchScope::Thread, Some(id)) if id > 0 => Ok(MessageSearchRange::Thread(id)),
+            _ => Err(crate::errors::AppError::BadRequest(
+                "threadId must be a positive ID and is required only for scope=thread",
+            )),
+        }
+    }
+
+    pub fn into_query(self) -> SearchMessagesQuery {
+        SearchMessagesQuery {
+            q: self.q,
+            sort: self.sort,
+            limit: self.limit,
+            offset: self.offset,
+        }
+    }
+}
+
+#[cfg(test)]
+mod search_scope_tests {
+    use super::*;
+    use crate::services::message_search::MessageSearchRange;
+    #[test]
+    fn scope_validation_and_id_precision() {
+        for (uri, expected) in [
+            ("/?q=hello", MessageSearchRange::All),
+            ("/?q=hello&scope=main", MessageSearchRange::Main),
+            (
+                "/?q=hello&scope=thread&threadId=9223372036854775807",
+                MessageSearchRange::Thread(i64::MAX),
+            ),
+        ] {
+            let query = axum::extract::Query::<ChatSearchMessagesQuery>::try_from_uri(
+                &uri.parse().unwrap(),
+            )
+            .unwrap();
+            assert_eq!(query.search_range().unwrap(), expected);
+        }
+        for uri in [
+            "/?q=hello&scope=thread",
+            "/?q=hello&threadId=1",
+            "/?q=hello&scope=main&threadId=1",
+            "/?q=hello&scope=thread&threadId=0",
+        ] {
+            let query = axum::extract::Query::<ChatSearchMessagesQuery>::try_from_uri(
+                &uri.parse().unwrap(),
+            )
+            .unwrap();
+            assert!(query.search_range().is_err());
+        }
+        assert!(serde_json::from_value::<ChatSearchMessagesQuery>(
+            serde_json::json!({"q":"hello","scope":"invalid"})
+        )
+        .is_err());
+    }
+}
