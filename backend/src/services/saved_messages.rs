@@ -397,14 +397,7 @@ fn load_locatable_chat_ids(
         return Ok(HashSet::new());
     }
 
-    group_membership::table
-        .filter(
-            group_membership::uid
-                .eq(uid)
-                .and(group_membership::chat_id.eq_any(chat_ids)),
-        )
-        .select(group_membership::chat_id)
-        .load::<i64>(conn)
+    crate::services::chat_access::filter_accessible_chat_ids(conn, uid, &chat_ids)
         .map(|rows| rows.into_iter().collect())
         .map_err(Into::into)
 }

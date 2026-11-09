@@ -22,7 +22,7 @@ use crate::services::avatars::AvatarService;
 use crate::services::forwarding::prepare_forward_message;
 use crate::services::media::MediaStore;
 use crate::services::message_search::{
-    filter_authoritative_hits_with_counts, validate_search_query, MessageSearchMetrics,
+    filter_authoritative_hits_in_chats, validate_search_query, MessageSearchMetrics,
     MessageSearchService, MessageSearchSort, SearchCandidateDropCounts,
 };
 use crate::services::messages::{
@@ -318,6 +318,16 @@ pub async fn search_messages(
     conn: &mut PgConnection,
     deps: SearchMessagesDeps<'_>,
 ) -> Result<SearchMessagesResponse, AppError> {
+    search_messages_in_scope(uid, Some(chat_id), params, conn, deps).await
+}
+
+pub async fn search_messages_in_scope(
+    uid: i32,
+    chat_id: Option<i64>,
+    params: SearchMessagesQuery,
+    conn: &mut PgConnection,
+    deps: SearchMessagesDeps<'_>,
+) -> Result<SearchMessagesResponse, AppError> {
     let SearchMessagesDeps {
         media,
         avatars,
@@ -328,7 +338,10 @@ pub async fn search_messages(
     let sort = params.sort.unwrap_or(MessageSearchSort::Relevance);
     let sort_label = sort.as_str();
 
-    if let Err(err) = check_membership(conn, chat_id, uid) {
+    if let Err(err) = chat_id
+        .map(|id| check_membership(conn, id, uid))
+        .transpose()
+    {
         record_search_query_metrics(&metrics.message_search, sort_label, "failure", started_at);
         return Err(err);
     }
@@ -351,20 +364,32 @@ pub async fn search_messages(
         }
     };
 
+    let chat_ids = match chat_id {
+        Some(id) => vec![id],
+        None => crate::services::chat_access::list_accessible_chat_ids(conn, uid)?,
+    };
+    if chat_ids.is_empty() {
+        record_search_query_metrics(&metrics.message_search, sort_label, "success", started_at);
+        return Ok(SearchMessagesResponse {
+            messages: vec![],
+            next_offset: None,
+        });
+    }
+
     let Some(search_service) = message_search.as_ref() else {
         record_search_query_metrics(&metrics.message_search, sort_label, "failure", started_at);
         return Err(AppError::ServiceUnavailable("Message search unavailable"));
     };
 
     let candidate_page = match search_service
-        .search_candidates(&query, chat_id, sort, limit, offset)
+        .search_candidates(&query, &chat_ids, sort, limit, offset)
         .await
     {
         Ok(page) => page,
         Err(err) => {
             record_search_query_metrics(&metrics.message_search, sort_label, "failure", started_at);
             tracing::warn!(
-                chat_id,
+                ?chat_id,
                 sort = sort_label,
                 ?err,
                 "message search query failed"
@@ -403,8 +428,11 @@ pub async fn search_messages(
         }
     };
 
-    let authoritative_hits =
-        filter_authoritative_hits_with_counts(chat_id, &candidate_page.candidates, rows);
+    let authoritative_hits = filter_authoritative_hits_in_chats(
+        &crate::services::chat_access::filter_accessible_chat_ids(conn, uid, &chat_ids)?,
+        &candidate_page.candidates,
+        rows,
+    );
     record_search_candidate_drops(&metrics.message_search, authoritative_hits.drops);
     let messages = attach_metadata(conn, authoritative_hits.messages, media, avatars, uid).await;
     metrics

@@ -301,7 +301,7 @@ impl MessageSearchService {
     pub async fn search_candidates(
         &self,
         query: &str,
-        chat_id: i64,
+        chat_ids: &[i64],
         sort: MessageSearchSort,
         limit: usize,
         offset: usize,
@@ -310,7 +310,14 @@ impl MessageSearchService {
             return Err(MessageSearchError::NotReady);
         }
 
-        let filter = format!(r#"chatId = "{}""#, chat_id);
+        let filter = format!(
+            "chatId IN [{}]",
+            chat_ids
+                .iter()
+                .map(|id| format!(r#""{id}""#))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
         let sort_fields = ["createdAtMillis:desc"];
         let attributes_to_retrieve = DISPLAYED_ATTRIBUTES;
         let index = self.index();
@@ -656,11 +663,21 @@ pub fn project_message_document(message: &Message) -> Option<MessageSearchDocume
     })
 }
 
-pub fn filter_authoritative_hits_with_counts(
+#[cfg(test)]
+fn filter_authoritative_hits_with_counts(
     chat_id: i64,
     candidates: &[SearchHitCandidate],
     rows: Vec<Message>,
 ) -> AuthoritativeSearchHits {
+    filter_authoritative_hits_in_chats(&[chat_id], candidates, rows)
+}
+
+pub fn filter_authoritative_hits_in_chats(
+    chat_ids: &[i64],
+    candidates: &[SearchHitCandidate],
+    rows: Vec<Message>,
+) -> AuthoritativeSearchHits {
+    let chat_ids: std::collections::HashSet<_> = chat_ids.iter().copied().collect();
     let mut rows_by_id = rows
         .into_iter()
         .map(|message| (message.id, message))
@@ -675,7 +692,7 @@ pub fn filter_authoritative_hits_with_counts(
                 return None;
             };
 
-            if message.chat_id != chat_id {
+            if !chat_ids.contains(&message.chat_id) {
                 drops.wrong_chat += 1;
                 return None;
             }
@@ -850,6 +867,37 @@ mod tests {
         }
     }
 
+    #[test]
+    fn cross_chat_hits_preserve_rank_and_recheck_access() {
+        let first = message(1, Some("hello"));
+        let mut second = message(2, Some("hello"));
+        second.chat_id = 20;
+        let mut forbidden = message(3, Some("hello"));
+        forbidden.chat_id = 30;
+        let rows = vec![first, second, forbidden];
+        let candidates = rows
+            .iter()
+            .rev()
+            .map(|row| SearchHitCandidate {
+                message_id: row.id,
+                version: project_message_document(row).unwrap().version,
+            })
+            .collect::<Vec<_>>();
+        let result =
+            super::filter_authoritative_hits_in_chats(&[10, 20], &candidates, rows.clone());
+        assert_eq!(
+            result.messages.iter().map(|m| m.id).collect::<Vec<_>>(),
+            vec![2, 1]
+        );
+        assert_eq!(result.drops.wrong_chat, 1);
+        let revoked = super::filter_authoritative_hits_in_chats(&[10], &candidates, rows.clone());
+        assert_eq!(revoked.messages.len(), 1);
+        assert!(
+            super::filter_authoritative_hits_in_chats(&[], &candidates, rows)
+                .messages
+                .is_empty()
+        );
+    }
     #[test]
     fn normalization_strips_mentions_and_preserves_cjk_text() {
         assert_eq!(

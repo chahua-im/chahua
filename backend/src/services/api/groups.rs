@@ -278,7 +278,8 @@ pub async fn get_groups(
 
     query_builder = query_builder.filter(groups::kind.eq(GroupKind::Group));
     query_builder = match scope {
-        GroupSelectorScope::Joined => query_builder.filter(group_membership::uid.is_not_null()),
+        GroupSelectorScope::Joined => query_builder
+            .filter(groups::id.eq_any(crate::services::chat_access::accessible_chat_ids(uid))),
         GroupSelectorScope::Manageable => {
             query_builder.filter(group_membership::role.eq(GroupRole::Admin))
         }

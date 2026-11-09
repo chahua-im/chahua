@@ -699,6 +699,7 @@ pub fn get_user_threads(
             ts.archived,
             ts.last_read_message_id
         FROM thread_user_states ts
+        JOIN group_membership gm ON gm.chat_id = ts.chat_id AND gm.uid = ts.uid
         LEFT JOIN thread_meta tm ON tm.chat_id = ts.chat_id AND tm.thread_root_id = ts.thread_root_id
         JOIN groups g ON g.id = ts.chat_id
         LEFT JOIN media avatar_media ON g.avatar_image_id = avatar_media.id AND avatar_media.deleted_at IS NULL

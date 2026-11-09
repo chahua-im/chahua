@@ -108,6 +108,7 @@ register_methods! {
     ("conversations.watchStates", crate::dto::rpc::conversations::ConversationsWatchStatesParams, (), Control, control::watch_states),
 ("messages.list", crate::dto::rpc::messages::MessagesListParams, crate::dto::messages::ListMessagesResponse, Read, messages::list),
 ("messages.send", crate::dto::rpc::messages::MessagesSendParams, crate::dto::messages::MessageResponse, Mutation, messages::send),
+("messages.searchAll", crate::dto::messages::SearchMessagesQuery, crate::dto::messages::SearchMessagesResponse, Read, messages::search_all),
 ("messages.search", crate::dto::rpc::messages::MessagesSearchParams, crate::dto::messages::SearchMessagesResponse, Read, messages::search),
 ("messages.get", crate::dto::rpc::messages::MessagesGetParams, crate::dto::messages::MessageResponse, Read, messages::get),
 ("messages.edit", crate::dto::rpc::messages::MessagesEditParams, crate::dto::messages::MessageResponse, Mutation, messages::edit),

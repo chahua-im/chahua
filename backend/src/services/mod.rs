@@ -35,3 +35,5 @@ pub mod token_generation;
 pub mod unread;
 pub mod user;
 pub mod ws_registry;
+
+pub mod chat_access;
