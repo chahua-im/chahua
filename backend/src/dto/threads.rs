@@ -73,6 +73,8 @@ pub struct ListThreadsQuery {
 #[derive(Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ListChatThreadsQuery {
+    /// Author of the root or a surviving published reply; subscriptions do not count.
+    pub participant_uid: Option<i32>,
     pub limit: Option<i64>,
     #[serde(
         default,

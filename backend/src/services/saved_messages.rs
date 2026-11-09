@@ -16,7 +16,7 @@ use crate::{
     models::{
         Attachment, Group, Media, Message, MessageType, NewSavedMessage, SavedMessage, Sticker,
     },
-    schema::{attachments, group_membership, groups, media, messages, saved_messages, stickers},
+    schema::{attachments, groups, media, messages, saved_messages, stickers},
     services::messages::{build_mention_info, extract_mention_uids},
     services::{avatars::AvatarService, media::MediaStore, user::lookup_user_profiles},
     utils::{ids, ids::IdGen, pagination::validate_limit},
@@ -156,14 +156,7 @@ fn ensure_current_chat_membership(
     chat_id: i64,
     uid: i32,
 ) -> Result<(), AppError> {
-    let exists = diesel::select(diesel::dsl::exists(
-        group_membership::table.filter(
-            group_membership::chat_id
-                .eq(chat_id)
-                .and(group_membership::uid.eq(uid)),
-        ),
-    ))
-    .get_result::<bool>(conn)?;
+    let exists = crate::services::chat_access::is_chat_member(conn, chat_id, uid)?;
 
     if !exists {
         return Err(AppError::Forbidden("Not a member of this group"));

@@ -563,7 +563,7 @@ request volume.
 | `message_search_index_operation_duration_seconds` | Histogram; `operation`, `result` | Index operation latency from enqueue to Meilisearch task completion, in seconds. | `H7`; bounded operation/result labels. |
 | `message_search_candidates_per_query` | Histogram; `sort` | Meilisearch candidate hits per query. | `H8`; bounded sort label. |
 | `message_search_results_per_query` | Histogram; `sort` | Authoritative messages returned after database filtering, per query. | `H8`; bounded sort label. |
-| `message_search_candidates_dropped_total` | Counter; `reason` | Candidate hits dropped during database authority checks. | Reasons are `missing_db_row`, `wrong_chat` (outside the currently authorized search scope), `wrong_scope` (outside the requested main/thread range), `not_searchable`, and `stale_version`. |
+| `message_search_candidates_dropped_total` | Counter; `reason` | Candidate hits dropped during database authority checks. | Reasons are `missing_db_row`, `wrong_chat` (outside the currently authorized search scope), `wrong_scope` (outside the requested main/thread range), `wrong_sender` (sender differs from the requested UID), `not_searchable`, and `stale_version`. |
 | `message_search_index_documents_total` | Counter; `operation`, `result` | Documents affected by index operations; zero-document operations do not increment it. | Bounded operation/result labels. |
 | `message_search_reindex_duration_seconds` | Histogram; `result` | Full reindex job latency, in seconds. | `H9`; success/failure labels. |
 | `message_search_reindex_documents_total` | Counter; `result` | Documents indexed by full reindex jobs; zero-document jobs do not increment it. | Success/failure labels. |

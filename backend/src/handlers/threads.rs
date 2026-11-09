@@ -65,6 +65,7 @@ pub(super) struct ChatThreadsPath {
         ("limit" = Option<i64>, Query, description = "Page size, default 20, clamped to 1–100"),
         ("cursor" = Option<String>, Query, description = "Exclusive root ID cursor from nextCursor; retain the same order"),
         ("order" = Option<ThreadOrder>, Query, description = "Root ID ordering: newest (default) or oldest"),
+        ("participantUid" = Option<i32>, Query, description = "Filter threads by root/reply author"),
     ),
     responses(
         (status = OK, body = ListChatThreadsResponse),

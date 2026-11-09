@@ -58,6 +58,13 @@ To verify the backend without starting shared services, run `cargo build` and `c
 
 In `pwa/`, `npm start` and `npm run dev` invoke `pwa`; `npm run dev:online` invokes `pwa --online`. These start **only the frontend**. Online mode connects to production and must not be used for write tests.
 
+Message search indexes include `senderUid` for group sender filtering. After upgrading
+an index created before this field existed, run `node runspace/dev.mjs reindex`
+against the local infrastructure to backfill historical messages. Backend startup
+updates filterable attributes, but does not backfill existing documents. For other
+environments, run the backend's `message-search-reindex` command with that
+environment's database and Meilisearch configuration.
+
 ## Worktrees and configuration
 
 Once shared services have been initialized, a new worktree needs no additional `init`:

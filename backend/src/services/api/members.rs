@@ -17,7 +17,7 @@ use crate::models::{
     GroupJoinReason, GroupKind, GroupMembership, GroupRole, NewGroupMembership, SpeakingMode,
     SystemMessageKind,
 };
-use crate::schema::{self, group_membership, groups};
+use crate::schema::{group_membership, groups};
 use crate::services::avatars::AvatarService;
 use crate::services::background::{BackgroundJob, BackgroundService, DeleteScope};
 use crate::services::media::MediaStore;
@@ -52,23 +52,7 @@ pub struct DeleteRemoveMemberDeps<'a> {
     pub background_service: &'a Arc<BackgroundService>,
 }
 
-/// Check if user is a member of the chat; return 403 if not.
-pub(crate) fn check_membership(
-    conn: &mut PgConnection,
-    chat_id: i64,
-    uid: i32,
-) -> Result<(), AppError> {
-    let exists = crate::services::chat_access::accessible_chat_ids(uid)
-        .filter(group_membership::chat_id.eq(chat_id))
-        .count()
-        .get_result::<i64>(conn)?;
-
-    if exists == 0 {
-        return Err(AppError::Forbidden("Not a member of this chat"));
-    }
-
-    Ok(())
-}
+pub(crate) use crate::services::chat_access::require_chat_member as check_membership;
 
 /// Check if user is an admin of the chat; return 403 if not a member or not admin.
 pub(crate) fn require_admin_role(
@@ -171,12 +155,8 @@ pub async fn post_add_member(
         return Err(AppError::BadRequest("User not found"));
     }
 
-    use crate::schema::group_membership::dsl as gm_dsl;
-    let already_member = schema::group_membership::table
-        .filter(gm_dsl::chat_id.eq(chat_id).and(gm_dsl::uid.eq(body.uid)))
-        .count()
-        .get_result::<i64>(conn)?;
-    if already_member > 0 {
+    let already_member = crate::services::chat_access::is_chat_member(conn, chat_id, body.uid)?;
+    if already_member {
         return Err(AppError::Conflict("User is already a member"));
     }
 

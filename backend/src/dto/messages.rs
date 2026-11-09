@@ -648,6 +648,8 @@ pub enum ChatSearchScope {
 #[derive(Debug, serde::Deserialize, utoipa::IntoParams, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatSearchMessagesQuery {
+    /// Group chats only: current member for all/main, thread participant for thread.
+    pub sender_uid: Option<i32>,
     pub q: String,
     pub sort: Option<MessageSearchSort>,
     pub limit: Option<i64>,
@@ -694,6 +696,21 @@ impl ChatSearchMessagesQuery {
 mod search_scope_tests {
     use super::*;
     use crate::services::message_search::MessageSearchRange;
+
+    #[test]
+    fn sender_filter_uses_uid_in_http_and_rpc_queries() {
+        let query = axum::extract::Query::<ChatSearchMessagesQuery>::try_from_uri(
+            &"/?q=hello&scope=thread&threadId=123&senderUid=42"
+                .parse()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(query.sender_uid, Some(42));
+        let query: crate::dto::rpc::messages::MessagesSearchParams =
+            serde_json::from_value(serde_json::json!({"chatId":"10","q":"hello","senderUid":42}))
+                .unwrap();
+        assert_eq!(query.query.sender_uid, Some(42));
+    }
     #[test]
     fn scope_validation_and_id_precision() {
         for (uri, expected) in [

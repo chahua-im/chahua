@@ -24,7 +24,7 @@ pub const DEFAULT_INDEX_UID: &str = "messages_v1";
 pub const REINDEX_BATCH_SIZE: i64 = 500;
 
 const SEARCHABLE_ATTRIBUTES: &[&str] = &["text"];
-const FILTERABLE_ATTRIBUTES: &[&str] = &["chatId", "messageId", "replyRootId"];
+const FILTERABLE_ATTRIBUTES: &[&str] = &["chatId", "messageId", "replyRootId", "senderUid"];
 const SORTABLE_ATTRIBUTES: &[&str] = &["createdAtMillis"];
 const RANKING_RULES: &[&str] = &[
     // `sort` is ignored for relevance searches that do not pass a sort parameter,
@@ -173,6 +173,7 @@ impl From<diesel::r2d2::PoolError> for MessageSearchError {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageSearchDocument {
+    pub sender_uid: i32,
     pub id: String,
     pub message_id: String,
     pub chat_id: String,
@@ -206,6 +207,7 @@ pub struct SearchCandidateDropCounts {
     pub missing_db_row: usize,
     pub wrong_chat: usize,
     pub wrong_scope: usize,
+    pub wrong_sender: usize,
     pub not_searchable: usize,
     pub stale_version: usize,
 }
@@ -237,6 +239,21 @@ impl MessageSearchRange {
             Self::All => true,
             Self::Main => message.reply_root_id.is_none(),
             Self::Thread(id) => message.id == id || message.reply_root_id == Some(id),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MessageSearchFilters {
+    pub range: MessageSearchRange,
+    pub sender_uid: Option<i32>,
+}
+impl MessageSearchFilters {
+    fn filter(self, chats: &str) -> String {
+        let filter = self.range.filter(chats);
+        match self.sender_uid {
+            Some(uid) => format!("{filter} AND senderUid = {uid}"),
+            None => filter,
         }
     }
 }
@@ -328,7 +345,7 @@ impl MessageSearchService {
         &self,
         query: &str,
         chat_ids: &[i64],
-        range: MessageSearchRange,
+        filters: MessageSearchFilters,
         sort: MessageSearchSort,
         limit: usize,
         offset: usize,
@@ -345,7 +362,7 @@ impl MessageSearchService {
                 .collect::<Vec<_>>()
                 .join(",")
         );
-        let filter = range.filter(&filter);
+        let filter = filters.filter(&filter);
         let sort_fields = ["createdAtMillis:desc"];
         let attributes_to_retrieve = DISPLAYED_ATTRIBUTES;
         let index = self.index();
@@ -681,6 +698,7 @@ pub fn project_message_document(message: &Message) -> Option<MessageSearchDocume
     let text = normalize_search_text(message.message.as_deref()?)?;
 
     Some(MessageSearchDocument {
+        sender_uid: message.sender_uid,
         id: message.id.to_string(),
         message_id: message.id.to_string(),
         chat_id: message.chat_id.to_string(),
@@ -709,9 +727,27 @@ fn filter_authoritative_hits_in_chats(
     filter_authoritative_hits_in_range(chat_ids, MessageSearchRange::All, candidates, rows)
 }
 
-pub fn filter_authoritative_hits_in_range(
+#[cfg(test)]
+fn filter_authoritative_hits_in_range(
     chat_ids: &[i64],
     range: MessageSearchRange,
+    candidates: &[SearchHitCandidate],
+    rows: Vec<Message>,
+) -> AuthoritativeSearchHits {
+    filter_authoritative_hits(
+        chat_ids,
+        MessageSearchFilters {
+            range,
+            sender_uid: None,
+        },
+        candidates,
+        rows,
+    )
+}
+
+pub fn filter_authoritative_hits(
+    chat_ids: &[i64],
+    filters: MessageSearchFilters,
     candidates: &[SearchHitCandidate],
     rows: Vec<Message>,
 ) -> AuthoritativeSearchHits {
@@ -735,11 +771,18 @@ pub fn filter_authoritative_hits_in_range(
                 return None;
             }
 
-            if !range.contains(&message) {
+            if !filters.range.contains(&message) {
                 drops.wrong_scope += 1;
                 return None;
             }
 
+            if filters
+                .sender_uid
+                .is_some_and(|uid| message.sender_uid != uid)
+            {
+                drops.wrong_sender += 1;
+                return None;
+            }
             let Some(document) = project_message_document(&message) else {
                 drops.not_searchable += 1;
                 return None;
@@ -765,6 +808,7 @@ fn project_message_response_document(response: &MessageResponse) -> Option<Messa
     let text = normalize_search_text(response.message.as_deref()?)?;
 
     Some(MessageSearchDocument {
+        sender_uid: response.sender.uid,
         id: response.id.to_string(),
         message_id: response.id.to_string(),
         chat_id: response.chat_id.to_string(),
@@ -908,6 +952,50 @@ mod tests {
             transcode_status: TranscodeStatus::None,
             forwarded_bundle_id: None,
         }
+    }
+
+    #[test]
+    fn sender_filter_applies_to_all_ranges_and_authoritative_hits() {
+        use super::{MessageSearchFilters, MessageSearchRange as Range};
+        let mut first = message(1, Some("hello"));
+        first.sender_uid = 42;
+        let mut second = message(2, Some("hello"));
+        second.reply_root_id = Some(1);
+        assert_eq!(project_message_document(&first).unwrap().sender_uid, 42);
+        let rows = vec![first, second];
+        let candidates = rows
+            .iter()
+            .map(|m| SearchHitCandidate {
+                message_id: m.id,
+                version: project_message_document(m).unwrap().version,
+            })
+            .collect::<Vec<_>>();
+        for range in [Range::All, Range::Main, Range::Thread(1)] {
+            let filters = MessageSearchFilters {
+                range,
+                sender_uid: Some(42),
+            };
+            assert!(filters
+                .filter("chatId = 10")
+                .ends_with(" AND senderUid = 42"));
+            let result =
+                super::filter_authoritative_hits(&[10], filters, &candidates, rows.clone());
+            assert_eq!(
+                result.messages.iter().map(|m| m.id).collect::<Vec<_>>(),
+                vec![1]
+            );
+        }
+        let result = super::filter_authoritative_hits(
+            &[10],
+            MessageSearchFilters {
+                range: Range::All,
+                sender_uid: Some(999),
+            },
+            &candidates,
+            rows,
+        );
+        assert!(result.messages.is_empty());
+        assert_eq!(result.drops.wrong_sender, 2);
     }
 
     #[test]

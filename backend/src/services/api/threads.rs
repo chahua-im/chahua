@@ -71,8 +71,14 @@ pub async fn get_chat_threads(
 ) -> Result<ListChatThreadsResponse, AppError> {
     check_membership(conn, chat_id, uid)?;
     let limit = validate_limit(query.limit.or(Some(20)), 100);
-    let mut roots =
-        thread_svc::get_chat_threads(conn, chat_id, query.cursor, query.order, limit + 1)?;
+    let mut roots = thread_svc::get_chat_threads(
+        conn,
+        chat_id,
+        query.cursor,
+        query.order,
+        limit + 1,
+        query.participant_uid,
+    )?;
     let has_more = roots.len() as i64 > limit;
     roots.truncate(limit as usize);
     let next_cursor = has_more.then(|| roots.last().unwrap().id.to_string());
