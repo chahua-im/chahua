@@ -70,6 +70,9 @@ exclusive `createdBefore` (RFC 3339 timestamps with timezone, at most millisecon
 precision). Without a keyword, supply at least one date boundary or a permitted
 group `senderUid`; results include ordinary non-text messages, exclude system,
 deleted and unpublished messages, and sort by creation time then ID descending.
+Keyword searches use `matchingStrategy=last` for relevance ordering and
+`matchingStrategy=all` for newest ordering. The latter requires all query terms
+to match; typo tolerance and prefix matching still follow the index settings.
 Keyword-free requests query PostgreSQL directly, including when Meilisearch is
 disabled. Apply the `add_message_filter_indexes` migration before serving these
 queries. Keyword date filtering uses the existing `createdAtMillis` documents;

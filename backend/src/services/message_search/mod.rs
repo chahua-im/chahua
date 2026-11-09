@@ -9,7 +9,7 @@ use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::PgConnection;
 use meilisearch_sdk::client::Client;
 use meilisearch_sdk::errors::Error as MeiliError;
-use meilisearch_sdk::search::Selectors;
+use meilisearch_sdk::search::{MatchingStrategies, SearchQuery, Selectors};
 use meilisearch_sdk::task_info::TaskInfo;
 use meilisearch_sdk::tasks::Task;
 use serde::{Deserialize, Serialize};
@@ -289,6 +289,19 @@ pub enum MessageSearchSort {
 }
 
 impl MessageSearchSort {
+    fn configure(self, search: &mut SearchQuery<'_, meilisearch_sdk::DefaultHttpClient>) {
+        match self {
+            Self::Relevance => {
+                search.with_matching_strategy(MatchingStrategies::LAST);
+            }
+            Self::Newest => {
+                search
+                    .with_matching_strategy(MatchingStrategies::ALL)
+                    .with_sort(&["createdAtMillis:desc"]);
+            }
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Relevance => "relevance",
@@ -386,7 +399,6 @@ impl MessageSearchService {
                 .join(",")
         );
         let filter = filters.filter(&filter);
-        let sort_fields = ["createdAtMillis:desc"];
         let attributes_to_retrieve = DISPLAYED_ATTRIBUTES;
         let index = self.index();
         let mut search = index.search();
@@ -397,9 +409,7 @@ impl MessageSearchService {
             .with_limit(limit)
             .with_offset(offset)
             .with_attributes_to_retrieve(Selectors::Some(attributes_to_retrieve));
-        if sort == MessageSearchSort::Newest {
-            search.with_sort(&sort_fields);
-        }
+        sort.configure(&mut search);
 
         let result = search.execute::<MessageSearchHitDocument>().await?;
         let candidates = result
@@ -986,6 +996,29 @@ mod tests {
             is_published: true,
             transcode_status: TranscodeStatus::None,
             forwarded_bundle_id: None,
+        }
+    }
+
+    #[test]
+    fn keyword_requests_serialize_matching_strategy_and_sort_together() {
+        let client =
+            meilisearch_sdk::client::Client::new("http://localhost:7700", None::<String>).unwrap();
+        let index = client.index("messages_test");
+        for (sort, strategy) in [
+            (super::MessageSearchSort::Relevance, "last"),
+            (super::MessageSearchSort::Newest, "all"),
+        ] {
+            let mut query = index.search();
+            query.with_query("release plan");
+            sort.configure(&mut query);
+            let body = serde_json::to_value(&query).unwrap();
+            assert_eq!(body["q"], "release plan");
+            assert_eq!(body["matchingStrategy"], strategy);
+            if strategy == "all" {
+                assert_eq!(body["sort"], serde_json::json!(["createdAtMillis:desc"]));
+            } else {
+                assert!(body.get("sort").is_none());
+            }
         }
     }
 
