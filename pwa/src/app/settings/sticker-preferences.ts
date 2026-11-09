@@ -1,16 +1,17 @@
-import { Service, computed, inject, signal } from '@angular/core';
+import { Service, computed, inject } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom, filter } from 'rxjs';
 import { Connection } from '../api/connection';
 import { decodeId, encodeId, type SnowflakeID } from '../api/snowflake-id';
 import { SessionStore } from '../session/session-store';
+import { AccountStorage, AccountStore } from '../storage/account-storage';
 import { RpcApi } from '../../generated/rpc-api';
 import type { StickerPackOrderItem, UpdateStickerPackOrderItem } from '../../generated/models';
 import { ServerWsMessageType } from '../../generated/models';
 
-const AUTO_SORT_PACKS_KEY = 'chahua.preferences.autoSortStickerPacks';
-const AUTO_SORT_FAVORITES_KEY = 'chahua.preferences.autoSortFavoriteStickers';
-const FAVORITE_ORDER_KEY = 'chahua.preferences.favoriteStickerOrder';
+const AUTO_SORT_PACKS_KEY = 'autoSortStickerPacks';
+const AUTO_SORT_FAVORITES_KEY = 'autoSortFavoriteStickers';
+const FAVORITE_ORDER_KEY = 'favoriteStickerOrder';
 
 /** Packs beyond this position in the sorted list are excluded from usage recording. */
 export const AUTO_SORT_LIMIT = 20;
@@ -23,13 +24,17 @@ export interface FavoriteStickerOrderItem {
 @Service()
 export class StickerPreferences {
   private readonly session = inject(SessionStore);
+  private readonly storage = inject(AccountStorage);
   private readonly users = inject(RpcApi);
-  private readonly autoSortPacks = signal(window.localStorage.getItem(AUTO_SORT_PACKS_KEY) === 'true');
-  private readonly autoSortFavorites = signal(window.localStorage.getItem(AUTO_SORT_FAVORITES_KEY) === 'true');
-  private readonly favoriteOrder = signal(readFavoriteOrder());
-  readonly autoSortPacksEnabled = this.autoSortPacks.asReadonly();
-  readonly autoSortFavoritesEnabled = this.autoSortFavorites.asReadonly();
-  readonly favoriteStickerOrder = this.favoriteOrder.asReadonly();
+  readonly autoSortPacksEnabled = computed(() =>
+    this.storage.read(AccountStore.Preferences, AUTO_SORT_PACKS_KEY, false),
+  );
+  readonly autoSortFavoritesEnabled = computed(() =>
+    this.storage.read(AccountStore.Preferences, AUTO_SORT_FAVORITES_KEY, false),
+  );
+  readonly favoriteStickerOrder = computed(() =>
+    readFavoriteOrder(this.storage.read(AccountStore.Usage, FAVORITE_ORDER_KEY, [])),
+  );
   readonly packOrder = computed(() => this.session.user()?.stickerPackOrder ?? []);
 
   constructor() {
@@ -42,13 +47,11 @@ export class StickerPreferences {
   }
 
   setAutoSortPacks(value: boolean) {
-    window.localStorage.setItem(AUTO_SORT_PACKS_KEY, String(value));
-    this.autoSortPacks.set(value);
+    this.storage.set(AccountStore.Preferences, AUTO_SORT_PACKS_KEY, value);
   }
 
   setAutoSortFavorites(value: boolean) {
-    window.localStorage.setItem(AUTO_SORT_FAVORITES_KEY, String(value));
-    this.autoSortFavorites.set(value);
+    this.storage.set(AccountStore.Preferences, AUTO_SORT_FAVORITES_KEY, value);
   }
 
   upsertPackOrderItem(item: StickerPackOrderItem) {
@@ -61,15 +64,14 @@ export class StickerPreferences {
 
   upsertFavoriteStickerOrderItem(item: FavoriteStickerOrderItem) {
     const normalized = { ...item, lastUsedOn: Math.trunc(item.lastUsedOn) };
-    this.favoriteOrder.update((current) => [
+    const order = [
       normalized,
-      ...current.filter((existing) => existing.stickerId !== item.stickerId),
-    ]);
-    window.localStorage.setItem(
+      ...this.favoriteStickerOrder().filter((existing) => existing.stickerId !== item.stickerId),
+    ];
+    this.storage.set(
+      AccountStore.Usage,
       FAVORITE_ORDER_KEY,
-      JSON.stringify(
-        this.favoriteOrder().map(({ stickerId, lastUsedOn }) => ({ stickerId: decodeId(stickerId), lastUsedOn })),
-      ),
+      order.map(({ stickerId, lastUsedOn }) => ({ stickerId: decodeId(stickerId), lastUsedOn })),
     );
   }
 
@@ -121,34 +123,29 @@ function sortByKeyedOrder<T extends { id: SnowflakeID }, O extends { lastUsedOn:
   });
 }
 
-function readFavoriteOrder(): FavoriteStickerOrderItem[] {
-  try {
-    const value: unknown = JSON.parse(window.localStorage.getItem(FAVORITE_ORDER_KEY) ?? '[]');
-    if (!Array.isArray(value)) return [];
-    const seen = new Set<SnowflakeID>();
-    const items: FavoriteStickerOrderItem[] = [];
-    for (const entry of value) {
-      if (typeof entry !== 'object' || entry == null) continue;
-      const { stickerId, lastUsedOn } = entry as Record<string, unknown>;
-      let id: SnowflakeID;
-      if (typeof stickerId === 'string' && /^\d+$/.test(stickerId)) {
-        try {
-          id = encodeId(stickerId);
-        } catch {
-          continue;
-        }
-      } else if (typeof stickerId === 'number' && Number.isFinite(stickerId)) {
-        id = stickerId as SnowflakeID;
-      } else {
+function readFavoriteOrder(value: unknown): FavoriteStickerOrderItem[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<SnowflakeID>();
+  const items: FavoriteStickerOrderItem[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry == null) continue;
+    const { stickerId, lastUsedOn } = entry as Record<string, unknown>;
+    let id: SnowflakeID;
+    if (typeof stickerId === 'string' && /^\d+$/.test(stickerId)) {
+      try {
+        id = encodeId(stickerId);
+      } catch {
         continue;
       }
-      if (typeof lastUsedOn !== 'number' || !Number.isFinite(lastUsedOn)) continue;
-      if (seen.has(id)) continue;
-      seen.add(id);
-      items.push({ stickerId: id, lastUsedOn: Math.trunc(lastUsedOn) });
+    } else if (typeof stickerId === 'number' && Number.isFinite(stickerId)) {
+      id = stickerId as SnowflakeID;
+    } else {
+      continue;
     }
-    return items;
-  } catch {
-    return [];
+    if (typeof lastUsedOn !== 'number' || !Number.isFinite(lastUsedOn)) continue;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    items.push({ stickerId: id, lastUsedOn: Math.trunc(lastUsedOn) });
   }
+  return items;
 }

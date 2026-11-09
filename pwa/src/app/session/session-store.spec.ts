@@ -1,7 +1,9 @@
+import { delayNextGetAll, stubIndexedDB } from '../storage/testing';
+import { AccountStorage, AccountStore } from '../storage/account-storage';
 import { HttpClient, provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, TimeoutError } from 'rxjs';
 import { vi } from 'vitest';
 import { RpcApi } from '../../generated/rpc-api';
 import { authInterceptor } from '../api/auth.interceptor';
@@ -95,6 +97,109 @@ describe('SessionStore', () => {
     await Promise.resolve();
     await refreshProfile(user, group);
   }
+
+  it.each([false, true])(
+    'waits for local account data and rejects late publication after logout=%s',
+    async (logout) => {
+      let release!: () => void;
+      const loading = vi.spyOn(TestBed.inject(AccountStorage), 'activate').mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+      );
+      session.restoreToken();
+      const initialize = session.initialize();
+      await bootstrap();
+      await vi.waitFor(() => expect(loading).toHaveBeenCalledWith(testUser.uid));
+      expect(session.user()).toBeUndefined();
+      if (logout) session.logout();
+      release();
+      await initialize;
+      if (logout) expect(session.user()).toBeUndefined();
+      else expect(session.user()?.uid).toBe(testUser.uid);
+    },
+  );
+
+  it.each([0, 20_000])('bounds local account loading by the remaining login deadline after %i ms', async (elapsed) => {
+    vi.useFakeTimers();
+    const storage = TestBed.inject(AccountStorage);
+    let release!: () => void;
+    const loading = vi.spyOn(storage, 'activate').mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const deactivate = vi.spyOn(storage, 'deactivate');
+    try {
+      session.restoreToken();
+      const deadline = Date.now() + 30_000;
+      const first = session.initialize();
+      const rejection = expect(first).rejects.toMatchObject({ cause: expect.any(TimeoutError) });
+      await vi.advanceTimersByTimeAsync(elapsed);
+      await bootstrap();
+      await Promise.resolve();
+      expect(loading).toHaveBeenCalledWith(testUser.uid);
+      await vi.advanceTimersByTimeAsync(deadline - Date.now() - 1);
+      expect(deactivate).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await rejection;
+      expect(deactivate).toHaveBeenCalledOnce();
+      expect(session.user()).toBeUndefined();
+      expect(session.token()).toBe('refreshed-token');
+
+      const retry = session.initialize();
+      await bootstrap('refreshed-token');
+      await retry;
+      const currentUser = session.user();
+      release();
+      await Promise.resolve();
+      expect(session.user()).toBe(currentUser);
+      expect(currentUser).toMatchObject(testUser);
+    } finally {
+      release?.();
+      loading.mockRestore();
+      deactivate.mockRestore();
+    }
+  });
+
+  it('discards a timed-out IndexedDB snapshot after a successful retry and a new draft edit', async () => {
+    stubIndexedDB();
+    const storage = TestBed.inject(AccountStorage);
+    await storage.activate(testUser.uid);
+    const oldDraft = { text: 'before timeout', savedAt: 1 };
+    storage.set(AccountStore.Drafts, '42', oldDraft);
+    await storage.settled();
+    storage.deactivate();
+    const reading = delayNextGetAll();
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    try {
+      session.restoreToken();
+      const first = session.initialize();
+      const rejection = expect(first).rejects.toMatchObject({ cause: expect.any(TimeoutError) });
+      await bootstrap();
+      await reading.ready;
+      await vi.advanceTimersByTimeAsync(30_000);
+      await rejection;
+      expect(session.user()).toBeUndefined();
+      expect(storage.entries(AccountStore.Drafts)).toEqual({});
+
+      const retry = session.initialize();
+      await bootstrap('refreshed-token');
+      await retry;
+      expect(storage.read(AccountStore.Drafts, '42', undefined)).toEqual(oldDraft);
+      const edited = { text: 'after retry', savedAt: 2 };
+      storage.set(AccountStore.Drafts, '42', edited);
+      reading.release();
+      await storage.settled();
+      expect(storage.read(AccountStore.Drafts, '42', undefined)).toEqual(edited);
+      expect(session.user()).toMatchObject(testUser);
+    } finally {
+      reading.release();
+      reading.restore();
+    }
+  });
 
   it.each([
     {

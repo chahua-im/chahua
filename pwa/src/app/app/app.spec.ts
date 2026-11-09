@@ -4,6 +4,7 @@ import { By } from '@angular/platform-browser';
 import { Navigation, Router, provideRouter } from '@angular/router';
 import { getPlatforms, IonRouterOutlet } from '@ionic/angular';
 import { afterAll, vi } from 'vitest';
+import { TimeoutError } from 'rxjs';
 import { testUser } from '../api/testing';
 import { RpcError, RpcErrorCode, RpcTransportError } from '../api/rpc-error';
 import { ListTab } from '../chats/list-tabs';
@@ -424,6 +425,7 @@ describe('App', () => {
 
   it.each([
     [new RpcTransportError('disconnected'), '暂时无法连接茶话'],
+    [new Error('Local account data could not be loaded', { cause: new TimeoutError() }), '暂时无法进入茶话'],
     [new RpcError(RpcErrorCode.Forbidden, 'Forbidden'), '暂时无法进入茶话'],
     [new RpcError(RpcErrorCode.Unavailable, 'Unavailable'), '茶话暂时不可用'],
     [new RpcError(RpcErrorCode.Internal, 'Internal'), '茶话暂时不可用'],

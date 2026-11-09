@@ -1,3 +1,5 @@
+import { stubIndexedDB } from '../storage/testing';
+import { AccountStorage, AccountStore } from '../storage/account-storage';
 import { signal, type WritableSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
@@ -33,11 +35,17 @@ describe('StickerPreferences', () => {
     peer.authenticate();
   }
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    stubIndexedDB();
     const values = new Map<string, string>();
     vi.stubGlobal('localStorage', {
       getItem: (key: string) => values.get(key) ?? null,
       setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+      get length() {
+        return values.size;
+      },
+      key: (index: number) => [...values.keys()][index] ?? null,
     });
     events$ = new Subject<ServerWsMessage>();
     session = {
@@ -58,6 +66,7 @@ describe('StickerPreferences', () => {
       ),
     };
     configure();
+    await TestBed.inject(AccountStorage).activate(testUser.uid);
   });
 
   afterEach(() => {
@@ -72,16 +81,18 @@ describe('StickerPreferences', () => {
     }
   });
 
-  it('defaults both auto-sort toggles to off and persists their values locally', () => {
+  it('defaults both auto-sort toggles to off and persists their values locally', async () => {
     const preferences = TestBed.inject(StickerPreferences);
     expect(preferences.autoSortPacksEnabled()).toBe(false);
     expect(preferences.autoSortFavoritesEnabled()).toBe(false);
     preferences.setAutoSortPacks(true);
     preferences.setAutoSortFavorites(true);
-    expect(localStorage.getItem('chahua.preferences.autoSortStickerPacks')).toBe('true');
-    expect(localStorage.getItem('chahua.preferences.autoSortFavoriteStickers')).toBe('true');
+    expect(TestBed.inject(AccountStorage).read(AccountStore.Preferences, 'autoSortStickerPacks', false)).toBe(true);
+    expect(TestBed.inject(AccountStorage).read(AccountStore.Preferences, 'autoSortFavoriteStickers', false)).toBe(true);
+    await TestBed.inject(AccountStorage).settled();
     TestBed.resetTestingModule();
     configure();
+    await TestBed.inject(AccountStorage).activate(testUser.uid);
     const restored = TestBed.inject(StickerPreferences);
     expect(restored.autoSortPacksEnabled()).toBe(true);
     expect(restored.autoSortFavoritesEnabled()).toBe(true);
@@ -89,7 +100,7 @@ describe('StickerPreferences', () => {
     restored.setAutoSortFavorites(false);
   });
 
-  it('keeps the favorite order deduplicated and truncated', () => {
+  it('keeps the favorite order deduplicated and truncated', async () => {
     const preferences = TestBed.inject(StickerPreferences);
     preferences.upsertFavoriteStickerOrderItem({ stickerId: encodeId('101'), lastUsedOn: 50.9 });
     preferences.upsertFavoriteStickerOrderItem({ stickerId: encodeId('102'), lastUsedOn: 60 });
@@ -98,19 +109,21 @@ describe('StickerPreferences', () => {
       { stickerId: encodeId('101'), lastUsedOn: 70 },
       { stickerId: encodeId('102'), lastUsedOn: 60 },
     ]);
-    expect(JSON.parse(localStorage.getItem('chahua.preferences.favoriteStickerOrder')!)).toEqual([
+    expect(TestBed.inject(AccountStorage).read(AccountStore.Usage, 'favoriteStickerOrder', [])).toEqual([
       { stickerId: '101', lastUsedOn: 70 },
       { stickerId: '102', lastUsedOn: 60 },
     ]);
+    await TestBed.inject(AccountStorage).settled();
     TestBed.resetTestingModule();
     configure();
+    await TestBed.inject(AccountStorage).activate(testUser.uid);
     expect(TestBed.inject(StickerPreferences).favoriteStickerOrder()).toEqual([
       { stickerId: encodeId('101'), lastUsedOn: 70 },
       { stickerId: encodeId('102'), lastUsedOn: 60 },
     ]);
   });
 
-  it('reads the pack order from the session and upserts through it', () => {
+  it('reads the pack order from the session and upserts through it', async () => {
     const preferences = TestBed.inject(StickerPreferences);
     expect(preferences.packOrder()).toEqual([]);
     preferences.upsertPackOrderItem({ stickerPackId: encodeId('201'), lastUsedOn: 30.4 });
@@ -149,14 +162,14 @@ describe('StickerPreferences', () => {
     expect(session.user()?.stickerPackOrder).toEqual([item]);
   });
 
-  it('replaces the session order when the server pushes an update', () => {
+  it('replaces the session order when the server pushes an update', async () => {
     TestBed.inject(StickerPreferences);
     const order = [{ stickerPackId: encodeId('401'), lastUsedOn: 80 }];
     events$.next({ type: ServerWsMessageType.stickerPackOrderUpdated, payload: { order } });
     expect(session.user()?.stickerPackOrder).toEqual(order);
   });
 
-  it('sorts packs by last used time, ordered before unordered, stable otherwise', () => {
+  it('sorts packs by last used time, ordered before unordered, stable otherwise', async () => {
     const a = { id: encodeId('1'), name: 'a' };
     const b = { id: encodeId('2'), name: 'b' };
     const c = { id: encodeId('3'), name: 'c' };

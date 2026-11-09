@@ -14,9 +14,9 @@
 | ChatListStore          | 查询成员 ID、游标、覆盖范围、消费者、好友请求与共享未读响应                        | 应用；无消费者时取消读取                                                            |
 | ConversationStore      | 连续消息区间、双向游标、请求状态、期间收到的补丁、用于改写引用快照的撤回与编辑记录 | 每个 ConversationPage；由页面生命周期控制                                           |
 | MessageOutbox          | 已提交内容、编辑/撤回意图、上传、确认与重试                                        | 应用内存；跨页面，整页刷新不恢复                                                    |
-| DraftStore             | 文字、回复目标 ID、保存时间                                                        | 按账号和聊天/话题保存到 localStorage                                                |
-| Preferences            | 本机显示偏好、消息字号、最近表情、置顶表态表情；派生账号成员消息偏好               | 本机项存 localStorage；账号项由 SessionStore 保存                                   |
-| StickerPreferences     | 自动整理开关、收藏贴纸使用顺序；读写 SessionStore 中的贴纸包顺序                   | 应用；开关与收藏顺序保存到 localStorage，收藏 ID 为十进制字符串，包顺序以服务器为准 |
+| DraftStore             | 文字、回复目标 ID、保存时间                                                        | 按后端环境、账号和聊天/话题保存到 IndexedDB                                                  |
+| Preferences            | 设备显示偏好、账号聊天显示偏好、最近表情、置顶表态表情；派生成员消息偏好           | 设备项存 localStorage；本机账号项经 AccountStorage 保存；成员消息偏好由 SessionStore 保存    |
+| StickerPreferences     | 自动整理开关、收藏贴纸使用顺序；读写 SessionStore 中的贴纸包顺序                   | 应用；开关与收藏顺序经 AccountStorage 按账号保存，收藏 ID 为十进制字符串，包顺序以服务器为准 |
 | MessageActions         | 请求操作，不保存消息缓存                                                           | 每个 MessageMenu                                                                    |
 | ConversationNavigation | 关闭会话入口弹层、路由与即时定位；不保存消息或位置                                 | 应用；当前页面消费                                                                  |
 | PushNotifications      | 本机通知意图、浏览器权限、操作状态、去重记录                                       | 应用；本机意图保存到 localStorage，去重保存到独立 IndexedDB                         |
@@ -65,11 +65,25 @@ flowchart TD
 
 好友请求详情路径 `/profile/:uid/request/:requestId` 保留请求定位，刷新或直接进入时可恢复。PanelPage 从请求方向选择对方资料；请求不存在或与路径中的用户不匹配时沿用面板加载失败反馈。
 
+## 本机账号数据
+
+AccountStorage 通过 `idb` 库访问 IndexedDB 数据库 `chahua-accounts`（版本 1），包含 `preferences`、`usage`、`drafts` 与 `meta`。前三者保存 `{ environment, uid, key, value }`，使用 inline 复合主键 `keyPath: ["environment", "uid", "key"]`；其中 environment 是规范化后端 API 地址，key 是项目键，value 是原偏好、使用记录或草稿值。草稿项目键为聊天 ID 或 `聊天ID/话题ID`。`meta` 保存 `{ key, value }`，使用 inline 主键 `keyPath: "key"`，记录旧数据归属、初始偏好与迁移完成标记。四个 Object Store 均不设自增主键或额外索引。后端地址由现有 API 配置解析到绝对地址，不使用 Token 字符串或代际作为存储身份。
+
+内存中的 `preferences`、`usage`、`drafts` 分别使用独立 signal；单项写入或删除只通知所属类别的消费者，保存草稿不触发表情与贴纸使用记录的重新计算。账号加载与退出统一替换三个类别的状态。
+
+主题、语言、字号、错误诊断显示及通知开关仍保存在设备级 localStorage；登录凭据、开发标记、通知去重、诊断和 Angular 资源缓存保留各自的存储。话题显示、全部头像显示、私聊详情、置顶表态、肤色及贴纸自动整理开关保存在账号 `preferences`；最近表态、表情选择器的频次/使用时间和收藏贴纸使用顺序保存在账号 `usage`。这些账号数据只保存在本机，不跨设备同步。
+
+SessionStore 完成服务端身份查询后、发布 user 前等待 AccountStorage 加载；本地加载与补充用户组查询并行，共用登录截止时间。本地加载超时后失效迟到读取，保留磁盘数据与登录凭据，通过现有登录重试入口重新加载；同账号已激活时保留内存值。首次内容显示不经过默认偏好或空草稿的中间状态。退出或身份变化清空内存并失效迟到读取，不删除该账号磁盘上的偏好、记录和草稿。写入先更新内存，每次事务绑定发起时的账号；已打开数据库时立即提交事务，包括现有 pagehide 草稿保存入口。数据库连接异常关闭时释放连接引用，后续写入重新打开数据库，保留当前内存状态。存储写入失败保留内存状态；数据库不可用时仍可读取当前 UID 的旧草稿，旧全局使用记录只有在归属事务成功后才启用。
+
 ## 启动存储迁移
 
 LegacyMigration 通过 Angular 初始化器先于组件和偏好服务运行，只读取旧数据库 `wetty`。不存在旧库时中止创建；有旧库时将 Token 补入 `jwt_token`，把 `draft:聊天ID_thread_话题ID` 转为按原 Token uid 归属的 `chahua.drafts.uid` 与 `聊天ID/话题ID` 键，回复字段转为 `replyTo`，保留保存时间和更晚的新草稿。话题显示、全部头像、最近表情转换为 Preferences 的 localStorage 格式；已有新偏好不覆盖。
 
 没有对应界面的旧设置以及无法确认归属的草稿保存在 `chahua.migration.wetty.backup`；旧贴纸排序同样留在备份中，现用贴纸包顺序以服务器 `stickerPackOrder` 为准。所有写入成功后标记已转换，再后台删除旧库；失败保留旧库供下次重试。旧标签页阻挡删除时不阻塞应用启动，后续启动跳过读取、继续删除；连接释放后完成删除并标记迁移完成。通知独立数据库不受影响。
+
+AccountStorage 在服务端确认身份后接续迁移 localStorage：所有有效 `chahua.drafts.<uid>` 按原 UID 写入当前后端环境，保留文字、回复 ID 与保存时间，相同目标保留较新的草稿。无 UID 或格式不完整的草稿及 `chahua.migration.wetty.backup` 原样保留。全局显式偏好作为新账号的初始值；最近表态、表情选择器最近记录、收藏贴纸使用顺序只归入首次成功提交归属事务的账号。已有账号值不被覆盖。
+
+数据与迁移完成标记在同一个 IndexedDB 事务中提交，成功后才删除对应旧键。失败保留来源供后续加载重试，清理失败保留完成标记，避免再次覆盖新值或复活已清除的草稿。迁移不创建恢复界面、不改变登录入口或多标签页登录规则。
 
 ## 身份、协议与入口
 
@@ -81,7 +95,7 @@ localStorage 和 Cookie 使用同一个键 `jwt_token`；读取身份及刷新 t
 
 iOS/iPadOS 17.2+ 与 macOS Safari 安装网页应用时复制 Cookie，不复制 localStorage；安装后两边存储独立，已安装应用不会收到 Safari 后续的登录变化。更早 iOS 不提供这条安装登录传递；`start_url` 固定为 `/chats`，不携带 token。[WebKit 安装行为](https://webkit.org/blog/14787/webkit-features-in-safari-17-2/#login-cookies)
 
-选定身份后先完成 `session.open`，再依次调用 `auth.refresh`、`users.getMe`、`users.search({q: UID, limit: 1})`；包括开发会话在内的整次初始化共用 30 秒截止时间，超时退订当前等待，迟到响应不能覆盖后续重试。最后一步补用户组，失败或超时不阻塞登录。刷新 token 只替换存储与下一次重连凭据，不重新认证当前连接、不增加连接、不清空同账号资料。SessionStore 从成功解码的 RpcApi 结果和 Connection 领域事件更新本人资料；所有 savedMessages 结果均不参与更新。待发消息从当前身份派生作者资料。
+选定身份后先完成 `session.open`，再依次调用 `auth.refresh`、`users.getMe`、`users.search({q: UID, limit: 1})`；包括开发会话在内的整次初始化与本地账号数据加载共用 30 秒截止时间，超时退订当前等待，迟到响应不能覆盖后续重试。最后一步补用户组，与本地加载并行；用户组查询失败或超时不阻塞已完成本地加载的登录。刷新 token 只替换存储与下一次重连凭据，不重新认证当前连接、不增加连接、不清空同账号资料。SessionStore 从成功解码的 RpcApi 结果和 Connection 领域事件更新本人资料；所有 savedMessages 结果均不参与更新。待发消息从当前身份派生作者资料。
 
 默认 API 基地址为 `/_api`；跨域生产构建通过 `CHAHUA_API_BASE` 使用 `https://chahui.app/_api`，HTTP 与 WebSocket 共用该地址，凭据来自页面源的身份存储。构建与资源部署约定见 [README](../README.md#开发)。SnowflakeID 是有意使用的可排序无损 number 编码，RPC／HTTP／路由边界无损转换为十进制字符串，包含服务令牌 ID；普通 UID、计数与请求关联号不转换。null/undefined 原样保留；仅 UpdateChatBody.avatarImageId 与 PatchInviteBody.expiresAt 显式允许请求 null 表达清除，邀请有效期省略仍为 BadRequest。JSON 拦截器保留 FormData，二进制上传不按 JSON 转换。
 
@@ -99,7 +113,7 @@ Service Worker 缓存应用资源（包括 landing 安装页及含表情数据�
 
 导航 fallback 与服务器 SPA fallback 保持相同边界：`/_api`、`/.well-known`、`/icon`、`/icon-maskable`、`/emoji`、`/media` 及其子路径，以及末段带扩展名的路径，不回退为应用 HTML。普通 `fetch`、API 与资源请求不因离线或失败而收到 `index.html`。首次安装前仍依赖服务器的页面 fallback；缓存应用壳不代表聊天消息可离线读取。
 
-表情选择器的最近记录由 @nicematic/emoji-picker 存入 localStorage，与 Preferences 的快捷表态记录独立。共享聊天数据仅在内存，连续消息的保留与释放由页面生命周期决定，没有离线消息数据库。
+表情选择器通过 PickerRecents、PickerSkinTone 替换第三方默认存储，使用 AccountStorage 按账号保存最近记录与肤色；最近记录仍保留十项及三天半衰期的频次排序，与 Preferences 的快捷表态记录独立。共享聊天数据仅在内存，连续消息的保留与释放由页面生命周期决定，没有离线消息数据库。
 
 表情选择器不预取全部国旗图片。国旗图片使用浏览器原生懒加载，在滚动或搜索使对应图片接近可见区域时请求；加载失败沿用组件的 Unicode 字符回退。
 
@@ -280,7 +294,7 @@ ConversationPage 只在活跃 DM 范围读取回执；普通聊天和话题使�
 
 更换转发目标时，`ConversationPage` 固定当前转发消息数组与原 chatId／threadId，交给 `ForwardPicker.moveFrom` 和 `messages`。`prepareForward` 校验原槽仍持有同一选择，导航成功后仅清除仍属于该次选择的原槽；同目标选择不会清除新写入的预览，导航失败恢复目标原有选择。页面销毁或复用到其他聊天不影响已提交的移动；附言和其他文字草稿不参与移动，仍保留在各自聊天中。
 
-`DraftStore` 的转发集合与持久化文字草稿分开，只保留 MessageResponse，不引用 OutgoingMessage、上传任务或 File；切换账号清空，不序列化到 localStorage。草稿不订阅源消息的编辑或撤回事件，也不扫描各目标的来源，预览保留选定时的数据。`ConversationPage` 消费当前目标的转发草稿，点击发送直接交给队列，不预读来源或转码状态，由转发接口校验当前权限、撤回状态及占位需求。提交后移除该次转发和对应文字，后续输入不受请求结果影响。回复／编辑状态独立保留，附言不携带旧的回复目标。
+`DraftStore` 的转发集合与持久化文字草稿分开，只保留 MessageResponse，不引用 OutgoingMessage、上传任务或 File；切换账号清空，不写入持久化存储。草稿不订阅源消息的编辑或撤回事件，也不扫描各目标的来源，预览保留选定时的数据。`ConversationPage` 消费当前目标的转发草稿，点击发送直接交给队列，不预读来源或转码状态，由转发接口校验当前权限、撤回状态及占位需求。提交后移除该次转发和对应文字，后续输入不受请求结果影响。回复／编辑状态独立保留，附言不携带旧的回复目标。
 
 `ConversationPage` 持有多选消息 Map，分页不清空；已确认消息用服务端 ID、待发消息用 clientGeneratedId 保留对应消息或队列对象引用，消息更新替换对应引用、撤回移除选择。只允许已有服务端 ID 的消息参与勾选；尚未发布的音频使用队列 confirmed() 中的 ID。勾选不检查转发资格，点击转发时校验来源和消息类型；目标选择器固定 MessageResponse 或 OutgoingMessage 引用，选择目标时读取队列的 confirmed()，进入草稿后不再持有队列项或跟踪 published()。选择器独立监听撤回，使该次选择失效。已提交任务不再读取页面选择状态。批量撤回在确认时固定待处理数组；队列项先通过 MessageOutbox.waitForPublication 读取已发布确认或等待对应发布事件，沿用 30 秒请求超时。等待期间不取消队列项或释放上传资源；收集完成后重新检查选择与权限，通过 MessageActions.recallMany 一次调用 `messages.deleteMany({chatId, messageIds})`（1–100 条）。等待失败项保留，其余可提交项仍按一批处理；已由服务器撤回的所选项跳过。服务端整批校验并事务撤回，已撤回 ID 可重复提交；成功响应返回 `BulkDeletedPayload`，含 `complete: true` 与受影响的 `threadRootIds`，直接合并到现有批量删除事件路径，不等待通知回声。仅成功响应中的 ID 计入成功，请求失败时保留未撤回项。切换会话、退出选择或销毁页面后停止提交后续请求，迟到响应仍可更新原聊天数据，但不得修改新选择的界面状态。
 

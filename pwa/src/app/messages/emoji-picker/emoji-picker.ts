@@ -16,11 +16,14 @@ import {
   EmojiFlagCacheService,
   EmojiPickerComponent,
   EmojiSearchService,
+  EmojiRecentsService,
+  EmojiSkinToneService,
 } from '@nicematic/emoji-picker';
 import { Localization } from '../../i18n/localization';
 import { attachScrollbars } from '../../scrolling/overlay-scrollbars';
 import { PickerData, PickerSearch } from './picker-data';
 import { PickerFlags } from './picker-flags';
+import { PickerRecents, PickerSkinTone } from './picker-preferences';
 import { EscapePriority, registerEscape } from '../../navigation/escape-navigation';
 
 @Component({
@@ -28,6 +31,8 @@ import { EscapePriority, registerEscape } from '../../navigation/escape-navigati
   templateUrl: './emoji-picker.html',
   imports: [EmojiPickerComponent],
   providers: [
+    { provide: EmojiRecentsService, useExisting: PickerRecents },
+    { provide: EmojiSkinToneService, useExisting: PickerSkinTone },
     { provide: EmojiDataService, useFactory: () => new PickerData() },
     { provide: EmojiSearchService, useFactory: () => new PickerSearch() },
     { provide: EmojiFlagCacheService, useFactory: () => new PickerFlags() },

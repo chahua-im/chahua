@@ -6,6 +6,7 @@ import { Connection } from '../api/connection';
 import { decodeId, encodeId } from '../api/snowflake-id';
 import { mockRealtime, testChat, testMessage, testUser } from '../api/testing';
 import { SessionStore } from '../session/session-store';
+import { AccountStorage } from '../storage/account-storage';
 import { ConversationNavigation } from './conversation-navigation';
 import { DraftStore } from './draft-store';
 
@@ -300,6 +301,7 @@ describe('Forward destination navigation', () => {
       chatId: testChat.id,
     });
     TestBed.inject(SessionStore).user.set({ ...testUser, uid: testUser.uid + 1 });
+    TestBed.inject(AccountStorage).deactivate();
     drafts.save(target, undefined, 'new account draft');
     resolve(false);
     await pending;

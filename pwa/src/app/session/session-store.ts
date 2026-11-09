@@ -1,6 +1,6 @@
 import { DestroyRef, inject, isDevMode, Service, signal } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
-import { filter, firstValueFrom, timeout, type Observable } from 'rxjs';
+import { filter, firstValueFrom, from, timeout, type Observable } from 'rxjs';
 import { RpcApi } from '../../generated/rpc-api';
 import type { ChatSettings, MeResponse, StickerPackOrderItem, User } from '../../generated/models';
 import { Connection } from '../api/connection';
@@ -9,6 +9,7 @@ import { RpcConnectionState, RpcTransport } from '../api/rpc-transport';
 import { appVersion } from '../app-version';
 import type { SnowflakeID } from '../api/snowflake-id';
 import { Diagnostics } from '../pwa/diagnostics';
+import { AccountStorage } from '../storage/account-storage';
 
 declare const CHAHUA_DEV_TOKEN: string | undefined;
 declare const CHAHUA_DEV_BACKEND: boolean | undefined;
@@ -34,6 +35,7 @@ export class SessionStore {
   private readonly transport = inject(RpcTransport);
   private readonly connection = inject(Connection);
   private readonly diagnostics = inject(Diagnostics);
+  private readonly storage = inject(AccountStorage);
   readonly token = signal<string | undefined>(undefined);
   readonly user = signal<(MeResponse & Pick<User, 'userGroup'>) | undefined>(undefined);
   readonly user$ = toObservable(this.user);
@@ -108,8 +110,15 @@ export class SessionStore {
       const user = await request(this.api.users.getMe());
       if (!current()) return;
       this.diagnostics.setAccount(user.uid);
-      // /users/me omits the group tag; the existing UID lookup includes it.
-      const profile = await request(this.api.users.search({ q: String(user.uid), limit: 1 })).catch(() => undefined);
+      // Load local data alongside the optional group lookup so both share the login deadline.
+      const [profile] = await Promise.all([
+        request(this.api.users.search({ q: String(user.uid), limit: 1 })).catch(() => undefined),
+        request(from(this.storage.activate(user.uid))).catch((error: unknown) => {
+          // Unsubscribing from a promise cannot stop IndexedDB; invalidate its late snapshot.
+          if (current()) this.storage.deactivate();
+          throw new Error('Local account data could not be loaded', { cause: error });
+        }),
+      ]);
       if (!current()) return;
       const userGroup = profile?.members.find((member) => member.uid === user.uid)?.userGroup;
       this.user.set({
@@ -160,6 +169,7 @@ export class SessionStore {
     this.transport.close();
     this.connection.reset();
     this.user.set(undefined);
+    this.storage.deactivate();
     this.diagnostics.setAccount(undefined);
   }
 

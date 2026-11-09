@@ -126,7 +126,10 @@ describe('EmojiPicker data integration', () => {
     popover.onSelect('🏽');
     expect(chosen).toHaveBeenLastCalledWith('🧑🏽‍🚀');
 
-    const saved = new EmojiRecentsService().recents().find((emoji) => emoji.char === '🧑🏽‍🚀')!;
+    const saved = child.injector
+      .get(EmojiRecentsService)
+      .recents()
+      .find((emoji) => emoji.char === '🧑🏽‍🚀')!;
     expect(saved.base).toBe('🧑‍🚀');
     expect(data.getEmojiWithSkinTone(saved, '')).toBe('🧑🏽‍🚀');
     picker.grid.onLongPress(saved, new DOMRect(50, 200, 36, 36));
