@@ -9,6 +9,12 @@ const MESSAGE_FILTER_UP: &str =
     include_str!("../migrations/2026-11-09-124756-0000_add_message_filter_indexes/up.sql");
 const MESSAGE_FILTER_DOWN: &str =
     include_str!("../migrations/2026-11-09-124756-0000_add_message_filter_indexes/down.sql");
+const SENDER_HISTORY_MIGRATION: &str = "2026-11-10-021536-0000_add_sender_history_root_seek_index";
+const SENDER_HISTORY_UP: &str =
+    include_str!("../migrations/2026-11-10-021536-0000_add_sender_history_root_seek_index/up.sql");
+const SENDER_HISTORY_DOWN: &str = include_str!(
+    "../migrations/2026-11-10-021536-0000_add_sender_history_root_seek_index/down.sql"
+);
 const STATEMENT_BREAK: &str = "\n-- statement-break\n";
 
 pub struct AppMigrations;
@@ -19,17 +25,29 @@ impl MigrationSource<Pg> for AppMigrations {
         Ok(migrations
             .into_iter()
             .map(|migration: Box<dyn Migration<Pg>>| {
-                if migration.name().to_string() == MESSAGE_FILTER_MIGRATION {
-                    Box::new(MessageFilterMigration(migration)) as Box<dyn Migration<Pg>>
-                } else {
-                    migration
+                let statements = match migration.name().to_string().as_str() {
+                    MESSAGE_FILTER_MIGRATION => Some((MESSAGE_FILTER_UP, MESSAGE_FILTER_DOWN)),
+                    SENDER_HISTORY_MIGRATION => Some((SENDER_HISTORY_UP, SENDER_HISTORY_DOWN)),
+                    _ => None,
+                };
+                match statements {
+                    Some((up, down)) => Box::new(ConcurrentIndexMigration {
+                        migration,
+                        up,
+                        down,
+                    }) as Box<dyn Migration<Pg>>,
+                    None => migration,
                 }
             })
             .collect())
     }
 }
 
-struct MessageFilterMigration(Box<dyn Migration<Pg>>);
+struct ConcurrentIndexMigration {
+    migration: Box<dyn Migration<Pg>>,
+    up: &'static str,
+    down: &'static str,
+}
 
 // PQexec treats multiple statements as one implicit transaction even when Diesel's
 // migration transaction is disabled. Explicit boundaries avoid parsing SQL and
@@ -41,21 +59,21 @@ fn execute_statements(conn: &mut dyn BoxableConnection<Pg>, sql: &str) -> Result
     Ok(())
 }
 
-impl Migration<Pg> for MessageFilterMigration {
+impl Migration<Pg> for ConcurrentIndexMigration {
     fn run(&self, conn: &mut dyn BoxableConnection<Pg>) -> Result<()> {
-        execute_statements(conn, MESSAGE_FILTER_UP)
+        execute_statements(conn, self.up)
     }
 
     fn revert(&self, conn: &mut dyn BoxableConnection<Pg>) -> Result<()> {
-        execute_statements(conn, MESSAGE_FILTER_DOWN)
+        execute_statements(conn, self.down)
     }
 
     fn metadata(&self) -> &dyn MigrationMetadata {
-        self.0.metadata()
+        self.migration.metadata()
     }
 
     fn name(&self) -> &dyn MigrationName {
-        self.0.name()
+        self.migration.name()
     }
 }
 
@@ -65,18 +83,20 @@ mod tests {
     use diesel::{connection::SimpleConnection, prelude::*, PgConnection};
     use diesel_migrations::MigrationHarness;
 
-    fn message_filter_migration() -> Box<dyn Migration<Pg>> {
+    fn migration_named(name: &str) -> Box<dyn Migration<Pg>> {
         AppMigrations
             .migrations()
             .unwrap()
             .into_iter()
-            .find(|migration| migration.name().to_string() == MESSAGE_FILTER_MIGRATION)
+            .find(|migration| migration.name().to_string() == name)
             .unwrap()
     }
 
     #[test]
     fn concurrent_index_migration_does_not_use_a_transaction() {
-        assert!(!message_filter_migration().metadata().run_in_transaction());
+        for name in [MESSAGE_FILTER_MIGRATION, SENDER_HISTORY_MIGRATION] {
+            assert!(!migration_named(name).metadata().run_in_transaction());
+        }
     }
 
     #[test]
@@ -100,7 +120,7 @@ mod tests {
             )
             .unwrap();
             assert!(conn.applied_migrations().unwrap().is_empty());
-            let migration = message_filter_migration();
+            let migration = migration_named(MESSAGE_FILTER_MIGRATION);
             assert!(conn.run_migration(&migration).is_err());
             assert!(conn.applied_migrations().unwrap().is_empty());
             conn.batch_execute("ALTER TABLE messages ADD COLUMN sender_uid integer")
@@ -144,6 +164,23 @@ mod tests {
             // A second application proves the rollback removed all four names.
             conn.run_migration(&migration).unwrap();
             conn.revert_migration(&migration).unwrap();
+            let sender_history = migration_named(SENDER_HISTORY_MIGRATION);
+            conn.run_migration(&sender_history).unwrap();
+            let valid = diesel::sql_query(
+                "SELECT c.relname AS name, i.indisvalid AS valid,
+                    pg_get_expr(i.indpred, i.indrelid) AS predicate
+                 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
+                 WHERE i.indrelid='messages'::regclass",
+            )
+            .get_result::<IndexState>(&mut conn)
+            .unwrap();
+            assert_eq!(valid.name, "idx_messages_thread_root_date");
+            assert!(valid.valid);
+            assert!(valid.predicate.contains("reply_root_id IS NULL"));
+            assert!(!valid.predicate.contains("deleted_at"));
+            conn.revert_migration(&sender_history).unwrap();
+            conn.run_migration(&sender_history).unwrap();
+            conn.revert_migration(&sender_history).unwrap();
         }));
         conn.batch_execute(&format!(
             "SET search_path TO public; DROP SCHEMA {schema} CASCADE;"
