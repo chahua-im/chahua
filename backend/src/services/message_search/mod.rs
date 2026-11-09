@@ -17,14 +17,22 @@ use serde::{Deserialize, Serialize};
 use crate::dto::messages::MessageResponse;
 use crate::models::{Message, MessageType};
 use crate::schema::messages;
+mod filtering;
 mod metrics;
+pub use filtering::load_filtered_messages;
 pub use metrics::MessageSearchMetrics;
 
 pub const DEFAULT_INDEX_UID: &str = "messages_v1";
 pub const REINDEX_BATCH_SIZE: i64 = 500;
 
 const SEARCHABLE_ATTRIBUTES: &[&str] = &["text"];
-const FILTERABLE_ATTRIBUTES: &[&str] = &["chatId", "messageId", "replyRootId", "senderUid"];
+const FILTERABLE_ATTRIBUTES: &[&str] = &[
+    "chatId",
+    "messageId",
+    "replyRootId",
+    "senderUid",
+    "createdAtMillis",
+];
 const SORTABLE_ATTRIBUTES: &[&str] = &["createdAtMillis"];
 const RANKING_RULES: &[&str] = &[
     // `sort` is ignored for relevance searches that do not pass a sort parameter,
@@ -208,6 +216,7 @@ pub struct SearchCandidateDropCounts {
     pub wrong_chat: usize,
     pub wrong_scope: usize,
     pub wrong_sender: usize,
+    pub wrong_date: usize,
     pub not_searchable: usize,
     pub stale_version: usize,
 }
@@ -245,12 +254,26 @@ impl MessageSearchRange {
 
 #[derive(Debug, Clone, Copy)]
 pub struct MessageSearchFilters {
+    pub created_from: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_before: Option<chrono::DateTime<chrono::Utc>>,
     pub range: MessageSearchRange,
     pub sender_uid: Option<i32>,
 }
 impl MessageSearchFilters {
     fn filter(self, chats: &str) -> String {
-        let filter = self.range.filter(chats);
+        let mut filter = self.range.filter(chats);
+        if let Some(from) = self.created_from {
+            filter.push_str(&format!(
+                " AND createdAtMillis >= {}",
+                from.timestamp_millis()
+            ));
+        }
+        if let Some(before) = self.created_before {
+            filter.push_str(&format!(
+                " AND createdAtMillis < {}",
+                before.timestamp_millis()
+            ));
+        }
         match self.sender_uid {
             Some(uid) => format!("{filter} AND senderUid = {uid}"),
             None => filter,
@@ -737,6 +760,8 @@ fn filter_authoritative_hits_in_range(
     filter_authoritative_hits(
         chat_ids,
         MessageSearchFilters {
+            created_from: None,
+            created_before: None,
             range,
             sender_uid: None,
         },
@@ -781,6 +806,16 @@ pub fn filter_authoritative_hits(
                 .is_some_and(|uid| message.sender_uid != uid)
             {
                 drops.wrong_sender += 1;
+                return None;
+            }
+            if filters
+                .created_from
+                .is_some_and(|from| message.created_at < from)
+                || filters
+                    .created_before
+                    .is_some_and(|before| message.created_at >= before)
+            {
+                drops.wrong_date += 1;
                 return None;
             }
             let Some(document) = project_message_document(&message) else {
@@ -955,6 +990,41 @@ mod tests {
     }
 
     #[test]
+    fn keyword_date_filters_match_half_open_database_boundaries() {
+        let first = message(1, Some("hello"));
+        let last = message(2, Some("hello"));
+        let filters = super::MessageSearchFilters {
+            range: super::MessageSearchRange::All,
+            sender_uid: None,
+            created_from: Some(first.created_at),
+            created_before: Some(last.created_at),
+        };
+        let filter = filters.filter("chatId = 10");
+        assert!(filter.contains(&format!(
+            "createdAtMillis >= {}",
+            first.created_at.timestamp_millis()
+        )));
+        assert!(filter.contains(&format!(
+            "createdAtMillis < {}",
+            last.created_at.timestamp_millis()
+        )));
+        let rows = vec![first, last];
+        let candidates = rows
+            .iter()
+            .map(|m| SearchHitCandidate {
+                message_id: m.id,
+                version: project_message_document(m).unwrap().version,
+            })
+            .collect::<Vec<_>>();
+        let result = super::filter_authoritative_hits(&[10], filters, &candidates, rows);
+        assert_eq!(
+            result.messages.iter().map(|m| m.id).collect::<Vec<_>>(),
+            vec![1]
+        );
+        assert_eq!(result.drops.wrong_date, 1);
+    }
+
+    #[test]
     fn sender_filter_applies_to_all_ranges_and_authoritative_hits() {
         use super::{MessageSearchFilters, MessageSearchRange as Range};
         let mut first = message(1, Some("hello"));
@@ -972,6 +1042,8 @@ mod tests {
             .collect::<Vec<_>>();
         for range in [Range::All, Range::Main, Range::Thread(1)] {
             let filters = MessageSearchFilters {
+                created_from: None,
+                created_before: None,
                 range,
                 sender_uid: Some(42),
             };
@@ -988,6 +1060,8 @@ mod tests {
         let result = super::filter_authoritative_hits(
             &[10],
             MessageSearchFilters {
+                created_from: None,
+                created_before: None,
                 range: Range::All,
                 sender_uid: Some(999),
             },

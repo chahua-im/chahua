@@ -319,6 +319,8 @@ pub async fn search_messages(
     deps: SearchMessagesDeps<'_>,
 ) -> Result<SearchMessagesResponse, AppError> {
     let filters = MessageSearchFilters {
+        created_from: params.created_from,
+        created_before: params.created_before,
         range: params.search_range()?,
         sender_uid: params.sender_uid,
     };
@@ -332,18 +334,13 @@ pub async fn search_messages_in_scope(
     conn: &mut PgConnection,
     deps: SearchMessagesDeps<'_>,
 ) -> Result<SearchMessagesResponse, AppError> {
-    search_messages_with_range(
-        uid,
-        chat_id,
-        params,
-        MessageSearchFilters {
-            range: MessageSearchRange::All,
-            sender_uid: None,
-        },
-        conn,
-        deps,
-    )
-    .await
+    let filters = MessageSearchFilters {
+        range: MessageSearchRange::All,
+        sender_uid: None,
+        created_from: params.created_from,
+        created_before: params.created_before,
+    };
+    search_messages_with_range(uid, chat_id, params, filters, conn, deps).await
 }
 
 async fn search_messages_with_range(
@@ -361,7 +358,7 @@ async fn search_messages_with_range(
         message_search,
     } = deps;
     let started_at = Instant::now();
-    let sort = params.sort.unwrap_or(MessageSearchSort::Relevance);
+    let (query, sort) = prepare_search(&params, filters.sender_uid)?;
     let sort_label = sort.as_str();
 
     if let Err(err) = chat_id
@@ -391,15 +388,6 @@ async fn search_messages_with_range(
         validate_search_sender(conn, chat_id, filters.range, sender_uid)?;
     }
 
-    let query = match validate_search_query(&params.q) {
-        Ok(query) => query,
-        Err(_) => {
-            record_search_query_metrics(&metrics.message_search, sort_label, "failure", started_at);
-            return Err(AppError::BadRequest(
-                "Search query must be at least 2 characters",
-            ));
-        }
-    };
     let limit = search_limit(params.limit);
     let offset = match search_offset(params.offset, limit) {
         Ok(offset) => offset,
@@ -407,6 +395,39 @@ async fn search_messages_with_range(
             record_search_query_metrics(&metrics.message_search, sort_label, "failure", started_at);
             return Err(err);
         }
+    };
+
+    let Some(query) = query else {
+        let mut rows = match crate::services::message_search::load_filtered_messages(
+            conn,
+            uid,
+            chat_id,
+            filters,
+            limit as i64,
+            offset as i64,
+        ) {
+            Ok(rows) => rows,
+            Err(err) => {
+                record_search_query_metrics(
+                    &metrics.message_search,
+                    sort_label,
+                    "failure",
+                    started_at,
+                );
+                return Err(err.into());
+            }
+        };
+        let next_offset = search_next_offset((rows.len() > limit).then_some(offset + limit), limit);
+        rows.truncate(limit);
+        let messages = attach_metadata(conn, rows, media, avatars, uid).await;
+        metrics
+            .message_search
+            .observe_results(sort_label, messages.len());
+        record_search_query_metrics(&metrics.message_search, sort_label, "success", started_at);
+        return Ok(SearchMessagesResponse {
+            messages,
+            next_offset,
+        });
     };
 
     let chat_ids = match chat_id {
@@ -492,6 +513,54 @@ async fn search_messages_with_range(
         next_offset,
     })
 }
+
+fn prepare_search(
+    params: &SearchMessagesQuery,
+    sender_uid: Option<i32>,
+) -> Result<(Option<String>, MessageSearchSort), AppError> {
+    for date in [params.created_from, params.created_before]
+        .into_iter()
+        .flatten()
+    {
+        if date.timestamp_subsec_nanos() % 1_000_000 != 0 {
+            return Err(AppError::BadRequest(
+                "Date filters support millisecond precision",
+            ));
+        }
+    }
+    if matches!((params.created_from, params.created_before), (Some(from), Some(before)) if from >= before)
+    {
+        return Err(AppError::BadRequest(
+            "createdFrom must be before createdBefore",
+        ));
+    }
+    let q = params.q.as_deref().map(str::trim).filter(|q| !q.is_empty());
+    match q {
+        Some(q) => {
+            Ok((
+                Some(validate_search_query(q).map_err(|_| {
+                    AppError::BadRequest("Search query must be at least 2 characters")
+                })?),
+                params.sort.unwrap_or(MessageSearchSort::Relevance),
+            ))
+        }
+        None => {
+            if sender_uid.is_none()
+                && params.created_from.is_none()
+                && params.created_before.is_none()
+            {
+                return Err(AppError::BadRequest(
+                    "A date boundary or senderUid is required without a query",
+                ));
+            }
+            if params.sort == Some(MessageSearchSort::Relevance) {
+                return Err(AppError::BadRequest("relevance sorting requires a query"));
+            }
+            Ok((None, MessageSearchSort::Newest))
+        }
+    }
+}
+
 fn validate_search_sender(
     conn: &mut PgConnection,
     chat_id: i64,
@@ -538,6 +607,7 @@ fn record_search_candidate_drops(metrics: &MessageSearchMetrics, drops: SearchCa
     metrics.record_candidate_drop("wrong_chat", drops.wrong_chat);
     metrics.record_candidate_drop("wrong_scope", drops.wrong_scope);
     metrics.record_candidate_drop("wrong_sender", drops.wrong_sender);
+    metrics.record_candidate_drop("wrong_date", drops.wrong_date);
     metrics.record_candidate_drop("not_searchable", drops.not_searchable);
     metrics.record_candidate_drop("stale_version", drops.stale_version);
 }
@@ -580,6 +650,44 @@ pub async fn get_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn optional_query_dates_and_sort_are_validated() {
+        let parse = |value| serde_json::from_value::<SearchMessagesQuery>(value).unwrap();
+        let params = parse(serde_json::json!({"q":"  ","createdFrom":"2026-11-02T08:00:00+08:00"}));
+        assert_eq!(
+            prepare_search(&params, None).unwrap(),
+            (None, MessageSearchSort::Newest)
+        );
+        assert_eq!(
+            params.created_from.unwrap().to_rfc3339(),
+            "2026-11-02T00:00:00+00:00"
+        );
+        let empty = parse(serde_json::json!({}));
+        assert!(prepare_search(&empty, None).is_err());
+        assert_eq!(
+            prepare_search(&empty, Some(42)).unwrap(),
+            (None, MessageSearchSort::Newest)
+        );
+        for value in [
+            serde_json::json!({"q":"x"}),
+            serde_json::json!({"createdFrom":"2026-11-02T00:00:00Z","sort":"relevance"}),
+            serde_json::json!({"createdFrom":"2026-11-02T00:00:00Z","createdBefore":"2026-11-02T00:00:00Z"}),
+            serde_json::json!({"createdBefore":"2026-11-02T00:00:00.000001Z"}),
+        ] {
+            assert!(prepare_search(&parse(value), None).is_err());
+        }
+        assert_eq!(
+            prepare_search(&parse(serde_json::json!({"q":"你好"})), None)
+                .unwrap()
+                .1,
+            MessageSearchSort::Relevance
+        );
+        assert!(serde_json::from_value::<SearchMessagesQuery>(
+            serde_json::json!({"createdFrom":"2026-11-02"})
+        )
+        .is_err());
+    }
 
     #[test]
     fn sender_eligibility_is_group_only_and_uses_participants_not_subscribers() {
