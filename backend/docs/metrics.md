@@ -558,11 +558,11 @@ request volume.
 | Family | Type / labels | Meaning and recording boundary | Buckets / cardinality |
 | --- | --- | --- | --- |
 | `message_search_index_operations_total` | Counter; `operation`, `result` | Index operations completed by the best-effort index work. | `operation` is `upsert`, `delete`, or `delete_batch`; result is success/failure. |
-| `message_search_queries_total` | Counter; `sort`, `result` | Message search queries completed, including keyword-free database filtering. | `sort` is `relevance` or `newest`; result is success/failure. |
+| `message_search_queries_total` | Counter; `sort`, `result` | Calls through the shared message-search pipeline completed, including keyword-free database filtering and validation failures inside that pipeline; one observation per request, not per candidate batch. HTTP/RPC decoding and scope conversion failures occur outside this boundary. | `sort` is `relevance` or `newest`; result is success/failure. |
 | `message_search_query_duration_seconds` | Histogram; `sort`, `result` | Message-search request latency, in seconds. | `H1`; bounded sort/result labels. |
 | `message_search_index_operation_duration_seconds` | Histogram; `operation`, `result` | Index operation latency from enqueue to Meilisearch task completion, in seconds. | `H7`; bounded operation/result labels. |
-| `message_search_candidates_per_query` | Histogram; `sort` | Meilisearch candidate hits per query. | `H8`; bounded sort label. |
-| `message_search_results_per_query` | Histogram; `sort` | Messages returned after visibility filtering, including keyword-free database queries. | `H8`; bounded sort label. |
+| `message_search_candidates_per_query` | Histogram; `sort` | Total Meilisearch candidate hits fetched across all refill batches per successful keyword query, including prefetched candidates not consumed by this page. | `H8`; bounded sort label. |
+| `message_search_results_per_query` | Histogram; `sort` | Messages returned after visibility filtering, including keyword-free database queries and deduplicated thread roots in sender history. | `H8`; bounded sort label. |
 | `message_search_candidates_dropped_total` | Counter; `reason` | Candidate hits dropped during database authority checks. | Reasons are `missing_db_row`, `wrong_chat` (outside the currently authorized search scope), `wrong_scope` (outside the requested main/thread range), `wrong_sender` (sender differs from the requested UID), `wrong_date` (outside the requested creation-time interval), `not_searchable`, and `stale_version`. |
 | `message_search_index_documents_total` | Counter; `operation`, `result` | Documents affected by index operations; zero-document operations do not increment it. | Bounded operation/result labels. |
 | `message_search_reindex_duration_seconds` | Histogram; `result` | Full reindex job latency, in seconds. | `H9`; success/failure labels. |

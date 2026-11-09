@@ -407,8 +407,34 @@ pub struct ListMessagesResponse {
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchMessagesResponse {
-    pub messages: Vec<MessageResponse>,
-    pub next_offset: Option<usize>,
+    pub messages: Vec<SearchMessageResult>,
+    pub next_cursor: Option<String>,
+    /// Relevance search reached its result window; more matches may exist.
+    pub truncated: bool,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum SearchResultKind {
+    Message,
+    Thread,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchMessageResult {
+    pub kind: SearchResultKind,
+    #[serde(flatten)]
+    pub message: MessageResponse,
+}
+
+impl From<MessageResponse> for SearchMessageResult {
+    fn from(message: MessageResponse) -> Self {
+        Self {
+            kind: SearchResultKind::Message,
+            message,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
@@ -629,7 +655,7 @@ pub struct ListMessagesQuery {
 #[derive(Debug, serde::Deserialize, utoipa::IntoParams, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchMessagesQuery {
-    /// Optional text query. Without text, a date boundary or senderUid is required.
+    /// Required for cross-chat search; optional for chat main/thread history filtering.
     pub q: Option<String>,
     /// Inclusive creation time, RFC 3339 with timezone; millisecond precision.
     pub created_from: Option<DateTime<Utc>>,
@@ -638,7 +664,8 @@ pub struct SearchMessagesQuery {
     #[serde(default)]
     pub sort: Option<MessageSearchSort>,
     pub limit: Option<i64>,
-    pub offset: Option<usize>,
+    /// Opaque continuation token; keep all search conditions unchanged.
+    pub cursor: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, Copy, serde::Deserialize, utoipa::ToSchema)]
@@ -655,7 +682,7 @@ pub enum ChatSearchScope {
 pub struct ChatSearchMessagesQuery {
     /// Group chats only: current member for all/main, thread participant for thread.
     pub sender_uid: Option<i32>,
-    /// Optional text query. Without text, a date boundary or senderUid is required.
+    /// Without text, a date boundary or senderUid is required; all requires senderUid.
     pub q: Option<String>,
     /// Inclusive creation time, RFC 3339 with timezone; millisecond precision.
     pub created_from: Option<DateTime<Utc>>,
@@ -663,8 +690,9 @@ pub struct ChatSearchMessagesQuery {
     pub created_before: Option<DateTime<Utc>>,
     pub sort: Option<MessageSearchSort>,
     pub limit: Option<i64>,
-    pub offset: Option<usize>,
-    /// Defaults to all: main messages and all thread replies.
+    /// Opaque continuation token; keep all search conditions unchanged.
+    pub cursor: Option<String>,
+    /// Defaults to all; without keywords, all returns sender messages and participating threads and requires senderUid.
     #[serde(default)]
     pub scope: ChatSearchScope,
     /// Required only for scope=thread; includes the root and its replies.
@@ -699,7 +727,7 @@ impl ChatSearchMessagesQuery {
             created_before: self.created_before,
             sort: self.sort,
             limit: self.limit,
-            offset: self.offset,
+            cursor: self.cursor,
         }
     }
 }

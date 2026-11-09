@@ -21,6 +21,10 @@ use crate::services::authz::{Action as AuthzAction, AuthorizationService};
 use crate::services::avatars::AvatarService;
 use crate::services::forwarding::prepare_forward_message;
 use crate::services::media::MediaStore;
+use crate::services::message_search::pagination::{
+    CandidatePageRequest, CursorContext, SearchContinuation, SearchPosition, MAX_CANDIDATE_BATCHES,
+    RELEVANCE_RESULT_WINDOW,
+};
 use crate::services::message_search::{
     filter_authoritative_hits, validate_search_query, MessageSearchFilters, MessageSearchMetrics,
     MessageSearchRange, MessageSearchService, MessageSearchSort, SearchCandidateDropCounts,
@@ -107,7 +111,7 @@ pub struct SearchMessagesDeps<'a> {
 }
 
 const DEFAULT_SEARCH_LIMIT: i64 = 20;
-const MAX_SEARCH_RESULT_WINDOW: usize = 1_000;
+
 fn search_limit(limit: Option<i64>) -> usize {
     validate_limit(
         Some(limit.unwrap_or(DEFAULT_SEARCH_LIMIT)),
@@ -115,17 +119,6 @@ fn search_limit(limit: Option<i64>) -> usize {
     ) as usize
 }
 
-fn search_offset(offset: Option<usize>, limit: usize) -> Result<usize, AppError> {
-    let offset = offset.unwrap_or(0);
-    if offset.saturating_add(limit) > MAX_SEARCH_RESULT_WINDOW {
-        return Err(AppError::BadRequest("Search offset is too large"));
-    }
-    Ok(offset)
-}
-
-fn search_next_offset(next_offset: Option<usize>, limit: usize) -> Option<usize> {
-    next_offset.filter(|offset| offset.saturating_add(limit) <= MAX_SEARCH_RESULT_WINDOW)
-}
 pub async fn get_messages(
     uid: i32,
     chat_id: i64,
@@ -351,24 +344,42 @@ async fn search_messages_with_range(
     conn: &mut PgConnection,
     deps: SearchMessagesDeps<'_>,
 ) -> Result<SearchMessagesResponse, AppError> {
-    let SearchMessagesDeps {
-        media,
-        avatars,
-        metrics,
-        message_search,
-    } = deps;
     let started_at = Instant::now();
-    let (query, sort) = prepare_search(&params, filters.sender_uid)?;
-    let sort_label = sort.as_str();
-
-    if let Err(err) = chat_id
-        .map(|id| check_membership(conn, id, uid))
-        .transpose()
-    {
-        record_search_query_metrics(&metrics.message_search, sort_label, "failure", started_at);
-        return Err(err);
+    let sort = resolve_search_sort(&params);
+    let metrics = &deps.metrics.message_search;
+    let result = search_messages_page(uid, chat_id, params, filters, conn, &deps).await;
+    if let Ok(page) = &result {
+        metrics.observe_results(sort.as_str(), page.messages.len());
     }
+    record_search_query_metrics(
+        metrics,
+        sort.as_str(),
+        if result.is_ok() { "success" } else { "failure" },
+        started_at,
+    );
+    result
+}
 
+async fn search_messages_page(
+    uid: i32,
+    chat_id: Option<i64>,
+    params: SearchMessagesQuery,
+    filters: MessageSearchFilters,
+    conn: &mut PgConnection,
+    deps: &SearchMessagesDeps<'_>,
+) -> Result<SearchMessagesResponse, AppError> {
+    let (query, sort) = prepare_search(&params, filters.sender_uid)?;
+    let context = CursorContext::new(uid, chat_id, query.as_deref(), filters, sort);
+    let continuation = context.decode(params.cursor.as_deref(), sort)?;
+    let limit = search_limit(params.limit);
+    let before = match continuation {
+        Some(SearchContinuation::Newest(p)) => Some(p),
+        _ => None,
+    };
+
+    if let Some(chat_id) = chat_id {
+        check_membership(conn, chat_id, uid)?;
+    }
     if let (Some(chat_id), MessageSearchRange::Thread(id)) = (chat_id, filters.range) {
         let valid = diesel::select(diesel::dsl::exists(
             messages::table
@@ -383,50 +394,65 @@ async fn search_messages_with_range(
             return Err(AppError::NotFound("Thread not found"));
         }
     }
-
     if let (Some(chat_id), Some(sender_uid)) = (chat_id, filters.sender_uid) {
         validate_search_sender(conn, chat_id, filters.range, sender_uid)?;
     }
 
-    let limit = search_limit(params.limit);
-    let offset = match search_offset(params.offset, limit) {
-        Ok(offset) => offset,
-        Err(err) => {
-            record_search_query_metrics(&metrics.message_search, sort_label, "failure", started_at);
-            return Err(err);
-        }
-    };
-
     let Some(query) = query else {
-        let mut rows = match crate::services::message_search::load_filtered_messages(
-            conn,
-            uid,
-            chat_id,
-            filters,
-            limit as i64,
-            offset as i64,
-        ) {
-            Ok(rows) => rows,
-            Err(err) => {
-                record_search_query_metrics(
-                    &metrics.message_search,
-                    sort_label,
-                    "failure",
-                    started_at,
-                );
-                return Err(err.into());
-            }
+        let mixed = filters.range == MessageSearchRange::All && filters.sender_uid.is_some();
+        let mut rows = if mixed {
+            crate::services::message_search::load_sender_history(
+                conn,
+                uid,
+                chat_id.ok_or(AppError::BadRequest(
+                    "A chat is required for sender history",
+                ))?,
+                filters.sender_uid.unwrap(),
+                filters,
+                limit as i64,
+                before,
+            )?
+        } else {
+            let scope =
+                crate::services::message_search::HistorySearchScope::new(chat_id, filters.range)?;
+            crate::services::message_search::load_filtered_messages(
+                conn,
+                uid,
+                scope,
+                filters,
+                limit as i64,
+                before,
+            )?
         };
-        let next_offset = search_next_offset((rows.len() > limit).then_some(offset + limit), limit);
+        let has_more = rows.len() > limit;
         rows.truncate(limit);
-        let messages = attach_metadata(conn, rows, media, avatars, uid).await;
-        metrics
-            .message_search
-            .observe_results(sort_label, messages.len());
-        record_search_query_metrics(&metrics.message_search, sort_label, "success", started_at);
+        let next_cursor = rows.last().filter(|_| has_more).map(|m| {
+            context.encode(SearchContinuation::Newest(SearchPosition {
+                created_at: m.created_at,
+                id: m.id,
+            }))
+        });
+        let thread_ids: std::collections::HashSet<_> = rows
+            .iter()
+            .filter(|m| mixed && m.has_thread)
+            .map(|m| m.id)
+            .collect();
+        let messages = attach_metadata(conn, rows, deps.media, deps.avatars, uid)
+            .await
+            .into_iter()
+            .map(|message| {
+                let kind = if thread_ids.contains(&message.id) {
+                    crate::dto::messages::SearchResultKind::Thread
+                } else {
+                    crate::dto::messages::SearchResultKind::Message
+                };
+                crate::dto::messages::SearchMessageResult { kind, message }
+            })
+            .collect();
         return Ok(SearchMessagesResponse {
             messages,
-            next_offset,
+            next_cursor,
+            truncated: false,
         });
     };
 
@@ -435,82 +461,189 @@ async fn search_messages_with_range(
         None => crate::services::chat_access::list_accessible_chat_ids(conn, uid)?,
     };
     if chat_ids.is_empty() {
-        record_search_query_metrics(&metrics.message_search, sort_label, "success", started_at);
         return Ok(SearchMessagesResponse {
             messages: vec![],
-            next_offset: None,
+            next_cursor: None,
+            truncated: false,
         });
     }
-
-    let Some(search_service) = message_search.as_ref() else {
-        record_search_query_metrics(&metrics.message_search, sort_label, "failure", started_at);
-        return Err(AppError::ServiceUnavailable("Message search unavailable"));
-    };
-
-    let candidate_page = match search_service
-        .search_candidates(&query, &chat_ids, filters, sort, limit, offset)
+    let search_service = deps
+        .message_search
+        .as_ref()
+        .ok_or(AppError::ServiceUnavailable("Message search unavailable"))?;
+    let page = load_keyword_messages(
+        conn,
+        uid,
+        &chat_ids,
+        KeywordSearch {
+            query: &query,
+            filters,
+            sort,
+            limit,
+            continuation,
+        },
+        search_service,
+        &deps.metrics.message_search,
+    )
+    .await?;
+    let next_cursor = page.continuation.map(|c| context.encode(c));
+    let messages = attach_metadata(conn, page.messages, deps.media, deps.avatars, uid)
         .await
-    {
-        Ok(page) => page,
-        Err(err) => {
-            record_search_query_metrics(&metrics.message_search, sort_label, "failure", started_at);
-            tracing::warn!(
-                ?chat_id,
-                sort = sort_label,
-                ?err,
-                "message search query failed"
-            );
-            return Err(AppError::ServiceUnavailable("Message search unavailable"));
-        }
-    };
-    metrics
-        .message_search
-        .observe_candidates(sort_label, candidate_page.candidates.len());
-    let next_offset = search_next_offset(candidate_page.next_offset, limit);
-
-    if candidate_page.candidates.is_empty() {
-        metrics.message_search.observe_results(sort_label, 0);
-        record_search_query_metrics(&metrics.message_search, sort_label, "success", started_at);
-        return Ok(SearchMessagesResponse {
-            messages: Vec::new(),
-            next_offset,
-        });
-    }
-
-    let candidate_ids = candidate_page
-        .candidates
-        .iter()
-        .map(|candidate| candidate.message_id)
-        .collect::<Vec<_>>();
-    let rows = match messages::table
-        .filter(dsl::id.eq_any(&candidate_ids))
-        .select(Message::as_select())
-        .load::<Message>(conn)
-    {
-        Ok(rows) => rows,
-        Err(err) => {
-            record_search_query_metrics(&metrics.message_search, sort_label, "failure", started_at);
-            return Err(err.into());
-        }
-    };
-
-    let authoritative_hits = filter_authoritative_hits(
-        &crate::services::chat_access::filter_accessible_chat_ids(conn, uid, &chat_ids)?,
-        filters,
-        &candidate_page.candidates,
-        rows,
-    );
-    record_search_candidate_drops(&metrics.message_search, authoritative_hits.drops);
-    let messages = attach_metadata(conn, authoritative_hits.messages, media, avatars, uid).await;
-    metrics
-        .message_search
-        .observe_results(sort_label, messages.len());
-
-    record_search_query_metrics(&metrics.message_search, sort_label, "success", started_at);
-
+        .into_iter()
+        .map(Into::into)
+        .collect();
     Ok(SearchMessagesResponse {
         messages,
-        next_offset,
+        next_cursor,
+        truncated: page.truncated,
+    })
+}
+
+struct KeywordSearch<'a> {
+    query: &'a str,
+    filters: MessageSearchFilters,
+    sort: MessageSearchSort,
+    limit: usize,
+    continuation: Option<SearchContinuation>,
+}
+
+struct SearchRowsPage {
+    messages: Vec<Message>,
+    continuation: Option<SearchContinuation>,
+    truncated: bool,
+}
+
+async fn load_keyword_messages(
+    conn: &mut PgConnection,
+    uid: i32,
+    chat_ids: &[i64],
+    request: KeywordSearch<'_>,
+    search_service: &MessageSearchService,
+    metrics: &MessageSearchMetrics,
+) -> Result<SearchRowsPage, AppError> {
+    let KeywordSearch {
+        query,
+        filters,
+        sort,
+        limit,
+        continuation,
+    } = request;
+    let mut before = match continuation {
+        Some(SearchContinuation::Newest(p)) => Some(p),
+        _ => None,
+    };
+    let mut offset = match continuation {
+        Some(SearchContinuation::Relevance(n)) => n,
+        _ => 0,
+    };
+    let mut rows = Vec::with_capacity(limit);
+    let mut has_more = true;
+    let mut candidates_seen = 0;
+    // Bound work even when many indexed hits are deleted, stale or no longer accessible.
+    for batch in 0..MAX_CANDIDATE_BATCHES {
+        // Usually one page plus a lookahead is enough. Larger refill batches are
+        // useful only after authoritative checks have dropped indexed candidates.
+        let batch_limit = if batch == 0 {
+            (limit + 1).min(MAX_MESSAGES_LIMIT as usize)
+        } else {
+            MAX_MESSAGES_LIMIT as usize
+        };
+        let batch_limit = if sort == MessageSearchSort::Relevance {
+            batch_limit.min(RELEVANCE_RESULT_WINDOW - offset)
+        } else {
+            batch_limit
+        };
+        let page = search_service
+            .search_candidates(
+                query,
+                chat_ids,
+                filters,
+                sort,
+                CandidatePageRequest {
+                    limit: batch_limit,
+                    offset,
+                    before,
+                },
+            )
+            .await
+            .map_err(|err| {
+                tracing::warn!(
+                    chat_count = chat_ids.len(),
+                    sort = sort.as_str(),
+                    ?err,
+                    "message search query failed"
+                );
+                AppError::ServiceUnavailable("Message search unavailable")
+            })?;
+        candidates_seen += page.candidates.len();
+        let candidate_ids = page
+            .candidates
+            .iter()
+            .map(|c| c.message_id)
+            .collect::<Vec<_>>();
+        let candidates = messages::table
+            .filter(dsl::id.eq_any(candidate_ids))
+            .select(Message::as_select())
+            .load::<Message>(conn)?;
+        let hits = filter_authoritative_hits(
+            &crate::services::chat_access::filter_accessible_chat_ids(conn, uid, chat_ids)?,
+            filters,
+            &page.candidates,
+            candidates,
+        );
+        record_search_candidate_drops(metrics, hits.drops);
+        let mut accepted = hits
+            .messages
+            .into_iter()
+            .map(|m| (m.id, m))
+            .collect::<std::collections::HashMap<_, _>>();
+        has_more = page.has_more;
+        for (index, candidate) in page.candidates.iter().enumerate() {
+            if sort == MessageSearchSort::Newest {
+                before = candidate.position;
+            } else {
+                offset += 1;
+            }
+            if let Some(message) = accepted.remove(&candidate.message_id) {
+                rows.push(message);
+            }
+            if rows.len() == limit {
+                has_more = index + 1 < page.candidates.len() || page.has_more;
+                break;
+            }
+        }
+        if rows.len() == limit
+            || !has_more
+            || (sort == MessageSearchSort::Relevance && offset >= RELEVANCE_RESULT_WINDOW)
+        {
+            break;
+        }
+    }
+    metrics.observe_candidates(sort.as_str(), candidates_seen);
+    let truncated =
+        sort == MessageSearchSort::Relevance && offset >= RELEVANCE_RESULT_WINDOW && has_more;
+    let continuation = if !has_more || truncated {
+        None
+    } else {
+        match sort {
+            MessageSearchSort::Newest => before.map(SearchContinuation::Newest),
+            MessageSearchSort::Relevance => Some(SearchContinuation::Relevance(offset)),
+        }
+    };
+    Ok(SearchRowsPage {
+        messages: rows,
+        continuation,
+        truncated,
+    })
+}
+
+fn resolve_search_sort(params: &SearchMessagesQuery) -> MessageSearchSort {
+    params.sort.unwrap_or_else(|| {
+        if params.q.as_deref().is_some_and(|q| !q.trim().is_empty()) {
+            MessageSearchSort::Relevance
+        } else {
+            MessageSearchSort::Newest
+        }
     })
 }
 
@@ -534,6 +667,7 @@ fn prepare_search(
             "createdFrom must be before createdBefore",
         ));
     }
+    let sort = resolve_search_sort(params);
     let q = params.q.as_deref().map(str::trim).filter(|q| !q.is_empty());
     match q {
         Some(q) => {
@@ -541,7 +675,7 @@ fn prepare_search(
                 Some(validate_search_query(q).map_err(|_| {
                     AppError::BadRequest("Search query must be at least 2 characters")
                 })?),
-                params.sort.unwrap_or(MessageSearchSort::Relevance),
+                sort,
             ))
         }
         None => {
@@ -553,10 +687,10 @@ fn prepare_search(
                     "A date boundary or senderUid is required without a query",
                 ));
             }
-            if params.sort == Some(MessageSearchSort::Relevance) {
+            if sort == MessageSearchSort::Relevance {
                 return Err(AppError::BadRequest("relevance sorting requires a query"));
             }
-            Ok((None, MessageSearchSort::Newest))
+            Ok((None, sort))
         }
     }
 }
@@ -730,32 +864,6 @@ mod tests {
         assert_eq!(search_limit(None), 20);
         assert_eq!(search_limit(Some(500)), 100);
         assert_eq!(search_limit(Some(0)), 1);
-    }
-
-    #[test]
-    fn search_offset_rejects_requests_outside_result_window() {
-        assert_eq!(search_offset(None, 20).unwrap(), 0);
-        assert_eq!(
-            search_offset(Some(MAX_SEARCH_RESULT_WINDOW - 20), 20).unwrap(),
-            980
-        );
-        assert!(matches!(
-            search_offset(Some(MAX_SEARCH_RESULT_WINDOW - 19), 20),
-            Err(AppError::BadRequest("Search offset is too large"))
-        ));
-    }
-
-    #[test]
-    fn search_next_offset_stops_at_result_window() {
-        assert_eq!(
-            search_next_offset(Some(MAX_SEARCH_RESULT_WINDOW - 20), 20),
-            Some(980)
-        );
-        assert_eq!(
-            search_next_offset(Some(MAX_SEARCH_RESULT_WINDOW - 19), 20),
-            None
-        );
-        assert_eq!(search_next_offset(None, 20), None);
     }
 
     #[test]
@@ -1733,3 +1841,7 @@ mod message_write_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "message_search_pagination_tests.rs"]
+mod search_pagination_tests;

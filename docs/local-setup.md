@@ -58,26 +58,97 @@ To verify the backend without starting shared services, run `cargo build` and `c
 
 In `pwa/`, `npm start` and `npm run dev` invoke `pwa`; `npm run dev:online` invokes `pwa --online`. These start **only the frontend**. Online mode connects to production and must not be used for write tests.
 
-Message search indexes include `senderUid` for group sender filtering. After upgrading
-an index created before this field existed, run `node runspace/dev.mjs reindex`
-against the local infrastructure to backfill historical messages. Backend startup
-updates filterable attributes, but does not backfill existing documents. For other
-environments, run the backend's `message-search-reindex` command with that
-environment's database and Meilisearch configuration.
+Message search indexes include `senderUid` and exact chronological pagination keys
+(`createdAtSeconds`, `createdAtSubsecMicros`, `messageIdHigh`, `messageIdLow`).
+After upgrading an existing index, run `node runspace/dev.mjs reindex` against
+local infrastructure to backfill historical messages. Backend startup updates
+filterable/sortable/displayed attributes, but does not backfill documents. For
+other environments, run the backend's `message-search-reindex` command with that
+environment's database and Meilisearch configuration before enabling the new
+search API. Before enabling newest keyword pagination, the server checks that the entire index
+has the new keys. Incomplete indexes return 503 until backfilled; failed checks are
+retried on subsequent requests. Upgrade all index writers together so older servers
+do not reintroduce documents without keys after this check succeeds.
 
 Message history filtering accepts optional `q`, inclusive `createdFrom`, and
 exclusive `createdBefore` (RFC 3339 timestamps with timezone, at most millisecond
-precision). Without a keyword, supply at least one date boundary or a permitted
-group `senderUid`; results include ordinary non-text messages, exclude system,
-deleted and unpublished messages, and sort by creation time then ID descending.
+precision). Without a keyword, select a chat and supply at least one date boundary
+or a permitted group `senderUid`. Date-only searches require `scope=main` or
+`scope=thread` (and `threadId` for the latter). Without keywords, `scope=all` (the default) requires
+`senderUid` and returns that user's main-chat messages plus participating thread
+roots, each thread once. Cross-chat search still requires keywords.
+Dates constrain the user's own messages, including replies that establish thread
+participation; an older root can therefore appear when its replies match the dates.
+Mixed results sort by the displayed message/root creation time and ID, not the
+participant's latest reply. Root messages that also match main-chat history appear
+once as threads. Search `messages` items include `kind` (`message` or `thread`)
+alongside their existing message fields. Keyword searches remain individual message
+results. All chronological modes use `cursor`/`nextCursor` without a 1,000-hit cap.
+The cursor version changed to reject tokens issued under the previous semantics.
+
+`GET /chats/{chat_id}/threads` and RPC `threads.listForChat` accept optional
+`participantUid`, retaining root-ID ordering and cursor pagination. Participants
+are published root authors (including deleted roots) or authors of surviving,
+published replies; subscriptions alone do not qualify. The search and thread list
+share this query. A sender participation index narrows candidate messages before
+thread deduplication; the main-chat sender index remains main-only.
+Keyword-free message results include ordinary non-text messages and exclude system,
+deleted and unpublished messages. Thread results may retain deleted roots as
+placeholders, matching the existing thread list.
 Keyword searches use `matchingStrategy=last` for relevance ordering and
 `matchingStrategy=all` for newest ordering. The latter requires all query terms
 to match; typo tolerance and prefix matching still follow the index settings.
 Keyword-free requests query PostgreSQL directly, including when Meilisearch is
 disabled. Apply the `add_message_filter_indexes` migration before serving these
-queries. Keyword date filtering uses the existing `createdAtMillis` documents;
-startup updates its filterable setting without requiring a date-field backfill.
-Pagination remains `limit`/`offset` with a 1,000-result window, and no total count.
+queries. The chat/date and chat/sender/date indexes contain only main-chat
+messages; a separate reply-root/date index serves thread replies, with the root
+message looked up by primary key.
+
+The `add_sender_history_root_seek_index` migration adds chronological thread-root
+seeks, including deleted roots. Sender history first selects at most 256 roots after
+its cursor, then checks participation only within that prefix. If the prefix cannot
+fill a page, it falls back to deduplicating the sender's participating thread IDs
+and selecting the remaining results strictly after the scanned prefix. Both paths
+run in the same repeatable-read snapshot and hydrate only selected page results.
+Dates still constrain the sender's own root/reply messages, not another author's
+root creation time. The fallback can read the sender's full matching participation
+history, but avoids unbounded per-root probes across unrelated chat history.
+Existing root-ID and sender-participation
+indexes remain used by the thread-list API. Apply this migration through backend
+startup as well; its concurrent index statements use the same migration runner.
+
+The earlier `add_message_filter_indexes` migration retains one version and creates
+its four indexes concurrently.
+Use backend startup to apply it: the application's migration source executes the
+marked SQL statements separately, since Diesel CLI's whole-file execution puts
+multiple commands in an implicit transaction even with `run_in_transaction=false`.
+The same source supports rollback. Interrupted builds are dropped and rebuilt on
+retry, and the migration version is recorded only after all four builds succeed.
+Editing this migration does not rerun it on databases that already recorded its
+old version; those databases need an explicit rollback/reapplication of this version.
+
+Both HTTP and RPC search APIs now use `limit` / `cursor`, returning `messages`,
+`nextCursor`, and `truncated`; this replaces `offset` / `nextOffset`. Omit `cursor`
+for the first batch. For subsequent batches, pass the returned token with the same
+query, chat, scope/thread, sender, dates, and sort (the limit may change). Invalid
+or mismatched cursors return 400. Tokens are opaque, versioned continuation data,
+not authorization credentials; current chat membership is checked on every request.
+
+Newest searches (with or without keywords) use exact creation time and message ID
+as a descending key and have no 1,000-result browsing limit. Keyword searches
+restart at offset zero with a strictly older key filter. The index splits IDs into
+32-bit parts so large IDs do not lose precision. Relevance still uses a 1,000-candidate
+window internally; reaching it returns `nextCursor: null, truncated: true`, meaning
+additional matches may exist. There is no total count.
+
+The server examines at most five batches of 100 indexed candidates per request,
+rechecking database visibility and versions. A response may contain fewer messages
+than requested (even none) and still have `nextCursor`; continue until it is null.
+A full final index batch can require one extra empty request to establish the end.
+This is live pagination, not a snapshot: newer insertions do not shift chronological
+positions, but edits, deletions, membership changes and delayed indexing can alter
+remaining results. Relevance ordering remains susceptible to offset shifts as the
+index changes. Restart the search to refresh it.
 
 ## Worktrees and configuration
 

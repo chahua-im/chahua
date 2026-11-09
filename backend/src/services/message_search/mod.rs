@@ -18,8 +18,12 @@ use crate::dto::messages::MessageResponse;
 use crate::models::{Message, MessageType};
 use crate::schema::messages;
 mod filtering;
+pub mod pagination;
+use pagination::{
+    CandidatePageRequest, IndexPosition, SearchPosition, NEWEST_SORT, POSITION_ATTRIBUTES,
+};
 mod metrics;
-pub use filtering::load_filtered_messages;
+pub use filtering::{load_filtered_messages, load_sender_history, HistorySearchScope};
 pub use metrics::MessageSearchMetrics;
 
 pub const DEFAULT_INDEX_UID: &str = "messages_v1";
@@ -120,6 +124,7 @@ pub struct MessageSearchService {
     index_uid: String,
     metrics: Arc<MessageSearchMetrics>,
     setup_ready: Arc<AtomicBool>,
+    cursor_ready: Arc<AtomicBool>,
 }
 
 #[derive(Debug)]
@@ -130,6 +135,7 @@ pub enum MessageSearchError {
     Pool(diesel::r2d2::PoolError),
     TaskFailed(String),
     InvalidPrimaryKey(Option<String>),
+    InvalidHit,
     NotReady,
 }
 
@@ -147,6 +153,10 @@ impl fmt::Display for MessageSearchError {
                     "message search index primary key must be id, got {key:?}"
                 )
             }
+            Self::InvalidHit => write!(
+                f,
+                "Search index has invalid pagination keys; reindex required"
+            ),
             Self::NotReady => write!(f, "message search index setup is not complete"),
         }
     }
@@ -187,6 +197,8 @@ pub struct MessageSearchDocument {
     pub chat_id: String,
     pub reply_root_id: Option<String>,
     pub created_at_millis: i64,
+    #[serde(flatten)]
+    pub position: IndexPosition,
     pub version: i64,
     pub text: String,
 }
@@ -196,18 +208,21 @@ pub struct MessageSearchDocument {
 struct MessageSearchHitDocument {
     message_id: String,
     version: i64,
+    #[serde(flatten)]
+    position: Option<IndexPosition>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SearchHitCandidate {
     pub message_id: i64,
     pub version: i64,
+    pub position: Option<SearchPosition>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageSearchCandidatePage {
     pub candidates: Vec<SearchHitCandidate>,
-    pub next_offset: Option<usize>,
+    pub has_more: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -227,7 +242,7 @@ pub struct AuthoritativeSearchHits {
     pub drops: SearchCandidateDropCounts,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum MessageSearchRange {
     All,
     Main,
@@ -252,7 +267,7 @@ impl MessageSearchRange {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct MessageSearchFilters {
     pub created_from: Option<chrono::DateTime<chrono::Utc>>,
     pub created_before: Option<chrono::DateTime<chrono::Utc>>,
@@ -281,7 +296,7 @@ impl MessageSearchFilters {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum MessageSearchSort {
     Relevance,
@@ -297,7 +312,7 @@ impl MessageSearchSort {
             Self::Newest => {
                 search
                     .with_matching_strategy(MatchingStrategies::ALL)
-                    .with_sort(&["createdAtMillis:desc"]);
+                    .with_sort(NEWEST_SORT);
             }
         }
     }
@@ -326,6 +341,7 @@ impl MessageSearchService {
             index_uid: config.index_uid,
             metrics,
             setup_ready: Arc::new(AtomicBool::new(false)),
+            cursor_ready: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -383,11 +399,13 @@ impl MessageSearchService {
         chat_ids: &[i64],
         filters: MessageSearchFilters,
         sort: MessageSearchSort,
-        limit: usize,
-        offset: usize,
+        page: CandidatePageRequest,
     ) -> Result<MessageSearchCandidatePage, MessageSearchError> {
         if !self.is_setup_ready() {
             return Err(MessageSearchError::NotReady);
+        }
+        if sort == MessageSearchSort::Newest {
+            self.ensure_cursor_ready().await?;
         }
 
         let filter = format!(
@@ -398,41 +416,86 @@ impl MessageSearchService {
                 .collect::<Vec<_>>()
                 .join(",")
         );
-        let filter = filters.filter(&filter);
-        let attributes_to_retrieve = DISPLAYED_ATTRIBUTES;
+        let mut filter = filters.filter(&filter);
+        if let Some(before) = page.before {
+            filter.push_str(&format!(" AND {}", before.older_filter()));
+        }
+        let attributes_to_retrieve = [DISPLAYED_ATTRIBUTES, POSITION_ATTRIBUTES].concat();
         let index = self.index();
         let mut search = index.search();
 
         search
             .with_query(query)
             .with_filter(&filter)
-            .with_limit(limit)
-            .with_offset(offset)
-            .with_attributes_to_retrieve(Selectors::Some(attributes_to_retrieve));
+            .with_limit(page.limit)
+            .with_offset(page.offset)
+            .with_attributes_to_retrieve(Selectors::Some(&attributes_to_retrieve));
         sort.configure(&mut search);
 
         let result = search.execute::<MessageSearchHitDocument>().await?;
+        let has_more = result.hits.len() == page.limit;
         let candidates = result
             .hits
             .into_iter()
-            .filter_map(|hit| {
-                let message_id = hit.result.message_id.parse::<i64>().ok()?;
-                Some(SearchHitCandidate {
+            .map(|hit| {
+                let message_id = hit
+                    .result
+                    .message_id
+                    .parse::<i64>()
+                    .map_err(|_| MessageSearchError::InvalidHit)?;
+                let position = hit.result.position.and_then(IndexPosition::position);
+                if sort == MessageSearchSort::Newest && position.is_none_or(|p| p.id != message_id)
+                {
+                    return Err(MessageSearchError::InvalidHit);
+                }
+                Ok(SearchHitCandidate {
                     message_id,
                     version: hit.result.version,
+                    position,
                 })
             })
-            .collect::<Vec<_>>();
-
-        let next_offset = result
-            .estimated_total_hits
-            .and_then(|total| (offset + limit < total).then_some(offset + limit))
-            .or_else(|| (candidates.len() == limit).then_some(offset + limit));
-
+            .collect::<Result<Vec<_>, MessageSearchError>>()?;
+        if sort == MessageSearchSort::Newest {
+            let mut previous = page.before;
+            for candidate in &candidates {
+                let position = candidate.position.ok_or(MessageSearchError::InvalidHit)?;
+                if previous.is_some_and(|p| position >= p) {
+                    return Err(MessageSearchError::InvalidHit);
+                }
+                previous = Some(position);
+            }
+        }
         Ok(MessageSearchCandidatePage {
             candidates,
-            next_offset,
+            has_more,
         })
+    }
+
+    async fn ensure_cursor_ready(&self) -> Result<(), MessageSearchError> {
+        if self.cursor_ready.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        // Missing keys sort last, but a cursor filter would exclude them entirely.
+        // Check the whole index once before enabling newest pagination. Failed
+        // checks are retried so an externally completed reindex can unblock it.
+        let filter = POSITION_ATTRIBUTES
+            .iter()
+            .map(|field| format!("{field} NOT EXISTS OR {field} IS NULL"))
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        let index = self.index();
+        let hits = index
+            .search()
+            .with_filter(&filter)
+            .with_limit(1)
+            .with_attributes_to_retrieve(Selectors::Some(&["id"]))
+            .execute::<serde_json::Value>()
+            .await?;
+        if !hits.hits.is_empty() {
+            return Err(MessageSearchError::InvalidHit);
+        }
+        self.cursor_ready.store(true, Ordering::Release);
+        Ok(())
     }
 
     pub fn upsert_message_best_effort(self: &Arc<Self>, message: Message) {
@@ -503,6 +566,7 @@ impl MessageSearchService {
         db: &Pool<ConnectionManager<PgConnection>>,
         batch_size: i64,
     ) -> Result<usize, MessageSearchError> {
+        self.cursor_ready.store(false, Ordering::Release);
         self.ensure_index_exists().await?;
         self.apply_settings().await?;
         self.wait_for_task(self.index().delete_all_documents().await?)
@@ -575,16 +639,24 @@ impl MessageSearchService {
         .await?;
         self.wait_for_setup_task(
             index
-                .set_filterable_attributes(FILTERABLE_ATTRIBUTES)
+                .set_filterable_attributes(&[FILTERABLE_ATTRIBUTES, POSITION_ATTRIBUTES].concat())
                 .await?,
         )
         .await?;
-        self.wait_for_setup_task(index.set_sortable_attributes(SORTABLE_ATTRIBUTES).await?)
-            .await?;
+        self.wait_for_setup_task(
+            index
+                .set_sortable_attributes(&[SORTABLE_ATTRIBUTES, POSITION_ATTRIBUTES].concat())
+                .await?,
+        )
+        .await?;
         self.wait_for_setup_task(index.set_ranking_rules(RANKING_RULES).await?)
             .await?;
-        self.wait_for_setup_task(index.set_displayed_attributes(DISPLAYED_ATTRIBUTES).await?)
-            .await?;
+        self.wait_for_setup_task(
+            index
+                .set_displayed_attributes(&[DISPLAYED_ATTRIBUTES, POSITION_ATTRIBUTES].concat())
+                .await?,
+        )
+        .await?;
         Ok(())
     }
 
@@ -737,6 +809,11 @@ pub fn project_message_document(message: &Message) -> Option<MessageSearchDocume
         chat_id: message.chat_id.to_string(),
         reply_root_id: message.reply_root_id.map(|id| id.to_string()),
         created_at_millis: message.created_at.timestamp_millis(),
+        position: SearchPosition {
+            created_at: message.created_at,
+            id: message.id,
+        }
+        .index(),
         version: message_version(message),
         text,
     })
@@ -859,6 +936,11 @@ fn project_message_response_document(response: &MessageResponse) -> Option<Messa
         chat_id: response.chat_id.to_string(),
         reply_root_id: response.reply_root_id.map(|id| id.to_string()),
         created_at_millis: response.created_at.timestamp_millis(),
+        position: SearchPosition {
+            created_at: response.created_at,
+            id: response.id,
+        }
+        .index(),
         version: response.created_at.timestamp_micros(),
         text,
     })
@@ -1015,7 +1097,7 @@ mod tests {
             assert_eq!(body["q"], "release plan");
             assert_eq!(body["matchingStrategy"], strategy);
             if strategy == "all" {
-                assert_eq!(body["sort"], serde_json::json!(["createdAtMillis:desc"]));
+                assert_eq!(body["sort"], serde_json::json!(super::NEWEST_SORT));
             } else {
                 assert!(body.get("sort").is_none());
             }
@@ -1045,6 +1127,7 @@ mod tests {
         let candidates = rows
             .iter()
             .map(|m| SearchHitCandidate {
+                position: None,
                 message_id: m.id,
                 version: project_message_document(m).unwrap().version,
             })
@@ -1069,6 +1152,7 @@ mod tests {
         let candidates = rows
             .iter()
             .map(|m| SearchHitCandidate {
+                position: None,
                 message_id: m.id,
                 version: project_message_document(m).unwrap().version,
             })
@@ -1117,6 +1201,7 @@ mod tests {
         let candidates = rows
             .iter()
             .map(|m| SearchHitCandidate {
+                position: None,
                 message_id: m.id,
                 version: project_message_document(m).unwrap().version,
             })
@@ -1167,6 +1252,7 @@ mod tests {
             .iter()
             .rev()
             .map(|row| SearchHitCandidate {
+                position: None,
                 message_id: row.id,
                 version: project_message_document(row).unwrap().version,
             })
@@ -1273,18 +1359,22 @@ mod tests {
         let rows = vec![fresh.clone(), wrong_chat, deleted, edited.clone()];
         let candidates = vec![
             SearchHitCandidate {
+                position: None,
                 message_id: edited.id,
                 version: 1,
             },
             SearchHitCandidate {
+                position: None,
                 message_id: fresh.id,
                 version: project_message_document(&fresh).unwrap().version,
             },
             SearchHitCandidate {
+                position: None,
                 message_id: 2,
                 version: 1,
             },
             SearchHitCandidate {
+                position: None,
                 message_id: 3,
                 version: 1,
             },
@@ -1321,22 +1411,27 @@ mod tests {
         let rows = vec![fresh.clone(), wrong_chat.clone(), deleted, edited.clone()];
         let candidates = vec![
             SearchHitCandidate {
+                position: None,
                 message_id: 99,
                 version: 1,
             },
             SearchHitCandidate {
+                position: None,
                 message_id: wrong_chat.id,
                 version: project_message_document(&wrong_chat).unwrap().version,
             },
             SearchHitCandidate {
+                position: None,
                 message_id: 3,
                 version: 1,
             },
             SearchHitCandidate {
+                position: None,
                 message_id: edited.id,
                 version: 1,
             },
             SearchHitCandidate {
+                position: None,
                 message_id: fresh.id,
                 version: project_message_document(&fresh).unwrap().version,
             },
