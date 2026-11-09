@@ -1,15 +1,16 @@
 import { readChatFontSize, ChatFontSize } from './chat-font-size';
 import { computed, inject, Service, signal } from '@angular/core';
 import { SessionStore } from '../session/session-store';
+import { AccountStorage, AccountStore } from '../storage/account-storage';
 import { ColorMode, isColorMode } from './color-mode';
 import { type AppLocale, isAppLocale } from './locale';
 
-const THREADS_KEY = 'chahua.preferences.showThreadsInMessages';
-const REACTIONS_KEY = 'chahua.preferences.recentReactions';
-const PINNED_REACTIONS_KEY = 'chahua.preferences.pinnedReactions';
+const THREADS_KEY = 'showThreadsInMessages';
+const REACTIONS_KEY = 'recentReactions';
+const PINNED_REACTIONS_KEY = 'pinnedReactions';
 
-const AVATARS_KEY = 'chahua.preferences.showAllAvatars';
-const DM_DETAILS_KEY = 'chahua.preferences.showDmDetails';
+const AVATARS_KEY = 'showAllAvatars';
+const DM_DETAILS_KEY = 'showDmDetails';
 
 const COLOR_MODE_KEY = 'chahua.preferences.colorMode';
 const LOCALE_KEY = 'chahua.preferences.locale';
@@ -18,6 +19,7 @@ const ERROR_DIAGNOSTICS_KEY = 'chahua.preferences.showDiagnosticsOnError';
 @Service()
 export class Preferences {
   private readonly session = inject(SessionStore);
+  private readonly storage = inject(AccountStorage);
   private readonly fontSize = signal(readChatFontSize());
   readonly chatFontSize = this.fontSize.asReadonly();
 
@@ -26,37 +28,37 @@ export class Preferences {
     this.fontSize.set(value);
   }
 
-  readonly recentReactions = signal<readonly string[]>(readReactions());
-  readonly pinnedReactions = signal<readonly string[]>(readPinnedReactions());
+  readonly recentReactions = computed(() => readReactions(this.storage.read(AccountStore.Usage, REACTIONS_KEY, null)));
+  readonly pinnedReactions = computed(() =>
+    readPinnedReactions(this.storage.read(AccountStore.Preferences, PINNED_REACTIONS_KEY, null)),
+  );
   private readonly locale = signal<AppLocale | null>(readLocale());
   rememberReaction(emoji: string) {
     if (this.pinnedReactions().includes(emoji)) return;
-    this.recentReactions.update((items) => [emoji, ...items.filter((item) => item !== emoji)].slice(0, 5));
-    window.localStorage.setItem(REACTIONS_KEY, JSON.stringify(this.recentReactions()));
+    this.storage.set(
+      AccountStore.Usage,
+      REACTIONS_KEY,
+      [emoji, ...this.recentReactions().filter((item) => item !== emoji)].slice(0, 5),
+    );
   }
 
-  setPinnedReactions(reactions: string[]) {
+  setPinnedReactions(reactions: readonly string[]) {
     const pinned = [...new Set(reactions)].slice(0, 5);
-    window.localStorage.setItem(PINNED_REACTIONS_KEY, JSON.stringify(pinned));
-    this.pinnedReactions.set(pinned);
+    this.storage.set(AccountStore.Preferences, PINNED_REACTIONS_KEY, pinned);
   }
 
-  private readonly threads = signal(window.localStorage.getItem(THREADS_KEY) !== 'false');
-  private readonly avatars = signal(window.localStorage.getItem(AVATARS_KEY) === 'true');
-  private readonly dmDetails = signal(window.localStorage.getItem(DM_DETAILS_KEY) !== 'false');
   private readonly errorDiagnostics = signal(window.localStorage.getItem(ERROR_DIAGNOSTICS_KEY) !== 'false');
   readonly showDiagnosticsOnError = this.errorDiagnostics.asReadonly();
   private readonly mode = signal(readColorMode());
-  readonly showThreadsInMessages = this.threads.asReadonly();
-  readonly showAllAvatars = this.avatars.asReadonly();
-  readonly showDmDetails = this.dmDetails.asReadonly();
+  readonly showThreadsInMessages = computed(() => this.storage.read(AccountStore.Preferences, THREADS_KEY, true));
+  readonly showAllAvatars = computed(() => this.storage.read(AccountStore.Preferences, AVATARS_KEY, false));
+  readonly showDmDetails = computed(() => this.storage.read(AccountStore.Preferences, DM_DETAILS_KEY, true));
   readonly showMembershipMessages = computed(() => this.session.user()?.showMembershipMessages ?? true);
   readonly colorMode = this.mode.asReadonly();
   readonly selectedLocale = this.locale.asReadonly();
 
   setShowThreadsInMessages(value: boolean) {
-    window.localStorage.setItem(THREADS_KEY, String(value));
-    this.threads.set(value);
+    this.storage.set(AccountStore.Preferences, THREADS_KEY, value);
   }
 
   setShowDiagnosticsOnError(value: boolean) {
@@ -65,13 +67,11 @@ export class Preferences {
   }
 
   setShowAllAvatars(value: boolean) {
-    window.localStorage.setItem(AVATARS_KEY, String(value));
-    this.avatars.set(value);
+    this.storage.set(AccountStore.Preferences, AVATARS_KEY, value);
   }
 
   setShowDmDetails(value: boolean) {
-    window.localStorage.setItem(DM_DETAILS_KEY, String(value));
-    this.dmDetails.set(value);
+    this.storage.set(AccountStore.Preferences, DM_DETAILS_KEY, value);
   }
 
   setShowMembershipMessages(value: boolean) {
@@ -100,27 +100,17 @@ function readLocale(): AppLocale | null {
   return isAppLocale(value) ? value : null;
 }
 
-function readReactions(): string[] {
-  try {
-    const value: unknown = JSON.parse(window.localStorage.getItem(REACTIONS_KEY) ?? 'null');
-    return Array.isArray(value)
-      ? value.filter((item): item is string => typeof item === 'string').slice(0, 5)
-      : DEFAULT_REACTIONS;
-  } catch {
-    return DEFAULT_REACTIONS;
-  }
+function readReactions(value: unknown): readonly string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string').slice(0, 5)
+    : DEFAULT_REACTIONS;
 }
 
-const DEFAULT_REACTIONS = ['❤️', '😂', '😮', '😢', '🎉'];
-const DEFAULT_PINNED_REACTIONS = ['👍'];
+const DEFAULT_REACTIONS: readonly string[] = ['❤️', '😂', '😮', '😢', '🎉'];
+const DEFAULT_PINNED_REACTIONS: readonly string[] = ['👍'];
 
-function readPinnedReactions(): string[] {
-  try {
-    const value: unknown = JSON.parse(window.localStorage.getItem(PINNED_REACTIONS_KEY) ?? 'null');
-    return Array.isArray(value)
-      ? [...new Set(value.filter((item): item is string => typeof item === 'string'))].slice(0, 5)
-      : DEFAULT_PINNED_REACTIONS;
-  } catch {
-    return DEFAULT_PINNED_REACTIONS;
-  }
+function readPinnedReactions(value: unknown): readonly string[] {
+  return Array.isArray(value)
+    ? [...new Set(value.filter((item): item is string => typeof item === 'string'))].slice(0, 5)
+    : DEFAULT_PINNED_REACTIONS;
 }

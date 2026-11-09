@@ -1,7 +1,7 @@
 import { Service } from '@angular/core';
 import { isColorMode } from '../settings/color-mode';
 import { isAppLocale } from '../settings/locale';
-import type { Draft } from '../conversations/draft-store';
+import type { Draft } from '../storage/account-database';
 
 const DATABASE = 'wetty';
 const MIGRATION_KEY = 'chahua.migration.wetty';

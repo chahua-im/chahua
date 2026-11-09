@@ -211,7 +211,7 @@ ChatDetails 和 ConversationPage 激活同一个好友关系查询。用户资�
 | NotificationExceptionPicker | 激活普通／归档聊天查询，搜索已加载聊天，添加与默认相反的永久例外                                                                                                                   |
 | NotificationCategory        | 紧凑摘要或分类详情；正向通知开关、完整总数、例外分页、添加／移除／确认批量清除；刷新保留内容                                                                                       |
 | AdvancedSettings            | 手动复制诊断信息；编辑 Preferences 的 showDiagnosticsOnError 本机开关，默认开启，仅控制失败提示旁的复制入口                                                                        |
-| GeneralSettings             | 提供表情和贴纸子页入口，编辑 Preferences 的颜色模式、消息字号及本机显示开关；群成员进出群消息开关从账号资料派生，通过 Preferences 调用 SessionStore 保存，持有局部保存中与错误状态 |
+| GeneralSettings             | 提供表情和贴纸子页入口，编辑 Preferences 的颜色模式、消息字号及按账号保存的聊天显示开关；群成员进出群消息开关从账号资料派生，通过 Preferences 调用 SessionStore 保存，持有局部保存中与错误状态 |
 | LanguageSettings            | 自动/三种语言的单选；写入 Preferences 并调用 Localization 切换 catalog                                                                                                             |
 | FriendVerificationSettings  | Signal Form、读取/保存状态与结果；FriendsService                                                                                                                                   |
 | PrivacySettings             | 四项隐私入口；独立读取拉黑列表、好友验证、在线状态和已读回执设置资源，显示实际摘要与加载状态，窄屏摘要位于标题下方                                                                 |

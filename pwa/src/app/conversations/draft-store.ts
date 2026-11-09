@@ -2,32 +2,20 @@ import { computed, inject, linkedSignal, Service } from '@angular/core';
 import type { MessageResponse } from '../../generated/models';
 import { decodeId, type SnowflakeID } from '../api/snowflake-id';
 import { SessionStore } from '../session/session-store';
-
-export interface Draft {
-  text: string;
-  replyTo?: string;
-  savedAt: number;
-}
+import { AccountStorage, AccountStore } from '../storage/account-storage';
+import type { Draft } from '../storage/account-database';
 
 @Service()
 export class DraftStore {
   private readonly session = inject(SessionStore);
-  private readonly storageKey = computed(() => `chahua.drafts.${this.session.user()?.uid}`);
+  private readonly storage = inject(AccountStorage);
+  private readonly account = computed(() => this.session.user()?.uid);
   // Forward drafts keep server message data, never upload tasks, and only survive within this session.
   private readonly forwards = linkedSignal({
-    source: this.storageKey,
+    source: this.account,
     computation: (): Record<string, readonly MessageResponse[] | undefined> => ({}),
   });
-  private readonly items = linkedSignal({
-    source: this.storageKey,
-    computation: (key): Record<string, Draft> => {
-      try {
-        return JSON.parse(window.localStorage.getItem(key) ?? '{}');
-      } catch {
-        return {};
-      }
-    },
-  });
+  private readonly items = computed(() => this.storage.entries(AccountStore.Drafts));
 
   forward(chatId: SnowflakeID, threadId?: SnowflakeID) {
     return this.forwards()[this.key(chatId, threadId)];
@@ -67,15 +55,6 @@ export class DraftStore {
   }
 
   private update(chatId: SnowflakeID, threadId: SnowflakeID | undefined, draft: Draft | undefined) {
-    const items = { ...this.items() };
-    const key = this.key(chatId, threadId);
-    if (draft) items[key] = draft;
-    else delete items[key];
-    this.items.set(items);
-    try {
-      window.localStorage.setItem(this.storageKey(), JSON.stringify(items));
-    } catch {
-      // Storage may be full or disabled; keep the draft available for this session.
-    }
+    this.storage.set(AccountStore.Drafts, this.key(chatId, threadId), draft);
   }
 }

@@ -1,3 +1,4 @@
+import { AccountStorage } from '../../storage/account-storage';
 import { Location } from '@angular/common';
 import { signal, type WritableSignal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
@@ -2288,7 +2289,7 @@ describe('ConversationPage', () => {
 
   it('keeps typing and reply selection local, persisting once when navigation starts', () => {
     const drafts = TestBed.inject(DraftStore);
-    const write = vi.spyOn(window.localStorage, 'setItem');
+    const write = vi.spyOn(TestBed.inject(AccountStorage), 'set');
     for (const text of ['未', '未发', '未发送']) component['updateDraft'](text);
     component['startReply'](testMessage);
     expect(drafts.get(testChat.id)).toBeUndefined();

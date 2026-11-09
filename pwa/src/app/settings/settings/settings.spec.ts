@@ -1,3 +1,4 @@
+import { AccountStorage, AccountStore } from '../../storage/account-storage';
 import { AdvancedSettings } from '../advanced-settings/advanced-settings';
 import { ChangeDetectorRef, Component, getDebugNode, signal, type WritableSignal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
@@ -277,9 +278,9 @@ describe('Settings', () => {
     expect(TestBed.inject(Preferences).showThreadsInMessages()).toBe(false);
     expect(TestBed.inject(Preferences).showAllAvatars()).toBe(true);
     expect(TestBed.inject(Preferences).showDmDetails()).toBe(false);
-    expect(localStorage.getItem('chahua.preferences.showThreadsInMessages')).toBe('false');
-    expect(localStorage.getItem('chahua.preferences.showAllAvatars')).toBe('true');
-    expect(localStorage.getItem('chahua.preferences.showDmDetails')).toBe('false');
+    expect(TestBed.inject(AccountStorage).read(AccountStore.Preferences, 'showThreadsInMessages', null)).toBe(false);
+    expect(TestBed.inject(AccountStorage).read(AccountStore.Preferences, 'showAllAvatars', null)).toBe(true);
+    expect(TestBed.inject(AccountStorage).read(AccountStore.Preferences, 'showDmDetails', null)).toBe(false);
     await back();
     expect(page.tagName).toBe('APP-SETTINGS');
     expect(await nav.canGoBack()).toBe(false);
