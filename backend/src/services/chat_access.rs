@@ -25,6 +25,35 @@ pub fn filter_accessible_chat_ids(
         .load(conn)
 }
 
+pub fn member_uids(
+    chat_id: i64,
+) -> group_membership::BoxedQuery<'static, diesel::pg::Pg, diesel::sql_types::Integer> {
+    group_membership::table
+        .filter(group_membership::chat_id.eq(chat_id))
+        .select(group_membership::uid)
+        .into_boxed()
+}
+
+pub fn is_chat_member(conn: &mut PgConnection, chat_id: i64, uid: i32) -> QueryResult<bool> {
+    diesel::select(diesel::dsl::exists(
+        member_uids(chat_id).filter(group_membership::uid.eq(uid)),
+    ))
+    .get_result(conn)
+}
+
+pub fn require_chat_member(
+    conn: &mut PgConnection,
+    chat_id: i64,
+    uid: i32,
+) -> Result<(), crate::errors::AppError> {
+    if !is_chat_member(conn, chat_id, uid)? {
+        return Err(crate::errors::AppError::Forbidden(
+            "Not a member of this chat",
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -23,7 +23,7 @@ use crate::services::forwarding::prepare_forward_message;
 use crate::services::link_previews::{LinkPreviewJob, LinkPreviewService};
 use crate::services::media::MediaStore;
 use crate::services::message_search::{
-    filter_authoritative_hits_in_range, validate_search_query, MessageSearchMetrics,
+    filter_authoritative_hits, validate_search_query, MessageSearchFilters, MessageSearchMetrics,
     MessageSearchRange, MessageSearchService, MessageSearchSort, SearchCandidateDropCounts,
 };
 use crate::services::message_visibility::{history_query, MessageVisibility};
@@ -293,8 +293,11 @@ pub async fn search_messages(
     conn: &mut PgConnection,
     deps: SearchMessagesDeps<'_>,
 ) -> Result<SearchMessagesResponse, AppError> {
-    let range = params.search_range()?;
-    search_messages_with_range(uid, Some(chat_id), params.into_query(), range, conn, deps).await
+    let filters = MessageSearchFilters {
+        range: params.search_range()?,
+        sender_uid: params.sender_uid,
+    };
+    search_messages_with_range(uid, Some(chat_id), params.into_query(), filters, conn, deps).await
 }
 
 pub async fn search_messages_in_scope(
@@ -304,14 +307,25 @@ pub async fn search_messages_in_scope(
     conn: &mut PgConnection,
     deps: SearchMessagesDeps<'_>,
 ) -> Result<SearchMessagesResponse, AppError> {
-    search_messages_with_range(uid, chat_id, params, MessageSearchRange::All, conn, deps).await
+    search_messages_with_range(
+        uid,
+        chat_id,
+        params,
+        MessageSearchFilters {
+            range: MessageSearchRange::All,
+            sender_uid: None,
+        },
+        conn,
+        deps,
+    )
+    .await
 }
 
 async fn search_messages_with_range(
     uid: i32,
     chat_id: Option<i64>,
     params: SearchMessagesQuery,
-    range: MessageSearchRange,
+    filters: MessageSearchFilters,
     conn: &mut PgConnection,
     deps: SearchMessagesDeps<'_>,
 ) -> Result<SearchMessagesResponse, AppError> {
@@ -333,7 +347,7 @@ async fn search_messages_with_range(
         return Err(err);
     }
 
-    if let (Some(chat_id), MessageSearchRange::Thread(id)) = (chat_id, range) {
+    if let (Some(chat_id), MessageSearchRange::Thread(id)) = (chat_id, filters.range) {
         let valid = diesel::select(diesel::dsl::exists(
             messages::table
                 .filter(dsl::id.eq(id))
@@ -346,6 +360,10 @@ async fn search_messages_with_range(
         if !valid {
             return Err(AppError::NotFound("Thread not found"));
         }
+    }
+
+    if let (Some(chat_id), Some(sender_uid)) = (chat_id, filters.sender_uid) {
+        validate_search_sender(conn, chat_id, filters.range, sender_uid)?;
     }
 
     let query = match validate_search_query(&params.q) {
@@ -384,7 +402,7 @@ async fn search_messages_with_range(
     };
 
     let candidate_page = match search_service
-        .search_candidates(&query, &chat_ids, range, sort, limit, offset)
+        .search_candidates(&query, &chat_ids, filters, sort, limit, offset)
         .await
     {
         Ok(page) => page,
@@ -430,9 +448,9 @@ async fn search_messages_with_range(
         }
     };
 
-    let authoritative_hits = filter_authoritative_hits_in_range(
+    let authoritative_hits = filter_authoritative_hits(
         &crate::services::chat_access::filter_accessible_chat_ids(conn, uid, &chat_ids)?,
-        range,
+        filters,
         &candidate_page.candidates,
         rows,
     );
@@ -449,6 +467,37 @@ async fn search_messages_with_range(
         next_offset,
     })
 }
+fn validate_search_sender(
+    conn: &mut PgConnection,
+    chat_id: i64,
+    range: MessageSearchRange,
+    sender_uid: i32,
+) -> Result<(), AppError> {
+    let kind = groups::table
+        .find(chat_id)
+        .select(groups::kind)
+        .first::<crate::models::GroupKind>(conn)?;
+    if kind != crate::models::GroupKind::Group {
+        return Err(AppError::BadRequest(
+            "senderUid is only supported in group chats",
+        ));
+    }
+    let eligible = match range {
+        MessageSearchRange::All | MessageSearchRange::Main => {
+            crate::services::chat_access::is_chat_member(conn, chat_id, sender_uid)?
+        }
+        MessageSearchRange::Thread(id) => {
+            crate::services::threads::is_thread_participant(conn, id, sender_uid)?
+        }
+    };
+    if !eligible {
+        return Err(AppError::BadRequest(
+            "senderUid must identify a member or thread participant in the selected scope",
+        ));
+    }
+    Ok(())
+}
+
 fn record_search_query_metrics(
     metrics: &MessageSearchMetrics,
     sort_label: &str,
@@ -463,6 +512,7 @@ fn record_search_candidate_drops(metrics: &MessageSearchMetrics, drops: SearchCa
     metrics.record_candidate_drop("missing_db_row", drops.missing_db_row);
     metrics.record_candidate_drop("wrong_chat", drops.wrong_chat);
     metrics.record_candidate_drop("wrong_scope", drops.wrong_scope);
+    metrics.record_candidate_drop("wrong_sender", drops.wrong_sender);
     metrics.record_candidate_drop("not_searchable", drops.not_searchable);
     metrics.record_candidate_drop("stale_version", drops.stale_version);
 }
@@ -505,6 +555,43 @@ pub async fn get_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sender_eligibility_is_group_only_and_uses_participants_not_subscribers() {
+        use diesel::connection::SimpleConnection;
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        let mut conn = PgConnection::establish(&url).unwrap();
+        conn.test_transaction::<_, diesel::result::Error, _>(|conn| {
+            conn.batch_execute(
+                "INSERT INTO groups(id,name) VALUES (9876995000,'sender-group');
+                 INSERT INTO groups(id,name,kind,dm_uid1,dm_uid2) VALUES (9876995001,'sender-dm','dm',501,502);
+                 INSERT INTO group_membership(chat_id,uid) VALUES (9876995000,501),(9876995000,502),(9876995001,501);
+                 INSERT INTO messages(id,chat_id,sender_uid,message_type,client_generated_id,created_at,has_thread,deleted_at)
+                 VALUES (9876995010,9876995000,503,'text','sender-root-test',NOW(),TRUE,NOW());
+                 INSERT INTO messages(id,chat_id,sender_uid,message_type,client_generated_id,created_at,reply_root_id)
+                 VALUES (9876995011,9876995000,501,'text','sender-reply-test',NOW(),9876995010);
+                 INSERT INTO thread_user_states(chat_id,thread_root_id,uid,subscribed,archived)
+                 VALUES (9876995000,9876995010,502,TRUE,TRUE);"
+            )?;
+            for range in [MessageSearchRange::All, MessageSearchRange::Main] {
+                assert!(validate_search_sender(conn,9876995000,range,502).is_ok());
+                assert!(validate_search_sender(conn,9876995000,range,503).is_err());
+                assert!(validate_search_sender(conn,9876995001,range,501).is_err());
+            }
+            let range = MessageSearchRange::Thread(9876995010);
+            assert!(validate_search_sender(conn,9876995000,range,501).is_ok());
+            assert!(validate_search_sender(conn,9876995000,range,503).is_ok());
+            assert!(validate_search_sender(conn,9876995000,range,502).is_err());
+            assert!(validate_search_sender(conn,9876995001,range,501).is_err());
+            conn.batch_execute("UPDATE messages SET deleted_at=NOW() WHERE id=9876995011")?;
+            assert!(validate_search_sender(conn,9876995000,range,501).is_err());
+            Ok(())
+        });
+    }
+
     #[test]
     fn search_limit_defaults_to_twenty_and_caps_to_message_max() {
         assert_eq!(search_limit(None), 20);
