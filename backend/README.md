@@ -65,7 +65,9 @@ Duplicate outstanding IDs close the connection after InvalidRequest with
 `id: null`, without executing the duplicate.
 
 Current generation is checked before operations and every five seconds, using
-the existing 30-second lookup cache. Revocation sends `session.invalidated` with
+the [generation lookup cache](../docs/auth-provider/README.md#hot-path-generation-check).
+Successful local revocations update that cache immediately; they do not wait
+for its five-minute expiry. Revocation sends `session.invalidated` with
 `reason: "revoked"` and closes. Lookup failure sends `session.unavailable` with
 `reason: "authLookupUnavailable"` and closes; this is not credential revocation.
 Ordinary application unavailability, such as disabled search, does not invalidate
@@ -598,25 +600,45 @@ active WebSocket pings, and explicit active state reports. Inactive pings and
 state reports do not advance last seen or schedule client bookkeeping. Ordinary
 API activity does not change foreground state or restart the away grace; an
 offline user can therefore have recent API activity.
-Every qualifying observation immediately advances a process-wide in-memory buffer before
-client bookkeeping, coalesced by user and UTC day. Presence reads the newer of pending activity
-and the persisted timestamp,
-so recent activity is visible without waiting for a database write. One worker flushes all
-dirty users every 15 seconds, using one bulk update per pending UTC day and updating daily
-active-user rollups in the same transaction. Timestamps never move backward; activity arriving
-during a flush remains pending, and failed batches remain available for the next interval.
-Interrupt and termination signals request a final flush before exit. A process crash can lose
-unflushed observations; database failures can extend the normal 15-second persistence delay.
+Every qualifying observation immediately advances a process-wide in-memory last-seen buffer,
+coalesced by user and UTC day. Presence reads the newer of pending activity and the persisted
+timestamp, so recent activity is visible without waiting for a database write.
 
-Client bookkeeping retains a separate five-minute per-client throttle, bypassed when the
-application version, account, or UTC day changes. It initializes user records and records client
-activity, versions, rebinding, and client/new-user rollups without advancing existing users'
-last-seen timestamps. WebSocket handlers record active observations before replying or
-coalescing metadata work; each socket has at most one outstanding bookkeeping task, and
-heartbeats do not await that task. Delayed bookkeeping does not create another last-seen
-observation. Missing app-version headers preserve the last recorded version;
-RPC carries its version once in `session.open`. Active-report tracking failures
-are logged without closing the socket, and already buffered activity is retained.
+Client ownership is separate from analytics persistence. First use and account changes
+synchronously bind the client, initialize a missing user record, and transfer that client's
+push subscriptions in one transaction. Per-client serialization and cache publication after
+commit preserve ownership ordering. Same-account cache hits perform no bookkeeping SQL;
+HTTP runs authentication and any necessary binding in a blocking worker.
+
+Client timestamps and app versions are buffered by client and observation UTC day. The
+five-minute observation throttle is bypassed by application-version, account, or day changes,
+but these changes do not cause request-path analytics writes. Missing versions preserve the
+latest supplied version; RPC supplies its version during `session.open`. Delayed observations
+never set client ownership or reassign push subscriptions. Rebind counts are accumulated at
+successful ownership transitions rather than inferred from the final coalesced owner.
+
+One shared worker flushes client metadata, daily rollups, and user last seen every 15 seconds.
+It retains newer observations arriving during a flush and retries failed snapshots. Independent
+clients can progress after a client failure, and user last-seen flushing is attempted separately.
+Missing user records are also initialized during last-seen flushing before acknowledgement.
+Background checkouts are bounded to two seconds; transactions use a one-second lock timeout
+and two-second statement timeout. Flush work is bounded per tick, so a backlog can require
+multiple ticks. Recently observed clients are protected from stale-client cleanup.
+
+Each client and user pending buffer admits at most 100,000 entries. Existing entries still
+coalesce when full; excess new entries are dropped with a metric rather than blocking requests.
+Binding failures can still reject an operation; deferred analytics failures cannot. Active
+WebSocket reports record activity before replying and retain at most one per-socket binding
+task; inactive reports do not schedule it. Delayed work does not create another last-seen
+observation or change foreground presence.
+
+Failed flushes retain their snapshots for retry on the next worker tick and increment
+`client_activity_flush_retry_needed_total` once per failed combined flush. There is no
+persistent retry deduplication: if a commit succeeds but confirmation is lost, retrying may
+duplicate additive daily counters. Pending observations are memory-only; a crash or buffer
+overflow can lose unpersisted analytics. Shutdown attempts one final bounded flush, not an
+unbounded drain.
+
 Last-seen is qualifying server-observed activity, not an exact human interaction, disconnect,
 or foreground time. Snapshot publication follows the presence refresh schedule above.
 

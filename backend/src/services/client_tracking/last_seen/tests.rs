@@ -243,3 +243,47 @@ fn failed_flush_retains_activity_until_a_newer_observation_can_persist() {
     assert_eq!(persisted_last_seen(&pool, 301), newer);
     assert_eq!(active_users(&pool, day), 1);
 }
+
+#[test]
+fn flush_creates_missing_user_before_acknowledging() {
+    let Some(pool) = test_pool() else {
+        return;
+    };
+    create_activity_tables(&pool);
+    let day = NaiveDate::from_ymd_opt(2026, 8, 12).unwrap();
+    let seen = timestamp(day, 10, 0, 0);
+    let last_seen = last_seen(pool.clone());
+    last_seen.record(412, seen);
+    last_seen.flush().unwrap();
+    assert_eq!(persisted_last_seen(&pool, 412), seen);
+    assert_eq!(active_users(&pool, day), 1);
+    last_seen.flush().unwrap();
+    assert_eq!(active_users(&pool, day), 1);
+}
+
+#[test]
+fn midnight_retry_does_not_duplicate_committed_day() {
+    let Some(pool) = test_pool() else {
+        return;
+    };
+    pool.get().unwrap().batch_execute(
+        "CREATE TEMP TABLE user_extra (LIKE public.user_extra INCLUDING ALL,
+             CONSTRAINT test_midnight CHECK (last_seen_at < TIMESTAMP '2026-08-13'));
+         CREATE TEMP TABLE activity_daily_metrics (LIKE public.activity_daily_metrics INCLUDING ALL);"
+    ).unwrap();
+    let day = NaiveDate::from_ymd_opt(2026, 8, 12).unwrap();
+    let next = day.succ_opt().unwrap();
+    insert_user(&pool, 413, timestamp(day.pred_opt().unwrap(), 1, 0, 0));
+    let last_seen = last_seen(pool.clone());
+    last_seen.record(413, timestamp(day, 23, 59, 59));
+    last_seen.record(413, timestamp(next, 0, 0, 0));
+    assert!(last_seen.flush().is_err());
+    assert_eq!(active_users(&pool, day), 1);
+    pool.get()
+        .unwrap()
+        .batch_execute("ALTER TABLE user_extra DROP CONSTRAINT test_midnight")
+        .unwrap();
+    last_seen.flush().unwrap();
+    assert_eq!(active_users(&pool, day), 1);
+    assert_eq!(active_users(&pool, next), 1);
+}

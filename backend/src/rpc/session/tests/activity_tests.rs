@@ -53,6 +53,11 @@ async fn ordinary_calls_and_refresh_observe_activity_without_changing_presence()
         .expect("refresh records observed activity");
     assert!(after_refresh >= before_refresh);
 
+    services
+        .client_tracking
+        .flush_pending_activity()
+        .expect("flush buffered client activity");
+
     use crate::schema::clients::dsl;
     let recorded = dsl::clients
         .find(client_id)
@@ -70,7 +75,7 @@ async fn ordinary_calls_and_refresh_observe_activity_without_changing_presence()
 }
 
 #[tokio::test]
-async fn activity_failure_rejects_ordinary_operation_before_its_transaction() {
+async fn binding_failure_rejects_ordinary_operation_before_its_transaction() {
     let Some(services) = crate::rpc::test_support::services().await else {
         return;
     };
@@ -112,7 +117,62 @@ async fn activity_failure_rejects_ordinary_operation_before_its_transaction() {
         .expect("count groups");
     assert_eq!(
         after, before,
-        "activity failure precedes the business transaction"
+        "binding failure precedes the business transaction"
+    );
+
+    close_session(input, output, task).await;
+}
+
+#[tokio::test]
+async fn buffered_analytics_failure_does_not_reject_business_operation() {
+    let Some(services) = crate::rpc::test_support::services().await else {
+        return;
+    };
+    let client_id = "rpc-buffered-analytics-failure";
+    let token = services
+        .auth_token_service
+        .issue_session(1, client_id, 0)
+        .expect("issue session");
+    let (input, mut output, task) = open_authenticated(services.clone(), token).await;
+    services
+        .client_tracking
+        .flush_pending_activity()
+        .expect("flush initial activity");
+    services
+        .db
+        .get()
+        .expect("test DB connection")
+        .batch_execute(
+            "ALTER TABLE pg_temp.clients ADD CONSTRAINT rpc_analytics_failure \
+             CHECK (client_id <> 'rpc-buffered-analytics-failure' OR last_app_version <> 'rejected')",
+        )
+        .expect("reject only the buffered version update");
+    services
+        .client_tracking
+        .record_client_activity(1, client_id, Some("rejected"))
+        .expect("warmed activity is buffered without writing");
+
+    let before = crate::schema::groups::table
+        .count()
+        .get_result::<i64>(&mut services.db.get().expect("test DB connection"))
+        .expect("count groups");
+    let response = call(
+        &input,
+        &mut output,
+        "create",
+        "groups.create",
+        json!({"name":"commits despite analytics failure"}),
+    )
+    .await;
+    assert!(response.get("result").is_some(), "{response}");
+    let after = crate::schema::groups::table
+        .count()
+        .get_result::<i64>(&mut services.db.get().expect("test DB connection"))
+        .expect("count groups");
+    assert_eq!(after, before + 1);
+    assert!(
+        services.client_tracking.flush_pending_activity().is_err(),
+        "the deferred analytics write must encounter the constraint"
     );
 
     close_session(input, output, task).await;

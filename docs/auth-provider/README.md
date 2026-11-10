@@ -394,10 +394,21 @@ re-reads the mapping instead of allocating a second UID.
 
 ### Hot-path generation check
 
-Request auth needs `(state, token_generation)` per UID: one tiny indexed read,
-cached in-process with a short TTL (30–60s). Worst-case
-disable-to-rejection ≈ sweep interval + cache TTL. The TTL is the only
-revocation lag knob and must be chosen consciously.
+The token-generation lookup is cached per UID in-process for five minutes.
+Revocation writes increment the database generation and update the local cache
+after the statement commits, so a successful revocation takes effect on the next
+local generation check without waiting for expiry. Revocation must not run inside
+an enclosing transaction that could roll back after cache publication.
+
+Cache publication is monotonic: a late read or write completion cannot replace
+a higher cached generation or return its older generation to the caller. An
+older observation does not refresh the newer entry's expiry. A failed refresh
+remains unavailable rather than authorizing from an expired entry.
+
+There is no cross-process invalidation. Database changes made outside this
+process can take up to the cache TTL to be observed; a provider's sweep interval
+adds to that delay. Additional backend processes must account for this bound or
+add invalidation before requiring immediate cross-process revocation.
 
 ## Provider Contract
 
