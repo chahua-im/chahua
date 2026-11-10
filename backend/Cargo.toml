@@ -62,6 +62,12 @@ utoipa-axum = "0.2"
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
 mime = "0.3"
 percent-encoding = "2"
+url = "2"
+linkify = "0.10"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
+scraper = "0.24"
+ipnet = "2"
+bytes = "1"
 
 [profile.dev]
 overflow-checks = false

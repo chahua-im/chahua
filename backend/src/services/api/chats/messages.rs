@@ -20,6 +20,7 @@ use crate::services::authentication::Principal;
 use crate::services::authz::{Action as AuthzAction, AuthorizationService};
 use crate::services::avatars::AvatarService;
 use crate::services::forwarding::prepare_forward_message;
+use crate::services::link_previews::{LinkPreviewJob, LinkPreviewService};
 use crate::services::media::MediaStore;
 use crate::services::message_search::{
     filter_authoritative_hits_with_counts, validate_search_query, MessageSearchMetrics,
@@ -48,6 +49,7 @@ pub struct PostMessageDeps<'a> {
     pub ws_registry: &'a Arc<ConnectionRegistry>,
     pub push_service: &'a Arc<PushService>,
     pub message_search: &'a Option<Arc<MessageSearchService>>,
+    pub link_previews: &'a Arc<LinkPreviewService>,
 }
 
 pub struct ForwardMessagesDeps<'a> {
@@ -77,6 +79,7 @@ pub struct PostThreadMessageDeps<'a> {
     pub ws_registry: &'a Arc<ConnectionRegistry>,
     pub push_service: &'a Arc<PushService>,
     pub message_search: &'a Option<Arc<MessageSearchService>>,
+    pub link_previews: &'a Arc<LinkPreviewService>,
 }
 
 pub struct PatchMessageDeps<'a> {
@@ -84,6 +87,7 @@ pub struct PatchMessageDeps<'a> {
     pub avatars: &'a Arc<AvatarService>,
     pub ws_registry: &'a Arc<ConnectionRegistry>,
     pub message_search: &'a Option<Arc<MessageSearchService>>,
+    pub link_previews: &'a Arc<LinkPreviewService>,
 }
 
 pub struct DeleteMessageDeps<'a> {
@@ -589,6 +593,16 @@ pub async fn post_message(
     validate_client_message_type(&body.message_type)?;
     let attachment_ids = parse_attachment_ids(&body.attachment_ids)?;
     let publish_immediately = !matches!(body.message_type, MessageType::Audio);
+    let previews = crate::services::link_previews::prepare(
+        matches!(
+            body.message_type,
+            MessageType::Text | MessageType::Audio | MessageType::File
+        )
+        .then_some(body.message.as_deref())
+        .flatten(),
+        body.metadata.as_ref(),
+        Utc::now(),
+    )?;
     let (send_result, receipt_advanced) = {
         let mut transaction = AsyncTransaction::begin(conn)?;
         let conn = transaction.connection();
@@ -603,6 +617,7 @@ pub async fn post_message(
                     metrics: deps.metrics,
                 },
                 PreparedMessageSend {
+                    metadata: previews.metadata,
                     system_kind: None,
                     forwarded_from_message_id: None,
                     chat_id,
@@ -652,6 +667,13 @@ pub async fn post_message(
             send_result
                 .side_effects
                 .fire(deps.ws_registry, deps.push_service);
+            if !previews.work.is_empty() {
+                deps.link_previews.enqueue(LinkPreviewJob::new(
+                    &send_result.inserted_message,
+                    previews.expires_at,
+                    previews.work,
+                ));
+            }
             if let Some(search_service) = deps.message_search {
                 search_service.upsert_message_best_effort(send_result.inserted_message);
             }
@@ -933,6 +955,16 @@ pub async fn post_thread_message(
     validate_client_message_type(&body.message_type)?;
     let attachment_ids = parse_attachment_ids(&body.attachment_ids)?;
     let publish_immediately = !matches!(body.message_type, MessageType::Audio);
+    let previews = crate::services::link_previews::prepare(
+        matches!(
+            body.message_type,
+            MessageType::Text | MessageType::Audio | MessageType::File
+        )
+        .then_some(body.message.as_deref())
+        .flatten(),
+        body.metadata.as_ref(),
+        Utc::now(),
+    )?;
     let (send_result, receipt_advanced, subscription_changes) = {
         let mut transaction = AsyncTransaction::begin(conn)?;
         let conn = transaction.connection();
@@ -950,6 +982,7 @@ pub async fn post_thread_message(
                     metrics: deps.metrics,
                 },
                 PreparedMessageSend {
+                    metadata: previews.metadata,
                     system_kind: None,
                     forwarded_from_message_id: None,
                     chat_id,
@@ -1003,6 +1036,13 @@ pub async fn post_thread_message(
     let msg_side_effects = send_result.side_effects;
     deps.ws_registry.invalidate_unread(&[uid]);
     msg_side_effects.fire(deps.ws_registry, deps.push_service);
+    if !previews.work.is_empty() {
+        deps.link_previews.enqueue(LinkPreviewJob::new(
+            &send_result.inserted_message,
+            previews.expires_at,
+            previews.work,
+        ));
+    }
     if let Some(search_service) = deps.message_search {
         search_service.upsert_response_best_effort(response.clone());
     }
@@ -1104,100 +1144,113 @@ pub async fn patch_message(
     check_membership(conn, chat_id, uid)?;
     social::require_chat_writable(conn, chat_id, uid)?;
     let attachment_ids = parse_attachment_ids(&body.attachment_ids)?;
-    let now = Utc::now();
-    let (updated_message, added_mention_uids) = conn.transaction::<_, AppError, _>(|conn| {
-        use crate::schema::attachments::dsl as a_dsl;
-        use crate::services::speaking;
-        speaking::lock_chat(conn, chat_id, false)?;
-        let message: Message = messages::table
-            .filter(dsl::id.eq(message_id).and(dsl::chat_id.eq(chat_id)))
-            .for_update()
-            .select(Message::as_select())
-            .first(conn)
-            .optional()?
-            .ok_or(AppError::NotFound("Message not found"))?;
-        if message.system_kind.is_some_and(|kind| kind.is_membership())
-            && !crate::services::user::load_chat_settings_for_chat(conn, uid, chat_id)?
-                .2
-                .can_view
-        {
-            return Err(AppError::NotFound("Message not found"));
-        }
-        if message.sender_uid != uid {
-            return Err(AppError::Forbidden("You can only edit your own messages"));
-        }
-        if message.deleted_at.is_some() {
-            return Err(AppError::BadRequest("Cannot edit deleted message"));
-        }
-        if !message.is_published {
-            return Err(AppError::BadRequest("Cannot edit unpublished message"));
-        }
-        if message.forwarded_from_message_id.is_some()
-            || message.message_type == MessageType::Placeholder
-        {
-            return Err(AppError::Forbidden("Forwarded messages cannot be edited"));
-        }
-        if !matches!(message.message_type, MessageType::Text) {
-            return Err(AppError::BadRequest("This message type cannot be edited"));
-        }
-        speaking::require_edit(conn, &message, uid)?;
-        let requested = attachments::table
-            .filter(a_dsl::id.eq_any(&attachment_ids))
-            .order(a_dsl::id.asc())
-            .for_update()
-            .select(crate::models::Attachment::as_select())
-            .load::<crate::models::Attachment>(conn)?;
-        if requested.len() != attachment_ids.len()
-            || requested.iter().any(|attachment| {
-                attachment.deleted_at.is_some()
-                    || (attachment.message_id != Some(message_id)
-                        && (attachment.message_id.is_some()
-                            || attachment.uploader_uid != Some(uid)))
-            })
-        {
-            return Err(AppError::BadRequest("Invalid attachment selection"));
-        }
-        validate_message(
-            &message.message_type,
-            Some(&body.message),
-            message.sticker_id,
-            &requested,
-        )?;
-        diesel::update(attachments::table.filter(a_dsl::message_id.eq(message_id)))
-            .set(a_dsl::message_id.eq::<Option<i64>>(None))
-            .execute(conn)?;
-        if !attachment_ids.is_empty() {
-            let attached = diesel::update(
-                attachments::table
-                    .filter(a_dsl::id.eq_any(&attachment_ids))
-                    .filter(a_dsl::message_id.is_null()),
-            )
-            .set((
-                a_dsl::message_id.eq(message_id),
-                a_dsl::order.eq(attachment_position(&attachment_ids, a_dsl::id) - 1i16),
-            ))
-            .execute(conn)?;
-            if attached != attachment_ids.len() {
+    let (updated_message, added_mention_uids, previews) =
+        conn.transaction::<_, AppError, _>(|conn| {
+            use crate::schema::attachments::dsl as a_dsl;
+            use crate::services::speaking;
+            speaking::lock_chat(conn, chat_id, false)?;
+            let message: Message = messages::table
+                .filter(dsl::id.eq(message_id).and(dsl::chat_id.eq(chat_id)))
+                .for_update()
+                .select(Message::as_select())
+                .first(conn)
+                .optional()?
+                .ok_or(AppError::NotFound("Message not found"))?;
+            let now = crate::services::link_previews::finalize::next_edit_timestamp(
+                Utc::now(),
+                message.updated_at,
+            );
+            if message.system_kind.is_some_and(|kind| kind.is_membership())
+                && !crate::services::user::load_chat_settings_for_chat(conn, uid, chat_id)?
+                    .2
+                    .can_view
+            {
+                return Err(AppError::NotFound("Message not found"));
+            }
+            if message.sender_uid != uid {
+                return Err(AppError::Forbidden("You can only edit your own messages"));
+            }
+            if message.deleted_at.is_some() {
+                return Err(AppError::BadRequest("Cannot edit deleted message"));
+            }
+            if !message.is_published {
+                return Err(AppError::BadRequest("Cannot edit unpublished message"));
+            }
+            if message.forwarded_from_message_id.is_some()
+                || message.message_type == MessageType::Placeholder
+            {
+                return Err(AppError::Forbidden("Forwarded messages cannot be edited"));
+            }
+            if !matches!(message.message_type, MessageType::Text) {
+                return Err(AppError::BadRequest("This message type cannot be edited"));
+            }
+            speaking::require_edit(conn, &message, uid)?;
+            let requested = attachments::table
+                .filter(a_dsl::id.eq_any(&attachment_ids))
+                .order(a_dsl::id.asc())
+                .for_update()
+                .select(crate::models::Attachment::as_select())
+                .load::<crate::models::Attachment>(conn)?;
+            if requested.len() != attachment_ids.len()
+                || requested.iter().any(|attachment| {
+                    attachment.deleted_at.is_some()
+                        || (attachment.message_id != Some(message_id)
+                            && (attachment.message_id.is_some()
+                                || attachment.uploader_uid != Some(uid)))
+                })
+            {
                 return Err(AppError::BadRequest("Invalid attachment selection"));
             }
-        }
-        let updated_message: Message =
-            diesel::update(messages::table.filter(dsl::id.eq(message_id)))
+            validate_message(
+                &message.message_type,
+                Some(&body.message),
+                message.sticker_id,
+                &requested,
+            )?;
+            diesel::update(attachments::table.filter(a_dsl::message_id.eq(message_id)))
+                .set(a_dsl::message_id.eq::<Option<i64>>(None))
+                .execute(conn)?;
+            if !attachment_ids.is_empty() {
+                let attached = diesel::update(
+                    attachments::table
+                        .filter(a_dsl::id.eq_any(&attachment_ids))
+                        .filter(a_dsl::message_id.is_null()),
+                )
                 .set((
-                    dsl::message.eq(&body.message),
-                    dsl::has_attachments.eq(!attachment_ids.is_empty()),
-                    dsl::updated_at.eq(Some(now)),
+                    a_dsl::message_id.eq(message_id),
+                    a_dsl::order.eq(attachment_position(&attachment_ids, a_dsl::id) - 1i16),
                 ))
-                .returning(Message::as_returning())
-                .get_result(conn)?;
-        let added_mention_uids =
-            sync_edited_message_mentions(conn, &message, &body.message, uid, now)?;
-        Ok((updated_message, added_mention_uids))
-    })?;
+                .execute(conn)?;
+                if attached != attachment_ids.len() {
+                    return Err(AppError::BadRequest("Invalid attachment selection"));
+                }
+            }
+            let previews = crate::services::link_previews::prepare_edit(
+                &body.message,
+                body.metadata.as_ref(),
+                message.metadata.as_ref(),
+                Utc::now(),
+            )?;
+            let updated_message: Message =
+                diesel::update(messages::table.filter(dsl::id.eq(message_id)))
+                    .set((
+                        dsl::message.eq(&body.message),
+                        dsl::has_attachments.eq(!attachment_ids.is_empty()),
+                        dsl::updated_at.eq(Some(now)),
+                        dsl::metadata.eq(&previews.metadata),
+                    ))
+                    .returning(Message::as_returning())
+                    .get_result(conn)?;
+            let added_mention_uids =
+                sync_edited_message_mentions(conn, &message, &body.message, uid, now)?;
+            Ok((updated_message, added_mention_uids, previews))
+        })?;
     if let Some(search_service) = deps.message_search {
         search_service.upsert_message_best_effort(updated_message.clone());
     }
     let edited_thread_root_id = updated_message.reply_root_id;
+    let preview_job = (!previews.work.is_empty())
+        .then(|| LinkPreviewJob::new(&updated_message, previews.expires_at, previews.work));
     let response = attach_metadata(conn, vec![updated_message], deps.media, deps.avatars, uid)
         .await
         .into_iter()
@@ -1212,6 +1265,9 @@ pub async fn patch_message(
     };
     let ws_msg = Arc::new(ServerWsMessage::MessageUpdated(response.clone()));
     deps.ws_registry.broadcast_to_uids(&member_uids, ws_msg);
+    if let Some(job) = preview_job {
+        deps.link_previews.enqueue(job);
+    }
     if let Some(root_id) = edited_thread_root_id {
         for mentioned_uid in &added_mention_uids {
             crate::services::threads::broadcast_thread_membership_changed_to_user(

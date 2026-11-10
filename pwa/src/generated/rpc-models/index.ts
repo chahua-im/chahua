@@ -86,6 +86,10 @@ export type {
   InviteResponse,
   InviteType,
   LastSeenBucket,
+  LinkPreviewImageResponse,
+  LinkPreviewInput,
+  LinkPreviewResponse,
+  LinkPreviewStatus,
   ListBlocksResponse,
   ListChatAttachmentsResponse,
   ListChatThreadsResponse,
@@ -115,6 +119,8 @@ export type {
   MembershipMessageVisibility,
   MentionBadges,
   MentionInfo,
+  MessageMetadataInput,
+  MessageMetadataResponse,
   MessagePreview,
   MessagePreviewAttachment,
   MessagePreviewSticker,
@@ -421,6 +427,7 @@ export type MessagesEditParams = {
   chatId: Shared.SnowflakeID;
   message: string;
   messageId: Shared.SnowflakeID;
+  metadata?: Shared.MessageMetadataInput;
 };
 export type MessagesForwardOneParams = {
   allowPlaceholders?: boolean;
@@ -466,6 +473,7 @@ export type MessagesSendInThreadParams = {
   clientGeneratedId: string;
   message?: string;
   messageType: Shared.MessageType;
+  metadata?: Shared.MessageMetadataInput;
   replyToId?: Shared.SnowflakeID;
   stickerId?: Shared.SnowflakeID;
   threadId: Shared.SnowflakeID;
@@ -476,6 +484,7 @@ export type MessagesSendParams = {
   clientGeneratedId: string;
   message?: string;
   messageType: Shared.MessageType;
+  metadata?: Shared.MessageMetadataInput;
   replyToId?: Shared.SnowflakeID;
   stickerId?: Shared.SnowflakeID;
 };

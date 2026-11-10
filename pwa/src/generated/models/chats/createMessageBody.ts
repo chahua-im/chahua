@@ -7,6 +7,7 @@
  */
 import type { MessageType } from '../messageType';
 import type { SnowflakeID } from '../snowflakeID';
+import type { MessageMetadataInput } from './messageMetadataInput';
 
 export interface CreateMessageBody {
   /** Uploaded attachment IDs in display order; allocation-time order is replaced. */
@@ -14,6 +15,7 @@ export interface CreateMessageBody {
   clientGeneratedId: string;
   message?: string;
   messageType: MessageType;
+  metadata?: MessageMetadataInput;
   replyToId?: SnowflakeID;
   stickerId?: SnowflakeID;
 }

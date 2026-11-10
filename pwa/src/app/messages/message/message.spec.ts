@@ -10,7 +10,12 @@ import {
   timeOutline,
 } from 'ionicons/icons';
 import { vi } from 'vitest';
-import { AttachmentUploadPurpose, MessageType, type MessagePreview } from '../../../generated/models';
+import {
+  AttachmentUploadPurpose,
+  LinkPreviewStatus,
+  MessageType,
+  type MessagePreview,
+} from '../../../generated/models';
 import { encodeId } from '../../api/snowflake-id';
 import { testMessage } from '../../api/testing';
 import { MessageDelivery } from '../message-delivery';
@@ -77,6 +82,29 @@ describe('Message', () => {
     fixture.detectChanges();
     return fixture;
   }
+
+  it('shows link previews only for live content and disables them in menu and selection', async () => {
+    const fixture = await render();
+    expect(fixture.nativeElement.querySelector('app-message-link-previews')).toBeNull();
+    const message = {
+      ...testMessage,
+      metadata: { linkPreviews: [{ url: 'https://example.com/', status: LinkPreviewStatus.ready, title: 'Example' }] },
+    };
+    fixture.componentRef.setInput('message', message);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-message-link-previews a')).not.toBeNull();
+    fixture.componentRef.setInput('preview', true);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-message-link-previews a')).toBeNull();
+    fixture.componentRef.setInput('preview', false);
+    fixture.componentRef.setInput('selecting', true);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-message-link-previews a')).toBeNull();
+    fixture.componentRef.setInput('selecting', false);
+    fixture.componentRef.setInput('message', { ...message, isDeleted: true });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-message-link-previews')).toBeNull();
+  });
 
   it('renders a source and a display-only original reply, and suppresses attribution on record cards', async () => {
     const fixture = await render();

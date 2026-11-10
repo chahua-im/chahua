@@ -37,6 +37,7 @@ fn router(services: &RpcServices) -> Router {
         config: services.config.clone(),
         media: services.media.clone(),
         avatars: services.avatars.clone(),
+        link_previews: services.link_previews.clone(),
         authz_service: services.authz_service.clone(),
         ws_registry: services.ws_registry.clone(),
         presence_service: services.presence_service.clone(),

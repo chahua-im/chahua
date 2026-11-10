@@ -26,6 +26,21 @@ pub const DEFAULT_SAVED_MESSAGES_LIMIT: i64 = 30;
 pub const MAX_SAVED_MESSAGES_LIMIT: i64 = 100;
 const INVALID_SAVED_MESSAGE_SNAPSHOT: &str = "Saved message snapshot is invalid";
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedContentSnapshot {
+    attachments: Vec<SavedAttachmentSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    metadata: Option<crate::dto::link_previews::StoredMessageMetadata>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum SavedContent {
+    Envelope(SavedContentSnapshot),
+    Legacy(Vec<SavedAttachmentSnapshot>),
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SavedMentionSnapshot {
@@ -85,11 +100,16 @@ where
 pub fn saved_message_row_to_response(
     row: SavedMessage,
     can_locate_context: bool,
+    media: &MediaStore,
 ) -> Result<SavedMessageResponse, AppError> {
-    let attachments = deserialize_snapshot::<Vec<SavedAttachmentSnapshot>>(
-        row.snapshot_attachments,
-        "attachments",
-    )?;
+    let content = deserialize_snapshot::<SavedContent>(row.snapshot_attachments, "attachments")?;
+    let (attachments, metadata) = match content {
+        SavedContent::Envelope(content) => (content.attachments, content.metadata),
+        SavedContent::Legacy(attachments) => (attachments, None),
+    };
+    let metadata = metadata.map(|metadata| {
+        crate::services::link_previews::project_stored_metadata(metadata, media, Utc::now())
+    });
     let sticker = row
         .snapshot_sticker
         .map(|value| deserialize_snapshot::<SavedStickerSnapshot>(value, "sticker"))
@@ -115,6 +135,7 @@ pub fn saved_message_row_to_response(
         message_type: row.snapshot_message_type,
         forwarded_bundle_id: row.forwarded_bundle_id,
         attachments,
+        metadata,
         sticker,
         mentions,
         sender,
@@ -361,7 +382,13 @@ fn build_new_saved_message(
         saved_at: Utc::now(),
         snapshot_message: message.message.clone(),
         snapshot_message_type: message.message_type.clone(),
-        snapshot_attachments: snapshot_json(&snapshots.attachments, "attachments")?,
+        snapshot_attachments: snapshot_json(
+            &SavedContentSnapshot {
+                attachments: snapshots.attachments,
+                metadata: super::messages::snapshot_link_metadata(message),
+            },
+            "attachments",
+        )?,
         snapshot_sticker: snapshots
             .sticker
             .map(|snapshot| snapshot_json(&snapshot, "sticker"))
@@ -428,7 +455,7 @@ pub async fn save_message_snapshot(
     ensure_current_chat_membership(conn, message.chat_id, uid)?;
 
     if let Some(existing) = load_existing_saved_message(conn, uid, message_id)? {
-        return saved_message_row_to_response(existing, true);
+        return saved_message_row_to_response(existing, true, media);
     }
 
     let attachments = load_attachment_snapshots(conn, media, &message)?;
@@ -437,7 +464,7 @@ pub async fn save_message_snapshot(
     let chat = load_chat_snapshot(conn, media, message.chat_id)?;
 
     if let Some(existing) = load_existing_saved_message(conn, uid, message_id)? {
-        return saved_message_row_to_response(existing, true);
+        return saved_message_row_to_response(existing, true, media);
     }
 
     let id = match ids::next_message_id(id_gen).await {
@@ -445,7 +472,7 @@ pub async fn save_message_snapshot(
         Err(err) => {
             tracing::error!(error = ?err, "failed to generate saved message id");
             if let Some(existing) = load_existing_saved_message(conn, uid, message_id)? {
-                return saved_message_row_to_response(existing, true);
+                return saved_message_row_to_response(existing, true, media);
             }
             return Err(AppError::Internal("ID generation failed"));
         }
@@ -478,7 +505,7 @@ pub async fn save_message_snapshot(
             .ok_or(AppError::Internal("Saved message insert failed"))?,
     };
 
-    saved_message_row_to_response(row, true)
+    saved_message_row_to_response(row, true, media)
 }
 
 pub fn delete_saved_message_by_original(
@@ -517,6 +544,7 @@ pub fn delete_saved_message_by_id(
 
 pub fn list_saved_messages(
     conn: &mut PgConnection,
+    media: &MediaStore,
     uid: i32,
     chat_id: Option<i64>,
     before: Option<i64>,
@@ -554,7 +582,7 @@ pub fn list_saved_messages(
         .into_iter()
         .map(|row| {
             let can_locate_context = locatable_chat_ids.contains(&row.original_chat_id);
-            saved_message_row_to_response(row, can_locate_context)
+            saved_message_row_to_response(row, can_locate_context, media)
         })
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -576,6 +604,23 @@ mod tests {
     };
     use chrono::Utc;
     use serde_json::json;
+    fn media_store(base_url: &str) -> crate::services::media::MediaStore {
+        crate::services::media::MediaStore::new(
+            aws_sdk_s3::Client::from_conf(
+                aws_sdk_s3::Config::builder()
+                    .behavior_version_latest()
+                    .build(),
+            ),
+            std::sync::Arc::new(crate::config::MediaConfig {
+                bucket: "test".into(),
+                attachment_prefix: "attachments".into(),
+                base_url: Some(base_url.into()),
+                endpoint_url: None,
+                upload_proxy_path: None,
+                max_attachment_file_size_bytes: 1,
+            }),
+        )
+    }
 
     fn message_for_save() -> Message {
         Message {
@@ -583,6 +628,7 @@ mod tests {
             forwarded_from_message_id: None,
             id: 10,
             message: Some("hello".to_string()),
+            metadata: None,
             message_type: MessageType::Text,
             reply_to_id: None,
             reply_root_id: None,
@@ -710,13 +756,50 @@ mod tests {
         assert_eq!(page, vec![30, 20]);
         assert_eq!(next_cursor, Some(20));
     }
+    #[test]
+    fn link_preview_saved_snapshot_is_immutable_and_projects_current_media() {
+        let mut source = message_for_save();
+        source.metadata = Some(json!({"linkPreviews": [
+            {"url":"https://ready.example/", "status":"ready", "title":"Original",
+             "image":{"storageKey":"link-previews/image.webp","width":32,"height":24}},
+            {"url":"https://pending.example/", "status":"pending", "expiresAt":"2030-01-01T00:00:00Z"}
+        ]}));
+        let old = saved_row();
+        let parts = super::SavedMessageSnapshotParts {
+            attachments: Vec::new(),
+            sticker: None,
+            mentions: Vec::new(),
+            sender: serde_json::from_value(old.snapshot_sender.clone()).unwrap(),
+            chat: serde_json::from_value(old.snapshot_chat.clone()).unwrap(),
+        };
+        let captured = super::build_new_saved_message(500, 7, &source, parts).unwrap();
+        source.metadata = None;
+        source.message = None;
+        let mut row = old;
+        row.snapshot_attachments = captured.snapshot_attachments;
+        let response =
+            saved_message_row_to_response(row, true, &media_store("https://new.example")).unwrap();
+        let metadata = response.metadata.unwrap();
+        assert_eq!(metadata.link_previews.len(), 1);
+        assert_eq!(metadata.link_previews[0].title.as_deref(), Some("Original"));
+        assert_eq!(
+            metadata.link_previews[0].image.as_ref().unwrap().url,
+            "https://new.example/link-previews/image.webp"
+        );
+        assert!(metadata.link_previews[0].expires_at.is_none());
+        let legacy =
+            saved_message_row_to_response(saved_row(), true, &media_store("https://new.example"))
+                .unwrap();
+        assert!(legacy.metadata.is_none());
+        assert!(legacy.attachments.is_empty());
+    }
 
     #[test]
     fn saved_message_row_to_response_returns_internal_error_for_malformed_snapshot_json() {
         let mut row = saved_row();
         row.snapshot_attachments = json!({"not": "a list"});
 
-        let err = saved_message_row_to_response(row, true)
+        let err = saved_message_row_to_response(row, true, &media_store("https://media.example"))
             .expect_err("malformed JSON returns controlled error");
 
         assert!(matches!(

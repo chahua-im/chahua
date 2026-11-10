@@ -149,6 +149,18 @@
               (removeUpload)="removeUpload.emit($event)"></app-message-attachments>
           </div>
         }
+        @if (
+          !message().isDeleted &&
+          message().metadata?.linkPreviews?.length &&
+          message().messageType !== Type.placeholder &&
+          message().messageType !== Type.forwarded &&
+          message().messageType !== Type.invite
+        ) {
+          <app-message-link-previews
+            [previews]="message().metadata!.linkPreviews"
+            [interactive]="!preview() && !selecting() && (canInteract() || savedId() != null || record())"
+            [outgoing]="own()" />
+        }
         @if (!mediaOverlay()) {
           @let showForwardedCard = !hasMedia() && message().messageType === Type.forwarded && !message().isDeleted;
           <ng-template #timestamp>

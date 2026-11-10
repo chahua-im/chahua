@@ -475,6 +475,7 @@ async fn send_friendship_accepted_message(
             PreparedMessageSend {
                 system_kind: Some(crate::models::SystemMessageKind::FriendRequestAccepted),
                 forwarded_from_message_id: None,
+                metadata: None,
                 chat_id,
                 chat_kind,
                 sender_uid,

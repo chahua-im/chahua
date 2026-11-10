@@ -828,6 +828,7 @@ mod tests {
             forwarded_from_message_id: None,
             id,
             message: text.map(str::to_owned),
+            metadata: None,
             message_type: MessageType::Text,
             reply_to_id: None,
             reply_root_id: None,

@@ -208,6 +208,7 @@ fn rpc_services(state: &AppState) -> crate::rpc::RpcServices {
         config: state.config.clone(),
         media: state.media.clone(),
         avatars: state.avatars.clone(),
+        link_previews: state.link_previews.clone(),
         authz_service: state.authz_service.clone(),
         ws_registry: state.ws_registry.clone(),
         presence_service: state.presence_service.clone(),

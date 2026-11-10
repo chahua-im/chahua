@@ -49,11 +49,12 @@ struct SavedForwardedBundleMessagesPath {
     security(("bearer_jwt" = [])),
 )]
 async fn list_saved_messages(
+    State(state): State<AppState>,
     CurrentUid(uid): CurrentUid,
     mut conn: DbConn,
     Query(query): Query<ListSavedMessagesQuery>,
 ) -> Result<Json<ListSavedMessagesResponse>, AppError> {
-    saved_messages_api::list_saved_messages(uid, query, &mut conn).map(Json)
+    saved_messages_api::list_saved_messages(uid, query, &mut conn, &state.media).map(Json)
 }
 
 #[utoipa::path(

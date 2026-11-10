@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { MessageType, type SavedMessageResponse } from '../../../generated/models';
+import { LinkPreviewStatus, MessageType, type SavedMessageResponse } from '../../../generated/models';
 import { encodeId } from '../../api/snowflake-id';
 import { Message } from '../message/message';
 import { savedMessageContent } from './saved-message-content';
@@ -41,6 +41,14 @@ describe('savedMessageContent rendered by Message', () => {
     fixture.detectChanges();
     return fixture;
   }
+
+  it('maps saved preview metadata without consulting the original message', () => {
+    const metadata = {
+      linkPreviews: [{ url: 'https://example.com/', status: LinkPreviewStatus.ready, title: 'Saved title' }],
+    };
+    expect(savedMessageContent({ ...snapshot, metadata }).metadata).toEqual(metadata);
+    expect(savedMessageContent(snapshot).metadata).toBeUndefined();
+  });
 
   it('renders snapshot metadata and original attachment downloads without a live message', async () => {
     const fixture = await render({

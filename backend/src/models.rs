@@ -736,6 +736,7 @@ pub struct Message {
     pub forwarded_bundle_id: Option<i64>,
     pub forwarded_from_message_id: Option<i64>,
     pub system_kind: Option<SystemMessageKind>,
+    pub metadata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -761,6 +762,7 @@ pub struct NewMessage {
     pub forwarded_bundle_id: Option<i64>,
     pub forwarded_from_message_id: Option<i64>,
     pub system_kind: Option<SystemMessageKind>,
+    pub metadata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, Insertable)]

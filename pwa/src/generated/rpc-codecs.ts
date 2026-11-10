@@ -313,6 +313,7 @@ export const rpcSchemas: Record<string, JsonCodec> = {
   CreateMessageBody: {
     attachmentIds: [1],
     messageType: 'MessageType',
+    metadata: 'MessageMetadataInput',
     replyToId: 1,
     stickerId: 1,
   },
@@ -380,6 +381,7 @@ export const rpcSchemas: Record<string, JsonCodec> = {
     forwardedPreview: 'ForwardedMessagesPreviewResponse',
     mentions: ['MentionInfo'],
     messageType: 'MessageType',
+    metadata: 'MessageMetadataResponse',
     originalChatId: 1,
     originalMessageId: 1,
     reply: 'ForwardedReplyResponse',
@@ -555,6 +557,10 @@ export const rpcSchemas: Record<string, JsonCodec> = {
   InvitesUpdateParams: {
     inviteId: 1,
   },
+  LinkPreviewResponse: {
+    image: 'LinkPreviewImageResponse',
+    status: 'LinkPreviewStatus',
+  },
   ListBlocksResponse: {
     blocks: ['BlockResponse'],
   },
@@ -692,6 +698,12 @@ export const rpcSchemas: Record<string, JsonCodec> = {
   MentionInfo: {
     userGroup: 'UserGroupTagInfo',
   },
+  MessageMetadataInput: {
+    linkPreviews: ['LinkPreviewInput'],
+  },
+  MessageMetadataResponse: {
+    linkPreviews: ['LinkPreviewResponse'],
+  },
   MessagePreview: {
     attachments: ['MessagePreviewAttachment'],
     id: 1,
@@ -711,6 +723,7 @@ export const rpcSchemas: Record<string, JsonCodec> = {
     id: 1,
     mentions: ['MentionInfo'],
     messageType: 'MessageType',
+    metadata: 'MessageMetadataResponse',
     reactions: ['ReactionSummary'],
     replyRootId: 1,
     replyToMessage: 'MessagePreview',
@@ -739,6 +752,7 @@ export const rpcSchemas: Record<string, JsonCodec> = {
     attachmentIds: [1],
     chatId: 1,
     messageId: 1,
+    metadata: 'MessageMetadataInput',
   },
   MessagesForwardOneParams: {
     chatId: 1,
@@ -780,6 +794,7 @@ export const rpcSchemas: Record<string, JsonCodec> = {
     attachmentIds: [1],
     chatId: 1,
     messageType: 'MessageType',
+    metadata: 'MessageMetadataInput',
     replyToId: 1,
     stickerId: 1,
     threadId: 1,
@@ -788,6 +803,7 @@ export const rpcSchemas: Record<string, JsonCodec> = {
     attachmentIds: [1],
     chatId: 1,
     messageType: 'MessageType',
+    metadata: 'MessageMetadataInput',
     replyToId: 1,
     stickerId: 1,
   },
@@ -964,6 +980,7 @@ export const rpcSchemas: Record<string, JsonCodec> = {
     id: 1,
     mentions: ['MentionInfo'],
     messageType: 'MessageType',
+    metadata: 'MessageMetadataResponse',
     originalChatId: 1,
     originalMessageId: 1,
     originalReplyToMessageId: 1,
@@ -1248,6 +1265,7 @@ export const rpcSchemas: Record<string, JsonCodec> = {
   },
   UpdateMessageBody: {
     attachmentIds: [1],
+    metadata: 'MessageMetadataInput',
   },
   UpdateNotificationSettingRequest: {
     mode: 'NotificationSettingMode',

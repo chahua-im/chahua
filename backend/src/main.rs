@@ -131,16 +131,25 @@ async fn main() {
         client_tracking.clone(),
         shutdown_requested,
     ));
+    let media = build_media_store(&config).await;
+    let avatars = Arc::new(services::avatars::AvatarService::new(
+        config.avatars.clone(),
+        metrics.avatars.clone(),
+    ));
+    let link_previews = services::link_previews::LinkPreviewService::start(
+        pool.clone(),
+        media.clone(),
+        avatars.clone(),
+        ws_registry.clone(),
+    );
 
     let state = AppState::new(AppInner {
         db: pool.clone(),
         id_gen: Arc::new(utils::ids::new_generator()),
         metrics: metrics.clone(),
-        media: build_media_store(&config).await,
-        avatars: Arc::new(services::avatars::AvatarService::new(
-            config.avatars.clone(),
-            metrics.avatars.clone(),
-        )),
+        media,
+        avatars,
+        link_previews,
         authz_service: services::authz::AuthorizationService::start(),
         ws_registry: ws_registry.clone(),
         presence_service: Arc::new(services::presence::PresenceSnapshotService::new(

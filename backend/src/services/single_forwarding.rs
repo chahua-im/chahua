@@ -107,6 +107,7 @@ pub(crate) async fn prepare_single_forward(
             chat_kind: destination_kind,
             sender_uid: uid,
             message: Some(reason.as_str().to_owned()),
+            metadata: None,
             message_type: MessageType::Placeholder,
             sticker_id: None,
             reply_to_id: None,
@@ -155,12 +156,15 @@ pub(crate) async fn prepare_single_forward(
             .values(&cloned)
             .execute(conn)?;
     }
+    let metadata = super::messages::snapshot_link_metadata(&source)
+        .map(|metadata| serde_json::to_value(metadata).expect("snapshot metadata is serializable"));
     Ok(PreparedSingleForward::New(Box::new(PreparedMessageSend {
         system_kind: None,
         chat_id: destination_chat_id,
         chat_kind: destination_kind,
         sender_uid: uid,
         message: source.message,
+        metadata,
         message_type: source.message_type,
         sticker_id: source.sticker_id,
         reply_to_id: None,
@@ -334,6 +338,7 @@ mod tests {
             system_kind: None,
             id,
             message: Some("hello @[uid:9]".into()),
+            metadata: None,
             message_type: MessageType::Text,
             reply_to_id: None,
             reply_root_id: None,

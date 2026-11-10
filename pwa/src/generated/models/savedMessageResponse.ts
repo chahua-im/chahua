@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { MentionInfo } from './mentionInfo';
+import type { MessageMetadataResponse } from './messageMetadataResponse';
 import type { MessageType } from './messageType';
 import type { SavedAttachmentSnapshot } from './savedAttachmentSnapshot';
 import type { SavedChatSnapshot } from './savedChatSnapshot';
@@ -22,6 +23,7 @@ export interface SavedMessageResponse {
   mentions: MentionInfo[];
   message?: string;
   messageType: MessageType;
+  metadata?: MessageMetadataResponse;
   originalChatId: SnowflakeID;
   originalCreatedAt: string;
   originalMessageId: SnowflakeID;

@@ -366,6 +366,7 @@ export class ConversationStore {
       forwardedPreview: undefined,
       forwardedBundleId: undefined,
       message: undefined,
+      metadata: undefined,
       attachments: [],
       mentions: [],
       sticker: undefined,

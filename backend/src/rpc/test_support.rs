@@ -77,14 +77,23 @@ pub(crate) async fn services() -> Option<RpcServices> {
         metrics.presence.clone(),
         client_tracking.last_seen.clone(),
     ));
+    let media = crate::build_media_store(&config).await;
+    let avatars = Arc::new(services::avatars::AvatarService::new(
+        config.avatars.clone(),
+        metrics.avatars.clone(),
+    ));
+    let link_previews = services::link_previews::LinkPreviewService::start(
+        db.clone(),
+        media.clone(),
+        avatars.clone(),
+        ws_registry.clone(),
+    );
     Some(RpcServices::new(RpcServiceHandles {
         db: db.clone(),
         id_gen: Arc::new(crate::utils::ids::new_generator()),
-        media: crate::build_media_store(&config).await,
-        avatars: Arc::new(services::avatars::AvatarService::new(
-            config.avatars.clone(),
-            metrics.avatars.clone(),
-        )),
+        media,
+        avatars,
+        link_previews,
         authz_service: services::authz::AuthorizationService::start(),
         ws_registry: ws_registry.clone(),
         presence_service,

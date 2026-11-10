@@ -537,6 +537,7 @@ async fn send_pin_system_message(
             PreparedMessageSend {
                 system_kind: Some(system_kind),
                 forwarded_from_message_id: None,
+                metadata: None,
                 chat_id,
                 chat_kind,
                 sender_uid: uid,

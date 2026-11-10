@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    dto::{messages::MentionInfo, users::UserGroupTagInfo},
+    dto::{link_previews::MessageMetadataResponse, messages::MentionInfo, users::UserGroupTagInfo},
     models::MessageType,
 };
 
@@ -82,6 +82,8 @@ pub struct SavedMessageResponse {
     #[schema(value_type = Option<String>)]
     pub forwarded_bundle_id: Option<i64>,
     pub attachments: Vec<SavedAttachmentSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<MessageMetadataResponse>,
     pub sticker: Option<SavedStickerSnapshot>,
     pub mentions: Vec<MentionInfo>,
     pub sender: SavedSenderSnapshot,

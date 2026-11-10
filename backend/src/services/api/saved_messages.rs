@@ -18,8 +18,9 @@ pub fn list_saved_messages(
     uid: i32,
     query: ListSavedMessagesQuery,
     conn: &mut PgConnection,
+    media: &MediaStore,
 ) -> Result<ListSavedMessagesResponse, AppError> {
-    saved_messages::list_saved_messages(conn, uid, None, query.before, query.limit)
+    saved_messages::list_saved_messages(conn, media, uid, None, query.before, query.limit)
 }
 
 pub async fn put_saved_message(

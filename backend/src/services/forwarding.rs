@@ -189,6 +189,7 @@ fn prepared_forward_message(
         chat_kind,
         sender_uid,
         message: Some(forwarded_wrapper_text(preview.total)),
+        metadata: None,
         message_type: MessageType::Forwarded,
         sticker_id: None,
         reply_to_id: None,
@@ -348,6 +349,7 @@ mod tests {
                 sticker: None,
                 reply: None,
                 attachments: Vec::new(),
+                metadata: None,
                 mention_uids: Vec::new(),
             },
         }

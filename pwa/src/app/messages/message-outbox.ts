@@ -15,6 +15,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { filter, firstValueFrom, from, fromEvent, merge, Subject, takeUntil, timeout, type Observable } from 'rxjs';
 import { RpcApi } from '../../generated/rpc-api';
 import {
+  LinkPreviewStatus,
   MessageType,
   type SpeakingMode,
   ServerWsMessageType,
@@ -211,6 +212,11 @@ export class MessageOutbox {
     const messages = [...sources].sort((a, b) => a.id - b.id);
     const source = messages[0];
     const single = messages.length === 1;
+    const linkPreviews = single
+      ? source.metadata?.linkPreviews
+          .filter((preview) => preview.status === LinkPreviewStatus.ready)
+          .map(({ url, status, title, image }) => ({ url, status, title, image }))
+      : undefined;
     const clientGeneratedId = crypto.randomUUID();
     return this.add(chatId, threadId, {
       forwardComment: options.comment?.trim()
@@ -238,6 +244,7 @@ export class MessageOutbox {
         attachments: single ? source.attachments : [],
         sticker: single ? source.sticker : undefined,
         mentions: single ? source.mentions : undefined,
+        metadata: linkPreviews?.length ? { linkPreviews } : undefined,
         forwardedFrom:
           single && showsForwardOrigin(source)
             ? (source.forwardedFrom ?? {
@@ -741,6 +748,7 @@ export class MessageOutbox {
           ...message,
           isDeleted: true,
           message: undefined,
+          metadata: undefined,
           attachments: [],
           hasAttachments: false,
           sticker: undefined,
@@ -934,6 +942,7 @@ function tombstone(message: MessageResponse): MessageResponse {
   return {
     ...message,
     message: undefined,
+    metadata: undefined,
     attachments: [],
     hasAttachments: false,
     mentions: undefined,
