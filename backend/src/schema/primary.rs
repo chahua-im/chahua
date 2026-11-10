@@ -328,6 +328,7 @@ diesel::table! {
         forwarded_bundle_id -> Nullable<Int8>,
         forwarded_from_message_id -> Nullable<Int8>,
         system_kind -> Nullable<SystemMessageKind>,
+        metadata -> Nullable<Jsonb>,
     }
 }
 

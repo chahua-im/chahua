@@ -26,6 +26,7 @@ import {
   AttachmentUploadPurpose,
   GroupKind,
   GroupRole,
+  LinkPreviewStatus,
   MessageType,
   NotificationType,
   ServerWsMessageType,
@@ -3443,6 +3444,66 @@ describe('ConversationPage', () => {
     expect(scroll.scrollTop).toBe(200);
     expect(component['showDownButton']()).toBe(true);
   });
+
+  it.each([false, true])(
+    'preserves the reading position when a pending preview disappears (following bottom: %s)',
+    async (followingBottom) => {
+      component.ionViewDidEnter();
+      await settleMetadata();
+      await component['positionAndRead']();
+      const withPreview = {
+        ...testMessage,
+        message: 'Read https://example.com/',
+        metadata: {
+          linkPreviews: [
+            {
+              url: 'https://example.com/',
+              status: LinkPreviewStatus.pending,
+              expiresAt: new Date(Date.now() + 30000).toISOString(),
+            },
+          ],
+        },
+      };
+      events.next({ type: ServerWsMessageType.messageUpdated, payload: withPreview });
+      incoming.next({ ...testMessage, id: encodeId('9007199254741004'), clientGeneratedId: 'next-message' });
+      await fixture.whenStable();
+      const [first, anchor] = [...fixture.nativeElement.querySelectorAll('app-message')] as HTMLElement[];
+      const firstHeight = () => (first.querySelector('app-message-link-previews .card') ? 400 : 348);
+      const contentHeight = () => firstHeight() + 1100;
+      let top = followingBottom ? contentHeight() - 500 : 500;
+      Object.defineProperties(scroll, {
+        clientHeight: { value: 500, configurable: true },
+        scrollHeight: { get: contentHeight, configurable: true },
+        scrollTop: {
+          get: () => top,
+          set: (value: number) => {
+            top = Math.max(0, Math.min(value, contentHeight() - 500));
+          },
+          configurable: true,
+        },
+      });
+      vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 500));
+      vi.spyOn(first, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, -top, 300, firstHeight()));
+      vi.spyOn(anchor, 'getBoundingClientRect').mockImplementation(
+        () => new DOMRect(0, firstHeight() - top, 300, 1100),
+      );
+      await component['trackScroll']();
+      const bottom = anchor.getBoundingClientRect().bottom;
+      events.next({
+        type: ServerWsMessageType.messageUpdated,
+        payload: {
+          ...withPreview,
+          metadata: { linkPreviews: [{ url: 'https://example.com/', status: LinkPreviewStatus.unavailable }] },
+        },
+      });
+      await fixture.whenStable();
+      expect(first.querySelector('app-message-link-previews .card')).toBeNull();
+      expect(fixture.nativeElement.querySelectorAll('app-message')[1]).toBe(anchor);
+      expect(anchor.getBoundingClientRect().bottom).toBe(bottom);
+      if (followingBottom) expect(scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight).toBe(0);
+      else expect(scroll.scrollTop).toBe(448);
+    },
+  );
 
   it('keeps messages at their screen positions when the first pin appears or disappears while reading history', async () => {
     Object.defineProperties(scroll, { clientHeight: { value: 448 }, scrollHeight: { value: 1000 } });

@@ -99,6 +99,7 @@ pub struct PreparedMessageSend {
     pub chat_kind: GroupKind,
     pub sender_uid: i32,
     pub message: Option<String>,
+    pub metadata: Option<serde_json::Value>,
     pub message_type: MessageType,
     pub sticker_id: Option<i64>,
     pub reply_to_id: Option<i64>,
@@ -494,6 +495,7 @@ pub fn redact_deleted_message_response(response: &mut MessageResponse) {
     }
 
     response.message = None;
+    response.metadata = None;
     response.system_links = None;
     response.sticker = None;
     response.has_attachments = false;
@@ -603,6 +605,24 @@ fn load_forwarded_attachment_snapshots(
     Ok(by_message_id)
 }
 
+pub(crate) fn snapshot_link_metadata(
+    message: &Message,
+) -> Option<crate::dto::link_previews::StoredMessageMetadata> {
+    let metadata = message.metadata.as_ref()?;
+    match crate::services::link_previews::ready_snapshot(metadata)
+        .and_then(|snapshot| snapshot.map(serde_json::from_value).transpose())
+    {
+        Ok(snapshot) => snapshot,
+        Err(_) => {
+            tracing::warn!(
+                message_id = message.id,
+                "invalid link preview metadata in snapshot source"
+            );
+            None
+        }
+    }
+}
+
 fn build_forwarded_message_snapshot(
     source_message: &Message,
     attachments: Vec<AttachmentSnapshot>,
@@ -629,6 +649,7 @@ fn build_forwarded_message_snapshot(
         sticker,
         reply: build_forwarded_reply_snapshot(source_message.reply_to_id, selected_message_ids),
         attachments,
+        metadata: snapshot_link_metadata(source_message),
         mention_uids: source_message
             .message
             .as_deref()
@@ -732,6 +753,7 @@ pub(crate) fn capture_forwarded_bundle_items(
                             &selected_message_ids,
                         ),
                         attachments: Vec::new(),
+                        metadata: None,
                         mention_uids: Vec::new(),
                     },
                 });
@@ -1153,6 +1175,9 @@ fn forwarded_bundle_item_response(
                     height: attachment.height,
                 })
                 .collect(),
+            metadata: snapshot.metadata.clone().map(|metadata| {
+                crate::services::link_previews::project_stored_metadata(metadata, media, Utc::now())
+            }),
             mentions: snapshot
                 .mention_uids
                 .iter()
@@ -1177,6 +1202,7 @@ fn forwarded_bundle_item_response(
                 user_profiles,
             ),
             attachments: Vec::new(),
+            metadata: None,
             mentions: Vec::new(),
             forwarded_bundle_id: Some(bundle_ref.forwarded_bundle_id),
             forwarded_preview: Some(forwarded_messages_preview_response(
@@ -1880,6 +1906,7 @@ pub async fn send_prepared_message(
         forwarded_from_message_id: prepared.forwarded_from_message_id,
         id,
         message: stored_message.clone(),
+        metadata: prepared.metadata.clone(),
         message_type,
         sticker_id: prepared.sticker_id,
         reply_to_id: prepared.reply_to_id,
@@ -2099,6 +2126,7 @@ fn validate_idempotent_message_payload(
     stored_message: Option<&str>,
     existing_attachment_ids: &[i64],
 ) -> Result<(), AppError> {
+    // Enrichment is mutable; the first accepted metadata wins and is not compared on replay.
     let attachment_ids_match = existing_attachment_ids == prepared.attachment_ids;
 
     if existing.chat_id == prepared.chat_id
@@ -2590,6 +2618,15 @@ pub async fn attach_metadata(
             &sticker_emojis,
             &message_attachments_map,
         );
+        let metadata = m.metadata.as_ref().and_then(|value| {
+            match super::link_previews::project_metadata(value, media, Utc::now()) {
+                Ok(metadata) => Some(metadata),
+                Err(_) => {
+                    tracing::warn!(message_id = m.id, "Invalid stored message metadata");
+                    None
+                }
+            }
+        });
         let (message, system_links) = super::system_messages::decode(&m.message_type, m.message);
         let mut response = MessageResponse {
             system_kind: m.system_kind,
@@ -2597,6 +2634,7 @@ pub async fn attach_metadata(
             forwarded_from,
             id: m.id,
             message: if is_deleted { None } else { message },
+            metadata,
             message_type: m.message_type,
             sticker: m.sticker_id.and_then(|sticker_id| {
                 (!is_deleted)
@@ -2840,6 +2878,7 @@ mod tests {
             forwarded_from_message_id: None,
             id,
             message: Some(format!("message {id}")),
+            metadata: None,
             message_type: MessageType::Text,
             reply_to_id: None,
             reply_root_id: None,
@@ -2978,6 +3017,47 @@ mod tests {
     }
 
     #[test]
+    fn link_preview_forward_snapshot_is_immutable_and_projects_current_media() {
+        let mut source = message(10, |message| {
+            message.metadata = Some(json!({"linkPreviews": [
+                {"url":"https://ready.example/", "status":"ready", "title":"Original",
+                 "image":{"storageKey":"link-previews/image.webp","width":32,"height":24}},
+                {"url":"https://pending.example/", "status":"pending", "expiresAt":"2030-01-01T00:00:00Z"}
+            ]}));
+        });
+        let snapshot = build_forwarded_message_snapshot(
+            &source,
+            Vec::new(),
+            &HashMap::new(),
+            &HashSet::from([10]),
+        )
+        .unwrap();
+        source.metadata = None;
+        source.message = None;
+        let mut old = serde_json::to_value(&snapshot).unwrap();
+        old.as_object_mut().unwrap().remove("metadata");
+        let legacy: ForwardedMessageSnapshot = serde_json::from_value(old).unwrap();
+        assert!(legacy.metadata.is_none());
+        let item = ForwardedBundlePayloadItem::MessageSnapshot { snapshot };
+        let response = super::forwarded_bundle_item_response(
+            &media_store("https://new.example"),
+            &item,
+            &HashMap::new(),
+            &HashSet::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        let metadata = response.metadata.unwrap();
+        assert_eq!(metadata.link_previews.len(), 1);
+        assert_eq!(metadata.link_previews[0].title.as_deref(), Some("Original"));
+        assert_eq!(
+            metadata.link_previews[0].image.as_ref().unwrap().url,
+            "https://new.example/link-previews/image.webp"
+        );
+        assert!(metadata.link_previews[0].expires_at.is_none());
+    }
+
+    #[test]
     fn forwarded_sticker_response_uses_request_user_state_and_current_media_config() {
         let media = media_store("https://current-media.example");
         let snapshot = forwarded_sticker_snapshot();
@@ -3087,6 +3167,7 @@ mod tests {
                     original_message_id: 2,
                 }),
                 attachments: Vec::new(),
+                metadata: None,
                 mention_uids: Vec::new(),
             },
         };
@@ -3101,6 +3182,7 @@ mod tests {
                 sticker: None,
                 reply: None,
                 attachments: Vec::new(),
+                metadata: None,
                 mention_uids: Vec::new(),
             },
         };
@@ -3150,6 +3232,7 @@ mod tests {
                         width: None,
                         height: None,
                     }],
+                    metadata: None,
                     mention_uids,
                 },
             };
@@ -3282,6 +3365,21 @@ mod tests {
     }
 
     #[test]
+    fn idempotent_message_payload_ignores_enriched_metadata() {
+        let mut existing = test_message();
+        existing.metadata = Some(serde_json::json!({"linkPreviews": []}));
+        let prepared = test_prepared_message();
+
+        assert!(super::validate_idempotent_message_payload(
+            &existing,
+            &prepared,
+            Some("hello"),
+            &[10, 11]
+        )
+        .is_ok());
+    }
+
+    #[test]
     fn idempotent_message_payload_rejects_different_text() {
         let existing = test_message();
         let prepared = PreparedMessageSend {
@@ -3380,6 +3478,7 @@ mod tests {
             forwarded_from_message_id: None,
             id: 1,
             message: Some("hello".to_string()),
+            metadata: None,
             message_type: MessageType::Text,
             reply_to_id: Some(5),
             reply_root_id: None,
@@ -3411,6 +3510,7 @@ mod tests {
             forwarded_preview_items: None,
             sender_uid: 7,
             message: Some("hello".to_string()),
+            metadata: None,
             message_type: MessageType::Text,
             sticker_id: None,
             reply_to_id: Some(5),
@@ -3429,6 +3529,7 @@ mod tests {
             forwarded_from: None,
             id: 1,
             message: Some("abc123".to_string()),
+            metadata: None,
             message_type: MessageType::Invite,
             sticker: None,
             reply_root_id: None,
@@ -3532,6 +3633,15 @@ mod tests {
             forwarded_from: None,
             id: 10,
             message: Some("secret root".to_string()),
+            metadata: Some(crate::dto::link_previews::MessageMetadataResponse {
+                link_previews: vec![crate::dto::link_previews::LinkPreviewResponse {
+                    url: "https://example.com/".to_string(),
+                    status: crate::dto::link_previews::LinkPreviewStatus::Ready,
+                    expires_at: None,
+                    title: Some("secret".to_string()),
+                    image: None,
+                }],
+            }),
             message_type: MessageType::Text,
             sticker: Some(sticker_response()),
             reply_root_id: None,
@@ -3574,6 +3684,7 @@ mod tests {
             Some(2)
         );
         assert_eq!(response.message, None);
+        assert!(response.metadata.is_none());
         assert!(response.system_links.is_none());
         assert!(response.sticker.is_none());
         assert!(!response.has_attachments);

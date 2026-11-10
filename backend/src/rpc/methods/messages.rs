@@ -50,6 +50,7 @@ pub async fn send(
             id_gen: &services.id_gen,
             media: &services.media,
             avatars: &services.avatars,
+            link_previews: &services.link_previews,
             metrics: &services.metrics,
             authz_service: &services.authz_service,
             ws_registry: &services.ws_registry,
@@ -126,6 +127,7 @@ pub async fn edit(
         api::PatchMessageDeps {
             media: &services.media,
             avatars: &services.avatars,
+            link_previews: &services.link_previews,
             ws_registry: &services.ws_registry,
             message_search: &services.message_search,
         },
@@ -304,6 +306,7 @@ pub async fn send_in_thread(
             id_gen: &services.id_gen,
             media: &services.media,
             avatars: &services.avatars,
+            link_previews: &services.link_previews,
             metrics: &services.metrics,
             ws_registry: &services.ws_registry,
             push_service: &services.push_service,

@@ -9,6 +9,7 @@ import type { AttachmentResponse } from './attachmentResponse';
 import type { ForwardedMessagesPreviewResponse } from './forwardedMessagesPreviewResponse';
 import type { ForwardedReplyResponse } from './forwardedReplyResponse';
 import type { MentionInfo } from './mentionInfo';
+import type { MessageMetadataResponse } from './messageMetadataResponse';
 import type { MessageStickerResponse } from './messageStickerResponse';
 import type { MessageType } from './messageType';
 import type { SnowflakeID } from './snowflakeID';
@@ -21,6 +22,7 @@ export interface ForwardedMessageResponse {
   mentions?: MentionInfo[];
   message?: string;
   messageType: MessageType;
+  metadata?: MessageMetadataResponse;
   originalChatId: SnowflakeID;
   originalCreatedAt: string;
   originalMessageId: SnowflakeID;

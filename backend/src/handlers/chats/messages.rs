@@ -183,6 +183,7 @@ async fn post_message(
             id_gen: &state.id_gen,
             media: &state.media,
             avatars: &state.avatars,
+            link_previews: &state.link_previews,
             metrics: &state.metrics,
             authz_service: &state.authz_service,
             ws_registry: &state.ws_registry,
@@ -381,6 +382,7 @@ pub(super) async fn post_thread_message(
             id_gen: &state.id_gen,
             media: &state.media,
             avatars: &state.avatars,
+            link_previews: &state.link_previews,
             metrics: &state.metrics,
             ws_registry: &state.ws_registry,
             push_service: &state.push_service,
@@ -425,6 +427,7 @@ async fn patch_message(
         crate::services::api::chats::messages::PatchMessageDeps {
             media: &state.media,
             avatars: &state.avatars,
+            link_previews: &state.link_previews,
             ws_registry: &state.ws_registry,
             message_search: &state.message_search,
         },

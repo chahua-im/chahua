@@ -11,6 +11,9 @@ use crate::config::MediaConfig;
 use crate::errors::AppError;
 
 pub const PUBLIC_MEDIA_CACHE_CONTROL: &str = "public,max-age=31536000,immutable";
+// Bounds the entire SDK operation, including its existing retry policy.
+const PREVIEW_STORAGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// RFC 5987 allows only `attr-char` unescaped in an extended parameter value,
 /// so everything outside that set is percent-encoded.
 const CONTENT_DISPOSITION_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
@@ -139,20 +142,49 @@ impl MediaStore {
         content_type: &str,
         body: ByteStream,
     ) -> Result<(), (StatusCode, &'static str)> {
-        self.client
+        self.put_object_with_timeout(storage_key, content_type, body, None)
+            .await
+    }
+
+    pub async fn put_preview_object(
+        &self,
+        storage_key: &str,
+        content_type: &str,
+        body: ByteStream,
+    ) -> Result<(), (StatusCode, &'static str)> {
+        self.put_object_with_timeout(
+            storage_key,
+            content_type,
+            body,
+            Some(PREVIEW_STORAGE_TIMEOUT),
+        )
+        .await
+    }
+
+    async fn put_object_with_timeout(
+        &self,
+        storage_key: &str,
+        content_type: &str,
+        body: ByteStream,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<(), (StatusCode, &'static str)> {
+        let request = self
+            .client
             .put_object()
             .bucket(&self.config.bucket)
             .key(storage_key)
             .content_type(content_type)
             .cache_control(PUBLIC_MEDIA_CACHE_CONTROL)
             .acl(aws_sdk_s3::types::ObjectCannedAcl::PublicRead)
-            .body(body)
-            .send()
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to upload object: {:?}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, "Failed to upload media")
-            })?;
+            .body(body);
+        let mut request = request.customize();
+        if let Some(timeout) = timeout {
+            request = request.config_override(self.preview_timeout_config(timeout));
+        }
+        request.send().await.map_err(|e| {
+            tracing::error!("Failed to upload object: {:?}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to upload media")
+        })?;
 
         Ok(())
     }
@@ -210,16 +242,42 @@ impl MediaStore {
     /// Best-effort delete, used to roll back an upload whose database write
     /// failed. A leaked object is preferable to failing the rollback path.
     pub async fn delete_object(&self, storage_key: &str) {
-        if let Err(e) = self
+        self.delete_object_with_timeout(storage_key, None).await;
+    }
+
+    pub async fn delete_preview_object(&self, storage_key: &str) {
+        self.delete_object_with_timeout(storage_key, Some(PREVIEW_STORAGE_TIMEOUT))
+            .await;
+    }
+
+    async fn delete_object_with_timeout(
+        &self,
+        storage_key: &str,
+        timeout: Option<std::time::Duration>,
+    ) {
+        let request = self
             .client
             .delete_object()
             .bucket(&self.config.bucket)
-            .key(storage_key)
-            .send()
-            .await
-        {
+            .key(storage_key);
+        let mut request = request.customize();
+        if let Some(timeout) = timeout {
+            request = request.config_override(self.preview_timeout_config(timeout));
+        }
+        if let Err(e) = request.send().await {
             tracing::error!("Failed to delete object {}: {:?}", storage_key, e);
         }
+    }
+
+    fn preview_timeout_config(&self, timeout: std::time::Duration) -> aws_sdk_s3::config::Builder {
+        let mut timeouts = self
+            .client
+            .config()
+            .timeout_config()
+            .map(|config| config.to_builder())
+            .unwrap_or_default();
+        timeouts.set_operation_timeout(Some(timeout));
+        aws_sdk_s3::config::Builder::new().timeout_config(timeouts.build())
     }
 }
 
@@ -308,6 +366,75 @@ mod tests {
                 "/_storage/local-bucket/attachments/photo.webp"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn link_preview_storage_operations_timeout_on_stalled_response() {
+        use aws_sdk_s3::config::{Credentials, Region};
+        use tokio::io::AsyncReadExt;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let (sent, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let server = tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let sent = sent.clone();
+                tokio::spawn(async move {
+                    let mut buffer = [0; 8192];
+                    let count = socket.read(&mut buffer).await.unwrap();
+                    let request = String::from_utf8_lossy(&buffer[..count]);
+                    sent.send(request.split_whitespace().next().unwrap().to_owned())
+                        .unwrap();
+                    // Keep the connection open without sending response headers.
+                    std::future::pending::<()>().await;
+                    drop(socket);
+                });
+            }
+        });
+        let client = aws_sdk_s3::Client::from_conf(
+            aws_sdk_s3::Config::builder()
+                .behavior_version_latest()
+                .region(Region::new("us-west-2"))
+                .credentials_provider(Credentials::new("test", "test", None, None, "test"))
+                .endpoint_url(&endpoint)
+                .force_path_style(true)
+                .build(),
+        );
+        let store = MediaStore::new(
+            client,
+            Arc::new(crate::config::MediaConfig {
+                bucket: "local-bucket".into(),
+                attachment_prefix: "attachments".into(),
+                base_url: None,
+                endpoint_url: Some(endpoint),
+                upload_proxy_path: None,
+                max_attachment_file_size_bytes: 1024,
+            }),
+        );
+        let (put, ()) = tokio::time::timeout(
+            PREVIEW_STORAGE_TIMEOUT + std::time::Duration::from_secs(3),
+            async {
+                tokio::join!(
+                    store.put_preview_object(
+                        "link-previews/test.webp",
+                        "image/webp",
+                        vec![1].into()
+                    ),
+                    store.delete_preview_object("link-previews/test.webp"),
+                )
+            },
+        )
+        .await
+        .expect("preview storage operations must finish");
+        assert!(put.is_err());
+        let first = received.try_recv().unwrap();
+        let second = received.try_recv().unwrap();
+        assert!(matches!(
+            (first.as_str(), second.as_str()),
+            ("PUT", "DELETE") | ("DELETE", "PUT")
+        ));
+        server.abort();
     }
 
     #[test]

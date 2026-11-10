@@ -217,6 +217,7 @@ pub async fn post_add_member(
             PreparedMessageSend {
                 system_kind: Some(SystemMessageKind::MemberAdded),
                 forwarded_from_message_id: None,
+                metadata: None,
                 chat_id,
                 chat_kind: kind,
                 sender_uid: uid,
@@ -354,6 +355,7 @@ pub async fn delete_remove_member(
             PreparedMessageSend {
                 system_kind: Some(system_kind),
                 forwarded_from_message_id: None,
+                metadata: None,
                 chat_id,
                 chat_kind: kind,
                 sender_uid,

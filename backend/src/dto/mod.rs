@@ -7,6 +7,7 @@ pub mod external;
 pub mod friends;
 pub mod groups;
 pub mod invites;
+pub mod link_previews;
 pub mod members;
 pub mod messages;
 pub mod notification_preferences;

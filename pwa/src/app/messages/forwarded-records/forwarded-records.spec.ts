@@ -108,6 +108,16 @@ describe('ForwardedRecords', () => {
     expect(fixture.nativeElement.textContent).toContain('captured content');
   });
 
+  it('retains preview metadata when mapping a full forwarded record', async () => {
+    const { fixture, peer } = create({ id: wireChat.id, messageId: wireMessage.id });
+    const metadata = { linkPreviews: [{ url: 'https://example.com/', status: 'ready', title: 'Forwarded title' }] };
+    peer
+      .expect('messages.listForwardedMessages', { chatId: wireChat.id, messageId: wireMessage.id })
+      .flush({ total: 1, messages: [{ ...record, metadata }] });
+    await fixture.whenStable();
+    expect(fixture.componentInstance['messages']()[0].metadata).toEqual(metadata);
+  });
+
   it('keeps a text placeholder for the sticky record avatar while loading or on failure', async () => {
     const { fixture, peer } = create({ id: wireChat.id, messageId: wireMessage.id });
     peer

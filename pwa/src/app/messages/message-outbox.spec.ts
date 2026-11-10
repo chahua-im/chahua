@@ -5,6 +5,7 @@ import { vi } from 'vitest';
 import { AlertController } from '@ionic/angular';
 import {
   AttachmentUploadPurpose,
+  LinkPreviewStatus,
   MessageType,
   SpeakingMode,
   ServerWsMessageType,
@@ -201,6 +202,65 @@ describe('MessageOutbox', () => {
     ).flush({ ...wireAccepted(item.clientGeneratedId), message: 'latest edit', isEdited: true });
     await item.operation;
     expect(item.message().message).toBe('latest edit');
+  });
+
+  it('copies only ready preview snapshots for a single optimistic forward and keeps acknowledged metadata', async () => {
+    const ready = { url: 'https://example.com/', status: LinkPreviewStatus.ready, title: 'Example' };
+    const pending = {
+      url: 'https://pending.example/',
+      status: LinkPreviewStatus.pending,
+      expiresAt: '2099-01-01T00:00:00Z',
+    };
+    const source = {
+      ...testMessage,
+      metadata: { linkPreviews: [{ ...ready, expiresAt: '2099-01-01T00:00:00Z' }, pending] },
+    };
+    const item = outbox.enqueueForward(testChat.id, undefined, [source]);
+    expect(item.message().metadata?.linkPreviews).toEqual([{ ...ready, image: undefined }]);
+    const metadata = { linkPreviews: [ready] };
+    peer.expect('messages.forwardOne').flush({ ...accepted(item), metadata });
+    await item.operation;
+    expect(item.confirmed()?.metadata).toEqual(metadata);
+    expect(item.message().metadata).toEqual(metadata);
+  });
+
+  it('does not copy pending-only previews into a forward', async () => {
+    const source = {
+      ...testMessage,
+      metadata: {
+        linkPreviews: [
+          { url: 'https://example.com/', status: LinkPreviewStatus.pending, expiresAt: '2099-01-01T00:00:00Z' },
+        ],
+      },
+    };
+    const item = outbox.enqueueForward(testChat.id, undefined, [source]);
+    expect(item.message().metadata).toBeUndefined();
+    peer.expect('messages.forwardOne').flush(accepted(item));
+    await item.operation;
+  });
+
+  it('discards metadata from a cancelled acknowledgement and deletion event', async () => {
+    const changes = vi.fn();
+    events.subscribe(changes);
+    const item = outbox.enqueue(testChat.id, undefined, 'cancel', text);
+    const create = peer.expect('messages.send');
+    await outbox.cancel(item);
+    create.flush({
+      ...wireAccepted(item.clientGeneratedId),
+      metadata: { linkPreviews: [{ url: 'https://example.com/', status: LinkPreviewStatus.ready, title: 'Example' }] },
+    });
+    await item.operation;
+    (await peer.expectAsync('messages.delete', { chatId, messageId: '9007199254741100' })).flush(null);
+    await vi.waitFor(() =>
+      expect(changes).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: ServerWsMessageType.messageDeleted,
+          payload: expect.objectContaining({ metadata: undefined }),
+        }),
+      ),
+    );
+    expect(item.confirmed()?.metadata).toBeUndefined();
+    expect(item.message().metadata).toBeUndefined();
   });
 
   it('cancels a sent create, ignores its late result for display, and deletes the discovered server message', async () => {

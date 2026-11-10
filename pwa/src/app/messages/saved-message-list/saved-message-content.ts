@@ -9,6 +9,7 @@ export function savedMessageContent(saved: SavedMessageResponse): MessageContent
     sender: saved.sender,
     createdAt: saved.originalCreatedAt,
     message: saved.message,
+    metadata: saved.metadata,
     mentions: saved.mentions,
     forwardedBundleId: saved.forwardedBundleId,
     messageType: saved.messageType,

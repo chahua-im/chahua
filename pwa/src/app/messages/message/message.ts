@@ -17,6 +17,7 @@ import { MessageAttachments, type MessageAttachmentSource } from '../message-att
 import { MessageAuthor } from '../message-author/message-author';
 import { MessageDelivery } from '../message-delivery';
 import { MessagePreview } from '../message-preview/message-preview';
+import { MessageLinkPreviews } from '../message-link-previews';
 import { MessageReactions } from '../message-reactions/message-reactions';
 import { MessageStatus } from '../message-status/message-status';
 import { MessageText } from '../message-text/message-text';
@@ -36,6 +37,7 @@ export type MessageContent = MessageAttachmentSource &
       | 'id'
       | 'isEdited'
       | 'mentions'
+      | 'metadata'
       | 'isDeleted'
       | 'reactions'
       | 'replyRootId'
@@ -72,6 +74,7 @@ export interface MessageMenuSelection {
     MessageText,
     MessageAuthor,
     MessagePreview,
+    MessageLinkPreviews,
     MessageReactions,
     MessageThread,
     MessageStatus,

@@ -6,9 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { SnowflakeID } from '../snowflakeID';
+import type { MessageMetadataInput } from './messageMetadataInput';
 
 export interface UpdateMessageBody {
   /** Complete attachment selection in display order, including retained uploads. */
   attachmentIds?: SnowflakeID[];
   message: string;
+  metadata?: MessageMetadataInput;
 }

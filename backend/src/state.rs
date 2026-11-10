@@ -19,6 +19,7 @@ use crate::services::authz::AuthorizationService;
 use crate::services::avatars::AvatarService;
 use crate::services::background::BackgroundService;
 use crate::services::client_tracking::ClientTrackingService;
+use crate::services::link_previews::LinkPreviewService;
 use crate::services::media::MediaStore;
 use crate::services::message_search::MessageSearchService;
 use crate::services::presence::PresenceSnapshotService;
@@ -39,6 +40,7 @@ pub struct AppInner {
     pub media: MediaStore,
     /// Discuz user-avatar resolution.
     pub avatars: Arc<AvatarService>,
+    pub link_previews: Arc<LinkPreviewService>,
     pub authz_service: Arc<AuthorizationService>,
     pub ws_registry: Arc<ConnectionRegistry>,
     pub presence_service: Arc<PresenceSnapshotService>,

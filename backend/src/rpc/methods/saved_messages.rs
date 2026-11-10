@@ -19,7 +19,7 @@ pub async fn list_for_chat(
     let SavedMessagesListForChatParams { chat_id, query } = params;
     let uid = context.uid()?;
     let mut conn = services.db.get()?;
-    chat_api::list_chat_saved_messages(uid, chat_id, query, &mut conn)
+    chat_api::list_chat_saved_messages(uid, chat_id, query, &mut conn, &services.media)
 }
 
 pub async fn list(
@@ -30,7 +30,7 @@ pub async fn list(
     let SavedMessagesListParams { query } = params;
     let uid = context.uid()?;
     let mut conn = services.db.get()?;
-    api::list_saved_messages(uid, query, &mut conn)
+    api::list_saved_messages(uid, query, &mut conn, &services.media)
 }
 
 pub async fn save(

@@ -170,6 +170,12 @@ type ScrollPosition =
   | { type: PositionKind.Message | PositionKind.Reaction; messageId: SnowflakeID }
   | { type: PositionKind.Anchor; messageId: SnowflakeID; offset: number };
 
+interface ConversationEntry {
+  chatId: SnowflakeID;
+  threadId?: SnowflakeID;
+  version: number;
+}
+
 @Component({
   selector: 'app-conversation',
   templateUrl: './conversation.page.html',
@@ -589,7 +595,7 @@ export class ConversationPage {
     transform: parseMessageId,
   });
   private readonly entryVersion = signal(0);
-  private readonly entryKey = computed(() => ({
+  private readonly entryKey = computed<ConversationEntry>(() => ({
     chatId: this.id(),
     threadId: this.threadId(),
     version: this.entryVersion(),
@@ -920,6 +926,15 @@ export class ConversationPage {
     return uid ? this.chatInfo.relationship(uid).value() : undefined;
   });
   protected readonly scrolling = scrollActivity();
+  private contentGeometry?: {
+    entry: ConversationEntry;
+    height: number;
+    scrollTop: number;
+    anchor: HTMLElement;
+    anchorHeight: number;
+    bottom: number;
+    followingBottom: boolean;
+  };
   private readonly floatingDate = viewChild.required<ElementRef<HTMLElement>>('floatingDate');
   private readonly dateSeparators = viewChildren<ElementRef<HTMLElement>>('dateSeparator');
   protected readonly dateColliding = signal(false);
@@ -1983,6 +1998,7 @@ export class ConversationPage {
         }
       }
       this.position.set(undefined);
+      this.contentGeometry = undefined;
     }
     await this.trackScroll();
     if (position && this.isCurrent(entry) && version === this.navigationVersion) this.positioned.set(true);
@@ -1993,6 +2009,27 @@ export class ConversationPage {
     const version = this.navigationVersion;
     const scroll = await this.content()?.getScrollElement();
     if (!scroll || !this.isCurrent(entry) || version !== this.navigationVersion) return;
+    const previous = this.contentGeometry;
+    if (
+      previous?.entry === entry &&
+      previous.anchorHeight > 0 &&
+      previous.height !== scroll.scrollHeight &&
+      !this.position()
+    ) {
+      const below = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight;
+      if (
+        previous.followingBottom &&
+        this.conversation.atLatest() &&
+        (scroll.scrollTop === previous.scrollTop || below < 1)
+      ) {
+        scroll.scrollTop = scroll.scrollHeight;
+      } else if (previous.anchor.isConnected) {
+        // Preserve the visible message's bottom when asynchronous content above
+        // it changes height, while retaining any intervening user scroll.
+        const bottom = previous.anchor.getBoundingClientRect().bottom - scroll.getBoundingClientRect().top;
+        scroll.scrollTop += bottom - previous.bottom + scroll.scrollTop - previous.scrollTop;
+      }
+    }
     const height = scroll.clientHeight;
     const top = scroll.scrollTop;
     const bounds = {
@@ -2041,6 +2078,20 @@ export class ConversationPage {
       if (allElements[middle].nativeElement.getBoundingClientRect().bottom <= viewport.top) first = middle + 1;
       else last = middle;
     }
+    const geometryAnchor = allElements[first]?.nativeElement;
+    const anchorRect = geometryAnchor?.getBoundingClientRect();
+    this.contentGeometry =
+      geometryAnchor && anchorRect
+        ? {
+            entry,
+            height: scroll.scrollHeight,
+            scrollTop: scroll.scrollTop,
+            anchor: geometryAnchor,
+            anchorHeight: anchorRect.height,
+            bottom: anchorRect.bottom - viewport.top,
+            followingBottom: this.atBottom() && this.conversation.atLatest(),
+          }
+        : undefined;
     this.visibleDate.set(rows[first]?.message.createdAt);
     // Settings can change this filter while the cached conversation is covered.
     // Retain a non-membership row so it survives toggling in either direction.

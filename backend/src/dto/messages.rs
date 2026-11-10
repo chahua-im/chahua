@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     dto::{
         attachments::{AttachmentResponse, AttachmentSnapshot},
+        link_previews::{MessageMetadataInput, MessageMetadataResponse, StoredMessageMetadata},
         users::User,
     },
     models::MessageType,
@@ -31,6 +32,8 @@ pub struct CreateMessageBody {
     /// Uploaded attachment IDs in display order; allocation-time order is replaced.
     #[serde(default)]
     pub attachment_ids: Vec<String>,
+    #[serde(default)]
+    pub metadata: Option<MessageMetadataInput>,
 }
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
@@ -40,6 +43,8 @@ pub struct UpdateMessageBody {
     /// Complete attachment selection in display order, including retained uploads.
     #[serde(default)]
     pub attachment_ids: Vec<String>,
+    #[serde(default)]
+    pub metadata: Option<MessageMetadataInput>,
 }
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
@@ -125,6 +130,8 @@ pub struct MessageResponse {
     #[schema(value_type = String)]
     pub id: i64,
     pub message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<MessageMetadataResponse>,
     pub message_type: MessageType,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sticker: Option<MessageStickerResponse>,
@@ -266,6 +273,8 @@ pub struct ForwardedMessageSnapshot {
     pub sticker: Option<ForwardedStickerSnapshot>,
     pub reply: Option<ForwardedReplySnapshot>,
     pub attachments: Vec<AttachmentSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<StoredMessageMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mention_uids: Vec<i32>,
 }
@@ -362,6 +371,8 @@ pub struct ForwardedMessageResponse {
     pub sticker: Option<MessageStickerResponse>,
     pub reply: Option<ForwardedReplyResponse>,
     pub attachments: Vec<AttachmentResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<MessageMetadataResponse>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mentions: Vec<MentionInfo>,
     #[serde(

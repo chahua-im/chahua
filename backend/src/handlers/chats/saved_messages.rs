@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, Query},
+    extract::{Path, Query, State},
     Json,
 };
 use serde::Deserialize;
@@ -32,13 +32,18 @@ struct ChatIdPath {
     security(("bearer_jwt" = [])),
 )]
 async fn list_chat_saved_messages(
+    State(state): State<AppState>,
     CurrentUid(uid): CurrentUid,
     mut conn: DbConn,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
     Query(query): Query<ListSavedMessagesQuery>,
 ) -> Result<Json<ListSavedMessagesResponse>, AppError> {
     crate::services::api::chats::saved_messages::list_chat_saved_messages(
-        uid, chat_id, query, &mut conn,
+        uid,
+        chat_id,
+        query,
+        &mut conn,
+        &state.media,
     )
     .map(Json)
 }

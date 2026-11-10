@@ -2,6 +2,7 @@ import { SessionStore } from '../session/session-store';
 import { TestBed } from '@angular/core/testing';
 import {
   GroupKind,
+  LinkPreviewStatus,
   MembershipMessageVisibility,
   MessageType,
   ServerWsMessageType,
@@ -40,6 +41,37 @@ describe('ConversationStore', () => {
       TestBed.resetTestingModule();
     }
   });
+  it('replays preview updates and bulk tombstones onto a delayed history page', async () => {
+    const pending = {
+      linkPreviews: [
+        { url: 'https://example.com/', status: LinkPreviewStatus.pending, expiresAt: '2099-01-01T00:00:00Z' },
+      ],
+    };
+    const ready = {
+      linkPreviews: [{ url: 'https://example.com/', status: LinkPreviewStatus.ready, title: 'Example' }],
+    };
+    const opening = timeline.open();
+    messages().flush({ chatSettings: { showMembershipMessages: true }, messages: [wire('100')], olderCursor: '100' });
+    await opening;
+    const loading = timeline.load(PageDirection.Older);
+    const held = messages({ before: '100' });
+    timeline.update({ ...message('50'), metadata: pending });
+    timeline.update({ ...message('50'), metadata: ready });
+    timeline.delete(encodeId('60'));
+    held.flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [
+        { ...wire('50'), metadata: pending },
+        { ...wire('60'), metadata: ready },
+      ],
+    });
+    await loading;
+    expect(timeline.items().find((item) => item.id === encodeId('50'))?.metadata).toEqual(ready);
+    const deleted = timeline.items().find((item) => item.id === encodeId('60'));
+    expect(deleted?.isDeleted).toBe(true);
+    expect(deleted?.metadata).toBeUndefined();
+  });
+
   it.each([
     { current: undefined, removed: undefined, clears: true },
     { current: '90', removed: undefined, clears: true },

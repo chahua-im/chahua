@@ -11,6 +11,7 @@ pub mod client_tracking;
 pub mod forwarding;
 pub mod image_processing;
 pub mod invites;
+pub mod link_previews;
 pub mod media;
 pub mod message_deletion;
 pub mod message_search;
