@@ -168,7 +168,7 @@ async fn handle_auth_and_socket(mut socket: WebSocket, state: AppState, headers:
 
     // Header authentication used to run in HTTP middleware before upgrade. It is
     // deliberately deferred until after legacy selection, so an RPC upgrade cannot
-    // authenticate or track a header identity. A persistence error now has no HTTP
+    // authenticate or track a header identity. A binding error now has no HTTP
     // response channel; close before ticket verification or registry registration.
     let track_client = should_record_client_activity(&headers);
     if let Err(error) = load_legacy_header_activity(state.clone(), headers).await {

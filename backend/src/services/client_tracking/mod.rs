@@ -1,3 +1,4 @@
+mod buffered;
 mod last_seen;
 pub use last_seen::LastSeen;
 
@@ -5,7 +6,7 @@ mod metrics;
 pub use metrics::{ActivityTodaySnapshot, ClientTrackingMetrics};
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::{
@@ -42,9 +43,17 @@ const WS_UPGRADE_PATHS: [&str; 2] = ["/ws", "/ws/"];
 #[derive(Clone)]
 struct CachedActivity {
     last_written_at: Instant,
+    last_observed_at: Instant,
     uid: i32,
     day: NaiveDate,
     last_app_version: Option<String>,
+}
+
+#[derive(Default, Clone, Copy)]
+struct BindingChange {
+    new_client: bool,
+    new_user: bool,
+    rebound: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -133,7 +142,9 @@ pub(crate) fn refresh_app_version_snapshot(
 pub struct ClientTrackingService {
     db: Pool<ConnectionManager<PgConnection>>,
     metrics: Arc<ClientTrackingMetrics>,
-    recent_writes: DashMap<String, CachedActivity>,
+    recent_writes: Arc<DashMap<String, Arc<Mutex<Option<CachedActivity>>>>>,
+    pending: Mutex<buffered::Pending>,
+    activity_flush_lock: Mutex<()>,
     pub last_seen: Arc<LastSeen>,
 }
 
@@ -145,7 +156,9 @@ impl ClientTrackingService {
         let service = Arc::new(Self {
             db: db.clone(),
             metrics: metrics.clone(),
-            recent_writes: DashMap::new(),
+            recent_writes: Arc::new(DashMap::new()),
+            pending: Mutex::new(buffered::Pending::default()),
+            activity_flush_lock: Mutex::new(()),
             last_seen: Arc::new(LastSeen::new(db.clone(), metrics.clone())),
         });
 
@@ -226,8 +239,9 @@ impl ClientTrackingService {
         client_id: &str,
         app_version: Option<&str>,
     ) -> Result<(), AppError> {
-        self.last_seen.record(uid, Utc::now().naive_utc());
-        self.record_client_activity(uid, client_id, app_version)
+        let observed_at = Utc::now().naive_utc();
+        self.last_seen.record(uid, observed_at);
+        self.record_client_activity_at(uid, client_id, app_version, observed_at)
     }
 
     pub fn record_client_activity(
@@ -236,149 +250,121 @@ impl ClientTrackingService {
         client_id: &str,
         app_version: Option<&str>,
     ) -> Result<(), AppError> {
-        let now = Utc::now().naive_utc();
-        let today = now.date();
-        if let Some(entry) = self.recent_writes.get(client_id) {
-            let app_version_changed = app_version
-                .is_some_and(|version| entry.last_app_version.as_deref() != Some(version));
-            if entry.uid == uid
-                && !app_version_changed
-                && entry.day == today
-                && entry.last_written_at.elapsed() < ACTIVITY_WRITE_THROTTLE
-            {
-                self.metrics.record_activity_write_skipped("throttled");
-                return Ok(());
+        self.record_client_activity_at(uid, client_id, app_version, Utc::now().naive_utc())
+    }
+
+    fn record_client_activity_at(
+        &self,
+        uid: i32,
+        client_id: &str,
+        app_version: Option<&str>,
+        now: NaiveDateTime,
+    ) -> Result<(), AppError> {
+        let slot = match self.recent_writes.get(client_id) {
+            Some(slot) => slot.clone(),
+            None => self
+                .recent_writes
+                .entry(client_id.to_owned())
+                .or_insert_with(|| Arc::new(Mutex::new(None)))
+                .clone(),
+        };
+        let mut cached = slot.lock().unwrap();
+        let mut change = BindingChange::default();
+        let bound = cached.as_ref().is_none_or(|entry| entry.uid != uid);
+        if bound {
+            let conn = &mut self.db.get().map_err(|error| {
+                error!("client tracking: failed to get DB connection: {:?}", error);
+                AppError::Internal("Database connection failed")
+            })?;
+            let (existing, inserted, rebound, initialized) = conn
+                .transaction::<_, diesel::result::Error, _>(|conn| {
+                    let existing = clients::table
+                        .find(client_id)
+                        .select(ClientRecord::as_select())
+                        .first::<ClientRecord>(conn)
+                        .optional()?;
+                    let inserted = existing.is_none();
+                    let rebound = existing
+                        .as_ref()
+                        .is_some_and(|row| row.last_active_uid != uid);
+                    if inserted {
+                        diesel::insert_into(clients::table)
+                            .values(&NewClientRecord {
+                                client_id: client_id.to_owned(),
+                                created_at: now,
+                                last_active: now,
+                                last_active_uid: uid,
+                                last_app_version: None,
+                            })
+                            .execute(conn)?;
+                    } else if rebound {
+                        diesel::update(clients::table.find(client_id))
+                            .set(clients::last_active_uid.eq(uid))
+                            .execute(conn)?;
+                    }
+                    if inserted || rebound {
+                        diesel::update(
+                            push_subscriptions::table.filter(
+                                push_subscriptions::client_id.eq(Some(client_id.to_owned())),
+                            ),
+                        )
+                        .set(push_subscriptions::user_id.eq(uid))
+                        .execute(conn)?;
+                    }
+                    let initialized = diesel::insert_into(user_extra::table)
+                        .values(NewUserExtra::new(uid, now))
+                        .on_conflict(user_extra::uid)
+                        .do_nothing()
+                        .execute(conn)?
+                        > 0;
+                    Ok((existing, inserted, rebound, initialized))
+                })
+                .map_err(|error| {
+                    error!("client tracking: failed to bind client: {:?}", error);
+                    AppError::Internal("Failed to record client activity")
+                })?;
+            change = BindingChange {
+                new_client: inserted,
+                new_user: initialized,
+                rebound,
+            };
+            *cached = Some(CachedActivity {
+                uid,
+                day: now.date(),
+                last_written_at: Instant::now(),
+                last_observed_at: Instant::now(),
+                last_app_version: existing.and_then(|row| row.last_app_version),
+            });
+            if rebound {
+                self.metrics.record_rebind();
             }
         }
-
-        let conn = &mut self.db.get().map_err(|e| {
-            error!("client tracking: failed to get DB connection: {:?}", e);
-            self.metrics.record_activity_write("error");
-            AppError::Internal("Database connection failed")
-        })?;
-
-        let (recorded_app_version, today_metrics, recorded_rebind) = conn
-            .transaction::<
-                (Option<String>, Option<ActivityTodaySnapshot>, bool),
-                diesel::result::Error,
-                _,
-            >(|conn| {
-                let existing_client = clients::table
-                    .find(client_id)
-                    .select(ClientRecord::as_select())
-                    .first::<ClientRecord>(conn)
-                    .optional()?;
-
-                let active_client_delta = i64::from(
-                    existing_client
-                        .as_ref()
-                        .is_none_or(|client| client.last_active.date() != today),
-                );
-                let new_client_delta = i64::from(existing_client.is_none());
-                let rebind_delta = i64::from(
-                    existing_client
-                        .as_ref()
-                        .is_some_and(|client| client.last_active_uid != uid),
-                );
-
-                if rebind_delta > 0 {
-                    diesel::update(
-                        push_subscriptions::table
-                            .filter(push_subscriptions::client_id.eq(Some(client_id.to_string()))),
-                    )
-                    .set(push_subscriptions::user_id.eq(uid))
-                    .execute(conn)?;
+        let entry = cached.as_mut().unwrap();
+        entry.last_observed_at = Instant::now();
+        let changed =
+            app_version.is_some_and(|version| entry.last_app_version.as_deref() != Some(version));
+        if bound
+            || changed
+            || entry.day != now.date()
+            || entry.last_written_at.elapsed() >= ACTIVITY_WRITE_THROTTLE
+        {
+            if self
+                .pending
+                .lock()
+                .unwrap()
+                .record(client_id, uid, now, app_version, change)
+            {
+                entry.day = now.date();
+                entry.last_written_at = Instant::now();
+                if let Some(version) = app_version {
+                    entry.last_app_version = Some(version.to_owned());
                 }
-
-                let new_client_app_version = app_version.map(str::to_owned).or_else(|| {
-                    existing_client
-                        .as_ref()
-                        .and_then(|client| client.last_app_version.clone())
-                });
-                let new_client = NewClientRecord {
-                    client_id: client_id.to_string(),
-                    created_at: existing_client
-                        .as_ref()
-                        .map_or(now, |client| client.created_at),
-                    last_active: now,
-                    last_active_uid: uid,
-                    last_app_version: new_client_app_version,
-                };
-
-                let last_app_version = if let Some(version) = app_version {
-                    diesel::insert_into(clients::table)
-                        .values(&new_client)
-                        .on_conflict(clients::client_id)
-                        .do_update()
-                        .set((
-                            clients::last_active.eq(now),
-                            clients::last_active_uid.eq(uid),
-                            clients::last_app_version.eq(version),
-                        ))
-                        .returning(clients::last_app_version)
-                        .get_result::<Option<String>>(conn)?
-                } else {
-                    diesel::insert_into(clients::table)
-                        .values(&new_client)
-                        .on_conflict(clients::client_id)
-                        .do_update()
-                        .set((
-                            clients::last_active.eq(now),
-                            clients::last_active_uid.eq(uid),
-                        ))
-                        .returning(clients::last_app_version)
-                        .get_result::<Option<String>>(conn)?
-                };
-
-                let new_user_delta = diesel::insert_into(user_extra::table)
-                    .values(NewUserExtra::new(uid, now))
-                    .on_conflict(user_extra::uid)
-                    .do_nothing()
-                    .execute(conn)? as i64;
-
-                let today_metrics = Self::upsert_daily_metrics(
-                    conn,
-                    DailyMetricDelta {
-                        day: today,
-                        active_users: new_user_delta,
-                        new_users: new_user_delta,
-                        active_clients: active_client_delta,
-                        new_clients: new_client_delta,
-                        client_rebinds: rebind_delta,
-                        stale_clients_purged: 0,
-                        legacy_subscriptions_purged: 0,
-                    },
-                    now,
-                )?;
-
-                Ok((last_app_version, today_metrics, rebind_delta > 0))
-            })
-            .map_err(|e| {
-                error!("client tracking: failed to record activity: {:?}", e);
-                self.metrics.record_activity_write("error");
-                self.metrics.record_daily_rollup_update("error");
-                AppError::Internal("Failed to record client activity")
-            })?;
-
-        self.metrics.record_activity_write("success");
-
-        if let Some(today_metrics) = today_metrics {
-            self.metrics.set_activity_today(today_metrics);
-            self.metrics.record_daily_rollup_update("success");
+            } else {
+                self.metrics.record_activity_dropped();
+            }
+        } else {
+            self.metrics.record_activity_write_skipped("throttled");
         }
-        if recorded_rebind {
-            self.metrics.record_rebind();
-        }
-        self.recent_writes.insert(
-            client_id.to_string(),
-            CachedActivity {
-                last_written_at: Instant::now(),
-                day: today,
-                uid,
-                last_app_version: recorded_app_version,
-            },
-        );
-
         Ok(())
     }
 
@@ -432,16 +418,14 @@ impl ClientTrackingService {
 
         loop {
             let db = self.db.clone();
+            let cache = self.recent_writes.clone();
             let batch = tokio::task::spawn_blocking(move || {
-                Self::purge_stale_subscriptions_batch(db, now, today, stale_cutoff)
+                Self::purge_stale_subscriptions_batch(db, cache, now, today, stale_cutoff)
             })
             .await
             .map_err(|error| format!("stale client purge worker failed: {}", error))??;
             let stale_client_count = batch.stale_client_ids.len();
 
-            for client_id in &batch.stale_client_ids {
-                self.recent_writes.remove(client_id);
-            }
             if let Some(today_metrics) = batch.today_metrics {
                 self.metrics.set_activity_today(today_metrics);
                 self.metrics.record_daily_rollup_update("success");
@@ -472,6 +456,7 @@ impl ClientTrackingService {
 
     fn purge_stale_subscriptions_batch(
         db: Pool<ConnectionManager<PgConnection>>,
+        cache: Arc<DashMap<String, Arc<Mutex<Option<CachedActivity>>>>>,
         now: NaiveDateTime,
         today: NaiveDate,
         stale_cutoff: NaiveDateTime,
@@ -480,56 +465,106 @@ impl ClientTrackingService {
             .get()
             .map_err(|error| format!("failed to get DB connection: {:?}", error))?;
 
-        conn.transaction::<PurgeBatch, diesel::result::Error, _>(|conn| {
-            let stale_client_ids: Vec<String> = clients::table
-                .filter(clients::last_active.lt(stale_cutoff))
-                .order(clients::last_active.asc())
-                .for_update()
-                .skip_locked()
-                .limit(PURGE_BATCH_SIZE)
-                .select(clients::client_id)
-                .load(conn)?;
-
-            if stale_client_ids.is_empty() {
-                return Ok(PurgeBatch {
-                    stale_client_ids,
-                    deleted_subscriptions: 0,
-                    deleted_clients: 0,
-                    today_metrics: None,
-                });
-            }
-
-            let deleted_subscriptions = diesel::delete(
-                push_subscriptions::table
-                    .filter(push_subscriptions::client_id.eq_any(&stale_client_ids)),
-            )
-            .execute(conn)?;
-            let deleted_clients =
-                diesel::delete(clients::table.filter(clients::client_id.eq_any(&stale_client_ids)))
-                    .execute(conn)?;
-            let today_metrics = Self::upsert_daily_metrics(
-                conn,
-                DailyMetricDelta {
-                    day: today,
-                    active_users: 0,
-                    new_users: 0,
-                    active_clients: 0,
-                    new_clients: 0,
-                    client_rebinds: 0,
-                    stale_clients_purged: deleted_clients as i64,
-                    legacy_subscriptions_purged: 0,
-                },
-                now,
-            )?;
-
-            Ok(PurgeBatch {
-                stale_client_ids,
-                deleted_subscriptions,
-                deleted_clients,
-                today_metrics,
+        let candidates: Vec<String> = clients::table
+            .filter(clients::last_active.lt(stale_cutoff))
+            .order(clients::last_active.asc())
+            .limit(PURGE_BATCH_SIZE)
+            .select(clients::client_id)
+            .load(conn)
+            .map_err(|error| format!("failed to select stale clients: {error:?}"))?;
+        let slots: Vec<_> = candidates
+            .iter()
+            .map(|id| {
+                cache
+                    .entry(id.clone())
+                    .or_insert_with(|| Arc::new(Mutex::new(None)))
+                    .clone()
             })
-        })
-        .map_err(|error| format!("failed to purge stale client batch: {:?}", error))
+            .collect();
+        let mut guards: Vec<_> = slots.iter().map(|slot| slot.try_lock().ok()).collect();
+        // Clients with buffered recent activity are not purge candidates. Release
+        // their locks before any database work so their requests remain memory-only.
+        for guard in &mut guards {
+            if guard.as_ref().is_some_and(|entry| {
+                entry.as_ref().is_some_and(|cached| {
+                    cached.last_observed_at.elapsed()
+                        < Duration::from_secs(STALE_CLIENT_RETENTION_DAYS * 86400)
+                })
+            }) {
+                *guard = None;
+            }
+        }
+        let eligible: Vec<_> = candidates
+            .iter()
+            .zip(guards.iter())
+            .filter_map(|(id, guard)| guard.as_ref().map(|_| id.clone()))
+            .collect();
+        let batch = conn
+            .transaction::<PurgeBatch, diesel::result::Error, _>(|conn| {
+                let stale_client_ids: Vec<String> = clients::table
+                    .filter(clients::client_id.eq_any(&eligible))
+                    .filter(clients::last_active.lt(stale_cutoff))
+                    .for_update()
+                    .skip_locked()
+                    .select(clients::client_id)
+                    .load(conn)?;
+
+                if stale_client_ids.is_empty() {
+                    return Ok(PurgeBatch {
+                        stale_client_ids,
+                        deleted_subscriptions: 0,
+                        deleted_clients: 0,
+                        today_metrics: None,
+                    });
+                }
+
+                let deleted_subscriptions = diesel::delete(
+                    push_subscriptions::table
+                        .filter(push_subscriptions::client_id.eq_any(&stale_client_ids)),
+                )
+                .execute(conn)?;
+                let deleted_clients = diesel::delete(
+                    clients::table.filter(clients::client_id.eq_any(&stale_client_ids)),
+                )
+                .execute(conn)?;
+                let today_metrics = Self::upsert_daily_metrics(
+                    conn,
+                    DailyMetricDelta {
+                        day: today,
+                        active_users: 0,
+                        new_users: 0,
+                        active_clients: 0,
+                        new_clients: 0,
+                        client_rebinds: 0,
+                        stale_clients_purged: deleted_clients as i64,
+                        legacy_subscriptions_purged: 0,
+                    },
+                    now,
+                )?;
+
+                Ok(PurgeBatch {
+                    stale_client_ids,
+                    deleted_subscriptions,
+                    deleted_clients,
+                    today_metrics,
+                })
+            })
+            .map_err(|error| format!("failed to purge stale client batch: {:?}", error))?;
+        for (id, guard) in candidates.iter().zip(guards.iter_mut()) {
+            if batch.stale_client_ids.contains(id) {
+                if let Some(guard) = guard {
+                    **guard = None;
+                }
+            }
+        }
+        drop(guards);
+        drop(slots);
+        for id in &batch.stale_client_ids {
+            // Keep a slot while another request holds it, so concurrent binds
+            // cannot acquire different locks for the same client.
+            cache.remove_if(id, |_, slot| Arc::strong_count(slot) == 1);
+        }
+        Ok(batch)
     }
 
     fn refresh_today_metrics_gauges(&self) -> Result<(), String> {
@@ -628,11 +663,32 @@ impl ClientTrackingService {
             .as_activity_today_snapshot(),
         ))
     }
+
+    pub fn flush_pending_activity(&self) -> Result<(), String> {
+        let _guard = self.activity_flush_lock.lock().unwrap();
+        let (count, age) = self.pending.lock().unwrap().stats();
+        let (seen_count, seen_age) = self.last_seen.stats();
+        self.metrics
+            .set_pending_activity(count + seen_count, age.max(seen_age));
+        let started = Instant::now();
+        let clients = self.flush_clients();
+        let seen = self.last_seen.flush();
+        let result = clients.and(seen);
+        if count + seen_count > 0 {
+            self.metrics
+                .record_activity_flush(started.elapsed(), result.is_ok());
+        }
+        let (count, age) = self.pending.lock().unwrap().stats();
+        let (seen_count, seen_age) = self.last_seen.stats();
+        self.metrics
+            .set_pending_activity(count + seen_count, age.max(seen_age));
+        result
+    }
 }
 
 /// Flush all users together, including one final batch when the server stops.
-pub async fn run_last_seen_worker(
-    last_seen: Arc<LastSeen>,
+pub async fn run_activity_worker(
+    service: Arc<ClientTrackingService>,
     mut shutdown: tokio::sync::oneshot::Receiver<()>,
 ) {
     let period = Duration::from_secs(15);
@@ -643,11 +699,11 @@ pub async fn run_last_seen_worker(
             _ = &mut shutdown => true,
             _ = interval.tick() => false,
         };
-        let batch = last_seen.clone();
-        match tokio::task::spawn_blocking(move || batch.flush()).await {
+        let batch = service.clone();
+        match tokio::task::spawn_blocking(move || batch.flush_pending_activity()).await {
             Ok(Ok(())) => {}
-            Ok(Err(error)) => warn!(%error, "last-seen batch flush failed"),
-            Err(error) => warn!(%error, "last-seen batch worker failed"),
+            Ok(Err(error)) => warn!(%error, "activity batch flush failed"),
+            Err(error) => warn!(%error, "activity batch worker failed"),
         }
         if stopping {
             break;
@@ -682,20 +738,29 @@ pub async fn track_client_activity(
     request: Request<axum::body::Body>,
     next: Next,
 ) -> Response {
-    let app_version = app_version_from_headers(request.headers());
-    if !is_websocket_upgrade_request(request.method(), request.uri().path(), request.headers())
-        && should_record_client_activity(request.headers())
-    {
-        if let Ok(auth) = extract_auth_context(request.headers(), &state) {
-            if let Err(error) = state.client_tracking.record_activity(
-                auth.uid,
-                &auth.client_id,
-                app_version.as_deref(),
-            ) {
-                return error.into_response();
+    let request =
+        if !is_websocket_upgrade_request(request.method(), request.uri().path(), request.headers())
+            && request
+                .headers()
+                .contains_key(axum::http::header::AUTHORIZATION)
+            && should_record_client_activity(request.headers())
+        {
+            match tokio::task::spawn_blocking(move || {
+                let result = record_header_activity(&state, request.headers());
+                (request, result)
+            })
+            .await
+            {
+                Ok((request, Ok(()))) => request,
+                Ok((_, Err(error))) => return error.into_response(),
+                Err(error) => {
+                    error!(?error, "client activity worker failed");
+                    return AppError::Internal("Failed to record client activity").into_response();
+                }
             }
-        }
-    }
+        } else {
+            request
+        };
 
     next.run(request).await
 }
@@ -759,19 +824,22 @@ mod tests {
         let service = ClientTrackingService {
             db,
             metrics,
-            recent_writes: DashMap::new(),
+            recent_writes: Arc::new(DashMap::new()),
+            pending: Mutex::new(buffered::Pending::default()),
+            activity_flush_lock: Mutex::new(()),
             last_seen: last_seen.clone(),
         };
         let before = Utc::now().naive_utc();
         last_seen.record(17, before - chrono::Duration::minutes(3));
         service.recent_writes.insert(
             "client".into(),
-            CachedActivity {
+            Arc::new(Mutex::new(Some(CachedActivity {
                 last_written_at: Instant::now(),
+                last_observed_at: Instant::now(),
                 uid: 17,
                 day: before.date(),
                 last_app_version: None,
-            },
+            }))),
         );
 
         service.record_activity(17, "client", None).unwrap();
@@ -793,7 +861,9 @@ mod tests {
         let service = ClientTrackingService {
             db,
             metrics,
-            recent_writes: DashMap::new(),
+            recent_writes: Arc::new(DashMap::new()),
+            pending: Mutex::new(buffered::Pending::default()),
+            activity_flush_lock: Mutex::new(()),
             last_seen: last_seen.clone(),
         };
         let before = Utc::now().naive_utc();
@@ -1027,6 +1097,7 @@ mod tests {
         let client_id = format!("app-version-test-{}", uuid::Uuid::new_v4());
         let pool = Pool::builder()
             .max_size(1)
+            .connection_timeout(Duration::from_millis(100))
             .connection_customizer(Box::new(diesel::r2d2::TestCustomizer))
             .build(ConnectionManager::<PgConnection>::new(url))
             .expect("create test database pool");
@@ -1035,7 +1106,9 @@ mod tests {
             last_seen: Arc::new(LastSeen::new(pool.clone(), metrics.clone())),
             db: pool,
             metrics,
-            recent_writes: DashMap::new(),
+            recent_writes: Arc::new(DashMap::new()),
+            pending: Mutex::new(buffered::Pending::default()),
+            activity_flush_lock: Mutex::new(()),
         };
 
         service
@@ -1044,6 +1117,7 @@ mod tests {
         service
             .record_activity(uid, &client_id, None)
             .expect("record activity without app version");
+        service.flush_pending_activity().unwrap();
         assert_eq!(
             service
                 .last_app_versions(std::slice::from_ref(&client_id))
@@ -1053,9 +1127,12 @@ mod tests {
             Some(Some("1.0.0".to_owned()))
         );
 
+        let checked_out = service.db.get().unwrap();
         service
             .record_activity(uid, &client_id, Some("2.0.0"))
             .expect("record changed app version without waiting for throttle");
+        drop(checked_out);
+        service.flush_pending_activity().unwrap();
         assert_eq!(
             service
                 .last_app_versions(std::slice::from_ref(&client_id))
@@ -1069,6 +1146,7 @@ mod tests {
         service
             .record_activity(uid, &client_id, None)
             .expect("persist activity without overwriting the stored version");
+        service.flush_pending_activity().unwrap();
         assert_eq!(
             service
                 .last_app_versions(std::slice::from_ref(&client_id))
@@ -1143,6 +1221,7 @@ mod tests {
 
         let batch = ClientTrackingService::purge_stale_subscriptions_batch(
             pool.clone(),
+            Arc::new(DashMap::new()),
             now,
             now.date(),
             stale_cutoff,

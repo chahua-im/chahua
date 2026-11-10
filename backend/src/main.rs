@@ -126,9 +126,9 @@ async fn main() {
         pool.clone(),
         metrics.client_tracking.clone(),
     );
-    let (last_seen_shutdown, shutdown_requested) = tokio::sync::oneshot::channel();
-    let last_seen_worker = tokio::spawn(services::client_tracking::run_last_seen_worker(
-        client_tracking.last_seen.clone(),
+    let (activity_shutdown, shutdown_requested) = tokio::sync::oneshot::channel();
+    let activity_worker = tokio::spawn(services::client_tracking::run_activity_worker(
+        client_tracking.clone(),
         shutdown_requested,
     ));
 
@@ -310,8 +310,8 @@ async fn main() {
         result = metrics_server => result,
         _ = shutdown_signal() => Ok(()),
     };
-    let _ = last_seen_shutdown.send(());
-    last_seen_worker.await.expect("last-seen worker failed");
+    let _ = activity_shutdown.send(());
+    activity_worker.await.expect("activity worker failed");
     result.unwrap();
 }
 

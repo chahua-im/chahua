@@ -484,17 +484,19 @@ misses for the same UID share one filesystem lookup.
 ## Client tracking and daily activity
 
 Tracked authenticated HTTP/RPC operations, active WebSocket pings, and explicit
-active state reports record last-seen activity in memory immediately,
-independently of client bookkeeping success.
-Inactive WebSocket reports update connection liveness only; they do not buffer last seen or
-schedule bookkeeping. A shared 15-second batch flush persists user timestamps and daily
-active-user increments transactionally; pending UTC days are handled separately, and only the
-current day's rollup updates today's gauges.
-Client bookkeeping keeps its five-minute per-client throttle, bypassed on account,
-application-version, or UTC-day changes. It records client activity, rebinding, and
-new-user/client rollups without producing another last-seen observation.
-Legacy active reports preserve the recorded application version; RPC carries
-its version once during session binding and later activity preserves it.
+active state reports record last seen in memory immediately. Inactive WebSocket
+reports update connection liveness only. Client ownership binding remains
+synchronous on first use/account changes and is cached for same-account activity;
+timestamps, versions, and daily rollups use the shared background activity worker.
+See the [activity persistence contract](../README.md#scoped-websocket-presence)
+for buffer limits, flush bounds, ownership ordering, retries, and durability.
+
+Client metadata observations retain the five-minute throttle, bypassed on account,
+application-version, or observation UTC-day changes. Legacy active reports preserve
+the recorded application version; RPC supplies its version during session binding.
+Worker snapshots and acknowledgement update the pending gauges, normally every
+15 seconds; they are not a per-scrape measurement of the buffers.
+
 HTTP bookkeeping follows the [direct user-session eligibility rules](../README.md#scoped-websocket-presence):
 service-token requests and requests carrying `X-On-Behalf-Of` schedule no client
 writes, including subsequent legacy WebSocket reports. RPC ignores upgrade
@@ -504,9 +506,14 @@ client-rebind or client-bookkeeping rollup metrics.
 
 | Family | Type / labels | Meaning and recording boundary | Buckets / cardinality |
 | --- | --- | --- | --- |
-| `client_activity_writes_total` | Counter; `result` | Client bookkeeping database writes attempted; excludes last-seen batch flushes. | Result is a small outcome classification. |
-| `client_activity_writes_skipped_total` | Counter; `reason` | Client bookkeeping writes skipped by throttling; the last-seen observation is still buffered. | Keep reasons bounded; never label by client or user. |
-| `client_rebinds_total` | Counter | Client-to-user rebind events recorded during a daily rollup update. | No labels. |
+| `client_activity_writes_total` | Counter; `result=success\|error` | Background client metadata transaction attempts; excludes binding and user last-seen transactions. | Two outcomes. |
+| `client_activity_writes_skipped_total` | Counter; `reason=throttled` | Client metadata observations suppressed by the five-minute throttle; last seen is still buffered. | One reason. |
+| `client_activity_pending` | Gauge | Sum of buffered client/day and user/day entries at the latest worker snapshot or acknowledgement. | No labels. |
+| `client_activity_oldest_pending_seconds` | Gauge | Maximum pending age across client entries and user last-seen observations at the latest worker snapshot or acknowledgement; zero when empty. | No labels. |
+| `client_activity_dropped_total` | Counter | Client or user observations dropped when their pending buffer is full; never fails the business request. | No labels. |
+| `client_activity_flush_duration_seconds` | Histogram; `outcome=success\|error` | Combined client and last-seen flush duration when at least one buffer is nonempty; partial progress followed by an error records `error`. | `H12`; both outcomes registered at startup. |
+| `client_activity_flush_retry_needed_total` | Counter | Nonempty combined flush attempts that fail and leave work pending for retry; increments once per attempt, not per entry or actual retry. Includes pool, lock, statement, and uncertain-commit failures. | No labels. |
+| `client_rebinds_total` | Counter | Successful client-to-user ownership transitions, recorded immediately after binding commits; daily rollup persistence may lag. | No labels. |
 | `client_tracking_purge_total` | Counter; `kind` | Client tracking records purged, incremented by the number deleted. | `kind` is a bounded record-kind classification. |
 | `activity_daily_rollup_updates_total` | Counter; `result` | Daily activity rollup updates from client bookkeeping, purge work, and last-seen batches; failed batch acquisition or persistence also records an error. | Result is a small outcome classification. |
 | `activity_today_active_users` | Gauge | Exact active-user count for today mirrored from the daily rollup. | No labels. |
@@ -528,10 +535,11 @@ or on-behalf-of requests do not contribute client bookkeeping.
 
 Each instance refreshes this shared database snapshot asynchronously at startup
 and every 60 seconds, retaining the last successful snapshot if refresh fails.
-Persisted activity is subject to the existing five-minute client bookkeeping
-throttle, so the snapshot can lag activity by that throttle plus the refresh
-interval. Each successful refresh removes expired clients and versions with no
-remaining clients. The gauge has no series for an empty population; this is
+Persisted activity is subject to the five-minute observation throttle and the
+background flush schedule. Version changes bypass the throttle but still await
+flushing; failures or a backlog can extend this delay. Snapshot publication adds
+up to the refresh interval. Each successful refresh removes expired clients and
+versions with no remaining clients. The gauge has no series for an empty population; this is
 healthy no-data, not a zero-filled distribution.
 
 Snapshots are replicas, not instance-local counts: use

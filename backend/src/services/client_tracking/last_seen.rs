@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
 use chrono::{NaiveDate, NaiveDateTime, Utc};
+use diesel::connection::SimpleConnection;
 use diesel::prelude::*;
 use diesel::sql_types::{Array, BigInt, Date, Integer, Timestamp};
 use diesel::QueryableByName;
@@ -10,6 +11,11 @@ use super::{
     ActivityTodaySnapshot, ClientTrackingMetrics, ClientTrackingService, DailyMetricDelta,
 };
 use crate::state::DbPool;
+
+const MAX_PENDING_OBSERVATIONS: usize = 100_000;
+const FLUSH_CHECKOUT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+type LastSeenSnapshot = (NaiveDate, Vec<(i32, NaiveDateTime)>);
 
 /// Coalesces user last-seen observations before persisting them in bulk.
 ///
@@ -22,6 +28,7 @@ pub struct LastSeen {
     metrics: Arc<ClientTrackingMetrics>,
     pending: Mutex<BTreeMap<NaiveDate, HashMap<i32, NaiveDateTime>>>,
     flush_lock: Mutex<()>,
+    in_flight: Mutex<Option<LastSeenSnapshot>>,
 }
 
 #[derive(QueryableByName)]
@@ -37,6 +44,7 @@ impl LastSeen {
             metrics,
             pending: Mutex::new(BTreeMap::new()),
             flush_lock: Mutex::new(()),
+            in_flight: Mutex::new(None),
         }
     }
 
@@ -44,6 +52,14 @@ impl LastSeen {
     /// timestamp for this user and UTC day.
     pub fn record(&self, uid: i32, at: NaiveDateTime) {
         let mut pending = self.pending.lock().unwrap();
+        if !pending
+            .get(&at.date())
+            .is_some_and(|day| day.contains_key(&uid))
+            && pending.values().map(HashMap::len).sum::<usize>() >= MAX_PENDING_OBSERVATIONS
+        {
+            self.metrics.record_activity_dropped();
+            return;
+        }
         pending
             .entry(at.date())
             .or_default()
@@ -65,17 +81,29 @@ impl LastSeen {
             })
     }
 
+    pub(super) fn stats(&self) -> (usize, f64) {
+        let pending = self.pending.lock().unwrap();
+        let now = Utc::now().naive_utc();
+        let mut count = 0;
+        let mut age: f64 = 0.0;
+        for at in pending.values().flat_map(|day| day.values()) {
+            count += 1;
+            age = age.max((now - *at).num_milliseconds().max(0) as f64 / 1000.0);
+        }
+        (count, age)
+    }
+
     /// Persists a stable snapshot of pending observations. Successful days are
     /// acknowledged independently, so a failure leaves that day and all later
-    /// days available for retry without duplicating already committed rollups.
+    /// days available for retry. An uncertain commit may duplicate additive rollups.
     pub fn flush(&self) -> Result<(), String> {
         let _flush_lock = self.flush_lock.lock().unwrap();
-        let snapshot = self.snapshot();
-        if snapshot.is_empty() {
+        if self.pending.lock().unwrap().is_empty() {
             return Ok(());
         }
+        let mut in_flight = self.in_flight.lock().unwrap();
 
-        let mut conn = match self.db.get() {
+        let mut conn = match self.db.get_timeout(FLUSH_CHECKOUT_TIMEOUT) {
             Ok(conn) => conn,
             Err(error) => {
                 self.metrics.record_daily_rollup_update("error");
@@ -85,12 +113,23 @@ impl LastSeen {
             }
         };
         let flushed_at = Utc::now().naive_utc();
+        let started = std::time::Instant::now();
 
-        for (day, observations) in snapshot {
-            let mut observations: Vec<_> = observations.into_iter().collect();
-            observations.sort_unstable_by_key(|(uid, _)| *uid);
-
-            let today_metrics = match Self::flush_day(&mut conn, day, &observations, flushed_at) {
+        loop {
+            if started.elapsed() >= FLUSH_CHECKOUT_TIMEOUT {
+                break;
+            }
+            if in_flight.is_none() {
+                let Some((day, entries)) = self.snapshot().into_iter().next() else {
+                    break;
+                };
+                let mut observations: Vec<_> = entries.into_iter().collect();
+                observations.sort_unstable_by_key(|(uid, _)| *uid);
+                *in_flight = Some((day, observations));
+            }
+            let (day, observations) = in_flight.as_ref().unwrap();
+            let day = *day;
+            let today_metrics = match Self::flush_day(&mut conn, day, observations, flushed_at) {
                 Ok(today_metrics) => today_metrics,
                 Err(error) => {
                     self.metrics.record_daily_rollup_update("error");
@@ -100,7 +139,8 @@ impl LastSeen {
                 }
             };
 
-            self.acknowledge(day, &observations);
+            self.acknowledge(day, observations);
+            *in_flight = None;
             if let Some(today_metrics) = today_metrics {
                 self.metrics.record_daily_rollup_update("success");
                 if day == Utc::now().date_naive() {
@@ -113,7 +153,22 @@ impl LastSeen {
     }
 
     fn snapshot(&self) -> BTreeMap<NaiveDate, HashMap<i32, NaiveDateTime>> {
-        self.pending.lock().unwrap().clone()
+        self.pending
+            .lock()
+            .unwrap()
+            .iter()
+            .take(1)
+            .map(|(day, entries)| {
+                (
+                    *day,
+                    entries
+                        .iter()
+                        .take(1000)
+                        .map(|(uid, at)| (*uid, *at))
+                        .collect(),
+                )
+            })
+            .collect()
     }
 
     fn acknowledge(&self, day: NaiveDate, observations: &[(i32, NaiveDateTime)]) {
@@ -147,6 +202,19 @@ impl LastSeen {
         let timestamps: Vec<NaiveDateTime> = observations.iter().map(|(_, at)| *at).collect();
 
         conn.transaction::<Option<ActivityTodaySnapshot>, diesel::result::Error, _>(|conn| {
+            conn.batch_execute(
+                "SET LOCAL statement_timeout = '2s'; SET LOCAL lock_timeout = '1s'",
+            )?;
+            let new_users = diesel::insert_into(crate::schema::user_extra::table)
+                .values(
+                    observations
+                        .iter()
+                        .map(|(uid, at)| crate::models::NewUserExtra::new(*uid, *at))
+                        .collect::<Vec<_>>(),
+                )
+                .on_conflict(crate::schema::user_extra::uid)
+                .do_nothing()
+                .execute(conn)? as i64;
             // Arrays avoid one round trip per user. The ordered candidates CTE
             // locks user rows by uid before the UPDATE, giving concurrent
             // flushes a consistent lock order.
@@ -185,8 +253,8 @@ impl LastSeen {
                 conn,
                 DailyMetricDelta {
                     day,
-                    active_users,
-                    new_users: 0,
+                    active_users: active_users + new_users,
+                    new_users,
                     active_clients: 0,
                     new_clients: 0,
                     client_rebinds: 0,

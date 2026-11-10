@@ -1,7 +1,8 @@
 use prometheus::{
+    register_gauge_with_registry, register_histogram_vec_with_registry,
     register_int_counter_vec_with_registry, register_int_counter_with_registry,
-    register_int_gauge_vec_with_registry, register_int_gauge_with_registry, IntCounter,
-    IntCounterVec, IntGauge, IntGaugeVec, Registry,
+    register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Gauge, Histogram,
+    IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,13 +44,18 @@ pub struct ClientTrackingMetrics {
     today_stale_clients_purged: IntGauge,
     today_legacy_subscriptions_purged: IntGauge,
     app_version_active_clients: IntGaugeVec,
+    pending_activity: IntGauge,
+    oldest_pending_activity_seconds: Gauge,
+    dropped_activity: IntCounter,
+    activity_flush_duration: [Histogram; 2],
+    activity_flush_retries: IntCounter,
 }
 
 impl ClientTrackingMetrics {
     pub fn new(registry: &Registry) -> Self {
         let activity_writes_total = register_int_counter_vec_with_registry!(
             "client_activity_writes_total",
-            "Total number of client activity writes attempted",
+            "Total number of background client activity write attempts",
             &["result"],
             registry
         )
@@ -130,6 +136,45 @@ impl ClientTrackingMetrics {
             registry
         )
         .expect("app_version_active_clients registration should succeed");
+        let pending_activity = register_int_gauge_with_registry!(
+            "client_activity_pending",
+            "Buffered client and user activity entries at the latest flush snapshot",
+            registry
+        )
+        .expect("client_activity_pending registration should succeed");
+        let oldest_pending_activity_seconds = register_gauge_with_registry!(
+            "client_activity_oldest_pending_seconds",
+            "Age of the oldest buffered activity at the latest flush snapshot",
+            registry
+        )
+        .expect("client_activity_oldest_pending_seconds registration should succeed");
+        let dropped_activity = register_int_counter_with_registry!(
+            "client_activity_dropped_total",
+            "Activity observations dropped because a pending buffer is full",
+            registry
+        )
+        .expect("client_activity_dropped_total registration should succeed");
+        let flush_duration = register_histogram_vec_with_registry!(
+            "client_activity_flush_duration_seconds",
+            "Elapsed time of nonempty combined activity flush attempts",
+            &["outcome"],
+            vec![
+                0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0,
+                10.0, 30.0
+            ],
+            registry
+        )
+        .expect("client_activity_flush_duration_seconds registration should succeed");
+        let activity_flush_duration = [
+            flush_duration.with_label_values(&["error"]),
+            flush_duration.with_label_values(&["success"]),
+        ];
+        let activity_flush_retries = register_int_counter_with_registry!(
+            "client_activity_flush_retry_needed_total",
+            "Nonempty activity flush attempts that failed and left work pending for retry",
+            registry
+        )
+        .expect("client_activity_flush_retry_needed_total registration should succeed");
 
         Self {
             activity_writes_total,
@@ -145,6 +190,11 @@ impl ClientTrackingMetrics {
             today_stale_clients_purged,
             today_legacy_subscriptions_purged,
             app_version_active_clients,
+            pending_activity,
+            oldest_pending_activity_seconds,
+            dropped_activity,
+            activity_flush_duration,
+            activity_flush_retries,
         }
     }
 
@@ -172,6 +222,21 @@ impl ClientTrackingMetrics {
         self.daily_rollup_updates_total
             .with_label_values(&[result])
             .inc();
+    }
+    pub(crate) fn set_pending_activity(&self, count: usize, oldest_age_seconds: f64) {
+        self.pending_activity.set(count as i64);
+        self.oldest_pending_activity_seconds.set(oldest_age_seconds);
+    }
+
+    pub(crate) fn record_activity_dropped(&self) {
+        self.dropped_activity.inc();
+    }
+
+    pub(crate) fn record_activity_flush(&self, elapsed: std::time::Duration, success: bool) {
+        self.activity_flush_duration[usize::from(success)].observe(elapsed.as_secs_f64());
+        if !success {
+            self.activity_flush_retries.inc();
+        }
     }
 
     pub(crate) fn set_app_version_active_clients(

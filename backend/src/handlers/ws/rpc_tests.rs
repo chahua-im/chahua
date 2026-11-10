@@ -29,7 +29,7 @@ impl Drop for Server {
     }
 }
 
-async fn server(services: &RpcServices) -> Server {
+fn router(services: &RpcServices) -> Router {
     let state = AppState::new(AppInner {
         db: services.db.clone(),
         id_gen: services.id_gen.clone(),
@@ -48,13 +48,18 @@ async fn server(services: &RpcServices) -> Server {
         auth_token_service: services.auth_token_service.clone(),
         token_generation: services.token_generation.clone(),
     });
-    let app = Router::new()
+    Router::new()
         .route("/ws", get(super::ws_handler))
+        .route("/activity-probe", get(|| async { "ok" }))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             crate::services::client_tracking::track_client_activity,
         ))
-        .with_state(state);
+        .with_state(state)
+}
+
+async fn server(services: &RpcServices) -> Server {
+    let app = router(services);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let task = tokio::spawn(async move {
@@ -120,6 +125,47 @@ async fn wait_removed(services: &RpcServices) {
     })
     .await
     .expect("registry cleanup deadline");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn warmed_http_activity_does_not_wait_for_a_database_connection() {
+    use tower::ServiceExt;
+
+    let Some(services) = crate::rpc::test_support::services().await else {
+        return;
+    };
+    let token = services
+        .auth_token_service
+        .issue_session(1, "http-warm-activity", 0)
+        .unwrap();
+    let app = router(&services);
+    let request = |version: &str| {
+        axum::http::Request::builder()
+            .uri("/activity-probe")
+            .header("authorization", format!("Bearer {token}"))
+            .header("x-app-version", version)
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    assert_eq!(
+        app.clone()
+            .oneshot(request("first"))
+            .await
+            .unwrap()
+            .status(),
+        axum::http::StatusCode::OK
+    );
+
+    let connection = services.db.get().expect("hold the only DB connection");
+    let response = timeout(Duration::from_secs(1), app.oneshot(request("second"))).await;
+    drop(connection);
+    assert_eq!(
+        response
+            .expect("warmed tracking must not wait for the pool")
+            .unwrap()
+            .status(),
+        axum::http::StatusCode::OK
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
