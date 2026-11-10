@@ -76,7 +76,10 @@ precision). Without a keyword, select a chat and supply at least one date bounda
 or a permitted group `senderUid`. Date-only searches require `scope=main` or
 `scope=thread` (and `threadId` for the latter). Without keywords, `scope=all` (the default) requires
 `senderUid` and returns that user's main-chat messages plus participating thread
-roots, each thread once. Cross-chat search still requires keywords.
+roots, each thread once. Cross-chat search still requires keywords and supports
+optional `senderUid` together with date filters. It filters message authors across
+the requester's currently accessible chats, including DMs and messages from former
+members; it does not require the sender to still be a member of each chat.
 Dates constrain the user's own messages, including replies that establish thread
 participation; an older root can therefore appear when its replies match the dates.
 Mixed results sort by the displayed message/root creation time and ID, not the

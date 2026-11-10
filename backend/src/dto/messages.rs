@@ -655,6 +655,8 @@ pub struct ListMessagesQuery {
 #[derive(Debug, serde::Deserialize, utoipa::IntoParams, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchMessagesQuery {
+    /// Message author UID; cross-chat search still requires a query and current chat access.
+    pub sender_uid: Option<i32>,
     /// Required for cross-chat search; optional for chat main/thread history filtering.
     pub q: Option<String>,
     /// Inclusive creation time, RFC 3339 with timezone; millisecond precision.
@@ -722,6 +724,7 @@ impl ChatSearchMessagesQuery {
 
     pub fn into_query(self) -> SearchMessagesQuery {
         SearchMessagesQuery {
+            sender_uid: self.sender_uid,
             q: self.q,
             created_from: self.created_from,
             created_before: self.created_before,
@@ -739,6 +742,14 @@ mod search_scope_tests {
 
     #[test]
     fn sender_filter_uses_uid_in_http_and_rpc_queries() {
+        let cross_chat = axum::extract::Query::<SearchMessagesQuery>::try_from_uri(
+            &"/?q=hello&senderUid=42".parse().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(cross_chat.sender_uid, Some(42));
+        let cross_chat: SearchMessagesQuery =
+            serde_json::from_value(serde_json::json!({"q":"hello","senderUid":42})).unwrap();
+        assert_eq!(cross_chat.sender_uid, Some(42));
         let query = axum::extract::Query::<ChatSearchMessagesQuery>::try_from_uri(
             &"/?q=hello&scope=thread&threadId=123&senderUid=42"
                 .parse()

@@ -329,7 +329,7 @@ pub async fn search_messages_in_scope(
 ) -> Result<SearchMessagesResponse, AppError> {
     let filters = MessageSearchFilters {
         range: MessageSearchRange::All,
-        sender_uid: None,
+        sender_uid: params.sender_uid,
         created_from: params.created_from,
         created_before: params.created_before,
     };
@@ -369,6 +369,9 @@ async fn search_messages_page(
     deps: &SearchMessagesDeps<'_>,
 ) -> Result<SearchMessagesResponse, AppError> {
     let (query, sort) = prepare_search(&params, filters.sender_uid)?;
+    if chat_id.is_none() && query.is_none() {
+        return Err(AppError::BadRequest("Cross-chat search requires a query"));
+    }
     let context = CursorContext::new(uid, chat_id, query.as_deref(), filters, sort);
     let continuation = context.decode(params.cursor.as_deref(), sort)?;
     let limit = search_limit(params.limit);
