@@ -211,6 +211,7 @@ async fn keyword_cursor_browses_all_hits_and_advances_past_stale_batches() {
             next.messages.iter().map(|m| m.id).collect::<Vec<_>>(),
             rows[..20].iter().map(|m| m.id).collect::<Vec<_>>()
         );
+        assert_cross_chat_sender_filter(&mut conn, &service, &client, &index).await;
         // Revalidate membership when continuing an already-issued cursor.
         conn.batch_execute("DELETE FROM group_membership WHERE uid=8001")
             .unwrap();
@@ -242,5 +243,136 @@ async fn keyword_cursor_browses_all_hits_and_advances_past_stale_batches() {
         .is_success());
     if let Err(panic) = result {
         std::panic::resume_unwind(panic);
+    }
+}
+
+async fn assert_cross_chat_sender_filter(
+    conn: &mut PgConnection,
+    service: &MessageSearchService,
+    client: &meilisearch_sdk::client::Client,
+    index: &meilisearch_sdk::indexes::Index,
+) {
+    use aws_sdk_s3::config::Region;
+
+    // The sender has no current group membership. Requester access, not sender
+    // membership, determines which chats can contribute to cross-chat results.
+    conn.batch_execute(
+        "INSERT INTO groups(id,name) VALUES (9876998010,'sender-visible'),(9876998011,'sender-hidden');
+         INSERT INTO groups(id,name,kind,dm_uid1,dm_uid2) VALUES (9876998012,'sender-dm','dm',42,8001);
+         INSERT INTO group_membership(chat_id,uid,archived) VALUES (9876998010,8001,TRUE),(9876998012,8001,FALSE);
+         INSERT INTO messages(id,chat_id,sender_uid,message_type,message,client_generated_id,created_at,has_thread)
+         VALUES (9007199254950000,9876998010,43,'text','thread root','cross-sender-root','2026-10-01',TRUE);
+         INSERT INTO messages(id,chat_id,sender_uid,message_type,message,client_generated_id,created_at,reply_root_id)
+         VALUES (9007199254950001,9876998010,42,'text','crosschat sender needle','cross-sender-main','2026-11-02',NULL),
+                (9007199254950002,9876998012,42,'text','crosschat sender needle','cross-sender-dm','2026-11-02 01:00Z',NULL),
+                (9007199254950003,9876998010,42,'text','crosschat sender needle','cross-sender-reply','2026-11-02 02:00Z',9007199254950000),
+                (9007199254950004,9876998010,43,'text','crosschat sender needle','cross-sender-other','2026-11-02 03:00Z',NULL),
+                (9007199254950005,9876998011,42,'text','crosschat sender needle','cross-sender-hidden','2026-11-02 04:00Z',NULL),
+                (9007199254950006,9876998010,42,'text','crosschat sender needle','cross-sender-outside-date','2026-11-03',NULL),
+                (9007199254950007,9876998010,43,'text','crosschat sender needle','cross-sender-stale','2026-11-02 05:00Z',NULL);",
+    )
+    .unwrap();
+    let mut documents = messages::table
+        .filter(dsl::chat_id.eq_any([9876998010i64, 9876998011, 9876998012]))
+        .select(Message::as_select())
+        .load::<Message>(conn)
+        .unwrap()
+        .iter()
+        .filter_map(project_message_document)
+        .collect::<Vec<_>>();
+    // A wrong indexed sender must also be rejected by database authority checks.
+    documents
+        .iter_mut()
+        .find(|d| d.id == "9007199254950007")
+        .unwrap()
+        .sender_uid = 42;
+    assert!(index
+        .add_documents(&documents, Some("id"))
+        .await
+        .unwrap()
+        .wait_for_completion(client, None, None)
+        .await
+        .unwrap()
+        .is_success());
+
+    let metrics = Arc::new(Metrics::new());
+    let avatars = Arc::new(AvatarService::new(None, metrics.avatars.clone()));
+    let media = MediaStore::new(
+        aws_sdk_s3::Client::from_conf(
+            aws_sdk_s3::Config::builder()
+                .behavior_version_latest()
+                .region(Region::new("us-east-1"))
+                .build(),
+        ),
+        Arc::new(crate::config::MediaConfig {
+            bucket: "test".into(),
+            attachment_prefix: "attachments".into(),
+            base_url: None,
+            upload_proxy_path: None,
+            endpoint_url: None,
+            max_attachment_file_size_bytes: 1024,
+        }),
+    );
+    let search = Some(Arc::new(service.clone()));
+    let deps = || SearchMessagesDeps {
+        media: &media,
+        avatars: &avatars,
+        metrics: &metrics,
+        message_search: &search,
+    };
+    let request = |sort: &str, sender_uid: i32, cursor: Option<String>| {
+        serde_json::from_value::<SearchMessagesQuery>(serde_json::json!({
+            "q": "crosschat sender needle", "senderUid": sender_uid,
+            "createdFrom": "2026-11-01T00:00:00Z", "createdBefore": "2026-11-03T00:00:00Z",
+            "sort": sort, "limit": 1, "cursor": cursor
+        }))
+        .unwrap()
+    };
+    for sort in ["newest", "relevance"] {
+        let mut cursor = None;
+        let mut seen = Vec::new();
+        for _ in 0..10 {
+            let page =
+                search_messages_in_scope(8001, None, request(sort, 42, cursor), conn, deps())
+                    .await
+                    .unwrap();
+            assert!(!page.truncated);
+            assert!(page.messages.iter().all(|m| m.message.sender.uid == 42));
+            seen.extend(page.messages.into_iter().map(|m| m.message.id));
+            cursor = page.next_cursor;
+            if cursor.is_none() {
+                break;
+            }
+            assert!(matches!(
+                search_messages_in_scope(
+                    8001,
+                    None,
+                    request(sort, 43, cursor.clone()),
+                    conn,
+                    deps()
+                )
+                .await,
+                Err(AppError::BadRequest(_))
+            ));
+        }
+        assert!(cursor.is_none());
+        seen.sort_unstable();
+        assert_eq!(
+            seen,
+            vec![9007199254950001, 9007199254950002, 9007199254950003]
+        );
+    }
+    let absent =
+        search_messages_in_scope(8001, None, request("newest", 999999, None), conn, deps())
+            .await
+            .unwrap();
+    assert!(absent.messages.is_empty() && absent.next_cursor.is_none());
+    for q in [None, Some("  ".to_owned())] {
+        let mut params = request("newest", 42, None);
+        params.q = q;
+        assert!(matches!(
+            search_messages_in_scope(8001, None, params, conn, deps()).await,
+            Err(AppError::BadRequest("Cross-chat search requires a query"))
+        ));
     }
 }
