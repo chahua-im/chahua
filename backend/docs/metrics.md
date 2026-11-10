@@ -445,8 +445,7 @@ privacy/relationship changes. A completed result discarded because of a concurre
 change still records its service duration; the replacement query records another observation.
 
 All presence duration metrics use `H3`; all have no identifiers as labels. For
-the process-local presence boundary, see the [Scoped WebSocket presence section
-of the backend README](../README.md#scoped-websocket-presence).
+the process-local presence boundary, see the [backend architecture overview](../README.md#scoped-websocket-presence).
 
 | Family | Type / labels | Meaning and recording boundary | Buckets / cardinality |
 | --- | --- | --- | --- |
@@ -488,8 +487,14 @@ active state reports record last seen in memory immediately. Inactive WebSocket
 reports update connection liveness only. Client ownership binding remains
 synchronous on first use/account changes and is cached for same-account activity;
 timestamps, versions, and daily rollups use the shared background activity worker.
-See the [activity persistence contract](../README.md#scoped-websocket-presence)
-for buffer limits, flush bounds, ownership ordering, retries, and durability.
+The worker flushes every 15 seconds with bounded work per tick. Client and user
+buffers each admit up to 100,000 entries; excess new entries are dropped rather
+than blocking requests. Connection acquisition is bounded to two seconds, with
+one-second lock and two-second statement timeouts inside flush transactions.
+Failed snapshots remain pending for later ticks. An uncertain commit can duplicate
+additive rollups on retry; no persistent deduplication is used. Buffers are
+memory-only, so crashes or overflow can lose unpersisted analytics. Graceful
+shutdown attempts one final bounded flush rather than draining indefinitely.
 
 Client metadata observations retain the five-minute throttle, bypassed on account,
 application-version, or observation UTC-day changes. Legacy active reports preserve
@@ -497,7 +502,7 @@ the recorded application version; RPC supplies its version during session bindin
 Worker snapshots and acknowledgement update the pending gauges, normally every
 15 seconds; they are not a per-scrape measurement of the buffers.
 
-HTTP bookkeeping follows the [direct user-session eligibility rules](../README.md#scoped-websocket-presence):
+HTTP bookkeeping is limited to direct user sessions:
 service-token requests and requests carrying `X-On-Behalf-Of` schedule no client
 writes, including subsequent legacy WebSocket reports. RPC ignores upgrade
 headers and uses only the first-frame verified user/client. Excluded HTTP and
@@ -546,7 +551,7 @@ Snapshots are replicas, not instance-local counts: use
 `max by (version) (app_version_active_clients{job="wetty-chat-backend"})`
 across instances, never sum replicas or apply `rate`/`increase`. Divide that
 per-version result by its sum for the client distribution; do not weight it by
-request volume. See the [Grafana dashboard](../../docs/grafana.json).
+request volume.
 
 ## Message search
 

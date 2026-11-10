@@ -2,11 +2,16 @@
 
 ## Project Structure & Module Organization
 
-This repository contains the Rust API server (`backend/`) and the PWA client (`pwa/`), plus shared docs and API collections. A separate Apple client is maintained outside this repository and still uses the backend's APNs support. Backend core modules live in `src/handlers`, `src/services`, `src/utils`, `src/schema`, `src/dto` (API data transfer objects), `src/models.rs` (Diesel models), and `src/metrics.rs` (Prometheus metrics), with Diesel migrations in `migrations/`. Routing and app wiring live in `src/main.rs`.
+See [README.md](README.md) for the backend architecture and source layout. The PWA lives in `../pwa/`; a separate Apple client also uses this backend.
 
-Server-wide configuration is parsed in one place, `src/config.rs` (`AppConfig::from_env`) — add new env vars there rather than calling `std::env::var` from a handler or `main`. Three subsystems still own their own `from_env` because they are independently optional: `services/message_search`, `services/push` (VAPID/APNs) and `utils/ids` (`NODE_ID`). Shared state lives in `src/state.rs`: `AppState` is a newtype over `Arc<AppInner>` that `Deref`s to the inner struct, so `state.db`, `state.media` etc. read normally while the per-request clone stays a single refcount bump. Services take the narrowest dependency they actually use — `&MediaStore` for object-storage URLs, `&AvatarService` for user avatars, `&IdGen` for id generation — and never `&AppState`; handlers may take `State<AppState>` and pass the pieces down.
+Parse server-wide configuration in `src/config.rs` (`AppConfig::from_env`), not in handlers or `main`. The optional search, push, and ID subsystems retain their own configuration loaders. Services take narrow dependencies, never `AppState`; transport adapters extract and pass the required pieces.
 
-Real-time messaging uses WebSockets: ticket-based WS auth, handlers in `src/handlers/ws/`, payloads in `src/dto/ws.rs`, connection registry in `src/services/ws_registry.rs`. Background work (e.g. push notifications via web-push/APNs) lives in `src/services/background.rs` and `src/services/push/`. Message full-text search is backed by Meilisearch (`src/services/message_search/`); media is stored in S3.
+## Documentation
+
+- Keep `README.md` a short, current architecture overview: major components, dependencies, boundaries, and links.
+- Do not append per-feature implementation notes, endpoint/field catalogs, tuning constants, investigation results, rollout history, or work journals to the README.
+- Update documentation only when a lasting contract changes. Put necessary details in the existing focused document, generated API schemas, or a nearby code comment; do not duplicate them or create a document for every change.
+- Keep this file focused on contributor rules, not feature implementation history.
 
 ## Auth
 
