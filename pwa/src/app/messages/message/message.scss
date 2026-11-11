@@ -168,7 +168,7 @@
 }
 
 app-message-link-previews:not(:empty) {
-  margin-bottom: 4px;
+  margin-top: 4px;
 }
 
 .bubble:has(app-message-attachments.album) app-message-link-previews {
