@@ -523,6 +523,7 @@ export class ConversationStore {
 /** Mirrors the server's MessagePreview shape embedded as replyToMessage. */
 function toMessagePreview(message: MessageResponse): MessagePreview {
   return {
+    metadata: message.metadata,
     id: message.id,
     clientGeneratedId: message.clientGeneratedId,
     forwardedFromName: message.forwardedFrom?.sender.name,

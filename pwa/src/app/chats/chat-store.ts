@@ -1646,6 +1646,7 @@ export class ChatStore {
 
 function messagePreview(message: MessageResponse): MessagePreview {
   return {
+    metadata: message.metadata,
     id: message.id,
     clientGeneratedId: message.clientGeneratedId,
     forwardedFromName: message.forwardedFrom?.sender.name,

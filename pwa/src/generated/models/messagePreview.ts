@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { MentionInfo } from './mentionInfo';
+import type { MessageMetadataResponse } from './messageMetadataResponse';
 import type { MessagePreviewAttachment } from './messagePreviewAttachment';
 import type { MessagePreviewSticker } from './messagePreviewSticker';
 import type { MessageType } from './messageType';
@@ -24,6 +25,7 @@ export interface MessagePreview {
   mentions: MentionInfo[];
   message?: string;
   messageType: MessageType;
+  metadata?: MessageMetadataResponse;
   sender: User;
   sticker?: MessagePreviewSticker;
   systemKind?: SystemMessageKind;

@@ -1,4 +1,4 @@
-import { SystemMessageKind } from '../../../generated/models';
+import { LinkPreviewStatus, SystemMessageKind } from '../../../generated/models';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { TranslocoService } from '@jsverse/transloco';
 import { firstValueFrom } from 'rxjs';
@@ -213,6 +213,42 @@ describe('MessagePreview', () => {
   it('does not translate or highlight a user message that happens to contain a protocol phrase', () => {
     expect(render({ messageType: MessageType.text, message: 'joined the chat' })).toBe('joined the chat');
     expect(fixture.nativeElement.classList.contains('action')).toBe(false);
+  });
+
+  it('renders a ready standalone link as a literal share title and follows metadata updates', () => {
+    const url = 'https://example.com/article';
+    const source = { message: url, metadata: { linkPreviews: [{ url, status: LinkPreviewStatus.pending }] } };
+    expect(render(source)).toBe(url);
+    expect(
+      render({
+        ...source,
+        metadata: { linkPreviews: [{ url, status: LinkPreviewStatus.ready, title: '<b>标题</b>' }] },
+      }),
+    ).toBe('[分享]<b>标题</b>');
+    expect(fixture.nativeElement.querySelector('b, a')).toBeNull();
+    expect(render({ ...source, metadata: { linkPreviews: [{ url, status: LinkPreviewStatus.ready }] } })).toBe(
+      '[分享]example.com',
+    );
+    expect(render(source)).toBe(url);
+  });
+
+  it('keeps ordinary text and unmatched links out of share summaries', () => {
+    const url = 'https://example.com/article';
+    const metadata = { linkPreviews: [{ url, status: LinkPreviewStatus.ready, title: '标题' }] };
+    for (const message of ['说明 ' + url, 'https://other.example/', url + ' https://example.com/other']) {
+      expect(render({ message, metadata })).not.toContain('[分享]');
+    }
+    expect(
+      render({ message: url, metadata: { linkPreviews: [...metadata.linkPreviews, ...metadata.linkPreviews] } }),
+    ).toBe(url);
+    expect(render({ message: url, metadata, isDeleted: true })).toBe('消息已删除');
+    expect(
+      render({
+        message: url,
+        metadata,
+        attachments: [{ id: testMessage.id, url: '/media', kind: 'image/jpeg', size: 1, fileName: 'image' }],
+      }),
+    ).not.toContain('[分享]');
   });
 
   it('describes an invitation instead of displaying its protocol code', () => {
