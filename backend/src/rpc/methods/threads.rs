@@ -1,8 +1,7 @@
 use crate::dto::rpc::threads::*;
 use crate::dto::threads::{
-    ListChatThreadsResponse, ListThreadParticipantsResponse, ListThreadsResponse,
-    MarkThreadReadResponse, ThreadReadStateResponse, ThreadSubscriptionStatusResponse,
-    UnreadThreadCountResponse,
+    ListChatThreadsResponse, ListThreadsResponse, MarkThreadReadResponse, ThreadReadStateResponse,
+    ThreadSubscriptionStatusResponse, UnreadThreadCountResponse,
 };
 use crate::errors::AppError;
 use crate::rpc::{RpcCallContext, RpcServices};
@@ -55,7 +54,7 @@ pub async fn list_participants(
     context: &RpcCallContext,
     services: &RpcServices,
     params: ThreadsListParticipantsParams,
-) -> Result<ListThreadParticipantsResponse, AppError> {
+) -> Result<crate::dto::chats::ListParticipantsResponse, AppError> {
     let uid = context.uid()?;
     let mut conn = services.db.get()?;
     crate::services::api::threads::get_thread_participants(

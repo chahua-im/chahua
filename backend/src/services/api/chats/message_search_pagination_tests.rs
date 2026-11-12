@@ -376,3 +376,165 @@ async fn assert_cross_chat_sender_filter(
         ));
     }
 }
+
+#[tokio::test]
+async fn participant_thread_search_works_without_index_and_rechecks_access() {
+    use crate::dto::messages::{ChatSearchMessagesQuery, SearchResultKind};
+    use aws_sdk_s3::config::Region;
+    let Ok(database) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+        return;
+    };
+    let mut conn = PgConnection::establish(&database).unwrap();
+    let schema = format!("thread_search_test_{}", uuid::Uuid::new_v4().simple());
+    conn.batch_execute(&format!(
+        "CREATE SCHEMA {schema}; SET search_path TO {schema},public;
+        CREATE TABLE groups (LIKE public.groups INCLUDING ALL);
+        CREATE TABLE group_membership (LIKE public.group_membership INCLUDING ALL);
+        CREATE TABLE messages (LIKE public.messages INCLUDING ALL);"
+    ))
+    .unwrap();
+    let result = std::panic::AssertUnwindSafe(async {
+
+    conn.batch_execute("INSERT INTO groups(id,name) VALUES (9876987000,'thread-search');
+        INSERT INTO group_membership(chat_id,uid) VALUES (9876987000,7001),(9876987000,7002);
+        INSERT INTO messages(id,chat_id,sender_uid,message_type,client_generated_id,created_at,has_thread,deleted_at)
+        VALUES (9876987010,9876987000,42,'text','participant-search-root-a','2026-01-01',TRUE,NOW()),
+               (9876987020,9876987000,43,'text','participant-search-root-b','2026-02-01',TRUE,NULL);
+        INSERT INTO messages(id,chat_id,sender_uid,message_type,client_generated_id,created_at,reply_root_id)
+        VALUES (9876987011,9876987000,42,'text','participant-search-reply-a','2026-11-01',9876987010),
+               (9876987021,9876987000,42,'text','participant-search-reply-b','2026-11-01',9876987020),
+               (9876987022,9876987000,42,'text','participant-search-reply-c','2026-11-01',9876987020),
+               (9876987030,9876987000,42,'text','participant-search-main','2026-11-01',NULL);").unwrap();
+    let metrics = Arc::new(Metrics::new());
+    let avatars = Arc::new(AvatarService::new(None, metrics.avatars.clone()));
+    let media = MediaStore::new(
+        aws_sdk_s3::Client::from_conf(
+            aws_sdk_s3::Config::builder()
+                .behavior_version_latest()
+                .region(Region::new("us-east-1"))
+                .build(),
+        ),
+        Arc::new(crate::config::MediaConfig {
+            bucket: "test".into(),
+            attachment_prefix: "attachments".into(),
+            base_url: None,
+            upload_proxy_path: None,
+            endpoint_url: None,
+            max_attachment_file_size_bytes: 1024,
+        }),
+    );
+    let deps = || SearchMessagesDeps {
+        media: &media,
+        avatars: &avatars,
+        metrics: &metrics,
+        message_search: &None,
+    };
+    let request = |participant: i32, cursor: Option<String>, date: &str| {
+        serde_json::from_value::<ChatSearchMessagesQuery>(
+        serde_json::json!({"scope":"threads","participantUid":participant,"createdFrom":date,"limit":1,"cursor":cursor})
+    ).unwrap()
+    };
+    let first = search_messages(
+        7001,
+        9876987000,
+        request(42, None, "2026-11-01T00:00:00Z"),
+        &mut conn,
+        deps(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(first.messages.len(), 1);
+    assert_eq!(first.messages[0].message.id, 9876987020);
+    assert!(matches!(first.messages[0].kind, SearchResultKind::Thread));
+    let cursor = first.next_cursor.unwrap();
+    let second = search_messages(
+        7001,
+        9876987000,
+        request(42, Some(cursor.clone()), "2026-11-01T00:00:00Z"),
+        &mut conn,
+        deps(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(second.messages.len(), 1);
+    assert_eq!(second.messages[0].message.id, 9876987010);
+    assert!(matches!(second.messages[0].kind, SearchResultKind::Thread));
+    assert!(second.next_cursor.is_none());
+    assert!(matches!(
+        search_messages(
+            7001,
+            9876987000,
+            request(43, Some(cursor.clone()), "2026-11-01T00:00:00Z"),
+            &mut conn,
+            deps()
+        )
+        .await,
+        Err(AppError::BadRequest(_))
+    ));
+    assert!(matches!(
+        search_messages(
+            7001,
+            9876987000,
+            request(7002, None, "2026-11-01T00:00:00Z"),
+            &mut conn,
+            deps()
+        )
+        .await,
+        Err(AppError::BadRequest(_))
+    ));
+    let empty = search_messages(
+        7001,
+        9876987000,
+        request(42, None, "2026-12-01T00:00:00Z"),
+        &mut conn,
+        deps(),
+    )
+    .await
+    .unwrap();
+    assert!(empty.messages.is_empty() && empty.next_cursor.is_none());
+    let relevance: ChatSearchMessagesQuery = serde_json::from_value(
+        serde_json::json!({"scope":"threads","participantUid":42,"sort":"relevance"}),
+    )
+    .unwrap();
+    assert!(matches!(
+        search_messages(7001, 9876987000, relevance, &mut conn, deps()).await,
+        Err(AppError::BadRequest(_))
+    ));
+    for scope in ["all", "main", "thread"] {
+        let mut value = serde_json::json!({"scope":scope,"senderUid":42});
+        if scope == "thread" {
+            value["threadId"] = serde_json::json!("9876987020");
+        }
+        let page = search_messages(
+            7001,
+            9876987000,
+            serde_json::from_value(value).unwrap(),
+            &mut conn,
+            deps(),
+        )
+        .await
+        .unwrap();
+        assert!(!page.messages.is_empty());
+    }
+    conn.batch_execute("DELETE FROM group_membership WHERE chat_id=9876987000 AND uid=7001")
+        .unwrap();
+    assert!(matches!(
+        search_messages(
+            7001,
+            9876987000,
+            request(42, Some(cursor), "2026-11-01T00:00:00Z"),
+            &mut conn,
+            deps()
+        )
+        .await,
+        Err(AppError::Forbidden(_))
+    ));
+    }).catch_unwind().await;
+    conn.batch_execute(&format!(
+        "SET search_path TO public; DROP SCHEMA {schema} CASCADE;"
+    ))
+    .unwrap();
+    if let Err(panic) = result {
+        std::panic::resume_unwind(panic);
+    }
+}

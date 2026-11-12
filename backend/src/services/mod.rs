@@ -25,6 +25,7 @@ pub mod message_sync;
 pub(crate) mod message_visibility;
 pub mod messages;
 pub mod notification_preferences;
+pub mod participants;
 pub mod presence;
 pub mod privacy_exceptions;
 pub mod push;

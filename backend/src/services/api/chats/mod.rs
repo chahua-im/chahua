@@ -1,5 +1,6 @@
 pub mod chat_attachments;
 pub mod messages;
+pub mod participants;
 pub mod reactions;
 pub mod saved_messages;
 

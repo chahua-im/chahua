@@ -100,3 +100,13 @@ pub struct ChatsAcknowledgeReactionsParams {
     #[serde(flatten)]
     pub body: AcknowledgeReactionsBody,
 }
+
+#[derive(Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatsListParticipantsParams {
+    #[serde(deserialize_with = "crate::dto::rpc::deserialize_id")]
+    #[schema(schema_with = crate::serde_i64_string::schema)]
+    pub chat_id: i64,
+    #[serde(flatten)]
+    pub query: crate::dto::chats::ListChatParticipantsQuery,
+}

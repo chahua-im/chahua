@@ -6,11 +6,14 @@ use axum::{
 use utoipa_axum::router::OpenApiRouter;
 
 use crate::{
-    dto::threads::{
-        ListChatThreadsQuery, ListChatThreadsResponse, ListThreadParticipantsQuery,
-        ListThreadParticipantsResponse, ListThreadsQuery, ListThreadsResponse, MarkThreadReadBody,
-        MarkThreadReadResponse, ThreadOrder, ThreadReadStateResponse,
-        ThreadSubscriptionStatusResponse, UnreadThreadCountResponse,
+    dto::{
+        chats::ListParticipantsResponse,
+        threads::{
+            ListChatThreadsQuery, ListChatThreadsResponse, ListThreadParticipantsQuery,
+            ListThreadsQuery, ListThreadsResponse, MarkThreadReadBody, MarkThreadReadResponse,
+            ThreadOrder, ThreadReadStateResponse, ThreadSubscriptionStatusResponse,
+            UnreadThreadCountResponse,
+        },
     },
     errors::AppError,
     extractors::DbConn,
@@ -68,7 +71,6 @@ pub(super) struct ChatThreadsPath {
         ("limit" = Option<i64>, Query, description = "Page size, default 20, clamped to 1–100"),
         ("cursor" = Option<String>, Query, description = "Exclusive root ID cursor from nextCursor; retain the same order"),
         ("order" = Option<ThreadOrder>, Query, description = "Root ID ordering: newest (default) or oldest"),
-        ("participantUid" = Option<i32>, Query, description = "Filter threads by root/reply author"),
     ),
     responses(
         (status = OK, body = ListChatThreadsResponse),
@@ -101,10 +103,11 @@ pub(super) async fn get_chat_threads(
         ("chat_id" = String, Path, description = "Chat ID"),
         ("thread_root_id" = String, Path, description = "Thread root message ID"),
         ("limit" = Option<i64>, Query, description = "Page size, default 100, clamped to 1–100"),
-        ("cursor" = Option<i32>, Query, description = "Exclusive UID cursor from nextCursor"),
+        ("cursor" = Option<i32>, Query, description = "Exclusive UID cursor from nextCursor; retain scope and q"),
+        ("q" = Option<String>, Query, description = "Username prefix or exact UID; filtered before pagination"),
     ),
     responses(
-        (status = OK, body = ListThreadParticipantsResponse),
+        (status = OK, body = ListParticipantsResponse),
         (status = FORBIDDEN, description = "Not a chat member"),
         (status = NOT_FOUND, description = "No published thread at this root in this chat"),
     ),
@@ -119,7 +122,7 @@ async fn get_thread_participants(
     }): Path<ThreadSubscribePath>,
     conn: DbConn,
     Query(query): Query<ListThreadParticipantsQuery>,
-) -> Result<Json<ListThreadParticipantsResponse>, AppError> {
+) -> Result<Json<ListParticipantsResponse>, AppError> {
     conn.run(move |mut conn| async move {
         Ok(Json(threads::get_thread_participants(
             uid,

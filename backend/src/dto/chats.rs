@@ -203,3 +203,34 @@ pub struct UnreadReactionsAckResponse {
     /// Fresh unread-reaction message count after the cursor advance.
     pub unread_reactions: i64,
 }
+
+/// Historic authors to offer in the group-chat sender/participant picker.
+#[derive(Debug, Default, Clone, Copy, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ChatParticipantScope {
+    #[default]
+    All,
+    Main,
+    Threads,
+}
+
+#[derive(serde::Deserialize, utoipa::IntoParams, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListChatParticipantsQuery {
+    #[serde(default)]
+    pub scope: ChatParticipantScope,
+    /// Case-insensitive username prefix or exact UID, filtered before pagination.
+    pub q: Option<String>,
+    /// Page size, default 100, clamped to 1–100.
+    pub limit: Option<i64>,
+    /// Exclusive UID cursor; keep scope and q unchanged.
+    pub cursor: Option<i32>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListParticipantsResponse {
+    pub participants: Vec<crate::dto::users::User>,
+    /// Last returned UID; pass as `cursor` to continue in ascending UID order.
+    pub next_cursor: Option<i32>,
+}
