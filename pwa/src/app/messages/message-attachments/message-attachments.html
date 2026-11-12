@@ -80,7 +80,7 @@
           }
         }
         @if (last && overlayTime()) {
-          <ion-badge #timePill class="media-time">
+          <ion-badge #timePill class="media-time message-time-pill">
             <time [attr.datetime]="message().createdAt">{{ message().createdAt | localDate: 'time' }}</time>
             <app-message-status [delivery]="delivery()" [read]="read()" />
           </ion-badge>
