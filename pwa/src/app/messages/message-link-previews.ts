@@ -18,7 +18,6 @@ import { internalHref } from './message-text/message-text';
         @if (interactive()) {
           <a
             class="card"
-            [class.described]="preview.description"
             [href]="preview.url"
             [attr.target]="internal(preview.url) ? null : '_blank'"
             [attr.rel]="internal(preview.url) ? null : 'noopener noreferrer'"
@@ -27,19 +26,20 @@ import { internalHref } from './message-text/message-text';
             <ng-container [ngTemplateOutlet]="content" />
           </a>
         } @else {
-          <div class="card" [class.described]="preview.description"><ng-container [ngTemplateOutlet]="content" /></div>
+          <div class="card"><ng-container [ngTemplateOutlet]="content" /></div>
         }
         <ng-template #content>
           @if (preview.image?.url && !failedImages().has(preview.image!.url)) {
-            <img
-              class="thumbnail"
-              [src]="preview.image!.url"
-              width="36"
-              height="36"
-              loading="lazy"
-              decoding="async"
-              (error)="imageFailed(preview.image!.url)"
-            />
+            <span class="thumbnail">
+              <img
+                [src]="preview.image!.url"
+                width="36"
+                height="36"
+                loading="lazy"
+                decoding="async"
+                (error)="imageFailed(preview.image!.url)"
+              />
+            </span>
           } @else {
             <span class="thumbnail letter">{{ host.charAt(0).toUpperCase() }}</span>
           }
@@ -64,7 +64,8 @@ import { internalHref } from './message-text/message-text';
     }
     .card {
       box-sizing: border-box;
-      display: flex;
+      display: grid;
+      grid-template-columns: var(--thumbnail-width, clamp(56px, 26%, 88px)) minmax(0, 1fr);
       align-items: center;
       gap: 8px;
       min-height: 48px;
@@ -75,9 +76,6 @@ import { internalHref } from './message-text/message-text';
       color: inherit;
       text-decoration: none;
       min-width: 0;
-    }
-    .card.described {
-      align-items: flex-start;
     }
     .card + .card {
       margin-top: 4px;
@@ -94,11 +92,19 @@ import { internalHref } from './message-text/message-text';
       --tile: var(--message-accent-tile);
     }
     .thumbnail {
-      flex: 0 0 36px;
-      width: 36px;
-      height: 36px;
+      position: relative;
+      min-width: 0;
+      /* Two title lines, three description lines with margins, and one domain line. */
+      height: var(--thumbnail-height, 106px);
       border-radius: 4px;
-      object-fit: cover;
+      overflow: hidden;
+    }
+    .thumbnail img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
     }
     .letter {
       display: grid;
@@ -110,16 +116,20 @@ import { internalHref } from './message-text/message-text';
       display: flex;
       flex-direction: column;
       min-width: 0;
-      flex: 1;
+      justify-content: center;
       line-height: 16px;
     }
-    .title,
     .domain {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     .title {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      overflow: hidden;
+      overflow-wrap: anywhere;
       font-size: 14px;
       font-weight: 600;
     }
@@ -156,26 +166,17 @@ import { internalHref } from './message-text/message-text';
       width: 45%;
     }
     :host(.standalone-card) .card {
-      align-items: flex-start;
+      --thumbnail-width: clamp(64px, 30%, 112px);
+      --thumbnail-height: 114px;
       gap: 12px;
-      min-height: 112px;
+      min-height: 88px;
       padding: 14px 14px 36px;
       border: 1px solid var(--ion-color-light-shade);
       border-radius: 14px;
       background: var(--ion-background-color-step-50, var(--ion-background-color, var(--ion-color-light)));
       color: var(--ion-text-color, var(--ion-color-dark));
     }
-    :host(.standalone-card) .thumbnail {
-      flex-basis: 44px;
-      width: 44px;
-      height: 44px;
-    }
     :host(.standalone-card) .title {
-      display: -webkit-box;
-      -webkit-box-orient: vertical;
-      -webkit-line-clamp: 2;
-      white-space: normal;
-      overflow-wrap: anywhere;
       line-height: 20px;
     }
   `,
