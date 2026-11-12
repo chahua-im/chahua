@@ -43,6 +43,8 @@ pub struct StoredLinkPreview {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<StoredLinkPreviewImage>,
 }
 
@@ -69,6 +71,9 @@ pub struct LinkPreviewResponse {
     pub expires_at: Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Optional Open Graph description, whitespace-normalized and capped at 512 Unicode scalars.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<LinkPreviewImageResponse>,
 }

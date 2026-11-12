@@ -9,6 +9,8 @@ import type { LinkPreviewImageResponse } from './linkPreviewImageResponse';
 import type { LinkPreviewStatus } from './linkPreviewStatus';
 
 export interface LinkPreviewResponse {
+  /** Optional Open Graph description, whitespace-normalized and capped at 512 Unicode scalars. */
+  description?: string;
   expiresAt?: string;
   image?: LinkPreviewImageResponse;
   status: LinkPreviewStatus;

@@ -30,6 +30,7 @@ impl PreviewBackend for FakeBackend {
         }
         Ok(FetchedLinkPreview {
             title: "Fetched title".into(),
+            description: Some("Fetched description".into()),
             image_url: Some(Url::parse("https://image.example/a.png").unwrap()),
         })
     }
@@ -144,6 +145,12 @@ async fn link_preview_worker_partial_failure_and_supplied_text_without_page_fetc
         ["https://auto.example/", "https://fail.example/"]
     );
     assert_eq!(completed[0].title.as_deref(), Some("Fetched title"));
+    assert_eq!(
+        completed[0].description.as_deref(),
+        Some("Fetched description")
+    );
+    let serialized = serde_json::to_value(&completed[0]).unwrap();
+    assert_eq!(serialized["description"], "Fetched description");
     assert_eq!(
         completed[0]
             .image
@@ -265,6 +272,10 @@ async fn link_preview_worker_stale_upload_is_cleaned_and_unpublished_metadata_is
     assert_eq!(
         stored.link_previews[0].title.as_deref(),
         Some("Fetched title")
+    );
+    assert_eq!(
+        stored.link_previews[0].description.as_deref(),
+        Some("Fetched description")
     );
     assert!(stored.link_previews[0].image.is_some());
     assert!(current.updated_at.is_none());

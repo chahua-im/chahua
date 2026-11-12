@@ -222,6 +222,7 @@ async fn external_work<B: PreviewBackend>(
                             status: LinkPreviewStatus::Ready,
                             expires_at: None,
                             title: Some(page.title),
+                            description: page.description,
                             image,
                         }
                     }
@@ -236,6 +237,7 @@ async fn external_work<B: PreviewBackend>(
                             status: LinkPreviewStatus::Unavailable,
                             expires_at: None,
                             title: None,
+                            description: None,
                             image: None,
                         }
                     }
@@ -253,6 +255,7 @@ async fn external_work<B: PreviewBackend>(
                         status: LinkPreviewStatus::Ready,
                         expires_at: None,
                         title: None,
+                        description: None,
                         image,
                     },
                 )
