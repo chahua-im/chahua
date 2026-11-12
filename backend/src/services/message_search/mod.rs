@@ -51,60 +51,12 @@ const TASK_WAIT_INTERVAL: Duration = Duration::from_millis(50);
 const TASK_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
 const SETUP_TASK_WAIT_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct MessageSearchConfig {
     pub meili_url: String,
     pub meili_master_key: String,
     pub index_uid: String,
 }
-
-impl MessageSearchConfig {
-    pub fn from_env() -> Result<Option<Self>, MessageSearchConfigError> {
-        if !read_enabled_flag("MESSAGE_SEARCH_ENABLED")? {
-            return Ok(None);
-        }
-
-        Self::from_required_env().map(Some)
-    }
-
-    pub fn from_required_env() -> Result<Self, MessageSearchConfigError> {
-        let meili_url = read_required_env("MEILI_URL")?;
-        let meili_master_key = read_required_env("MEILI_MASTER_KEY")?;
-        let index_uid = std::env::var("MESSAGE_SEARCH_INDEX")
-            .ok()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| DEFAULT_INDEX_UID.to_string());
-
-        Ok(Self {
-            meili_url,
-            meili_master_key,
-            index_uid,
-        })
-    }
-}
-
-#[derive(Debug)]
-pub enum MessageSearchConfigError {
-    InvalidEnabledFlag(String),
-    MissingEnv(&'static str),
-}
-
-impl fmt::Display for MessageSearchConfigError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidEnabledFlag(value) => write!(
-                f,
-                "MESSAGE_SEARCH_ENABLED must be one of true/false/1/0/yes/no/on/off, got {value}"
-            ),
-            Self::MissingEnv(name) => {
-                write!(f, "{name} must be set when message search is enabled")
-            }
-        }
-    }
-}
-
-impl std::error::Error for MessageSearchConfigError {}
 
 #[derive(Clone)]
 pub struct MessageSearchService {
@@ -116,7 +68,6 @@ pub struct MessageSearchService {
 
 #[derive(Debug)]
 pub enum MessageSearchError {
-    Config(MessageSearchConfigError),
     Meili(MeiliError),
     Db(diesel::result::Error),
     Pool(diesel::r2d2::PoolError),
@@ -128,7 +79,6 @@ pub enum MessageSearchError {
 impl fmt::Display for MessageSearchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Config(err) => err.fmt(f),
             Self::Meili(err) => write!(f, "meilisearch error: {err}"),
             Self::Db(err) => write!(f, "database error: {err}"),
             Self::Pool(err) => write!(f, "database pool error: {err}"),
@@ -145,12 +95,6 @@ impl fmt::Display for MessageSearchError {
 }
 
 impl std::error::Error for MessageSearchError {}
-
-impl From<MessageSearchConfigError> for MessageSearchError {
-    fn from(err: MessageSearchConfigError) -> Self {
-        Self::Config(err)
-    }
-}
 
 impl From<MeiliError> for MessageSearchError {
     fn from(err: MeiliError) -> Self {
@@ -786,26 +730,6 @@ fn utf8_char_width(byte: u8) -> usize {
     } else {
         4
     }
-}
-
-fn read_enabled_flag(name: &'static str) -> Result<bool, MessageSearchConfigError> {
-    let Some(value) = std::env::var(name).ok() else {
-        return Ok(false);
-    };
-    let normalized = value.trim().to_ascii_lowercase();
-    match normalized.as_str() {
-        "" | "false" | "0" | "no" | "off" => Ok(false),
-        "true" | "1" | "yes" | "on" => Ok(true),
-        _ => Err(MessageSearchConfigError::InvalidEnabledFlag(value)),
-    }
-}
-
-fn read_required_env(name: &'static str) -> Result<String, MessageSearchConfigError> {
-    std::env::var(name)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .ok_or(MessageSearchConfigError::MissingEnv(name))
 }
 
 #[cfg(test)]

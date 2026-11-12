@@ -483,7 +483,7 @@ mod tests {
                     (-76311, -76310, 76301, 'text', 'root', 'merged-thread-root', NOW()),
                     (-76312, -76310, 76301, 'text', 'other root', 'merged-thread-other-root', NOW());",
         ).unwrap();
-        let id_gen = ids::new_generator();
+        let id_gen = ids::new_generator(0);
         for (message_id, thread_id) in [(-76313, None), (-76314, Some(-76311))] {
             let mut body = ForwardMessagesBody {
                 allow_placeholders: false,
