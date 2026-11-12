@@ -30,6 +30,9 @@ import { MessageThread } from '../message-thread/message-thread';
 import { UploadStatus, type AttachmentUpload } from '../upload';
 import { userColors } from '../user-colors';
 import { AvatarMention } from '../avatar-mention';
+import { MessageReplyPreview } from './message-reply-preview';
+import { MessageSelectionMark } from './message-selection-mark';
+import { MessageSwipeReply } from './message-swipe-reply';
 
 export type MessageContent = MessageAttachmentSource &
   Pick<MessageResponse, 'sender' | 'message'> &
@@ -83,6 +86,9 @@ export interface MessageMenuSelection {
     MessageReactions,
     MessageThread,
     MessageStatus,
+    MessageReplyPreview,
+    MessageSelectionMark,
+    MessageSwipeReply,
   ],
   host: {
     '[class.selecting]': 'selecting()',

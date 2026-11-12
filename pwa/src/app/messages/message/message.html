@@ -9,19 +9,7 @@
   </p>
 } @else {
   @if (selecting()) {
-    <span class="selection-mark">
-      @if (selected()) {
-        <svg viewBox="0 0 16 16">
-          <path
-            d="M3 7.5 6.5 11 13 4.5"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="square"
-            stroke-linejoin="miter" />
-        </svg>
-      }
-    </span>
+    <app-message-selection-mark [selected]="selected()" />
   }
   <!-- Let the host receive selection clicks, including over disabled buttons and media controls. -->
   <div
@@ -40,26 +28,12 @@
     (pointerup)="endSwipe()"
     (pointercancel)="endSwipe(true)">
     @if (canInteract() && canReply()) {
-      <div
-        class="swipe-reply"
-        [style.translate]="swipe() + 'px -50%'"
-        [style.opacity]="progress()"
-        [style.scale]="0.5 + progress() * 0.5"
-        [class.burst]="burst()"
-        (animationend)="burst.set(false)">
-        <svg viewBox="0 0 512 512">
-          <path
-            d="M240 424v-96c116.4 0 159.39 33.76 208 96 0-119.23-39.57-240-208-240V88L64 256Z"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="35"
-            stroke-linejoin="round" />
-          <path
-            d="M240 424v-96c116.4 0 159.39 33.76 208 96 0-119.23-39.57-240-208-240V88L64 256Z"
-            fill="currentColor"
-            [style.clip-path]="'inset(0 0 0 ' + (1 - fillProgress()) * 100 + '%)'" />
-        </svg>
-      </div>
+      <app-message-swipe-reply
+        [offset]="swipe()"
+        [progress]="progress()"
+        [fillProgress]="fillProgress()"
+        [burst]="burst()"
+        (animationCompleted)="burst.set(false)" />
     }
     @if (showDetails()) {
       <span class="avatar-slot">
@@ -80,8 +54,7 @@
       #bubble
       [class]="isSticker() ? 'sticker-content' : 'bubble'"
       [class.media-only]="mediaOnly()"
-      [class.invitation]="message().messageType === Type.invite"
-      [class.link-preview-card]="!!linkCard()"
+      [class.card-bubble]="message().messageType === Type.invite || !!linkCard()"
       (contextmenu)="showMenu($event, bubble)"
       (pointerdown)="startPress($event, bubble)">
       <div class="bubble-surface">
@@ -104,35 +77,27 @@
           <app-forwarded-label class="forward-origin" [name]="origin.sender.name" />
           @if (origin.originalReplyTo; as originalReply) {
             @if (!originalReply.isDeleted) {
-              <div class="reply-preview original-reply">
-                <span class="reply-content">
-                  @if (originalReply.forwardedFromName) {
-                    <app-forwarded-label [name]="originalReply.forwardedFromName" />
-                  } @else {
-                    <span class="reply-name">{{ originalReply.sender.name ?? originalReply.sender.uid }}</span>
-                  }
-                  <span class="reply-text"><app-message-preview [message]="originalReply" /></span>
-                </span>
-              </div>
+              <div
+                appMessageReplyPreview
+                class="original-reply"
+                [message]="originalReply"
+                [name]="originalReply.sender.name ?? originalReply.sender.uid"
+                [outgoing]="own()"
+                [neutral]="message().messageType === Type.invite || !!linkCard()"></div>
             }
           }
         }
         @if (quoted(); as quote) {
           <button
+            appMessageReplyPreview
             type="button"
-            class="reply-preview"
+            [message]="quote"
+            [name]="quoteName()"
+            [outgoing]="own()"
+            [neutral]="message().messageType === Type.invite || !!linkCard()"
             [attr.inert]="preview() ? '' : null"
             [disabled]="jumpDisabled() || !canInteract()"
-            (click)="jump.emit(quote.id)">
-            <span class="reply-content">
-              @if (quote.forwardedFromName) {
-                <app-forwarded-label [name]="quote.forwardedFromName" />
-              } @else {
-                <span class="reply-name">{{ quoteName() }}</span>
-              }
-              <span class="reply-text"><app-message-preview [message]="quote"></app-message-preview></span>
-            </span>
-          </button>
+            (click)="jump.emit(quote.id)"></button>
         }
         @if (hasMedia()) {
           <div class="media-content" [attr.inert]="preview() ? '' : null" (click)="sticker($event)">

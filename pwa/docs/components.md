@@ -38,6 +38,9 @@ flowchart TD
   PAGE --> VOICEBAR
   VOICEBAR --> PLAYBACK[VoicePlayback]
   VOICE --> PLAYBACK
+  MSG --> QUOTE[MessageReplyPreview]
+  MSG --> SELECTION[MessageSelectionMark]
+  MSG --> SWIPE[MessageSwipeReply]
   MSG --> AUTHOR[MessageAuthor]
   MSG --> TEXT[MessageText]
   MSG --> PREVIEW[MessagePreview]
@@ -133,6 +136,8 @@ scrollActivity.moving 控制浮动日期，idle 同时要求没有触摸与惯�
 | ReactionDetails    | chatId、messageId；完整表态名单、选中表情、loading/error                                                                                                                                                                                                                                                                   |
 | EmojiPanel         | title、anchor、active → chosen、back、dismissed；消息表态与置顶设置共用标题栏、面板样式、安全区定位与延迟加载反馈；无 anchor 时居中，有 anchor 时桌面锚定点击位置、移动端居中；置顶设置不传 anchor，通过 keepContentsMounted 保留实例；active 控制首次网格渲染与定位，消息菜单内返回时隐藏并保留实例，调用方处理选中与关闭 |
 | EmojiPicker        | chosen 输出 Unicode 字符串；封装 @nicematic/emoji-picker 的尺寸与中英文语言映射，局部提供 PickerData、PickerSearch、PickerFlags，使用组件自带最近记录服务；安装时通过固定版本补丁将分类与搜索网格改为按行渲染视口及前后各 2 行，保留分类标题与等高占位                                                                     |
+
+`MessageReplyPreview` 复用普通回复和转发原始引用的作者与摘要展示，以属性选择器保留原生 button/div 容器；父组件管理跳转、禁用状态和卡片配色模式。消息的 `MessageSelectionMark` 负责多选圆圈与勾选展示，`MessageSwipeReply` 负责滑动回复的位移、填充、缩放和触发动画。选择交互、手势识别、阈值判断与回复动作由 `Message` 管理。
 
 `picker-emojis.generated.json` 由 `npm run emoji:picker:generate` 从固定版本 `emojibase-data` 生成并提交，包含英文名称、英/简中/繁中搜索关键词、分类和准确的肤色序列。PickerData 与 PickerSearch 通过组件局部 provider 替换库内各自独立的数据源，网格、搜索、肤色浮层使用同一份数据；普通肤色查表转换，混合肤色作为独立条目保持原序列。搜索忽略大小写，空白分隔词取交集，完整表情精确匹配优先并容忍省略 VS16，输出使用与输入校验一致的 Unicode 17 RGI 序列，避免额外 VS16 将相同表态拆成不同键。生成器校验覆盖全部 RGI 序列。数据及索引只随 EmojiPicker 的延迟代码加载，静态索引在模块内复用，每个选择器的查询状态独立。
 
