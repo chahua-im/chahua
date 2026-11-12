@@ -64,6 +64,7 @@ impl LinkPreviewService {
         avatars: Arc<AvatarService>,
         registry: Arc<ConnectionRegistry>,
     ) -> Arc<Self> {
+        let config = Arc::new(super::sites::LinkPreviewConfig::default());
         let (sender, receiver) = mpsc::channel(CAPACITY);
         let context = Arc::new(Context {
             db,
@@ -72,7 +73,7 @@ impl LinkPreviewService {
             registry,
             backend: ProductionBackend {
                 media,
-                fetcher: SecurePreviewFetcher::new(),
+                fetcher: SecurePreviewFetcher::new(config.clone()),
             },
         });
         tokio::spawn(dispatch(receiver, move |job| {
@@ -81,7 +82,7 @@ impl LinkPreviewService {
         }));
         Arc::new(Self {
             sender,
-            drafts: Default::default(),
+            drafts: super::drafts::DraftPreviews::new(config),
         })
     }
 
