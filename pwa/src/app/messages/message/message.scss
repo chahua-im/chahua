@@ -167,7 +167,7 @@
   contain: inline-size;
 }
 
-app-message-link-previews:not(:empty) {
+.message-body > app-message-link-previews:not(:empty) {
   margin-top: 4px;
 }
 
@@ -464,9 +464,9 @@ app-message-link-previews:not(:empty) {
   cursor: default;
 }
 
-.bubble.invitation {
+.chat-row .bubble:is(.invitation, .link-preview-card) {
   --thread-color: var(--ion-color-primary);
-  color: var(--ion-text-color);
+  color: var(--ion-text-color, var(--ion-color-dark));
 
   &::after {
     display: none;
@@ -481,6 +481,26 @@ app-message-link-previews:not(:empty) {
   .message-text {
     display: block;
   }
+
+  .reply-preview {
+    border-inline-start-color: var(--reply-color);
+    background: color-mix(in srgb, var(--reply-color) 10%, transparent);
+  }
+}
+
+.link-card-content {
+  position: relative;
+  width: 280px;
+  max-width: 100%;
+}
+
+.sent .link-card-content {
+  margin-inline-start: auto;
+}
+
+.link-card-content .timestamp {
+  margin: 0;
+  color: inherit;
 }
 
 .invite-time {

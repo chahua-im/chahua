@@ -81,12 +81,14 @@
       [class]="isSticker() ? 'sticker-content' : 'bubble'"
       [class.media-only]="mediaOnly()"
       [class.invitation]="message().messageType === Type.invite"
+      [class.link-preview-card]="!!linkCard()"
       (contextmenu)="showMenu($event, bubble)"
       (pointerdown)="startPress($event, bubble)">
       <div class="bubble-surface">
         @if (
           first() &&
           !isSticker() &&
+          !linkCard() &&
           message().messageType !== Type.forwarded &&
           message().messageType !== Type.invite &&
           !message().forwardedFrom &&
@@ -161,7 +163,17 @@
             </time>
           </ng-template>
           <div class="message-body">
-            @if (!hasMedia()) {
+            @if (linkCard(); as card) {
+              <div class="link-card-content">
+                <app-message-link-previews
+                  [previews]="[card]"
+                  [standaloneCard]="true"
+                  [interactive]="!preview() && !selecting() && (canInteract() || savedId() != null || record())" />
+                <ion-badge class="invite-time" color="medium">
+                  <ng-container [ngTemplateOutlet]="timestamp" />
+                </ion-badge>
+              </div>
+            } @else if (!hasMedia()) {
               <span class="message-text">
                 @if (message().messageType === Type.placeholder) {
                   <app-message-preview [message]="message()" />
@@ -203,6 +215,7 @@
               </span>
             }
             @if (
+              !linkCard() &&
               !message().isDeleted &&
               message().metadata?.linkPreviews?.length &&
               message().messageType !== Type.placeholder &&
@@ -214,7 +227,7 @@
                 [interactive]="!preview() && !selecting() && (canInteract() || savedId() != null || record())"
                 [outgoing]="own()" />
             }
-            @if (!showForwardedCard && message().messageType !== Type.invite) {
+            @if (!linkCard() && !showForwardedCard && message().messageType !== Type.invite) {
               <ng-container [ngTemplateOutlet]="timestamp" />
             }
           </div>

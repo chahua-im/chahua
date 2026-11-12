@@ -106,6 +106,125 @@ describe('Message', () => {
     expect(fixture.nativeElement.querySelector('app-message-link-previews')).toBeNull();
   });
 
+  it('renders a lone URL as one standalone card with its timestamp and delivery status', async () => {
+    const fixture = await render();
+    fixture.componentRef.setInput('own', true);
+    fixture.componentRef.setInput('message', {
+      ...testMessage,
+      message: ' \nhttps://example.com\n ',
+      metadata: {
+        linkPreviews: [
+          {
+            url: 'https://example.com/',
+            status: LinkPreviewStatus.ready,
+            title: 'Example',
+            description: 'A page description',
+          },
+        ],
+      },
+    });
+    fixture.detectChanges();
+    const element: HTMLElement = fixture.nativeElement;
+    expect(element.querySelector('.bubble.link-preview-card')).not.toBeNull();
+    expect(element.querySelectorAll('app-message-link-previews')).toHaveLength(1);
+    expect(element.querySelector('app-message-text, .sender')).toBeNull();
+    expect(element.querySelector('.standalone-card a')?.getAttribute('href')).toBe('https://example.com/');
+    expect(element.querySelector('.description')?.textContent).toBe('A page description');
+    expect(element.querySelectorAll('time')).toHaveLength(1);
+    expect(element.querySelector('.link-card-content .timestamp app-message-status')).not.toBeNull();
+    fixture.componentRef.setInput('preview', true);
+    fixture.detectChanges();
+    expect(element.querySelector('.link-card-content')).not.toBeNull();
+    expect(element.querySelector('.standalone-card a')).toBeNull();
+    fixture.componentRef.setInput('preview', false);
+    fixture.componentRef.setInput('selecting', true);
+    fixture.detectChanges();
+    expect(element.querySelector('.chat-row')?.hasAttribute('inert')).toBe(true);
+    expect(element.querySelector('.standalone-card a')).toBeNull();
+  });
+
+  it.each([
+    'Look at https://example.com/',
+    'https://example.com/ extra text',
+    'https://example.com/ https://example.com/',
+    'https://example.com/\nhttps://other.example/',
+    '[Example](https://example.com/)',
+    'https://different.example/',
+    'https://example.com/。',
+    'https://[invalid',
+  ])('keeps ordinary text and inline previews for %s', async (message) => {
+    const fixture = await render();
+    fixture.componentRef.setInput('message', {
+      ...testMessage,
+      message,
+      metadata: { linkPreviews: [{ url: 'https://example.com/', status: LinkPreviewStatus.ready, title: 'Example' }] },
+    });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.link-card-content')).toBeNull();
+    expect(fixture.nativeElement.querySelector('app-message-text')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('app-message-link-previews')).not.toBeNull();
+  });
+
+  it('preserves the URL until a preview is ready and restores it if the preview becomes unavailable', async () => {
+    const fixture = await render();
+    const message = { ...testMessage, message: 'https://example.com/' };
+    for (const status of [
+      undefined,
+      LinkPreviewStatus.pending,
+      LinkPreviewStatus.ready,
+      LinkPreviewStatus.unavailable,
+    ]) {
+      fixture.componentRef.setInput('message', {
+        ...message,
+        metadata: status
+          ? {
+              linkPreviews: [
+                {
+                  url: message.message,
+                  status,
+                  title: 'Example',
+                  expiresAt: new Date(Date.now() + 30000).toISOString(),
+                },
+              ],
+            }
+          : undefined,
+      });
+      fixture.detectChanges();
+      expect(!!fixture.nativeElement.querySelector('.link-card-content')).toBe(status === LinkPreviewStatus.ready);
+      if (status !== LinkPreviewStatus.ready) {
+        expect(fixture.nativeElement.querySelector('app-message-text').textContent).toContain(message.message);
+      }
+    }
+  });
+
+  it('keeps media captions inline, and preserves quotes and read-only record links on standalone cards', async () => {
+    const fixture = await render();
+    const message = {
+      ...testMessage,
+      message: 'https://example.com/',
+      replyToMessage: { ...testMessage, message: 'Quoted message' },
+      metadata: { linkPreviews: [{ url: 'https://example.com/', status: LinkPreviewStatus.ready, title: 'Example' }] },
+    };
+    fixture.componentRef.setInput('message', {
+      ...message,
+      attachments: [
+        { kind: 'image/jpeg', url: '/photo.jpg', width: 1200, height: 800, fileName: 'photo.jpg', size: 2048 },
+      ],
+    });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.link-card-content')).toBeNull();
+    fixture.componentRef.setInput('message', message);
+    fixture.componentRef.setInput('interactive', false);
+    fixture.componentRef.setInput('record', true);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.reply-preview').textContent).toContain('Quoted message');
+    expect(fixture.nativeElement.querySelector('.standalone-card a')).not.toBeNull();
+    fixture.componentRef.setInput('message', { ...message, message: undefined, isDeleted: true });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.link-card-content')).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('消息已删除');
+  });
+
   it('renders a source and a display-only original reply, and suppresses attribution on record cards', async () => {
     const fixture = await render();
     const forwardedFrom = {

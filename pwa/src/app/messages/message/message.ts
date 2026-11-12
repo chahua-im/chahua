@@ -8,7 +8,12 @@ import { alertCircleOutline, arrowUndoOutline } from 'ionicons/icons';
 import { ForwardedLabel } from '../forwarded-label';
 import { ForwardedCard } from '../forwarded-card';
 import { showsForwardOrigin } from '../forwarding';
-import { MessageType, type MessageResponse, type MessagePreview as Quote } from '../../../generated/models';
+import {
+  LinkPreviewStatus,
+  MessageType,
+  type MessageResponse,
+  type MessagePreview as Quote,
+} from '../../../generated/models';
 import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
 import { InviteCard } from '../invite-card/invite-card';
@@ -253,6 +258,21 @@ export class Message<T extends MessageContent = MessageResponse> {
   protected readonly hasMedia = computed(() => {
     const message = this.message();
     return !message.isDeleted && (message.attachments.length > 0 || !!message.sticker);
+  });
+  protected readonly linkCard = computed(() => {
+    const message = this.message();
+    if (message.isDeleted || message.messageType !== MessageType.text || this.hasMedia()) return;
+    const text = message.message?.trim();
+    const previews = message.metadata?.linkPreviews;
+    if (!text || !/^https?:\/\/\S+$/i.test(text) || previews?.length !== 1) return;
+    const preview = previews[0];
+    if (preview.status !== LinkPreviewStatus.ready) return;
+    try {
+      return new URL(text).href === new URL(preview.url).href ? preview : undefined;
+    } catch {
+      // Invalid URL text remains visible as an ordinary message.
+      return;
+    }
   });
   protected readonly isSticker = computed(
     () => !this.message().isDeleted && this.message().messageType === MessageType.sticker,
