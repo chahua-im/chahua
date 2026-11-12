@@ -83,14 +83,15 @@ import { internalHref } from './message-text/message-text';
       margin-top: 4px;
     }
     :host {
-      --stripe: var(--ion-color-primary);
-      --background: color-mix(in srgb, var(--ion-color-primary) 12%, transparent);
-      --tile: color-mix(in srgb, var(--ion-color-primary) 20%, transparent);
+      --preview-color: var(--ion-color-primary);
+      --stripe: var(--preview-color);
+      --background: color-mix(in srgb, var(--preview-color) 12%, transparent);
+      --tile: color-mix(in srgb, var(--preview-color) 20%, transparent);
     }
-    :host(.outgoing) {
-      --stripe: color-mix(in srgb, var(--ion-color-primary-contrast) 50%, transparent);
-      --background: color-mix(in srgb, var(--ion-color-primary-contrast) 12%, transparent);
-      --tile: color-mix(in srgb, var(--ion-color-primary-contrast) 20%, transparent);
+    :host(:not(.standalone-card)) {
+      --stripe: var(--message-accent-stripe);
+      --background: var(--message-accent-background);
+      --tile: var(--message-accent-tile);
     }
     .thumbnail {
       flex: 0 0 36px;
@@ -121,6 +122,9 @@ import { internalHref } from './message-text/message-text';
     .title {
       font-size: 14px;
       font-weight: 600;
+    }
+    :host(:not(.standalone-card)) .title {
+      color: var(--message-accent);
     }
     .description {
       display: -webkit-box;
@@ -176,12 +180,11 @@ import { internalHref } from './message-text/message-text';
     }
   `,
   imports: [NgTemplateOutlet],
-  host: { '[class.outgoing]': 'outgoing()', '[class.standalone-card]': 'standaloneCard()' },
+  host: { '[class.standalone-card]': 'standaloneCard()' },
 })
 export class MessageLinkPreviews {
   readonly previews = input.required<readonly LinkPreviewResponse[]>();
   readonly interactive = input(true);
-  readonly outgoing = input(false);
   readonly standaloneCard = input(false);
   protected readonly status = LinkPreviewStatus;
   protected readonly failedImages = signal<ReadonlySet<string>>(new Set());

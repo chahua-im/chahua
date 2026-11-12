@@ -1,4 +1,5 @@
-import { Component, input } from '@angular/core';
+import { userColors } from '../user-colors';
+import { Component, computed, input } from '@angular/core';
 import { type MessagePreview as Quote } from '../../../generated/models';
 import { ForwardedLabel } from '../forwarded-label';
 import { MessagePreview } from '../message-preview/message-preview';
@@ -18,6 +19,7 @@ import { MessagePreview } from '../message-preview/message-preview';
   `,
   styles: `
     :host {
+      --message-accent-source: light-dark(var(--reply-light), var(--reply-dark));
       display: grid;
       grid-template-columns: minmax(0, 1fr);
       position: relative;
@@ -28,10 +30,10 @@ import { MessagePreview } from '../message-preview/message-preview';
       font-size: var(--app-font-compact);
       line-height: var(--app-line-compact);
       color: inherit;
-      border-inline-start: 3px solid var(--reply-color);
+      border-inline-start: 3px solid var(--message-accent-stripe);
       min-width: 0;
       overflow: hidden;
-      background: color-mix(in srgb, var(--reply-color) 10%, transparent);
+      background: var(--message-accent-background);
       padding: 3px 6px;
       border-radius: 4px;
       margin-bottom: 6px;
@@ -50,30 +52,17 @@ import { MessagePreview } from '../message-preview/message-preview';
 
     .reply-name {
       font-weight: 600;
-      color: var(--reply-color);
-    }
-
-    :host(.outgoing) .reply-name {
-      color: inherit;
-    }
-    :host(.outgoing) app-forwarded-label {
-      --forward-muted: currentColor;
-      opacity: 0.75;
-    }
-    :host(.outgoing:not(.neutral)) {
-      border-inline-start-color: color-mix(in srgb, var(--ion-color-primary-contrast) 50%, transparent);
-      background: color-mix(in srgb, var(--ion-text-color, #000) 10%, transparent);
+      color: var(--message-accent);
     }
   `,
   host: {
     class: 'reply-preview',
-    '[class.outgoing]': 'outgoing()',
-    '[class.neutral]': 'neutral()',
+    '[style.--reply-light]': 'colors().light',
+    '[style.--reply-dark]': 'colors().dark',
   },
 })
 export class MessageReplyPreview {
   readonly message = input.required<Omit<Quote, 'clientGeneratedId'>>();
   readonly name = input.required<string | number>();
-  readonly outgoing = input(false);
-  readonly neutral = input(false);
+  protected readonly colors = computed(() => userColors(String(this.name())));
 }

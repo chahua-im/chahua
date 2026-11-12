@@ -12,12 +12,15 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  color: var(--sender-color);
+  color: var(--message-accent);
 }
 .sender-group {
-  background: light-dark(
-    var(--group-light, rgba(var(--ion-text-color-rgb), 0.25)),
-    var(--group-dark, var(--group-light, rgba(var(--ion-text-color-rgb), 0.25)))
+  background: var(
+    --message-group-background,
+    light-dark(
+      var(--group-light, rgba(var(--ion-text-color-rgb), 0.25)),
+      var(--group-dark, var(--group-light, rgba(var(--ion-text-color-rgb), 0.25)))
+    )
   );
   color: var(--ion-color-primary-contrast);
   padding: 0 5px;
@@ -33,10 +36,4 @@
 }
 .female {
   color: #ff8080;
-}
-:host(.own) .sender-name {
-  color: inherit;
-}
-:host(.own) .sender-group {
-  background: rgba(var(--ion-color-primary-contrast-rgb), 0.25);
 }
