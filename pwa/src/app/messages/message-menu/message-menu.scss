@@ -75,7 +75,8 @@ button:disabled {
 .actions button {
   flex: none;
   width: calc((276px - 12px) / 5);
-  height: 63px;
+  min-height: 63px;
+  padding: 4px 2px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -86,11 +87,19 @@ button:disabled {
   color: var(--ion-color-danger);
 }
 .actions ion-icon {
+  flex: none;
   font-size: 23px;
 }
 .actions span {
+  width: 100%;
+  min-width: 0;
   font-size: 11px;
-  white-space: nowrap;
+  line-height: 12px;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
 }
 .preview {
   position: relative;

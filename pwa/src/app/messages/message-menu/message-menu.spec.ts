@@ -889,7 +889,7 @@ describe('MessageMenu', () => {
       },
     ]);
     fixture.detectChanges();
-    expect(labels()).toEqual(['回复', '转发', '收藏贴纸', '链接', '撤回']);
+    expect(labels()).toEqual(['回复', '转发', '收藏', '链接', '撤回']);
     expect(fixture.nativeElement.querySelector('.reactions.panel')).toBeNull();
     await menu['choose'](MessageAction.FavoriteSticker);
     expect(favoriteStickers.set).toHaveBeenCalledWith(sticker, true);
@@ -940,6 +940,40 @@ describe('MessageMenu', () => {
     expect(savedMessages.save).toHaveBeenCalledWith(testMessage);
   });
 
+  it('only remeasures labels whose text or available width changed', () => {
+    const actions = document.createElement('div');
+    actions.innerHTML = '<button><span>Reactions</span></button><button><span>Copy</span></button>';
+    const [label, other] = actions.querySelectorAll('span');
+    let width = 49;
+    Object.defineProperty(label, 'clientWidth', { get: () => width });
+    Object.defineProperty(other, 'clientWidth', { get: () => 49 });
+    const measure = vi.fn(() => 60);
+    const measureOther = vi.fn(() => 25);
+    Object.defineProperty(label, 'scrollWidth', { get: measure });
+    Object.defineProperty(other, 'scrollWidth', { get: measureOther });
+    vi.spyOn(window, 'getComputedStyle').mockReturnValue({ fontSize: '11px' } as CSSStyleDeclaration);
+
+    menu['fitActionLabels'](actions);
+    measure.mockClear();
+    measureOther.mockClear();
+    const style = label.getAttribute('style');
+    menu['fitActionLabels'](actions);
+    expect(measure).not.toHaveBeenCalled();
+    expect(measureOther).not.toHaveBeenCalled();
+    expect(label.getAttribute('style')).toBe(style);
+
+    label.textContent = '查看表态';
+    menu['fitActionLabels'](actions);
+    expect(measure).toHaveBeenCalled();
+    expect(measureOther).not.toHaveBeenCalled();
+
+    measure.mockClear();
+    width = 40;
+    menu['fitActionLabels'](actions);
+    expect(measure).toHaveBeenCalled();
+    expect(measureOther).not.toHaveBeenCalled();
+  });
+
   it('reverses the favorite state of the selected sticker', async () => {
     const sticker = {
       id: encodeId('123'),
@@ -954,7 +988,7 @@ describe('MessageMenu', () => {
     menu.reset();
     menu.open(selection());
     fixture.detectChanges();
-    expect(labels()).toContain('取消收藏贴纸');
+    expect(labels()).toContain('取消收藏');
     await menu['choose'](MessageAction.FavoriteSticker);
     expect(favoriteStickers.set).toHaveBeenCalledWith(sticker, false);
     expect(menu['notice']()).toBe(MessageNotice.Unsaved);
