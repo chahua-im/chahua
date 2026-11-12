@@ -273,6 +273,11 @@ export class ConversationPage {
     return this.router.navigate(['/chats/chat', decodeId(this.id()), 'search']);
   }
   protected readonly compactToolbar = signal(false);
+  protected readonly groupToolbar = computed(() => !this.threadId() && !this.chatTitle().isDm);
+  protected readonly groupVisibleActions = signal(3);
+  private readonly groupActions = viewChild('groupActions', { read: ElementRef }) as Signal<
+    ElementRef<HTMLElement> | undefined
+  >;
   private readonly toolbar = viewChild('toolbar', { read: ElementRef }) as Signal<ElementRef<HTMLElement> | undefined>;
   private readonly toolbarActions = viewChild('toolbarActions', { read: ElementRef }) as Signal<
     ElementRef<HTMLElement> | undefined
@@ -281,6 +286,10 @@ export class ConversationPage {
   private expandedActionsWidth = 0;
 
   private measureToolbar() {
+    if (this.groupToolbar()) {
+      this.measureGroupToolbar();
+      return;
+    }
     const text = this.titleText()?.nativeElement;
     const actions = this.toolbarActions()?.nativeElement;
     const title = text?.parentElement;
@@ -295,6 +304,43 @@ export class ConversationPage {
     const expanded = this.compactToolbar() ? available - this.expandedActionsWidth + actionsWidth : available;
     if (!this.compactToolbar()) this.expandedActionsWidth = actionsWidth;
     this.compactToolbar.set(this.compactToolbar() ? natural + 1 > expanded : natural > expanded);
+  }
+  private measureGroupToolbar() {
+    const text = this.titleText()?.nativeElement;
+    const title = text?.parentElement;
+    const actions = this.groupActions()?.nativeElement;
+    if (!text || !title?.clientWidth || !actions?.offsetWidth) return;
+    const name = text.querySelector('.conversation-name')!;
+    const range = document.createRange();
+    range.selectNodeContents(name);
+    const counts = text.querySelector<HTMLElement>('.group-counts');
+    const countWidths = counts ? Array.from(counts.children, (element) => (element as HTMLElement).scrollWidth) : [];
+    const natural = Math.max(
+      range.getBoundingClientRect().width,
+      countWidths.reduce((sum, width) => sum + width, 0) +
+        (counts ? parseFloat(getComputedStyle(counts).columnGap) || 0 : 0),
+    );
+    const width = (element: HTMLElement) => {
+      const style = getComputedStyle(element);
+      return element.offsetWidth + (parseFloat(style.marginLeft) || 0) + (parseFloat(style.marginRight) || 0);
+    };
+    const buttons = Array.from(actions.querySelectorAll<HTMLElement>('ion-button:not(.overflow-action)'));
+    const more = actions.querySelector<HTMLElement>('.overflow-action')!;
+    const avatar = title.firstElementChild as HTMLElement;
+    const available =
+      title.clientWidth +
+      actions.offsetWidth -
+      avatar.offsetWidth -
+      (parseFloat(getComputedStyle(title).columnGap) || 0);
+    let visible = buttons.length;
+    while (visible > 0) {
+      const actionsWidth =
+        buttons.slice(0, visible).reduce((sum, button) => sum + width(button), 0) +
+        (visible < buttons.length ? width(more) : 0);
+      if (natural + actionsWidth <= available) break;
+      visible--;
+    }
+    this.groupVisibleActions.set(visible);
   }
   protected readonly muteBusy = linkedSignal({ source: () => this.entryKey(), computation: () => false });
   protected readonly muted = computed(() => this.chatInfo.isMuted(this.id()));
@@ -1932,7 +1978,13 @@ export class ConversationPage {
     const resize = new ResizeObserver(() => this.measureToolbar());
     resize.observe(toolbar);
     resize.observe(text);
-    this.destroyRef.onDestroy(() => resize.disconnect());
+    // Presence can change its intrinsic width without resizing the clipped heading.
+    const contents = new MutationObserver(() => this.measureToolbar());
+    contents.observe(text, { childList: true, characterData: true, subtree: true });
+    this.destroyRef.onDestroy(() => {
+      resize.disconnect();
+      contents.disconnect();
+    });
   }
 
   /** Publish the composer height so page overlays can sit above it. */

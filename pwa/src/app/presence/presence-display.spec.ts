@@ -28,7 +28,11 @@ describe('GroupPresenceDisplay', () => {
     fixture.componentRef.setInput('chatId', encodeId('100'));
     fixture.detectChanges();
     await fixture.whenStable();
-    expect(fixture.nativeElement.textContent.trim()).toBe('12,345位成员，123人在线');
+    expect(
+      Array.from(fixture.nativeElement.querySelectorAll('.group-counts > span'), (element) =>
+        (element as HTMLElement).textContent?.trim(),
+      ),
+    ).toEqual(['12,345位成员', '123人在线']);
     state.set({ memberCount: 12345, onlineCount: 1234 });
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('1,234人在线');

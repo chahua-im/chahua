@@ -86,7 +86,8 @@
   "presence": {
     "loadFailed": "狀態載入失敗",
     "online": "在線",
-    "groupCounts": "{{ members }}位成員，{{ online }}人在線",
+    "groupMembers": "{{ count }}位成員",
+    "groupOnline": "{{ count }}人在線",
     "lastSeen": {
       "recently": "最近上線",
       "withinWeek": "1 週內上線",
@@ -901,6 +902,7 @@
       "repliesOnly": "僅回覆已有話題",
       "readOnly": "禁止發言"
     },
+    "placeholder": { "threadsOnly": "僅限話題內發言", "repliesOnly": "僅可回覆已有話題", "readOnly": "目前禁止發言" },
     "blocked": {
       "threadsOnly": "僅能在話題內發言，不能傳送或編輯群組主聊天訊息。",
       "repliesOnly": "僅能回覆已有話題，不能在群組主聊天發言或建立話題。",

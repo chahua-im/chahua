@@ -1017,8 +1017,8 @@ describe('Message composer upload ownership', () => {
   });
   it.each([
     [SpeakingMode.readOnly, '当前禁止发言'],
-    [SpeakingMode.threadsOnly, '仅能在话题内发言'],
-    [SpeakingMode.repliesOnly, '仅能回复已有话题'],
+    [SpeakingMode.threadsOnly, '仅限话题内发言'],
+    [SpeakingMode.repliesOnly, '仅可回复已有话题'],
   ])('disables composition and retains drafts and attachments under %s', (mode, reason) => {
     const textarea = fixture.nativeElement.querySelector('ion-textarea');
     const microphone = fixture.nativeElement.querySelector('.microphone');
@@ -1028,6 +1028,7 @@ describe('Message composer upload ownership', () => {
     expect(microphone.disabled).toBe(true);
     expect(textarea.disabled).toBe(true);
     expect(textarea.placeholder).toContain(reason);
+    expect(fixture.nativeElement.querySelector('.restriction-placeholder').textContent).toBe(reason);
     expect(fixture.nativeElement.querySelector('.attach-button').disabled).toBe(true);
     expect(fixture.nativeElement.querySelector('.sticker-button').disabled).toBe(true);
     fixture.componentRef.setInput('restriction', undefined);
@@ -1049,6 +1050,7 @@ describe('Message composer upload ownership', () => {
     expect(fixture.nativeElement.querySelector('ion-textarea')).toBe(textarea);
     expect(textarea.value).toBe('');
     expect(textarea.placeholder).toContain(reason);
+    expect(fixture.nativeElement.querySelector('.restriction-placeholder').textContent).toBe(reason);
     expect(fixture.nativeElement.querySelector('.send-button').disabled).toBe(true);
     fixture.componentRef.setInput('restriction', undefined);
     fixture.detectChanges();
