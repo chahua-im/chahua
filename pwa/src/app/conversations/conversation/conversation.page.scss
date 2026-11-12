@@ -100,14 +100,6 @@ ion-content::part(scroll) {
   font: inherit;
   font-size: max(12px, var(--app-font-micro));
   line-height: normal;
-
-  > ion-spinner {
-    position: absolute;
-    inset-block: 0;
-    inset-inline-end: var(--composer-padding-start);
-    margin-block: auto;
-    pointer-events: none;
-  }
 }
 .reply-description strong,
 .reply-description span {

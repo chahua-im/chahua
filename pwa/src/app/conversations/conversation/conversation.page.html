@@ -225,13 +225,12 @@
           [canReply]="!editing() && canSendMessage()"
           [canMention]="!speakingRestriction()"
           (mention)="composer()?.insertMention($event)"
-          [jumpingTo]="jumpingTo()"
           [jumpDisabled]="!!pendingNavigation()"
           [canOpenThread]="!threadId()"
           (reply)="row.confirmed && startReply(row.confirmed)"
           (menu)="menu()?.open($event)"
           (react)="row.confirmed && menu()?.reactTo(row.confirmed, $event)"
-          (jump)="goTo({ type: ConversationTargetKind.Message, messageId: $event }, false, row.message.id)"
+          (jump)="navigateReply($event, row.message.id)"
           (openThread)="openThread($event)"></app-message>
         @if (row.outgoing?.speakingRestriction?.(); as mode) {
           <p class="speaking-error ion-padding-horizontal ion-text-right">
@@ -309,7 +308,7 @@
       </div>
       <div class="down-navigation" [hidden]="!showDownButton()">
         <ion-fab-button size="small" [disabled]="!!pendingNavigation()" (click)="navigateDown()">
-          @if (navigatingDown() || pendingNavigation()?.type === ConversationTargetKind.Latest) {
+          @if (navigatingReply() || navigatingDown() || pendingNavigation()?.type === ConversationTargetKind.Latest) {
             <ion-spinner class="action-icon"></ion-spinner>
           } @else {
             <ion-icon class="action-icon" [icon]="downIcon"></ion-icon>
@@ -437,7 +436,7 @@
           type="button"
           class="reply-description"
           [disabled]="!!pendingNavigation()"
-          (click)="goTo({ type: ConversationTargetKind.Message, messageId: message.id })">
+          (click)="navigateReply(message.id)">
           <strong>
             @if (message.forwardedFrom; as origin) {
               <app-forwarded-label [name]="origin.sender.name" />
@@ -446,9 +445,6 @@
             }
           </strong>
           <span><app-message-preview [message]="message" /></span>
-          @if (jumpingTo() === message.id) {
-            <ion-spinner />
-          }
         </button>
         <button type="button" class="reply-close" (click)="cancelReply()">
           <ion-icon [icon]="closeIcon" />

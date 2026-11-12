@@ -969,11 +969,19 @@ export class ConversationPage {
   });
   protected readonly showDownButton = computed(
     () =>
-      this.positioned() &&
-      (!this.atBottom() || !!this.conversation.page()?.newerCursor) &&
+      (this.navigatingReply() ||
+        this.navigatingDown() ||
+        (this.positioned() && (!this.atBottom() || !!this.conversation.page()?.newerCursor))) &&
       !this.composer()?.voiceActive(),
   );
   protected readonly navigatingDown = linkedSignal({ source: this.entryKey, computation: () => false });
+  private readonly replyNavigationTarget = linkedSignal({
+    source: this.entryKey,
+    computation: (): ConversationTarget | undefined => undefined,
+  });
+  protected readonly navigatingReply = computed(
+    () => !!this.pendingNavigation() && this.pendingNavigation() === this.replyNavigationTarget(),
+  );
   protected readonly unreadCount = computed(() => this.chatInfo.unreadCount(this.id(), this.threadId()));
   protected readonly reactionIcon = heartOutline;
   protected readonly reactionJumpIds = signal<SnowflakeID[]>([]);
@@ -1571,6 +1579,13 @@ export class ConversationPage {
       position = anchor ? { ...position, messageId: anchor.confirmed!.id } : { type: PositionKind.Bottom };
     }
     this.position.set(position);
+  }
+
+  protected navigateReply(messageId: SnowflakeID, fromId?: SnowflakeID) {
+    if (this.pendingNavigation()) return;
+    const target: ConversationTarget = { type: ConversationTargetKind.Message, messageId };
+    this.replyNavigationTarget.set(target);
+    return this.goTo(target, false, fromId);
   }
 
   protected async navigateDown() {

@@ -132,9 +132,6 @@
               }
               <span class="reply-text"><app-message-preview [message]="quote"></app-message-preview></span>
             </span>
-            @if (jumpingTo() === quote.id) {
-              <ion-spinner></ion-spinner>
-            }
           </button>
         }
         @if (hasMedia()) {
