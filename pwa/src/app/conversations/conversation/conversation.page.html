@@ -384,6 +384,49 @@
     (forwardSubmitted)="sendForward($event)"
     (submitted)="sendMessage($event)"
     (editLast)="editLastMessage()">
+    <ng-template #linkContextIcon>
+      @if (draftUrls().length && !speakingRestriction()) {
+        <button
+          type="button"
+          class="link-preview-button"
+          [class.selected]="linkPreviewOpen()"
+          [title]="'messages.linkDraft.title' | transloco"
+          (click)="linkPreviewOpen.set(!linkPreviewOpen())">
+          <ion-icon class="link-main" [icon]="linkIcon" />
+          <ion-icon class="link-badge" [icon]="advancedIcon" />
+        </button>
+      } @else {
+        <ion-icon class="context-icon" [icon]="editing() ? editContextIcon : replyContextIcon" />
+      }
+    </ng-template>
+    <ng-template #firstLinkPreview>
+      @if (linkPreviewPanel()?.firstReady(); as preview) {
+        <app-message-link-previews
+          class="draft-preview"
+          [style.--message-accent]="'light-dark(' + draftPreviewColors().light + ', ' + draftPreviewColors().dark + ')'"
+          [previews]="[preview]"
+          [interactive]="false" />
+      } @else if (linkPreviewPanel()?.fallbackUrl(); as url) {
+        <a class="draft-link-fallback" [href]="url" [title]="url" target="_blank" rel="noopener noreferrer">
+          {{ url }}
+        </a>
+      }
+    </ng-template>
+    @if (!pendingForward()) {
+      <app-draft-link-previews
+        [colors]="draftPreviewColors()"
+        [chatId]="id()"
+        [scope]="linkPreviewScope()"
+        [text]="linkPreviewText()"
+        [automatic]="!editing() && active() && !speakingRestriction()"
+        [initial]="editing()?.metadata?.linkPreviews ?? []"
+        [choices]="linkPreviewChoices()"
+        (choicesChange)="setLinkChoices($event)"
+        [(open)]="linkPreviewOpen" />
+      @if (!editing() && (replyTo() || savedReplyId())) {
+        <ng-container [ngTemplateOutlet]="firstLinkPreview" />
+      }
+    }
     @if (pendingForward(); as sources) {
       <div class="reply-context forward-context">
         <button
@@ -432,7 +475,7 @@
       </div>
     } @else if (editing(); as edit) {
       <div class="reply-context">
-        <ion-icon class="context-icon" [icon]="editing() ? editContextIcon : replyContextIcon" />
+        <ng-container [ngTemplateOutlet]="linkContextIcon" />
         <div class="reply-description">
           <strong>{{ 'conversation.editing' | transloco }}</strong>
           <span><app-message-preview [message]="edit" /></span>
@@ -443,7 +486,7 @@
       </div>
     } @else if (replyTo(); as message) {
       <div class="reply-context">
-        <ion-icon class="context-icon" [icon]="editing() ? editContextIcon : replyContextIcon" />
+        <ng-container [ngTemplateOutlet]="linkContextIcon" />
         <button
           type="button"
           class="reply-description"
@@ -464,13 +507,18 @@
       </div>
     } @else if (savedReplyId()) {
       <div class="reply-context">
-        <ion-icon class="context-icon" [icon]="editing() ? editContextIcon : replyContextIcon" />
+        <ng-container [ngTemplateOutlet]="linkContextIcon" />
         <div class="reply-description">
           <strong>{{ 'conversation.reply' | transloco }}</strong>
         </div>
         <button type="button" class="reply-close" (click)="cancelReply()">
           <ion-icon [icon]="closeIcon" />
         </button>
+      </div>
+    } @else if (draftUrls().length) {
+      <div class="reply-context">
+        <ng-container [ngTemplateOutlet]="linkContextIcon" />
+        <ng-container [ngTemplateOutlet]="firstLinkPreview" />
       </div>
     }
   </app-message-composer>

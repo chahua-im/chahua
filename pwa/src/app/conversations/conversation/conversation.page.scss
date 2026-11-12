@@ -325,3 +325,49 @@ app-message-composer[hidden] {
   visibility: hidden;
   pointer-events: none;
 }
+
+.link-preview-button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--composer-control-size);
+  height: var(--composer-control-size);
+  border: 0;
+  background: transparent;
+  color: var(--ion-color-primary);
+  cursor: pointer;
+  font-size: 22px;
+  .link-main {
+    transform: rotate(-45deg);
+  }
+  .link-badge {
+    position: absolute;
+    right: 2px;
+    bottom: 2px;
+    font-size: 13px;
+    background: var(--ion-background-color);
+    border-radius: 50%;
+  }
+  &.selected {
+    background: color-mix(in srgb, var(--ion-color-primary) 10%, transparent);
+    border-radius: 6px;
+  }
+}
+
+.draft-preview {
+  min-width: 0;
+  --message-accent-stripe: var(--message-accent);
+  --message-accent-background: color-mix(in srgb, var(--message-accent) 10%, transparent);
+  --message-accent-tile: color-mix(in srgb, var(--message-accent) 20%, transparent);
+}
+
+.draft-link-fallback {
+  display: block;
+  min-width: 0;
+  padding: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ion-color-primary);
+  font-size: var(--app-font-secondary);
+}

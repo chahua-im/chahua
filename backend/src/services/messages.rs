@@ -612,7 +612,7 @@ pub(crate) fn snapshot_link_metadata(
     message: &Message,
 ) -> Option<crate::dto::link_previews::StoredMessageMetadata> {
     let metadata = message.metadata.as_ref()?;
-    match crate::services::link_previews::ready_snapshot(metadata)
+    match crate::services::link_previews::snapshot_metadata(metadata)
         .and_then(|snapshot| snapshot.map(serde_json::from_value).transpose())
     {
         Ok(snapshot) => snapshot,

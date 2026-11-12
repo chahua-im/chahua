@@ -1,3 +1,4 @@
+import { LinkPreviewInputStatus } from '../../../generated/models';
 import { AccountStorage } from '../../storage/account-storage';
 import { Location } from '@angular/common';
 import { signal, type WritableSignal } from '@angular/core';
@@ -2370,6 +2371,112 @@ describe('ConversationPage', () => {
     (router.events as Subject<NavigationEnd>).next(new NavigationEnd(1, '/chats', '/chats'));
     expect(component['conversation'].page()).toBeUndefined();
     expect(fixture.nativeElement.querySelector('app-message')).toBeNull();
+  });
+
+  it('shows the first draft preview automatically and keeps link management behind the icon', async () => {
+    const url = 'https://example.com/';
+    component['updateDraft'](url);
+    fixture.detectChanges();
+    peer.expectNone('messages.previewLinks');
+    const button = fixture.nativeElement.querySelector('.link-preview-button') as HTMLButtonElement;
+    expect(button).not.toBeNull();
+    expect(button.querySelector('.link-badge')).not.toBeNull();
+    await vi.waitFor(() => expect(component['linkPreviewPanel']()).toBeDefined());
+    const request = await vi.waitFor(() => peer.expect('messages.previewLinks', { chatId: wireChat.id, urls: [url] }));
+    request.flush([{ url, status: 'ready', title: 'Draft title' }]);
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.reply-context app-message-link-previews').textContent).toContain(
+      'Draft title',
+    );
+    expect(component['linkPreviewOpen']()).toBe(false);
+    button.click();
+    fixture.detectChanges();
+    component['setLinkChoices']([{ url, status: LinkPreviewInputStatus.disabled }]);
+    component.ionViewWillLeave();
+    expect(TestBed.inject(DraftStore).get(testChat.id)?.linkPreviews).toEqual([
+      { url, status: LinkPreviewInputStatus.disabled },
+    ]);
+    await component['escapeComposer']();
+    expect(component['linkPreviewOpen']()).toBe(false);
+    component['updateDraft']('No link');
+    fixture.detectChanges();
+    peer.expectNone('messages.previewLinks');
+    expect(component['draftLinks']()).toEqual([]);
+  });
+
+  it('falls back to the original link when the send draft preview is unavailable', async () => {
+    const url = 'https://example.com/';
+    component['updateDraft'](url);
+    fixture.detectChanges();
+    const request = await vi.waitFor(() => peer.expect('messages.previewLinks', { chatId: wireChat.id, urls: [url] }));
+    request.flush([{ url, status: 'unavailable' }]);
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const fallback = fixture.nativeElement.querySelector('.draft-link-fallback') as HTMLAnchorElement;
+    expect(fallback.textContent?.trim()).toBe(url);
+    expect(fallback.href).toBe(url);
+    component['setLinkChoices']([{ url, status: LinkPreviewInputStatus.disabled }]);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.draft-link-fallback')).toBeNull();
+  });
+
+  it('restores editing text and link choices separately from the unsent draft without fetching previews', async () => {
+    const url = 'https://example.com/';
+    const choices = [{ url, status: LinkPreviewInputStatus.disabled }];
+    component['updateDraft']('Next message');
+    component['startEdit']({ ...testMessage, message: url });
+    component['updateDraft'](url + ' edited');
+    component['setLinkChoices'](choices);
+    component.ionViewDidLeave();
+    const drafts = TestBed.inject(DraftStore);
+    expect(drafts.get(testChat.id)).toMatchObject({
+      text: 'Next message',
+      edit: { messageId: wireMessage.id, text: url + ' edited', linkPreviews: choices },
+    });
+    component.ionViewWillEnter();
+    await fixture.whenStable();
+    const restore = peer.expect('messages.get', { chatId: wireChat.id, messageId: wireMessage.id });
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50 }).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [structuredClone(wireMessage)],
+    });
+    component['saveDraft']();
+    expect(drafts.get(testChat.id)?.edit?.linkPreviews).toEqual(choices);
+    restore.flush({ ...wireMessage, message: url });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(component['editText']()).toBe(url + ' edited');
+    expect(component['editLinks']()).toEqual(choices);
+    expect(component['draft']()).toBe('Next message');
+    peer.expectNone('messages.previewLinks');
+    component['cancelEdit']();
+    expect(drafts.get(testChat.id)?.edit).toBeUndefined();
+    expect(component['draft']()).toBe('Next message');
+  });
+
+  it('does not let a delayed saved edit replace newly typed input', async () => {
+    component.ionViewDidLeave();
+    const drafts = TestBed.inject(DraftStore);
+    drafts.save(testChat.id, undefined, '', undefined, [], {
+      messageId: wireMessage.id,
+      text: 'Saved edit',
+      linkPreviews: [],
+    });
+    component.ionViewWillEnter();
+    await fixture.whenStable();
+    const restore = peer.expect('messages.get', { chatId: wireChat.id, messageId: wireMessage.id });
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50 }).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [structuredClone(wireMessage)],
+    });
+    component['updateDraft']('New input');
+    restore.flush(structuredClone(wireMessage));
+    await fixture.whenStable();
+    expect(component['editing']()).toBeUndefined();
+    expect(component['draft']()).toBe('New input');
+    component['saveDraft']();
+    expect(drafts.get(testChat.id)?.edit?.text).toBe('Saved edit');
   });
 
   it('keeps typing and reply selection local, persisting once when navigation starts', () => {

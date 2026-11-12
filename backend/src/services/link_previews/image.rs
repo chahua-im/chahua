@@ -11,6 +11,7 @@ const MAX_PIXELS: u64 = 4_000_000;
 const MAX_ALLOC: u64 = 64 * 1024 * 1024;
 const THUMBNAIL_DIMENSION: u32 = 128;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Thumbnail {
     pub bytes: Vec<u8>,
     pub width: u32,

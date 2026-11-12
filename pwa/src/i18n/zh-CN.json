@@ -555,6 +555,14 @@
     "newerLoadFailed": "更新的消息加载失败"
   },
   "messages": {
+    "linkDraft": {
+      "title": "链接预览",
+      "enable": "开启",
+      "disable": "关闭",
+      "disabled": "预览已关闭",
+      "limit": "等待预览名额",
+      "failed": "无法获取预览"
+    },
     "date": {
       "today": "今天",
       "yesterday": "昨天"

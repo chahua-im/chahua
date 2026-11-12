@@ -315,3 +315,16 @@ pub async fn send_in_thread(
     )
     .await
 }
+
+pub async fn preview_links(
+    context: &RpcCallContext,
+    services: &RpcServices,
+    params: crate::dto::rpc::messages::MessagesPreviewLinksParams,
+) -> Result<Vec<crate::dto::link_previews::LinkPreviewResponse>, AppError> {
+    let uid = context.uid()?;
+    {
+        let mut conn = services.db.get()?;
+        crate::services::api::members::check_membership(&mut conn, params.chat_id, uid)?;
+    }
+    services.link_previews.drafts.fetch(uid, params.urls).await
+}

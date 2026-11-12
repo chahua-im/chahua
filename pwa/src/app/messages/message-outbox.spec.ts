@@ -6,6 +6,7 @@ import { AlertController } from '@ionic/angular';
 import {
   AttachmentUploadPurpose,
   LinkPreviewStatus,
+  LinkPreviewInputStatus,
   MessageType,
   SpeakingMode,
   ServerWsMessageType,
@@ -99,6 +100,31 @@ describe('MessageOutbox', () => {
       dispose: item.dispose,
     };
   }
+
+  it('sends link choices in creates and metadata-only edits', async () => {
+    const url = 'https://example.com/';
+    const metadata = { linkPreviews: [{ url, status: LinkPreviewInputStatus.disabled }] };
+    const item = outbox.enqueue(testChat.id, undefined, url, { ...text, metadata });
+    await Promise.resolve();
+    const sent = peer.expect('messages.send');
+    expect(sent.params).toMatchObject({ metadata });
+    sent.flush({
+      ...wireAccepted(item.clientGeneratedId),
+      message: url,
+      metadata: { linkPreviews: [{ url, status: LinkPreviewStatus.disabled }] },
+    });
+    await item.operation;
+    const edited = outbox.enqueueEdit({ ...testMessage, message: url }, undefined, url, { ...text, metadata });
+    await Promise.resolve();
+    const patch = peer.expect('messages.edit');
+    expect(patch.params).toMatchObject({ metadata, message: url });
+    patch.flush({
+      ...wireMessage,
+      message: url,
+      metadata: { linkPreviews: [{ url, status: LinkPreviewStatus.disabled }] },
+    });
+    await edited.operation;
+  });
 
   it('sends decimal IDs in one flat request and accepts its confirmation through Connection', async () => {
     const item = outbox.enqueue(testChat.id, undefined, '保留消息', text, testMessage);

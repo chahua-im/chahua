@@ -89,6 +89,7 @@ import type {
   MessagesListForwardedBundleMessagesParams,
   MessagesListForwardedMessagesParams,
   MessagesListParams,
+  MessagesPreviewLinksParams,
   MessagesSearchParams,
   MessagesSendInThreadParams,
   MessagesSendParams,
@@ -207,6 +208,17 @@ export class RpcApi {
 
   readonly messages = {
     list: (params: MessagesListParams) => this.#call<Shared.ListMessagesResponse>('messages.list', params),
+    previewLinks: (params: MessagesPreviewLinksParams) =>
+      this.#call<
+        Array<{
+          description?: string;
+          expiresAt?: string;
+          image?: Shared.LinkPreviewImageResponse;
+          status: Shared.LinkPreviewStatus;
+          title?: string;
+          url: string;
+        }>
+      >('messages.previewLinks', params),
     send: (params: MessagesSendParams) => this.#call<Shared.MessageResponse>('messages.send', params),
     search: (params: MessagesSearchParams) => this.#call<Shared.SearchMessagesResponse>('messages.search', params),
     get: (params: MessagesGetParams) => this.#call<Shared.MessageResponse>('messages.get', params),

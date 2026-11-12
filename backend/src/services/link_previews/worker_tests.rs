@@ -73,7 +73,10 @@ fn job(work: Vec<LinkPreviewWork>) -> LinkPreviewJob {
 #[tokio::test]
 async fn link_preview_queue_drops_overflow_and_bounds_active_jobs_without_retries() {
     let (sender, receiver) = mpsc::channel(CAPACITY);
-    let service = LinkPreviewService { sender };
+    let service = LinkPreviewService {
+        sender,
+        drafts: Default::default(),
+    };
     for n in 0..65 {
         let mut job = job(Vec::new());
         if n >= 4 {
@@ -122,6 +125,7 @@ async fn link_preview_worker_partial_failure_and_supplied_text_without_page_fetc
         Some("https://supplied.example/ https://auto.example/ https://fail.example/"),
         Some(&MessageMetadataInput {
             link_previews: vec![LinkPreviewInput {
+                status: None,
                 url: "https://supplied.example/".into(),
                 title: Some("Supplied".into()),
                 image_url: None,
@@ -175,6 +179,7 @@ async fn link_preview_worker_supplied_image_only_and_expiry_awaits_upload_owners
         Some("https://supplied.example/"),
         Some(&MessageMetadataInput {
             link_previews: vec![LinkPreviewInput {
+                status: None,
                 url: "https://supplied.example/".into(),
                 title: Some("Supplied".into()),
                 image_url: Some("https://image.example/a.png".into()),
@@ -343,4 +348,32 @@ async fn link_preview_worker_stale_upload_is_cleaned_and_unpublished_metadata_is
             *context.backend.uploaded.lock().unwrap()
         );
     }
+}
+
+#[tokio::test]
+async fn draft_thumbnail_publication_does_not_fetch_page_or_image_again() {
+    let backend = FakeBackend::default();
+    let mut source = Cursor::new(Vec::new());
+    ::image::RgbaImage::new(100, 50)
+        .write_to(&mut source, ::image::ImageFormat::Png)
+        .unwrap();
+    let thumbnail = image::thumbnail(&source.into_inner()).unwrap();
+    let work = job(vec![LinkPreviewWork::CacheThumbnail {
+        url: "https://example.com/".into(),
+        thumbnail,
+    }]);
+    let mut keys = Vec::new();
+    let result = external_work(
+        &backend,
+        &work,
+        Instant::now() + std::time::Duration::from_secs(30),
+        &mut keys,
+    )
+    .await
+    .unwrap();
+    assert!(backend.pages.lock().unwrap().is_empty());
+    assert!(backend.images.lock().unwrap().is_empty());
+    assert_eq!(backend.uploaded.lock().unwrap().len(), 1);
+    assert_eq!(result[0].image.as_ref().unwrap().width, 100);
+    assert_eq!(keys.len(), 1);
 }

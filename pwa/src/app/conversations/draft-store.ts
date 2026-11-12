@@ -1,5 +1,5 @@
 import { computed, inject, linkedSignal, Service } from '@angular/core';
-import type { MessageResponse } from '../../generated/models';
+import type { LinkPreviewInput, MessageResponse } from '../../generated/models';
 import { decodeId, type SnowflakeID } from '../api/snowflake-id';
 import { SessionStore } from '../session/session-store';
 import { AccountStorage, AccountStore } from '../storage/account-storage';
@@ -35,15 +35,34 @@ export class DraftStore {
     return this.items()[this.key(chatId, threadId)];
   }
 
-  save(chatId: SnowflakeID, threadId: SnowflakeID | undefined, text: string, replyTo?: SnowflakeID) {
+  save(
+    chatId: SnowflakeID,
+    threadId: SnowflakeID | undefined,
+    text: string,
+    replyTo?: SnowflakeID,
+    linkPreviews?: readonly LinkPreviewInput[],
+    edit?: Draft['edit'],
+  ) {
     const previous = this.get(chatId, threadId);
     const replyId = replyTo ? decodeId(replyTo) : undefined;
-    if (!text.trim() && !replyId) {
+    if (!text.trim() && !replyId && !edit) {
       this.clear(chatId, threadId);
       return;
     }
-    if (previous?.text === text && previous?.replyTo === replyId) return;
-    this.update(chatId, threadId, { text, replyTo: replyId, savedAt: Date.now() });
+    if (
+      previous?.text === text &&
+      previous?.replyTo === replyId &&
+      JSON.stringify(previous?.linkPreviews) === JSON.stringify(linkPreviews?.length ? linkPreviews : undefined) &&
+      JSON.stringify(previous?.edit) === JSON.stringify(edit)
+    )
+      return;
+    this.update(chatId, threadId, {
+      text,
+      replyTo: replyId,
+      savedAt: Date.now(),
+      ...(linkPreviews?.length ? { linkPreviews } : {}),
+      ...(edit ? { edit } : {}),
+    });
   }
 
   clear(chatId: SnowflakeID, threadId?: SnowflakeID) {

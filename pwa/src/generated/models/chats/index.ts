@@ -22,6 +22,7 @@ export * from './getChatReadReceiptParams';
 export * from './getChatsParams';
 export * from './getMessagesParams';
 export * from './linkPreviewInput';
+export * from './linkPreviewInputStatus';
 export * from './listChatAttachmentsResponse';
 export * from './listChatSavedMessagesParams';
 export * from './listChatsResponse';

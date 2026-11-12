@@ -1,3 +1,7 @@
+import { MessageLinkPreviews } from '../../messages/message-link-previews';
+import { DraftLinkPreviews } from '../../messages/draft-link-previews';
+import { draftLinkUrls } from '../../messages/draft-link-urls';
+import type { Draft } from '../../storage/account-database';
 import { DOCUMENT, NgTemplateOutlet } from '@angular/common';
 import {
   afterNextRender,
@@ -69,8 +73,10 @@ import {
   heartOutline,
   informationCircleOutline,
   listOutline,
+  linkOutline,
   notificationsOffOutline,
   notificationsOutline,
+  optionsOutline,
   returnDownBackOutline,
   returnUpForwardOutline,
   searchOutline,
@@ -81,6 +87,9 @@ import { RpcApi } from '../../../generated/rpc-api';
 import {
   GroupKind,
   GroupRole,
+  LinkPreviewInputStatus,
+  LinkPreviewStatus,
+  type LinkPreviewInput,
   MessageType,
   NotificationType,
   ServerWsMessageType,
@@ -204,6 +213,8 @@ interface ConversationEntry {
     Message,
     MessageMenu,
     MessageComposer,
+    DraftLinkPreviews,
+    MessageLinkPreviews,
     MessagePreview,
     VoiceBar,
     LoadError,
@@ -359,7 +370,7 @@ export class ConversationPage {
     }
   }
   private readonly editTarget = linkedSignal<MessageResponse | OutgoingMessage | undefined>(() => {
-    this.entryKey();
+    this.entryVersion();
     return undefined;
   });
   protected readonly editing = computed(() => {
@@ -370,15 +381,24 @@ export class ConversationPage {
     const target = this.editTarget();
     return target && 'delivery' in target ? untracked(() => target.uploads) : [];
   });
+  private editRestoreVersion = 0;
   protected startEdit(message: MessageResponse | OutgoingMessage) {
+    this.editRestoreVersion++;
     const content = 'delivery' in message ? message.message() : message;
     if (
       !this.chatInfo.canSpeak(this.id(), content.replyRootId ? SpeakingAction.ThreadReply : SpeakingAction.ChatMessage)
     )
       return;
     this.cancelForward();
+    this.savedEdit.set(undefined);
     this.editTarget.set(message);
     this.editText.set(this.editing()?.message ?? '');
+    this.editLinks.set(
+      (content.metadata?.linkPreviews ?? [])
+        .filter((p) => p.status === LinkPreviewStatus.disabled)
+        .map(({ url }) => ({ url, status: LinkPreviewInputStatus.disabled })),
+    );
+    this.linkPreviewOpen.set(false);
     void this.composer()?.setFocus();
   }
   protected editLastMessage() {
@@ -398,6 +418,10 @@ export class ConversationPage {
   private readonly discardChanges = inject(DiscardChanges);
   private readonly injector = inject(Injector);
   protected async escapeComposer() {
+    if (this.linkPreviewOpen()) {
+      this.linkPreviewOpen.set(false);
+      return true;
+    }
     const entry = this.entryKey();
     const composer = this.composer();
     if (this.selecting()) {
@@ -416,7 +440,16 @@ export class ConversationPage {
     if (this.pendingForward()) this.cancelForward();
     else if (this.editing()) {
       const target = this.editTarget();
-      const changed = this.editText() !== (this.editing()?.message ?? '') || composer?.hasAttachmentEdits();
+      const changed =
+        this.editText() !== (this.editing()?.message ?? '') ||
+        composer?.hasAttachmentEdits() ||
+        this.editLinks().some(
+          (p) =>
+            p.status === LinkPreviewInputStatus.enabled ||
+            !this.editing()?.metadata?.linkPreviews.some(
+              (old) => old.url === p.url && old.status === LinkPreviewStatus.disabled,
+            ),
+        );
       if (changed && !(await this.discardChanges.confirm())) return true;
       if (!this.isCurrent(entry) || target !== this.editTarget()) return true;
       this.cancelEdit();
@@ -431,8 +464,13 @@ export class ConversationPage {
     return true;
   }
   protected cancelEdit() {
+    this.editRestoreVersion++;
+    this.savedEdit.set(undefined);
     this.editTarget.set(undefined);
     this.editText.set('');
+    this.editLinks.set([]);
+    this.linkPreviewOpen.set(false);
+    if (this.drafts.get(this.id(), this.threadId())?.edit) this.saveDraft();
   }
   protected readonly PageDirection = PageDirection;
   protected readonly ConversationTargetKind = ConversationTargetKind;
@@ -1060,6 +1098,36 @@ export class ConversationPage {
   // Route cleanup saves the previous input before activate advances entryVersion.
   protected readonly draft = linkedSignal({ source: this.entryVersion, computation: () => '' });
   protected readonly editText = linkedSignal({ source: this.entryVersion, computation: () => '' });
+  private readonly savedEdit = linkedSignal({
+    source: this.entryVersion,
+    computation: (): Draft['edit'] => undefined,
+  });
+  protected readonly draftLinks = linkedSignal({
+    source: this.entryVersion,
+    computation: (): readonly LinkPreviewInput[] => [],
+  });
+  protected readonly editLinks = linkedSignal({
+    source: this.entryVersion,
+    computation: (): readonly LinkPreviewInput[] => [],
+  });
+  protected readonly linkPreviewOpen = linkedSignal({ source: this.entryVersion, computation: () => false });
+  protected readonly linkPreviewText = computed(() => (this.editing() ? this.editText() : this.draft()));
+  protected readonly linkPreviewChoices = computed(() => (this.editing() ? this.editLinks() : this.draftLinks()));
+  protected readonly draftUrls = computed(() => draftLinkUrls(this.linkPreviewText()));
+  protected readonly linkPreviewScope = computed(
+    () =>
+      `${this.session.user()?.uid}/${this.entryVersion()}/${this.id()}/${this.threadId()}/${this.editing() ? 'edit:' + this.editTarget()!.clientGeneratedId : 'send'}`,
+  );
+  protected readonly draftPreviewColors = computed(() => {
+    const user = this.session.user();
+    return userColors(user?.username ?? String(user?.uid));
+  });
+  protected readonly linkPreviewPanel = viewChild(DraftLinkPreviews);
+  protected readonly linkIcon = linkOutline;
+  protected readonly advancedIcon = optionsOutline;
+  protected setLinkChoices(choices: readonly LinkPreviewInput[]) {
+    (this.editing() ? this.editLinks : this.draftLinks).set(choices);
+  }
   protected readonly replyTo = linkedSignal({
     source: this.entryVersion,
     computation: (): MessageResponse | undefined => undefined,
@@ -1427,6 +1495,9 @@ export class ConversationPage {
     this.active.set(true);
     const draft = this.drafts.get(id, threadId);
     this.draft.set(draft?.text ?? '');
+    this.draftLinks.set(draft?.linkPreviews ?? []);
+    this.savedEdit.set(draft?.edit);
+    if (draft?.edit) void this.restoreEdit(draft.edit);
     this.savedReplyId.set(draft?.replyTo ? encodeId(draft.replyTo) : undefined);
     if (draft?.replyTo && !this.reply()) void this.restoreReply(encodeId(draft.replyTo));
     this.conversation.reset(id, threadId);
@@ -1501,6 +1572,7 @@ export class ConversationPage {
     const data = this.router.routerState.snapshot.root.firstChild?.data;
     const retainComposer = retainRange && (data?.['modal'] || data?.['preserveConversation']);
     this.saveDraft();
+    this.linkPreviewOpen.set(false);
     this.scrolling.reset();
     this.active.set(false);
     this.entered = false;
@@ -2268,12 +2340,26 @@ export class ConversationPage {
   }
 
   protected updateDraft(text: string) {
+    this.editRestoreVersion++;
     (!this.pendingForward() && this.editing() ? this.editText : this.draft).set(text);
+    const urls = draftLinkUrls(text);
+    const choices = !this.pendingForward() && this.editing() ? this.editLinks : this.draftLinks;
+    choices.update((items) => items.filter((item) => urls.includes(item.url)));
+    if (!urls.length) this.linkPreviewOpen.set(false);
   }
 
   protected saveDraft({ chatId, threadId } = { chatId: this.id(), threadId: this.threadId() }) {
     if (this.active() && this.session.user())
-      this.drafts.save(chatId, threadId, this.draft(), this.replyTo()?.id ?? this.savedReplyId());
+      this.drafts.save(
+        chatId,
+        threadId,
+        this.draft(),
+        this.replyTo()?.id ?? this.savedReplyId(),
+        this.draftLinks(),
+        this.editing()?.id
+          ? { messageId: decodeId(this.editing()!.id!), text: this.editText(), linkPreviews: this.editLinks() }
+          : this.savedEdit(),
+      );
   }
 
   protected cancelReply() {
@@ -2304,6 +2390,27 @@ export class ConversationPage {
     if (!this.conversation.atLatest()) void this.goTo({ type: ConversationTargetKind.Latest });
   }
 
+  private async restoreEdit(draft: NonNullable<Draft['edit']>) {
+    const version = this.editRestoreVersion;
+    const entry = this.entryKey();
+    try {
+      const message = await firstValueFrom(
+        this.api.messages
+          .get({ chatId: entry.chatId, messageId: encodeId(draft.messageId) })
+          .pipe(takeUntilDestroyed(this.destroyRef)),
+      );
+      if (entry !== this.entryKey() || version !== this.editRestoreVersion || !this.active() || this.editTarget())
+        return;
+      this.savedEdit.set(undefined);
+      if (message.isDeleted) return;
+      this.editTarget.set(message);
+      this.editText.set(draft.text);
+      this.editLinks.set(draft.linkPreviews);
+    } catch {
+      /* Preserve the saved draft for a later visit. */
+    }
+  }
+
   private async restoreReply(messageId: SnowflakeID) {
     const entry = this.entryKey();
     try {
@@ -2325,6 +2432,29 @@ export class ConversationPage {
   protected async sendMessage(composition: Composition = { messageType: MessageType.text, attachmentIds: [] }) {
     if (this.speakingRestriction()) return;
     const target = this.editTarget();
+    if (
+      composition.messageType === MessageType.text &&
+      (this.draftUrls().length || this.editing()?.metadata?.linkPreviews.length)
+    ) {
+      const choices = [...this.linkPreviewChoices()];
+      if (target) {
+        for (const url of this.draftUrls()) {
+          if (
+            !choices.some((choice) => choice.url === url) &&
+            this.editing()?.metadata?.linkPreviews.some(
+              (preview) => preview.url === url && preview.status === LinkPreviewStatus.disabled,
+            )
+          )
+            choices.push({ url, status: LinkPreviewInputStatus.enabled });
+        }
+      }
+      const previews = this.linkPreviewPanel()?.snapshot() ?? [];
+      composition = {
+        ...composition,
+        metadata: choices.length || target ? { linkPreviews: choices } : undefined,
+        previewMetadata: { linkPreviews: previews },
+      };
+    }
     const text = (target ? this.editText() : this.draft()).trim();
     if (!text && !composition.attachmentIds.length && !composition.uploads?.length && !composition.sticker) return;
     if (target) {
@@ -2345,6 +2475,8 @@ export class ConversationPage {
     );
     if (composition.messageType === MessageType.text) {
       this.draft.set('');
+      this.draftLinks.set([]);
+      this.linkPreviewOpen.set(false);
       this.drafts.clear(this.id(), this.threadId());
     }
     this.cancelReply();

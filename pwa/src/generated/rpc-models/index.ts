@@ -88,6 +88,7 @@ export type {
   LastSeenBucket,
   LinkPreviewImageResponse,
   LinkPreviewInput,
+  LinkPreviewInputStatus,
   LinkPreviewResponse,
   LinkPreviewStatus,
   ListBlocksResponse,
@@ -460,6 +461,7 @@ export type MessagesListParams = {
   max?: number;
   threadId?: Shared.SnowflakeID;
 };
+export type MessagesPreviewLinksParams = { chatId: Shared.SnowflakeID; urls: Array<string> };
 export type MessagesSearchParams = {
   chatId: Shared.SnowflakeID;
   limit?: number;

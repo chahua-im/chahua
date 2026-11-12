@@ -54,6 +54,7 @@ impl LinkPreviewJob {
 
 pub struct LinkPreviewService {
     sender: mpsc::Sender<LinkPreviewJob>,
+    pub drafts: super::drafts::DraftPreviews,
 }
 
 impl LinkPreviewService {
@@ -78,7 +79,10 @@ impl LinkPreviewService {
             let context = context.clone();
             async move { run_job(&context, job).await }
         }));
-        Arc::new(Self { sender })
+        Arc::new(Self {
+            sender,
+            drafts: Default::default(),
+        })
     }
 
     pub fn enqueue(&self, job: LinkPreviewJob) {
@@ -175,6 +179,15 @@ async fn thumbnail<B: PreviewBackend>(
     .ok()?
     .ok()?
     .ok()?;
+    upload_thumbnail(backend, decoded, deadline, keys).await
+}
+
+async fn upload_thumbnail<B: PreviewBackend>(
+    backend: &B,
+    thumbnail: image::Thumbnail,
+    deadline: Instant,
+    keys: &mut Vec<String>,
+) -> Option<StoredLinkPreviewImage> {
     if Instant::now() >= deadline {
         return None;
     }
@@ -182,7 +195,7 @@ async fn thumbnail<B: PreviewBackend>(
     // Record ownership before starting an upload. On deadline, wait for the
     // existing bounded SDK operation to settle rather than losing its key.
     keys.push(key.clone());
-    let upload = backend.put(&key, decoded.bytes);
+    let upload = backend.put(&key, thumbnail.bytes);
     tokio::pin!(upload);
     let uploaded = tokio::select! {
         result = &mut upload => result,
@@ -190,8 +203,8 @@ async fn thumbnail<B: PreviewBackend>(
     };
     uploaded.then_some(StoredLinkPreviewImage {
         storage_key: key.clone(),
-        width: decoded.width,
-        height: decoded.height,
+        width: thumbnail.width,
+        height: thumbnail.height,
     })
 }
 
@@ -244,6 +257,20 @@ async fn external_work<B: PreviewBackend>(
                     Err(_) => return None,
                 };
                 (url, result)
+            }
+            LinkPreviewWork::CacheThumbnail { url, thumbnail } => {
+                let image = upload_thumbnail(backend, thumbnail.clone(), deadline, keys).await;
+                (
+                    url,
+                    StoredLinkPreview {
+                        url: url.clone(),
+                        status: LinkPreviewStatus::Ready,
+                        expires_at: None,
+                        title: None,
+                        description: None,
+                        image,
+                    },
+                )
             }
             LinkPreviewWork::CacheImage { url, image_url } => {
                 let source = Url::parse(image_url).expect("prepared thumbnail URL");

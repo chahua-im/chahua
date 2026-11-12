@@ -10,4 +10,5 @@ export enum LinkPreviewStatus {
   pending = 'pending',
   ready = 'ready',
   unavailable = 'unavailable',
+  disabled = 'disabled',
 }

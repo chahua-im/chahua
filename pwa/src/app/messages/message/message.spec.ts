@@ -173,6 +173,7 @@ describe('Message', () => {
       LinkPreviewStatus.pending,
       LinkPreviewStatus.ready,
       LinkPreviewStatus.unavailable,
+      LinkPreviewStatus.disabled,
     ]) {
       fixture.componentRef.setInput('message', {
         ...message,

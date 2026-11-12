@@ -85,6 +85,7 @@ import type {
   MessagesListForwardedBundleMessagesParams,
   MessagesListForwardedMessagesParams,
   MessagesListParams,
+  MessagesPreviewLinksParams,
   MessagesSearchParams,
   MessagesSendInThreadParams,
   MessagesSendParams,
@@ -558,6 +559,9 @@ export const rpcSchemas: Record<string, JsonCodec> = {
   InvitesUpdateParams: {
     inviteId: 1,
   },
+  LinkPreviewInput: {
+    status: 'LinkPreviewInputStatus',
+  },
   LinkPreviewResponse: {
     image: 'LinkPreviewImageResponse',
     status: 'LinkPreviewStatus',
@@ -787,6 +791,9 @@ export const rpcSchemas: Record<string, JsonCodec> = {
     before: 1,
     chatId: 1,
     threadId: 1,
+  },
+  MessagesPreviewLinksParams: {
+    chatId: 1,
   },
   MessagesSearchParams: {
     chatId: 1,
@@ -1348,6 +1355,15 @@ export const rpcMethods: Record<string, RpcMethodCodec> = {
     params: 'MessagesListParams',
     result: 'ListMessagesResponse',
   },
+  'messages.previewLinks': {
+    params: 'MessagesPreviewLinksParams',
+    result: [
+      {
+        image: 'LinkPreviewImageResponse',
+        status: 'LinkPreviewStatus',
+      },
+    ],
+  },
   'messages.send': {
     params: 'MessagesSendParams',
     result: 'MessageResponse',
@@ -1859,6 +1875,7 @@ export const rpcMethodClasses: Record<string, RpcMethodClass> = {
   'conversations.watchUnread': 'control',
   'conversations.watchStates': 'control',
   'messages.list': 'read',
+  'messages.previewLinks': 'read',
   'messages.send': 'mutation',
   'messages.search': 'read',
   'messages.get': 'read',

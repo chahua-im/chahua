@@ -1,3 +1,4 @@
+import type { MessageMetadataInput, MessageMetadataResponse } from '../../../generated/models';
 import { NgTemplateOutlet } from '@angular/common';
 import {
   ChangeDetectorRef,
@@ -69,6 +70,8 @@ import { findCodeRegions } from '../../markdown/code-regions';
 import { SidebarFrame } from '../../layout/sidebar-frame';
 import { EscapePriority, registerEscape } from '../../navigation/escape-navigation';
 export interface Composition {
+  metadata?: MessageMetadataInput;
+  previewMetadata?: MessageMetadataResponse;
   messageType: MessageType;
   attachmentIds: SnowflakeID[];
   sticker?: StickerSummary;

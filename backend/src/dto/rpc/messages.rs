@@ -141,3 +141,12 @@ pub struct MessagesSendInThreadParams {
     #[serde(flatten)]
     pub body: CreateMessageBody,
 }
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MessagesPreviewLinksParams {
+    #[serde(deserialize_with = "crate::dto::rpc::deserialize_id")]
+    #[schema(schema_with = crate::serde_i64_string::schema)]
+    pub chat_id: i64,
+    pub urls: Vec<String>,
+}
