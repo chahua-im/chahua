@@ -413,6 +413,7 @@ export class MessageMenu {
         const previewWidth = Math.min(Math.max(baseWidth, nameWidth), availableWidth);
         preview.style.width = `${previewWidth}px`;
         stack.style.width = `${Math.min(Math.max(previewWidth, 276), availableWidth)}px`;
+        if (actions) this.fitActionLabels(actions);
         const barHeight = bar?.offsetHeight ?? 0;
         const actionsHeight = actions?.offsetHeight ?? 0;
         const totalHeight = preview.offsetHeight + barHeight + actionsHeight + (bar ? 16 : 8);
@@ -471,6 +472,8 @@ export class MessageMenu {
       const observer = new ResizeObserver(place);
       observer.observe(preview);
       observer.observe(actions!);
+      const labels = new MutationObserver(place);
+      labels.observe(actions!, { childList: true, characterData: true, subtree: true });
       if (bar) observer.observe(bar);
       window.addEventListener('resize', place);
       window.visualViewport?.addEventListener('resize', place);
@@ -478,11 +481,44 @@ export class MessageMenu {
       place();
       onCleanup(() => {
         observer.disconnect();
+        labels.disconnect();
         window.removeEventListener('resize', place);
         window.visualViewport?.removeEventListener('resize', place);
         window.visualViewport?.removeEventListener('scroll', place);
       });
     });
+  }
+
+  private readonly actionLabelSizes = new WeakMap<HTMLElement, { text: string | null; width: number }>();
+
+  private fitActionLabels(actions: HTMLElement) {
+    const changed = Array.from(actions.querySelectorAll<HTMLElement>('button > span'))
+      .map((label) => ({ label, text: label.textContent, width: label.clientWidth }))
+      .filter(({ label, text, width }) => {
+        const previous = this.actionLabelSizes.get(label);
+        return width > 0 && (previous?.text !== text || previous.width !== width);
+      });
+    if (!changed.length) return;
+
+    // Batch writes and reads so fitting a page does not force layout for every label.
+    for (const { label } of changed) {
+      label.style.removeProperty('font-size');
+      label.style.whiteSpace = 'nowrap';
+    }
+    const fitted = changed.map(({ label, text, width }) => {
+      const natural = label.scrollWidth;
+      const base = parseFloat(getComputedStyle(label).fontSize);
+      return { label, text, width, size: natural > width ? Math.max(9, (base * width) / natural) : base };
+    });
+    for (const { label, size } of fitted) {
+      label.style.fontSize = `${size}px`;
+      label.style.removeProperty('white-space');
+    }
+    const wrapped = fitted.map((item) => ({ ...item, natural: item.label.scrollWidth }));
+    for (const { label, text, width, size, natural } of wrapped) {
+      if (natural > width) label.style.fontSize = `${(size * (width - 1)) / natural}px`;
+      this.actionLabelSizes.set(label, { text, width });
+    }
   }
 
   protected readonly enterAnimation = (element: HTMLElement) => this.animate(element, true);

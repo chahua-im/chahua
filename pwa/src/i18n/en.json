@@ -594,11 +594,11 @@
         "edit": "Edit",
         "save": "Save",
         "unsave": "Unsave",
-        "favoriteSticker": "Favorite sticker",
-        "unfavoriteSticker": "Unfavorite sticker",
+        "favoriteSticker": "Fav",
+        "unfavoriteSticker": "Unfav",
         "link": "Link",
         "recall": "Recall",
-        "reactions": "View reactions"
+        "reactions": "Reactions"
       },
       "confirm": {
         "recallTitle": "Recall message",
@@ -749,7 +749,7 @@
     "createFailed": "Failed to create sticker pack",
     "emojiLabel": "Emoji",
     "fromMessage": {
-      "action": "Save as sticker",
+      "action": "To sticker",
       "title": "Add to sticker pack",
       "pack": "Sticker pack",
       "invalid": "Use an image-only message with one image up to 10 MiB and 1–4 emoji.",
