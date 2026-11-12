@@ -67,11 +67,7 @@
           !message().forwardedFrom &&
           showDetails()
         ) {
-          <app-message-author
-            class="sender"
-            [sender]="message().sender"
-            [own]="own()"
-            (click)="profile()"></app-message-author>
+          <app-message-author class="sender" [sender]="message().sender" (click)="profile()"></app-message-author>
         }
         @if (origin(); as origin) {
           <app-forwarded-label class="forward-origin" [name]="origin.sender.name" />
@@ -81,9 +77,7 @@
                 appMessageReplyPreview
                 class="original-reply"
                 [message]="originalReply"
-                [name]="originalReply.sender.name ?? originalReply.sender.uid"
-                [outgoing]="own()"
-                [neutral]="message().messageType === Type.invite || !!linkCard()"></div>
+                [name]="originalReply.sender.name ?? originalReply.sender.uid"></div>
             }
           }
         }
@@ -93,8 +87,6 @@
             type="button"
             [message]="quote"
             [name]="quoteName()"
-            [outgoing]="own()"
-            [neutral]="message().messageType === Type.invite || !!linkCard()"
             [attr.inert]="preview() ? '' : null"
             [disabled]="jumpDisabled() || !canInteract()"
             (click)="jump.emit(quote.id)"></button>
@@ -186,8 +178,7 @@
             ) {
               <app-message-link-previews
                 [previews]="message().metadata!.linkPreviews"
-                [interactive]="!preview() && !selecting() && (canInteract() || savedId() != null || record())"
-                [outgoing]="own()" />
+                [interactive]="!preview() && !selecting() && (canInteract() || savedId() != null || record())" />
             }
             @if (!linkCard() && !showForwardedCard && message().messageType !== Type.invite) {
               <ng-container [ngTemplateOutlet]="timestamp" />

@@ -19,6 +19,7 @@ import { arrowRedoOutline } from 'ionicons/icons';
       font-style: italic;
       font-weight: normal;
       color: var(--forward-muted, var(--ion-color-medium));
+      opacity: var(--forward-opacity, 1);
     }
     ion-icon {
       flex-shrink: 0;

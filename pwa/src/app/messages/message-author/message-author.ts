@@ -8,10 +8,8 @@ import type { User } from '../../../generated/models';
   templateUrl: './message-author.html',
   styleUrl: './message-author.scss',
   imports: [IonIcon],
-  host: { '[class.own]': 'own()' },
 })
 export class MessageAuthor {
   readonly sender = input.required<User>();
-  readonly own = input(false);
   protected readonly icons = { femaleOutline, maleOutline };
 }

@@ -93,8 +93,6 @@ export interface MessageMenuSelection {
     '[attr.data-message-id]': 'messageId()',
     '[style.--sender-light]': 'senderColors().light',
     '[style.--sender-dark]': 'senderColors().dark',
-    '[style.--reply-light]': 'replyColors().light',
-    '[style.--reply-dark]': 'replyColors().dark',
   },
 })
 export class Message<T extends MessageContent = MessageResponse> {
@@ -282,7 +280,6 @@ export class Message<T extends MessageContent = MessageResponse> {
     const sender = this.quoted()?.sender ?? this.origin()?.originalReplyTo?.sender;
     return sender ? (sender.name ?? String(sender.uid)) : '';
   });
-  protected readonly replyColors = computed(() => userColors(this.quoteName()));
   protected readonly replyIcon = arrowUndoOutline;
   protected readonly retryIcon = alertCircleOutline;
 
