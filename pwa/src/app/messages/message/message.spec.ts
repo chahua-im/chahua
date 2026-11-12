@@ -125,7 +125,7 @@ describe('Message', () => {
     });
     fixture.detectChanges();
     const element: HTMLElement = fixture.nativeElement;
-    expect(element.querySelector('.bubble.link-preview-card')).not.toBeNull();
+    expect(element.querySelector('.bubble.card-bubble')).not.toBeNull();
     expect(element.querySelectorAll('app-message-link-previews')).toHaveLength(1);
     expect(element.querySelector('app-message-text, .sender')).toBeNull();
     expect(element.querySelector('.standalone-card a')?.getAttribute('href')).toBe('https://example.com/');
@@ -268,6 +268,12 @@ describe('Message', () => {
     });
     fixture.componentRef.setInput('selecting', true);
     fixture.detectChanges();
+    const mark = fixture.nativeElement.querySelector('app-message-selection-mark') as HTMLElement;
+    expect(mark.querySelector('svg')).toBeNull();
+    fixture.componentRef.setInput('selected', true);
+    fixture.detectChanges();
+    expect(mark.classList.contains('selected')).toBe(true);
+    expect(mark.querySelector('svg')).not.toBeNull();
     const toggle = vi.fn();
     const reply = vi.fn();
     fixture.componentInstance.toggleSelected.subscribe(toggle);
@@ -325,7 +331,12 @@ describe('Message', () => {
     pointer(mention, 'pointermove', { clientX: 80 });
     fixture.detectChanges();
     expect(row.style.transform).toBe('translateX(-70px)');
-    expect(fixture.nativeElement.querySelector('.swipe-reply.burst')).not.toBeNull();
+    const indicator = fixture.nativeElement.querySelector('app-message-swipe-reply') as HTMLElement;
+    expect(indicator.classList.contains('burst')).toBe(true);
+    expect(indicator.style.translate).toBe('70px -50%');
+    indicator.dispatchEvent(new Event('animationend'));
+    fixture.detectChanges();
+    expect(indicator.classList.contains('burst')).toBe(false);
     pointer(row, 'pointerup', { clientX: 80 });
     expect(replied).toHaveBeenCalledOnce();
     const clicked = vi.fn();

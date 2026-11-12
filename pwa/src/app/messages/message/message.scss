@@ -111,7 +111,6 @@
 .bubble {
   font-size: var(--app-chat-font-size, var(--app-font-body));
   line-height: var(--app-chat-line-height, var(--app-line-body));
-  position: relative;
   isolation: isolate;
   min-width: 0;
   min-height: calc(var(--app-line-body) + 2 * var(--message-padding-block));
@@ -121,16 +120,15 @@
   --bubble-bottom-right: 16px;
   --bubble-bottom-left: 8px;
   color: var(--ion-text-color);
-  border-radius: var(--bubble-top-left) var(--bubble-top-right) var(--bubble-bottom-right) var(--bubble-bottom-left);
+  --bubble-radius: var(--bubble-top-left) var(--bubble-top-right) var(--bubble-bottom-right) var(--bubble-bottom-left);
+  border-radius: var(--bubble-radius);
 }
 
 .bubble > .bubble-surface {
   min-height: inherit;
   padding: var(--message-padding-block) var(--message-padding-inline);
   background: var(--bubble-background);
-  clip-path: inset(
-    0 round var(--bubble-top-left) var(--bubble-top-right) var(--bubble-bottom-right) var(--bubble-bottom-left)
-  );
+  clip-path: inset(0 round var(--bubble-radius));
 }
 
 .bubble:has(app-message-attachments.visual) > .bubble-surface {
@@ -163,16 +161,12 @@
 }
 
 // Album captions wrap to the media width; their text must not enlarge the photo group.
-.bubble:has(app-message-attachments.album) .message-body {
+.bubble:has(app-message-attachments.album) :is(.message-body, app-message-link-previews) {
   contain: inline-size;
 }
 
 .message-body > app-message-link-previews:not(:empty) {
   margin-top: 4px;
-}
-
-.bubble:has(app-message-attachments.album) app-message-link-previews {
-  contain: inline-size;
 }
 
 .message-text {
@@ -182,16 +176,13 @@
 
 // Ionic disables selection on ion-app for any coarse pointer, including touchscreen PCs.
 :host-context(html:not(.plt-ios):not(.plt-android)) {
-  .message-text,
-  .system-message {
+  :is(.message-text, .system-message) {
     -webkit-user-select: text;
     user-select: text;
   }
 }
 
-.preview .message-text,
-.preview .message-text app-message-text,
-.preview .message-text app-message-preview {
+.preview :is(.message-text, .message-text :is(app-message-text, app-message-preview)) {
   -webkit-user-select: text;
   user-select: text;
   -webkit-touch-callout: default;
@@ -228,42 +219,6 @@
   color: var(--ion-color-danger);
   font-size: 22px;
   cursor: pointer;
-}
-
-.reply-preview {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  position: relative;
-  touch-action: pan-y pinch-zoom;
-  width: 100%;
-  text-align: start;
-  font: inherit;
-  font-size: var(--app-font-compact);
-  line-height: var(--app-line-compact);
-  color: inherit;
-  border-inline-start: 3px solid var(--reply-color);
-  min-width: 0;
-  overflow: hidden;
-  background: color-mix(in srgb, var(--reply-color) 10%, transparent);
-  padding: 3px 6px;
-  border-radius: 4px;
-  margin-bottom: 6px;
-}
-
-.reply-name,
-.reply-text {
-  display: block;
-  // Keep the full font metrics inside the single-line clipping box.
-  line-height: normal;
-  min-height: var(--app-line-compact);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.reply-name {
-  font-weight: 600;
-  color: var(--reply-color);
 }
 
 .reply-button {
@@ -343,15 +298,6 @@
     right: -8px;
     transform: scaleX(-1);
   }
-
-  .reply-name {
-    color: inherit;
-  }
-
-  .reply-preview {
-    border-inline-start-color: color-mix(in srgb, var(--ion-color-primary-contrast) 50%, transparent);
-    background: color-mix(in srgb, var(--ion-text-color, #000) 10%, transparent);
-  }
 }
 
 .media-content {
@@ -415,32 +361,13 @@
 .chat-row.dragging {
   transition: none;
 }
-.swipe-reply {
-  position: absolute;
-  grid-row: 1 / 2;
-  right: 16px;
-  top: 50%;
-  width: 28px;
-  height: 28px;
-  color: var(--ion-color-primary);
-  pointer-events: none;
-}
-.swipe-reply svg {
-  width: 100%;
-  height: 100%;
-}
-.swipe-reply.burst {
-  animation: reply-burst 400ms ease-out;
-}
-@keyframes reply-burst {
-  45% {
-    transform: scale(1.25);
-  }
-}
-
 .invite-card {
   position: relative;
   display: block;
+}
+
+.invite-card,
+.forwarded-card {
   max-width: 100%;
   padding: 0;
   border: 0;
@@ -451,12 +378,13 @@
   cursor: pointer;
 }
 
-.invite-card:disabled {
+.invite-card:disabled,
+.forwarded-card:disabled {
   opacity: 1;
   cursor: default;
 }
 
-.chat-row .bubble:is(.invitation, .link-preview-card) {
+.chat-row .card-bubble {
   --thread-color: var(--ion-color-primary);
   color: var(--ion-text-color, var(--ion-color-dark));
 
@@ -472,11 +400,6 @@
 
   .message-text {
     display: block;
-  }
-
-  .reply-preview {
-    border-inline-start-color: var(--reply-color);
-    background: color-mix(in srgb, var(--reply-color) 10%, transparent);
   }
 }
 
@@ -512,23 +435,8 @@
   display: flex;
   margin-bottom: 4px;
 }
-.forwarded-card {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: start;
-  max-width: 100%;
-  cursor: pointer;
-}
-.forwarded-card:disabled {
-  opacity: 1;
-  cursor: default;
-}
 :host(.selecting) {
   cursor: pointer;
-  position: relative;
   padding-inline-start: 30px;
 }
 :host(.selected) {
@@ -538,32 +446,7 @@
   opacity: 0.5;
   cursor: default;
 }
-.selection-mark {
-  display: grid;
-  place-items: center;
-  position: absolute;
-  inset-inline-start: 5px;
-  top: 50%;
-  translate: 0 -50%;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 1px solid var(--ion-color-medium);
-  color: var(--ion-color-primary-contrast);
-
-  svg {
-    display: block;
-    width: 14px;
-    height: 14px;
-  }
-}
-:host(.selected) .selection-mark {
-  background: var(--ion-color-primary);
-  border-color: var(--ion-color-primary);
-}
-
-.sent app-forwarded-label,
-.sent app-forwarded-card {
+.sent :is(app-forwarded-label, app-forwarded-card) {
   --forward-muted: currentColor;
 }
 .sent app-forwarded-label {
