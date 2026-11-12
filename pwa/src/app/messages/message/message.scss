@@ -180,6 +180,15 @@ app-message-link-previews:not(:empty) {
   overflow-wrap: anywhere;
 }
 
+// Ionic disables selection on ion-app for any coarse pointer, including touchscreen PCs.
+:host-context(html:not(.plt-ios):not(.plt-android)) {
+  .message-text,
+  .system-message {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+}
+
 .preview .message-text,
 .preview .message-text app-message-text,
 .preview .message-text app-message-preview {
