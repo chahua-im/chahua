@@ -152,6 +152,24 @@ pub fn load_sender_history(
         })
 }
 
+/// Keep the bounded probe, fallback and hydration in one snapshot, including standalone searches.
+pub fn load_participant_threads(
+    conn: &mut PgConnection,
+    uid: i32,
+    chat_id: i64,
+    participant_uid: i32,
+    filters: MessageSearchFilters,
+    limit: i64,
+    before: Option<SearchPosition>,
+) -> QueryResult<Vec<Message>> {
+    conn.build_transaction()
+        .read_only()
+        .repeatable_read()
+        .run(|conn| {
+            load_sender_thread_roots(conn, uid, chat_id, participant_uid, filters, limit, before)
+        })
+}
+
 // Bound root work before checking participation, not after filtering matches.
 // The fallback may read the sender's participation history, but never performs
 // an unbounded sequence of per-root probes across unrelated chat history.
@@ -273,7 +291,7 @@ fn load_sender_thread_roots(
         .map(|candidate| candidate.id)
         .collect::<Vec<_>>();
     if !exhausted && ids.len() < (limit + 1) as usize {
-        // Both queries run in load_sender_history's repeatable-read snapshot.
+        // Both queries run in the caller's repeatable-read snapshot.
         // Continue strictly after the scanned prefix, not after its last match.
         let boundary = boundary.expect("a full probe has a last root");
         let remaining = limit + 1 - ids.len() as i64;
@@ -659,33 +677,25 @@ mod tests {
                     .unwrap()
                     .is_empty()
             );
-            let threads = crate::services::threads::get_chat_threads(
-                &mut conn,
-                10,
-                None,
-                crate::dto::threads::ThreadOrder::Newest,
-                2000,
-                Some(42),
-            )
-            .unwrap();
+            let threads =
+                load_participant_threads(&mut conn, 1, 10, 42, filters, 2000, None).unwrap();
             assert_eq!(threads.len(), 1203);
-            assert!(crate::services::threads::get_chat_threads(
+            assert!(
+                load_participant_threads(&mut conn, 1, 10, 77, filters, 20, None)
+                    .unwrap()
+                    .is_empty()
+            );
+            let next = load_participant_threads(
                 &mut conn,
+                1,
                 10,
-                None,
-                crate::dto::threads::ThreadOrder::Newest,
+                42,
+                filters,
                 20,
-                Some(77)
-            )
-            .unwrap()
-            .is_empty());
-            let next = crate::services::threads::get_chat_threads(
-                &mut conn,
-                10,
-                Some(1200),
-                crate::dto::threads::ThreadOrder::Newest,
-                20,
-                Some(42),
+                Some(SearchPosition {
+                    created_at: "2026-01-01T00:00:00Z".parse().unwrap(),
+                    id: 1200,
+                }),
             )
             .unwrap();
             assert!(next.iter().all(|m| m.id < 1200));

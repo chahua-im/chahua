@@ -181,3 +181,19 @@ pub async fn acknowledge_reactions(
         services.ws_registry.as_ref(),
     )
 }
+
+pub async fn list_participants(
+    context: &RpcCallContext,
+    services: &RpcServices,
+    params: ChatsListParticipantsParams,
+) -> Result<crate::dto::chats::ListParticipantsResponse, AppError> {
+    let uid = context.uid()?;
+    let mut conn = services.db.get()?;
+    crate::services::api::chats::participants::get_chat_participants(
+        uid,
+        params.chat_id,
+        params.query,
+        &mut conn,
+        &services.avatars,
+    )
+}

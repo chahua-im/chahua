@@ -89,12 +89,42 @@ alongside their existing message fields. Keyword searches remain individual mess
 results. All chronological modes use `cursor`/`nextCursor` without a 1,000-hit cap.
 The cursor version changed to reject tokens issued under the previous semantics.
 
-`GET /chats/{chat_id}/threads` and RPC `threads.listForChat` accept optional
-`participantUid`, retaining root-ID ordering and cursor pagination. Participants
-are published root authors (including deleted roots) or authors of surviving,
-published replies; subscriptions alone do not qualify. The search and thread list
-share this query. A sender participation index narrows candidate messages before
-thread deduplication; the main-chat sender index remains main-only.
+`GET /chats/{chat_id}/messages/search?scope=threads&participantUid=456`
+and RPC `messages.search` return only the roots of threads that user authored or
+replied to, with `kind=thread`. This scope requires a positive `participantUid`;
+`senderUid` is reserved for future root-author filtering and currently rejected.
+`threadId`, nonempty `q`, and `sort=relevance` are also rejected. Dates constrain
+the participant's own posts; results use root creation time/ID descending and the
+same opaque `cursor` contract as other chronological searches. This path does not
+require Meilisearch. `participantUid` is rejected in the other search scopes.
+
+`GET /chats/{chat_id}/threads` and RPC `threads.listForChat` only browse threads,
+using `limit`, root-ID `cursor`, and `order=newest|oldest`; they have no participant
+filter. Historical participants are published root authors (including deleted
+roots) or authors of surviving, published replies; subscriptions alone do not
+qualify. A sender participation index narrows candidate messages before thread
+deduplication; the main-chat sender index remains main-only.
+
+`GET /chats/{chat_id}/participants` / RPC `chats.listParticipants` return historical
+group-chat authors, including departed users. `scope=all` (default) combines
+nondeleted, published, nonsystem main-message authors with thread participants;
+`scope=main` selects only those main-message authors, and `scope=threads` selects
+only thread participants. The existing
+`GET /chats/{chat_id}/threads/{thread_root_id}/participants` /
+`threads.listParticipants` return participants in that one thread. Both return
+`{participants, nextCursor}`, accept `q` (case-insensitive literal username prefix
+or exact UID), `limit` (default/max 100), and exclusive UID `cursor`. Filtering
+happens before pagination; retain scope and q when continuing. Missing profiles do
+not remove historic UIDs, including exact-UID searches.
+
+Chat-scoped `senderUid` and `participantUid` must identify historical participants
+in the selected scope, using the same predicates as these picker endpoints. They
+need not be current group members or thread subscribers. A nonparticipant is a
+400; a participant with no results for the dates/keywords receives an empty page.
+The requester must still be a current chat member on every request. Group author
+filters and the chat participant endpoint are unavailable in DMs; cross-chat
+keyword sender filtering retains its existing semantics.
+
 Keyword-free message results include ordinary non-text messages and exclude system,
 deleted and unpublished messages. Thread results may retain deleted roots as
 placeholders, matching the existing thread list.

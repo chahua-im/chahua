@@ -395,31 +395,6 @@ pub fn get_thread_subscriber_uids(
         .load(conn)
 }
 
-/// Authors of published roots (including deleted roots) or surviving replies.
-/// Dates constrain the author's messages, never the age of another author's root.
-pub fn participant_thread_ids(
-    chat_id: i64,
-    uid: i32,
-    from: Option<DateTime<Utc>>,
-    until: Option<DateTime<Utc>>,
-) -> messages::BoxedQuery<'static, diesel::pg::Pg, diesel::sql_types::BigInt> {
-    let mut query = messages::table
-        .filter(messages::chat_id.eq(chat_id))
-        .filter(messages::sender_uid.eq(uid))
-        .filter(diesel::dsl::sql::<diesel::sql_types::Bool>(
-            "is_published = TRUE AND ((reply_root_id IS NOT NULL AND deleted_at IS NULL) OR (reply_root_id IS NULL AND has_thread = TRUE))",
-        ))
-        .select(diesel::dsl::sql::<diesel::sql_types::BigInt>("COALESCE(reply_root_id, id)"))
-        .into_boxed();
-    if let Some(from) = from {
-        query = query.filter(messages::created_at.ge(from));
-    }
-    if let Some(until) = until {
-        query = query.filter(messages::created_at.lt(until));
-    }
-    query
-}
-
 /// Seek thread roots using the partial (chat_id, id) browse index.
 /// Deleted roots remain visible while they have surviving replies, as in the inbox.
 pub fn get_chat_threads(
@@ -428,7 +403,6 @@ pub fn get_chat_threads(
     cursor: Option<i64>,
     order: crate::dto::threads::ThreadOrder,
     limit: i64,
-    participant_uid: Option<i32>,
 ) -> QueryResult<Vec<Message>> {
     use crate::dto::threads::ThreadOrder;
 
@@ -438,9 +412,6 @@ pub fn get_chat_threads(
         .filter(messages::has_thread.eq(true))
         .filter(messages::is_published.eq(true))
         .into_boxed();
-    if let Some(uid) = participant_uid {
-        query = query.filter(messages::id.eq_any(participant_thread_ids(chat_id, uid, None, None)));
-    }
     if let Some(cursor) = cursor {
         query = match order {
             ThreadOrder::Oldest => query.filter(messages::id.gt(cursor)),
@@ -459,11 +430,14 @@ pub fn get_chat_threads(
 pub fn get_thread_participant_uids(
     conn: &mut PgConnection,
     thread_root_id: i64,
+    q: Option<&str>,
     cursor: Option<i32>,
     limit: i64,
 ) -> QueryResult<Vec<i32>> {
-    let mut replies = participant_replies(thread_root_id);
-    let mut root = participant_root(thread_root_id);
+    let mut replies =
+        crate::services::user::filter_participant_names(participant_replies(thread_root_id), q);
+    let mut root =
+        crate::services::user::filter_participant_names(participant_root(thread_root_id), q);
     if let Some(cursor) = cursor {
         replies = replies.filter(messages::sender_uid.gt(cursor));
         root = root.filter(messages::sender_uid.gt(cursor));
@@ -1357,30 +1331,30 @@ mod tests {
             )?;
             let ids = |rows: Vec<Message>| rows.into_iter().map(|m| m.id).collect::<Vec<_>>();
             assert_eq!(
-                ids(get_chat_threads(conn, 9876730000, None, ThreadOrder::Newest, 2, None)?),
+                ids(get_chat_threads(conn, 9876730000, None, ThreadOrder::Newest, 2)?),
                 vec![9876730003, 9876730002]
             );
             assert_eq!(
-                ids(get_chat_threads(conn, 9876730000, Some(9876730002), ThreadOrder::Newest, 2, None)?),
+                ids(get_chat_threads(conn, 9876730000, Some(9876730002), ThreadOrder::Newest, 2)?),
                 vec![9876730001]
             );
             assert_eq!(
-                ids(get_chat_threads(conn, 9876730000, None, ThreadOrder::Oldest, 2, None)?),
+                ids(get_chat_threads(conn, 9876730000, None, ThreadOrder::Oldest, 2)?),
                 vec![9876730001, 9876730002]
             );
             assert_eq!(
-                ids(get_chat_threads(conn, 9876730000, Some(9876730002), ThreadOrder::Oldest, 2, None)?),
+                ids(get_chat_threads(conn, 9876730000, Some(9876730002), ThreadOrder::Oldest, 2)?),
                 vec![9876730003]
             );
             assert_eq!(
-                get_thread_participant_uids(conn, 9876730001, None, 100)?,
+                get_thread_participant_uids(conn, 9876730001, None, None, 100)?,
                 (1..=100).collect::<Vec<_>>()
             );
             assert_eq!(
-                get_thread_participant_uids(conn, 9876730001, Some(100), 100)?,
+                get_thread_participant_uids(conn, 9876730001, None, Some(100), 100)?,
                 vec![101, 102, 103, 104, 105]
             );
-            assert!(get_thread_participant_uids(conn, 9876730001, Some(105), 100)?.is_empty());
+            assert!(get_thread_participant_uids(conn, 9876730001, None, Some(105), 100)?.is_empty());
             for uid in 1..=105 {
                 assert!(is_thread_participant(conn, 9876730001, uid)?);
             }
@@ -1389,7 +1363,7 @@ mod tests {
             }
             assert!(is_thread_participant(conn, 9876730003, 1)?);
             // Deleted roots retain their author, matching the existing inbox contract.
-            assert_eq!(get_thread_participant_uids(conn, 9876730003, None, 100)?, vec![1]);
+            assert_eq!(get_thread_participant_uids(conn, 9876730003, None, None, 100)?, vec![1]);
             Err(diesel::result::Error::RollbackTransaction)
         });
         assert!(matches!(

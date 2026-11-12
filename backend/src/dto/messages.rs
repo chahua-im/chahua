@@ -677,14 +677,18 @@ pub enum ChatSearchScope {
     All,
     Main,
     Thread,
+    /// Thread roots in which participantUid authored a root or surviving reply.
+    Threads,
 }
 
 #[derive(Debug, serde::Deserialize, utoipa::IntoParams, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatSearchMessagesQuery {
-    /// Group chats only: current member for all/main, thread participant for thread.
+    /// Group chats only: historical participant in the selected scope. Reserved for scope=threads.
     pub sender_uid: Option<i32>,
-    /// Without text, a date boundary or senderUid is required; all requires senderUid.
+    /// Required only for scope=threads; root/reply author, independent of membership or subscription.
+    pub participant_uid: Option<i32>,
+    /// Without text, a date boundary or senderUid is required; all requires senderUid. Threads requires participantUid and does not support text.
     pub q: Option<String>,
     /// Inclusive creation time, RFC 3339 with timezone; millisecond precision.
     pub created_from: Option<DateTime<Utc>>,
@@ -712,6 +716,28 @@ impl ChatSearchMessagesQuery {
         &self,
     ) -> Result<crate::services::message_search::MessageSearchRange, crate::errors::AppError> {
         use crate::services::message_search::MessageSearchRange;
+        if let ChatSearchScope::Threads = self.scope {
+            if self.thread_id.is_some()
+                || self.sender_uid.is_some()
+                || self.q.as_deref().is_some_and(|q| !q.trim().is_empty())
+            {
+                return Err(crate::errors::AppError::BadRequest(
+                    "scope=threads does not support threadId, senderUid or q",
+                ));
+            }
+            return self
+                .participant_uid
+                .filter(|uid| *uid > 0)
+                .map(MessageSearchRange::Threads)
+                .ok_or(crate::errors::AppError::BadRequest(
+                    "scope=threads requires a positive participantUid",
+                ));
+        }
+        if self.participant_uid.is_some() {
+            return Err(crate::errors::AppError::BadRequest(
+                "participantUid is only supported for scope=threads",
+            ));
+        }
         match (self.scope, self.thread_id) {
             (ChatSearchScope::All, None) => Ok(MessageSearchRange::All),
             (ChatSearchScope::Main, None) => Ok(MessageSearchRange::Main),
@@ -762,6 +788,48 @@ mod search_scope_tests {
                 .unwrap();
         assert_eq!(query.query.sender_uid, Some(42));
     }
+    #[test]
+    fn threads_scope_requires_participant_and_reserves_sender() {
+        for uri in [
+            "/?scope=threads&participantUid=42",
+            "/?scope=threads&participantUid=42&sort=newest",
+        ] {
+            let query = axum::extract::Query::<ChatSearchMessagesQuery>::try_from_uri(
+                &uri.parse().unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                query.search_range().unwrap(),
+                MessageSearchRange::Threads(42)
+            );
+        }
+        let rpc: crate::dto::rpc::messages::MessagesSearchParams = serde_json::from_value(
+            serde_json::json!({"chatId":"9007199254740993","scope":"threads","participantUid":42}),
+        )
+        .unwrap();
+        assert_eq!(
+            rpc.query.search_range().unwrap(),
+            MessageSearchRange::Threads(42)
+        );
+        for uri in [
+            "/?scope=threads",
+            "/?scope=threads&participantUid=0",
+            "/?scope=threads&participantUid=-1",
+            "/?scope=threads&participantUid=42&senderUid=43",
+            "/?scope=threads&participantUid=42&threadId=1",
+            "/?scope=threads&participantUid=42&q=test",
+            "/?scope=all&participantUid=42",
+            "/?scope=main&participantUid=42",
+            "/?scope=thread&threadId=1&participantUid=42",
+        ] {
+            let query = axum::extract::Query::<ChatSearchMessagesQuery>::try_from_uri(
+                &uri.parse().unwrap(),
+            )
+            .unwrap();
+            assert!(query.search_range().is_err(), "{uri}");
+        }
+    }
+
     #[test]
     fn scope_validation_and_id_precision() {
         for (uri, expected) in [

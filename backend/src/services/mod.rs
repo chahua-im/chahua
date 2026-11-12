@@ -16,6 +16,7 @@ pub mod message_deletion;
 pub mod message_search;
 pub mod messages;
 pub mod notification_preferences;
+pub mod participants;
 pub mod presence;
 pub mod privacy_exceptions;
 pub mod push;

@@ -173,6 +173,36 @@ mod tests {
     }
 
     #[test]
+    fn thread_cursor_binds_participant_and_scope() {
+        let make = |range| {
+            CursorContext::new(
+                1,
+                Some(2),
+                None,
+                MessageSearchFilters { range, ..filters() },
+                MessageSearchSort::Newest,
+            )
+        };
+        let context = make(MessageSearchRange::Threads(42));
+        let token = context.encode(SearchContinuation::Newest(SearchPosition {
+            created_at: "2026-11-01T00:00:00Z".parse().unwrap(),
+            id: i64::MAX,
+        }));
+        assert!(context
+            .decode(Some(&token), MessageSearchSort::Newest)
+            .is_ok());
+        for range in [
+            MessageSearchRange::Threads(43),
+            MessageSearchRange::All,
+            MessageSearchRange::Thread(42),
+        ] {
+            assert!(make(range)
+                .decode(Some(&token), MessageSearchSort::Newest)
+                .is_err());
+        }
+    }
+
+    #[test]
     fn cursor_rejects_changed_context_invalid_version_and_wrong_mode() {
         let sort = MessageSearchSort::Newest;
         let context = CursorContext::new(1, Some(2), Some("hello"), filters(), sort);

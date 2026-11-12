@@ -272,6 +272,39 @@ pub fn lookup_user_profiles(
     result
 }
 
+/// Apply participant autocomplete before LIMIT; exact UIDs also work without a profile.
+pub fn filter_participant_names(
+    query: crate::schema::messages::BoxedQuery<'static, diesel::pg::Pg>,
+    q: Option<&str>,
+) -> crate::schema::messages::BoxedQuery<'static, diesel::pg::Pg> {
+    use crate::schema::{discuz::discuz::common_member, messages};
+    let Some(q) = q.map(str::trim).filter(|q| !q.is_empty()) else {
+        return query;
+    };
+    // Treat SQL LIKE metacharacters as literal username characters.
+    let prefix = format!(
+        "{}%",
+        q.replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_")
+    );
+    let names = common_member::table
+        .filter(
+            diesel::dsl::sql::<diesel::sql_types::Text>("LOWER(BTRIM(username::text))")
+                .like(prefix.to_lowercase()),
+        )
+        .select(common_member::uid);
+    if let Ok(uid) = q.parse::<i32>() {
+        query.filter(
+            messages::sender_uid
+                .eq(uid)
+                .or(messages::sender_uid.eq_any(names)),
+        )
+    } else {
+        query.filter(messages::sender_uid.eq_any(names))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::normalize_discuz_username;

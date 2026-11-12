@@ -368,7 +368,11 @@ async fn search_messages_page(
     conn: &mut PgConnection,
     deps: &SearchMessagesDeps<'_>,
 ) -> Result<SearchMessagesResponse, AppError> {
-    let (query, sort) = prepare_search(&params, filters.sender_uid)?;
+    let participant_uid = match filters.range {
+        MessageSearchRange::Threads(uid) => Some(uid),
+        _ => None,
+    };
+    let (query, sort) = prepare_search(&params, filters.sender_uid.or(participant_uid))?;
     if chat_id.is_none() && query.is_none() {
         return Err(AppError::BadRequest("Cross-chat search requires a query"));
     }
@@ -397,13 +401,23 @@ async fn search_messages_page(
             return Err(AppError::NotFound("Thread not found"));
         }
     }
-    if let (Some(chat_id), Some(sender_uid)) = (chat_id, filters.sender_uid) {
+    if let (Some(chat_id), Some(sender_uid)) = (chat_id, filters.sender_uid.or(participant_uid)) {
         validate_search_sender(conn, chat_id, filters.range, sender_uid)?;
     }
 
     let Some(query) = query else {
         let mixed = filters.range == MessageSearchRange::All && filters.sender_uid.is_some();
-        let mut rows = if mixed {
+        let mut rows = if let Some(participant_uid) = participant_uid {
+            crate::services::message_search::load_participant_threads(
+                conn,
+                uid,
+                chat_id.ok_or(AppError::BadRequest("A chat is required for thread search"))?,
+                participant_uid,
+                filters,
+                limit as i64,
+                before,
+            )?
+        } else if mixed {
             crate::services::message_search::load_sender_history(
                 conn,
                 uid,
@@ -437,7 +451,7 @@ async fn search_messages_page(
         });
         let thread_ids: std::collections::HashSet<_> = rows
             .iter()
-            .filter(|m| mixed && m.has_thread)
+            .filter(|m| (mixed || participant_uid.is_some()) && m.has_thread)
             .map(|m| m.id)
             .collect();
         let messages = attach_metadata(conn, rows, deps.media, deps.avatars, uid)
@@ -710,12 +724,17 @@ fn validate_search_sender(
         .first::<crate::models::GroupKind>(conn)?;
     if kind != crate::models::GroupKind::Group {
         return Err(AppError::BadRequest(
-            "senderUid is only supported in group chats",
+            "Author filters are only supported in group chats",
         ));
     }
     let eligible = match range {
-        MessageSearchRange::All | MessageSearchRange::Main => {
-            crate::services::chat_access::is_chat_member(conn, chat_id, sender_uid)?
+        MessageSearchRange::All | MessageSearchRange::Main | MessageSearchRange::Threads(_) => {
+            let scope = match range {
+                MessageSearchRange::Main => crate::dto::chats::ChatParticipantScope::Main,
+                MessageSearchRange::Threads(_) => crate::dto::chats::ChatParticipantScope::Threads,
+                _ => crate::dto::chats::ChatParticipantScope::All,
+            };
+            crate::services::participants::is_chat_participant(conn, chat_id, scope, sender_uid)?
         }
         MessageSearchRange::Thread(id) => {
             crate::services::threads::is_thread_participant(conn, id, sender_uid)?
@@ -723,7 +742,7 @@ fn validate_search_sender(
     };
     if !eligible {
         return Err(AppError::BadRequest(
-            "senderUid must identify a member or thread participant in the selected scope",
+            "The selected user must be a participant in the selected scope",
         ));
     }
     Ok(())
@@ -846,10 +865,16 @@ mod tests {
                  INSERT INTO thread_user_states(chat_id,thread_root_id,uid,subscribed,archived)
                  VALUES (9876995000,9876995010,502,TRUE,TRUE);"
             )?;
+            for range in [MessageSearchRange::All, MessageSearchRange::Threads(503)] {
+                assert!(validate_search_sender(conn,9876995000,range,502).is_err()); // Subscription alone.
+                assert!(validate_search_sender(conn,9876995000,range,503).is_ok()); // Departed root author.
+                assert!(validate_search_sender(conn,9876995001,range,501).is_err()); // DM.
+            }
+            assert!(validate_search_sender(conn,9876995000,MessageSearchRange::Main,501).is_err());
+            assert!(validate_search_sender(conn,9876995000,MessageSearchRange::Main,503).is_err());
+            conn.batch_execute("INSERT INTO messages(id,chat_id,sender_uid,message_type,client_generated_id,created_at) VALUES (9876995012,9876995000,504,'text','departed-main-author',NOW())")?;
             for range in [MessageSearchRange::All, MessageSearchRange::Main] {
-                assert!(validate_search_sender(conn,9876995000,range,502).is_ok());
-                assert!(validate_search_sender(conn,9876995000,range,503).is_err());
-                assert!(validate_search_sender(conn,9876995001,range,501).is_err());
+                assert!(validate_search_sender(conn,9876995000,range,504).is_ok());
             }
             let range = MessageSearchRange::Thread(9876995010);
             assert!(validate_search_sender(conn,9876995000,range,501).is_ok());

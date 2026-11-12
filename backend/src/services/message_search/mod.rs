@@ -23,7 +23,9 @@ use pagination::{
     CandidatePageRequest, IndexPosition, SearchPosition, NEWEST_SORT, POSITION_ATTRIBUTES,
 };
 mod metrics;
-pub use filtering::{load_filtered_messages, load_sender_history, HistorySearchScope};
+pub use filtering::{
+    load_filtered_messages, load_participant_threads, load_sender_history, HistorySearchScope,
+};
 pub use metrics::MessageSearchMetrics;
 
 pub const DEFAULT_INDEX_UID: &str = "messages_v1";
@@ -247,10 +249,14 @@ pub enum MessageSearchRange {
     All,
     Main,
     Thread(i64),
+    Threads(i32),
 }
 impl MessageSearchRange {
     fn filter(self, chats: &str) -> String {
         match self {
+            Self::Threads(_) => {
+                unreachable!("thread participation search does not use the text index")
+            }
             Self::All => chats.to_owned(),
             Self::Main => format!("{chats} AND replyRootId IS NULL"),
             Self::Thread(id) => {
@@ -260,6 +266,7 @@ impl MessageSearchRange {
     }
     fn contains(self, message: &Message) -> bool {
         match self {
+            Self::Threads(_) => message.reply_root_id.is_none() && message.has_thread,
             Self::All => true,
             Self::Main => message.reply_root_id.is_none(),
             Self::Thread(id) => message.id == id || message.reply_root_id == Some(id),
