@@ -366,6 +366,12 @@ app-message-link-previews:not(:empty) {
   display: flex;
 }
 
+// Keep outgoing stickers beside the avatar even when a quote or menu preview widens the row.
+.sent .sticker-content app-message-attachments {
+  width: fit-content;
+  margin-inline-start: auto;
+}
+
 // Visual media (images/videos) runs edge to edge, with or without a caption;
 // audio and files keep the bubble's padding.
 .bubble:has(app-message-attachments.visual) .media-content {
