@@ -194,7 +194,6 @@ export class Message<T extends MessageContent = MessageResponse> {
   readonly mention = output<MessageContent['sender']>();
   readonly canOpenThread = input(false);
   readonly reply = output<T>();
-  readonly jumpingTo = input<SnowflakeID>();
   readonly jumpDisabled = input(false);
   readonly jump = output<SnowflakeID>();
   readonly openThread = output<SnowflakeID>();

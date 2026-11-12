@@ -1564,6 +1564,62 @@ describe('ConversationPage', () => {
     });
   }
 
+  it.each([false, true])(
+    'uses the FAB for reply navigation and clears it afterwards (failure: %s)',
+    async (failure) => {
+      vi.spyOn(component as unknown as { positionAndRead(): Promise<void> }, 'positionAndRead').mockResolvedValue();
+      const target = { ...testMessage, id: encodeId('100') };
+      component['replyTo'].set(target);
+      component['atBottom'].set(true);
+      fixture.detectChanges();
+      const fab: HTMLElement = fixture.nativeElement.querySelector('.down-navigation');
+      const preview: HTMLButtonElement = fixture.nativeElement.querySelector('.reply-description');
+      const list = fixture.nativeElement.querySelector('.message-list');
+      expect(fab.hidden).toBe(true);
+      const pending = component['navigateReply'](target.id, testMessage.id);
+      fixture.detectChanges();
+      expect(fab.hidden).toBe(false);
+      expect(fab.querySelector('ion-spinner.action-icon')).not.toBeNull();
+      expect(preview.querySelector('ion-spinner')).toBeNull();
+      expect(preview.disabled).toBe(true);
+      expect(fixture.nativeElement.querySelector('.message-list')).toBe(list);
+      await component['navigateReply'](target.id);
+      const request = peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '100' });
+      if (failure) request.error(RpcErrorCode.Unavailable);
+      else
+        request.flush({
+          chatSettings: { showMembershipMessages: true },
+          messages: [{ ...wireMessage, id: '100' }],
+          newerCursor: '100',
+        });
+      await pending;
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('.down-navigation')).toBe(fab);
+      expect(fab.querySelector('ion-spinner')).toBeNull();
+      expect(preview.disabled).toBe(false);
+      expect(component['navigatingReply']()).toBe(false);
+      if (failure) {
+        expect(fab.hidden).toBe(true);
+        expect(component['conversation'].items()).toEqual([testMessage]);
+      } else {
+        expect(component['returnMessageIds']()).toEqual([testMessage.id]);
+        const returning = component['navigateDown']();
+        await vi.waitFor(() => expect(component['navigatingDown']()).toBe(true));
+        fixture.detectChanges();
+        expect(fab.hidden).toBe(false);
+        expect(fab.querySelector('ion-spinner.action-icon')).not.toBeNull();
+        peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: wireMessage.id }).flush({
+          chatSettings: { showMembershipMessages: true },
+          messages: [wireMessage],
+        });
+        await returning;
+        fixture.detectChanges();
+        expect(fab.querySelector('ion-spinner')).toBeNull();
+        expect(component['returnMessageIds']()).toEqual([]);
+      }
+    },
+  );
+
   it('keeps the current messages while locating a pin and clears feedback after failure', async () => {
     const older = { ...testMessage, id: encodeId('100') };
     pinMessage('201', older);
