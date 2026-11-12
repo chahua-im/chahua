@@ -151,14 +151,38 @@ import { internalHref } from './message-text/message-text';
     .skeleton .text .domain {
       width: 45%;
     }
+    :host(.standalone-card) .card {
+      align-items: flex-start;
+      gap: 12px;
+      min-height: 112px;
+      padding: 14px 14px 36px;
+      border: 1px solid var(--ion-color-light-shade);
+      border-radius: 14px;
+      background: var(--ion-background-color-step-50, var(--ion-background-color, var(--ion-color-light)));
+      color: var(--ion-text-color, var(--ion-color-dark));
+    }
+    :host(.standalone-card) .thumbnail {
+      flex-basis: 44px;
+      width: 44px;
+      height: 44px;
+    }
+    :host(.standalone-card) .title {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      line-height: 20px;
+    }
   `,
   imports: [NgTemplateOutlet],
-  host: { '[class.outgoing]': 'outgoing()' },
+  host: { '[class.outgoing]': 'outgoing()', '[class.standalone-card]': 'standaloneCard()' },
 })
 export class MessageLinkPreviews {
   readonly previews = input.required<readonly LinkPreviewResponse[]>();
   readonly interactive = input(true);
   readonly outgoing = input(false);
+  readonly standaloneCard = input(false);
   protected readonly status = LinkPreviewStatus;
   protected readonly failedImages = signal<ReadonlySet<string>>(new Set());
   private readonly expired = signal<ReadonlySet<string>>(new Set());

@@ -10,7 +10,7 @@ ion-card {
   border: 1px solid var(--ion-color-light-shade);
   border-radius: 14px;
   box-shadow: none;
-  --background: var(--ion-background-color-step-50, var(--ion-background-color));
+  --background: var(--ion-background-color-step-50, var(--ion-background-color, var(--ion-color-light)));
   --color: var(--ion-text-color, var(--ion-color-dark));
 }
 
