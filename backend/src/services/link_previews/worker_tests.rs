@@ -232,7 +232,7 @@ async fn link_preview_worker_stale_upload_is_cleaned_and_unpublished_metadata_is
         .connection_customizer(Box::new(IsolatedMessages))
         .build(ConnectionManager::<diesel::PgConnection>::new(url))
         .unwrap();
-    let config = crate::config::AppConfig::from_env();
+    let config = crate::config::AppConfig::from_env(crate::config::ConfigFile::from_env());
     let metrics = crate::metrics::Metrics::new();
     let services = Context {
         db,

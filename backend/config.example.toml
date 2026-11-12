@@ -1,0 +1,70 @@
+# Select this optional file with CHAHUA_CONFIG_PATH. Existing environment
+# variables override TOML; unset settings keep their existing defaults.
+# Keep DATABASE_URL, signing/private keys, API keys and AWS credentials in env.
+
+[server]
+app_addr = "0.0.0.0:3000"
+metrics_addr = "0.0.0.0:3001"
+# cors_allowed_origins = ["https://chat.example.com"]
+
+[logging]
+format = "json"
+filter = "info"
+
+[media]
+bucket = "chahua-media"
+attachment_prefix = "attachments"
+max_attachment_file_size_bytes = 52428800
+# region = "us-west-2"
+# endpoint_url = "http://127.0.0.1:19000"
+# base_url = "https://media.example.com"
+# upload_proxy_path = "/_storage"
+
+# Debug builds always enable development authentication, regardless of this flag.
+[auth]
+debug_auth_enabled = false
+
+[ids]
+node_id = 0 # Unique per instance; 0..15.
+
+[message_search]
+enabled = false
+index_uid = "messages_v1"
+# meili_url = "http://127.0.0.1:17700"
+# MEILI_MASTER_KEY remains an environment variable.
+
+[push]
+vapid_subject = "mailto:admin@example.com"
+# vapid_public_key = "..." # Public metadata; VAPID_PRIVATE_KEY stays in env.
+
+# [push.apns]
+# key_id = "..."
+# team_id = "..."
+# topic = "app.example.chahua"
+# APNS_PRIVATE_KEY_PATH stays in env and points to the existing private-key file.
+
+# [avatars]
+# public_url = "https://avatars.example.com"
+# path = "/srv/discuz/uc_server/data/avatar"
+
+# Exact hosts only. Redirects and images use their destination host's settings;
+# headers are never inherited by other hosts or subdomains. No cookie jar.
+# Multiline inline tables use TOML 1.1, supported by the backend parser.
+[[link_previews.sites]]
+host = "example.com"
+headers = {
+    User-Agent = "chahua-link-preview/1.0",
+    Accept-Language = "en-US,en;q=0.9",
+    # Use dedicated read-only credentials; Cookie/Authorization require env refs.
+    # Cookie = { env = "PREVIEW_EXAMPLE_COOKIE" },
+    # Authorization = { env = "PREVIEW_EXAMPLE_AUTHORIZATION" },
+    # X-Api-Key = { env = "PREVIEW_EXAMPLE_API_KEY" },
+}
+
+[[link_previews.sites]]
+host = "news.example.org"
+headers = {
+    User-Agent = "chahua-link-preview/1.0",
+    Accept-Language = "zh-CN,zh;q=0.9",
+    # Cookie = { env = "PREVIEW_NEWS_COOKIE" },
+}

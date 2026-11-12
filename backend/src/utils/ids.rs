@@ -16,27 +16,8 @@ define_snowflake_id!(
 
 pub type IdGen = LockSnowflakeGenerator<ChahuaId, MonotonicClock>;
 
-/// Create a shared snowflake ID generator. Node id from `FERROID_NODE_ID` env or 0.
-pub fn new_generator() -> IdGen {
-    let node_id: u64 = match std::env::var("NODE_ID") {
-        Ok(val) => match val.parse() {
-            Ok(id) => id,
-            Err(e) => {
-                tracing::warn!(
-                    "NODE_ID '{}' is not a valid number: {}; defaulting to 0",
-                    val,
-                    e
-                );
-                0
-            }
-        },
-        Err(_) => {
-            tracing::warn!(
-                "NODE_ID not set; defaulting to node_id=0. Set this in multi-instance deployments."
-            );
-            0
-        }
-    };
+/// Create a shared snowflake ID generator for the configured node.
+pub fn new_generator(node_id: u64) -> IdGen {
     LockSnowflakeGenerator::new(node_id, MonotonicClock::with_epoch(UNIX_EPOCH))
 }
 

@@ -330,7 +330,7 @@ mod tests {
 
     fn test_id_gen() -> &'static IdGen {
         static GENERATOR: std::sync::OnceLock<IdGen> = std::sync::OnceLock::new();
-        GENERATOR.get_or_init(ids::new_generator)
+        GENERATOR.get_or_init(|| ids::new_generator(0))
     }
 
     fn message(id: i64) -> Message {
