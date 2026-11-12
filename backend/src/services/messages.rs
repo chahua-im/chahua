@@ -911,17 +911,7 @@ pub(crate) fn load_chat_forwarded_bundle_id(
     message_id: i64,
     uid: i32,
 ) -> Result<i64, AppError> {
-    let is_member = diesel::select(diesel::dsl::exists(
-        group_membership::table.filter(
-            group_membership::chat_id
-                .eq(chat_id)
-                .and(group_membership::uid.eq(uid)),
-        ),
-    ))
-    .get_result::<bool>(conn)?;
-    if !is_member {
-        return Err(AppError::Forbidden("Not a member of this chat"));
-    }
+    crate::services::chat_access::require_chat_member(conn, chat_id, uid)?;
 
     let (message_type, bundle_id) = messages_schema::table
         .filter(

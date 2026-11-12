@@ -48,7 +48,7 @@ Run backend work from `backend/`:
 - `cargo build` verifies the Rust backend compiles.
 - `cargo test` runs the test suite (inline `#[test]`/`#[tokio::test]` modules).
 - `cargo clippy` checks lint issues before review.
-- `diesel migration run` applies local PostgreSQL migrations.
+- Backend startup applies PostgreSQL migrations through `src/database_migrations.rs`. Use this runner for the message-filter index migration: it executes concurrent index statements separately; Diesel CLI's whole-file execution cannot run that migration. See `docs/local-setup.md` at the repository root.
 
 ## Prometheus metrics
 

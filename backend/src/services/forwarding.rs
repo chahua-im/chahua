@@ -9,7 +9,7 @@ use crate::{
     models::{
         ForwardPlaceholder, GroupKind, Message, MessageType, NewForwardedBundle, TranscodeStatus,
     },
-    schema::{forwarded_bundles, group_membership, messages, messages::dsl},
+    schema::{forwarded_bundles, messages, messages::dsl},
     services::messages::{
         build_forwarded_preview_items, build_forwarded_preview_payload,
         capture_forwarded_bundle_items, deserialize_forwarded_bundle_payload,
@@ -135,25 +135,7 @@ pub(crate) fn acquire_forward_retry_lock(
     Ok(())
 }
 
-pub(crate) fn check_source_membership(
-    conn: &mut PgConnection,
-    chat_id: i64,
-    uid: i32,
-) -> Result<(), AppError> {
-    let exists = group_membership::table
-        .filter(
-            group_membership::chat_id
-                .eq(chat_id)
-                .and(group_membership::uid.eq(uid)),
-        )
-        .count()
-        .get_result::<i64>(conn)?;
-
-    if exists == 0 {
-        return Err(AppError::Forbidden("Not a member of this chat"));
-    }
-    Ok(())
-}
+pub(crate) use crate::services::chat_access::require_chat_member as check_source_membership;
 
 fn direct_child_bundle_ids(items: &[ForwardedBundlePayloadItem]) -> Vec<i64> {
     let mut child_bundle_ids: Vec<i64> = items

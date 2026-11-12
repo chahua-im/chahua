@@ -441,6 +441,30 @@ async fn unarchive_chat(
 // Router
 // ---------------------------------------------------------------------------
 
+/// Historic group-chat authors, including users who have left the group.
+#[utoipa::path(get, path = "/participants", tag = "chats",
+    params(("chat_id" = String, Path, description = "Chat ID"), crate::dto::chats::ListChatParticipantsQuery),
+    responses((status = 200, body = crate::dto::chats::ListParticipantsResponse),
+        (status = 400, description = "Not a group chat"),
+        (status = 403, description = "Not a chat member")),
+    security(("bearer_jwt" = [])))]
+async fn get_chat_participants(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
+    mut conn: DbConn,
+    Query(query): Query<crate::dto::chats::ListChatParticipantsQuery>,
+) -> Result<Json<crate::dto::chats::ListParticipantsResponse>, AppError> {
+    crate::services::api::chats::participants::get_chat_participants(
+        uid,
+        chat_id,
+        query,
+        &mut conn,
+        &state.avatars,
+    )
+    .map(Json)
+}
+
 pub fn router() -> OpenApiRouter<crate::AppState> {
     OpenApiRouter::new()
         .routes(utoipa_axum::routes!(get_chats))
@@ -463,6 +487,7 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
                 .routes(utoipa_axum::routes!(acknowledge_chat_reactions))
                 .routes(utoipa_axum::routes!(self::messages::post_thread_message))
                 .routes(utoipa_axum::routes!(super::threads::get_chat_threads))
+                .routes(utoipa_axum::routes!(get_chat_participants))
                 .nest("/threads/{thread_root_id}", super::threads::thread_router())
                 .nest("/saved-messages", self::saved_messages::router())
                 .nest("/pins", super::pins::router()),

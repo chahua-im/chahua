@@ -152,16 +152,9 @@ fn preview_eligibility(
     invite: &Invite,
     uid: i32,
 ) -> Result<PreviewEligibility, AppError> {
-    let already_member = group_membership::table
-        .filter(
-            group_membership::chat_id
-                .eq(invite.chat_id)
-                .and(group_membership::uid.eq(uid)),
-        )
-        .count()
-        .get_result::<i64>(conn)?;
+    let already_member = crate::services::chat_access::is_chat_member(conn, invite.chat_id, uid)?;
 
-    if already_member > 0 {
+    if already_member {
         return Ok(PreviewEligibility::AlreadyMember);
     }
 
@@ -180,16 +173,10 @@ fn preview_eligibility(
             let required_chat_id = invite
                 .required_chat_id
                 .ok_or(AppError::Internal("Invalid membership invite"))?;
-            let has_required_membership = group_membership::table
-                .filter(
-                    group_membership::chat_id
-                        .eq(required_chat_id)
-                        .and(group_membership::uid.eq(uid)),
-                )
-                .count()
-                .get_result::<i64>(conn)?;
+            let has_required_membership =
+                crate::services::chat_access::is_chat_member(conn, required_chat_id, uid)?;
 
-            if has_required_membership > 0 {
+            if has_required_membership {
                 Ok(PreviewEligibility::Eligible)
             } else {
                 Ok(PreviewEligibility::NotInvited)

@@ -713,7 +713,7 @@ pub struct NewForwardedBundle {
     pub preview: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Queryable, Selectable, Serialize)]
+#[derive(Debug, Clone, Queryable, QueryableByName, Selectable, Serialize)]
 #[diesel(table_name = schema::messages)]
 pub struct Message {
     pub id: i64,

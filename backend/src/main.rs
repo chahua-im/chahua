@@ -4,7 +4,7 @@ use axum::http::{Method, Request};
 use axum::{middleware, routing::get, Router};
 use diesel::r2d2::ConnectionManager;
 use diesel::PgConnection;
-use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+use diesel_migrations::MigrationHarness;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tower::ServiceBuilder;
@@ -20,6 +20,7 @@ use utils::auth::{X_APP_VERSION, X_CLIENT_ID};
 
 mod config;
 mod constants;
+mod database_migrations;
 mod db_tracing;
 mod dto;
 pub mod errors;
@@ -39,8 +40,6 @@ use config::{AppConfig, LogFormat};
 use state::{AppInner, DbPool};
 
 pub use state::AppState;
-
-const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 
 /// Produces a request ID from the `X-Request-ID` header or generates a new UUID.
 #[derive(Clone, Default)]
@@ -101,7 +100,7 @@ async fn main() {
 
     {
         let mut conn = pool.get().expect("Failed to get connection for migrations");
-        conn.run_pending_migrations(MIGRATIONS)
+        conn.run_pending_migrations(database_migrations::AppMigrations)
             .expect("Failed to run database migrations");
     }
 

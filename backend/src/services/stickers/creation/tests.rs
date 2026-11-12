@@ -1,4 +1,5 @@
 use super::*;
+use crate::schema::group_membership;
 use diesel::connection::SimpleConnection;
 use std::sync::{Arc, Mutex};
 

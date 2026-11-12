@@ -430,20 +430,14 @@ pub fn get_chat_threads(
 pub fn get_thread_participant_uids(
     conn: &mut PgConnection,
     thread_root_id: i64,
+    q: Option<&str>,
     cursor: Option<i32>,
     limit: i64,
 ) -> QueryResult<Vec<i32>> {
-    let mut replies = messages::table
-        .filter(messages::reply_root_id.eq(thread_root_id))
-        .filter(messages::deleted_at.is_null())
-        .filter(messages::is_published.eq(true))
-        .into_boxed();
-    let mut root = messages::table
-        .filter(messages::id.eq(thread_root_id))
-        .filter(messages::reply_root_id.is_null())
-        .filter(messages::has_thread.eq(true))
-        .filter(messages::is_published.eq(true))
-        .into_boxed();
+    let mut replies =
+        crate::services::user::filter_participant_names(participant_replies(thread_root_id), q);
+    let mut root =
+        crate::services::user::filter_participant_names(participant_root(thread_root_id), q);
     if let Some(cursor) = cursor {
         replies = replies.filter(messages::sender_uid.gt(cursor));
         root = root.filter(messages::sender_uid.gt(cursor));
@@ -457,6 +451,38 @@ pub fn get_thread_participant_uids(
         .positional_order_by(1)
         .limit(limit)
         .load(conn)
+}
+
+fn participant_replies(thread_root_id: i64) -> messages::BoxedQuery<'static, diesel::pg::Pg> {
+    messages::table
+        .filter(messages::reply_root_id.eq(thread_root_id))
+        .filter(messages::deleted_at.is_null())
+        .filter(messages::is_published.eq(true))
+        .into_boxed()
+}
+
+fn participant_root(thread_root_id: i64) -> messages::BoxedQuery<'static, diesel::pg::Pg> {
+    messages::table
+        .filter(messages::id.eq(thread_root_id))
+        .filter(messages::reply_root_id.is_null())
+        .filter(messages::has_thread.eq(true))
+        .filter(messages::is_published.eq(true))
+        .into_boxed()
+}
+
+/// Uses the same root/reply predicates as the participant picker; subscription is irrelevant.
+pub fn is_thread_participant(
+    conn: &mut PgConnection,
+    thread_root_id: i64,
+    uid: i32,
+) -> QueryResult<bool> {
+    diesel::select(
+        diesel::dsl::exists(participant_root(thread_root_id).filter(messages::sender_uid.eq(uid)))
+            .or(diesel::dsl::exists(
+                participant_replies(thread_root_id).filter(messages::sender_uid.eq(uid)),
+            )),
+    )
+    .get_result(conn)
 }
 
 // --- thread_meta maintenance ---
@@ -699,6 +725,7 @@ pub fn get_user_threads(
             ts.archived,
             ts.last_read_message_id
         FROM thread_user_states ts
+        JOIN group_membership gm ON gm.chat_id = ts.chat_id AND gm.uid = ts.uid
         LEFT JOIN thread_meta tm ON tm.chat_id = ts.chat_id AND tm.thread_root_id = ts.thread_root_id
         JOIN groups g ON g.id = ts.chat_id
         LEFT JOIN media avatar_media ON g.avatar_image_id = avatar_media.id AND avatar_media.deleted_at IS NULL
@@ -1320,16 +1347,23 @@ mod tests {
                 vec![9876730003]
             );
             assert_eq!(
-                get_thread_participant_uids(conn, 9876730001, None, 100)?,
+                get_thread_participant_uids(conn, 9876730001, None, None, 100)?,
                 (1..=100).collect::<Vec<_>>()
             );
             assert_eq!(
-                get_thread_participant_uids(conn, 9876730001, Some(100), 100)?,
+                get_thread_participant_uids(conn, 9876730001, None, Some(100), 100)?,
                 vec![101, 102, 103, 104, 105]
             );
-            assert!(get_thread_participant_uids(conn, 9876730001, Some(105), 100)?.is_empty());
+            assert!(get_thread_participant_uids(conn, 9876730001, None, Some(105), 100)?.is_empty());
+            for uid in 1..=105 {
+                assert!(is_thread_participant(conn, 9876730001, uid)?);
+            }
+            for uid in [106, 107, 108, 109] {
+                assert!(!is_thread_participant(conn, 9876730001, uid)?);
+            }
+            assert!(is_thread_participant(conn, 9876730003, 1)?);
             // Deleted roots retain their author, matching the existing inbox contract.
-            assert_eq!(get_thread_participant_uids(conn, 9876730003, None, 100)?, vec![1]);
+            assert_eq!(get_thread_participant_uids(conn, 9876730003, None, None, 100)?, vec![1]);
             Err(diesel::result::Error::RollbackTransaction)
         });
         assert!(matches!(

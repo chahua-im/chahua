@@ -1,10 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::dto::{
-    messages::MessagePreview,
-    users::{MemberSummary, User},
-};
+use crate::dto::{messages::MessagePreview, users::MemberSummary};
 use crate::models::GroupKind;
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -85,7 +82,10 @@ pub struct ListChatThreadsQuery {
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ListThreadParticipantsQuery {
+    /// Username prefix (case insensitive) or exact UID; filtered before pagination.
+    pub q: Option<String>,
     pub limit: Option<i64>,
     pub cursor: Option<i32>,
 }
@@ -104,14 +104,6 @@ pub struct ListChatThreadsResponse {
     pub threads: Vec<crate::dto::messages::MessageResponse>,
     /// Last returned root ID; pass as `cursor` with the same ordering.
     pub next_cursor: Option<String>,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ListThreadParticipantsResponse {
-    pub participants: Vec<User>,
-    /// Last returned UID; pass as `cursor` to continue in ascending UID order.
-    pub next_cursor: Option<i32>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]

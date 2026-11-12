@@ -3,10 +3,9 @@ use std::sync::Arc;
 use diesel::prelude::*;
 
 use crate::dto::threads::{
-    ListChatThreadsQuery, ListChatThreadsResponse, ListThreadParticipantsQuery,
-    ListThreadParticipantsResponse, ListThreadsQuery, ListThreadsResponse, MarkThreadReadBody,
-    MarkThreadReadResponse, ThreadReadStateResponse, ThreadSubscriptionStatusResponse,
-    UnreadThreadCountResponse,
+    ListChatThreadsQuery, ListChatThreadsResponse, ListThreadParticipantsQuery, ListThreadsQuery,
+    ListThreadsResponse, MarkThreadReadBody, MarkThreadReadResponse, ThreadReadStateResponse,
+    ThreadSubscriptionStatusResponse, UnreadThreadCountResponse,
 };
 use crate::errors::AppError;
 use crate::models::Message;
@@ -91,7 +90,7 @@ pub fn get_thread_participants(
     query: ListThreadParticipantsQuery,
     conn: &mut PgConnection,
     avatars: &AvatarService,
-) -> Result<ListThreadParticipantsResponse, AppError> {
+) -> Result<crate::dto::chats::ListParticipantsResponse, AppError> {
     authorize_thread_in_chat(conn, chat_id, thread_root_id, uid)?;
     let exists = diesel::select(diesel::dsl::exists(
         messages::table
@@ -104,21 +103,16 @@ pub fn get_thread_participants(
         return Err(AppError::NotFound("Thread root message not found"));
     }
     let limit = validate_limit(query.limit, 100);
-    let mut uids =
-        thread_svc::get_thread_participant_uids(conn, thread_root_id, query.cursor, limit + 1)?;
-    let has_more = uids.len() as i64 > limit;
-    uids.truncate(limit as usize);
-    let next_cursor = has_more.then(|| *uids.last().unwrap());
-    let profiles = crate::services::user::lookup_user_profiles(conn, &uids)?;
-    let avatars = avatars.lookup(&uids);
-    let participants = uids
-        .into_iter()
-        .map(|uid| crate::services::messages::build_sender(uid, &avatars, &profiles))
-        .collect();
-    Ok(ListThreadParticipantsResponse {
-        participants,
-        next_cursor,
-    })
+    let uids = thread_svc::get_thread_participant_uids(
+        conn,
+        thread_root_id,
+        query.q.as_deref(),
+        query.cursor,
+        limit + 1,
+    )?;
+    crate::services::api::chats::participants::build_participants_response(
+        conn, avatars, uids, limit,
+    )
 }
 
 /// Resolve `chat_id` from a thread root message ID, or return 404.

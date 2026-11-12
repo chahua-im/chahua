@@ -11,7 +11,7 @@ use crate::dto::users::{
 use crate::dto::ws::{ServerWsMessage, StickerPackOrderUpdatePayload};
 use crate::errors::AppError;
 use crate::models::UserExtra;
-use crate::schema::{group_membership, user_extra};
+use crate::schema::user_extra;
 use crate::services::authz::{
     Action as AuthzAction, AuthorizationService, Resource as AuthzResource,
 };
@@ -199,18 +199,11 @@ fn can_exclude_members_of_chat(
     requester_uid: i32,
     chat_id: i64,
 ) -> Result<bool, AppError> {
-    use crate::schema::group_membership::dsl as gm_dsl;
-
-    let count = group_membership::table
-        .filter(
-            gm_dsl::chat_id
-                .eq(chat_id)
-                .and(gm_dsl::uid.eq(requester_uid)),
-        )
-        .count()
-        .get_result::<i64>(conn)?;
-
-    Ok(count > 0)
+    Ok(crate::services::chat_access::is_chat_member(
+        conn,
+        chat_id,
+        requester_uid,
+    )?)
 }
 
 fn split_excluded_member_summaries(
@@ -241,9 +234,8 @@ fn load_excluded_member_uids(
 
     use crate::schema::group_membership::dsl as gm_dsl;
 
-    Ok(group_membership::table
-        .filter(gm_dsl::chat_id.eq(chat_id).and(gm_dsl::uid.eq_any(uids)))
-        .select(gm_dsl::uid)
+    Ok(crate::services::chat_access::member_uids(chat_id)
+        .filter(gm_dsl::uid.eq_any(uids))
         .load::<i32>(conn)?
         .into_iter()
         .collect())

@@ -84,6 +84,29 @@ pub async fn search(
     .await
 }
 
+pub async fn search_all(
+    context: &RpcCallContext,
+    services: &RpcServices,
+    params: crate::dto::messages::SearchMessagesQuery,
+) -> Result<SearchMessagesResponse, AppError> {
+    let query = params;
+    let uid = context.uid()?;
+    let mut conn = services.db.get()?;
+    api::search_messages_in_scope(
+        uid,
+        None,
+        query,
+        &mut conn,
+        api::SearchMessagesDeps {
+            media: &services.media,
+            avatars: &services.avatars,
+            metrics: &services.metrics,
+            message_search: &services.message_search,
+        },
+    )
+    .await
+}
+
 pub async fn get(
     context: &RpcCallContext,
     services: &RpcServices,

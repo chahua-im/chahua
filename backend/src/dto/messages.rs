@@ -418,8 +418,34 @@ pub struct ListMessagesResponse {
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchMessagesResponse {
-    pub messages: Vec<MessageResponse>,
-    pub next_offset: Option<usize>,
+    pub messages: Vec<SearchMessageResult>,
+    pub next_cursor: Option<String>,
+    /// Relevance search reached its result window; more matches may exist.
+    pub truncated: bool,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum SearchResultKind {
+    Message,
+    Thread,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchMessageResult {
+    pub kind: SearchResultKind,
+    #[serde(flatten)]
+    pub message: MessageResponse,
+}
+
+impl From<MessageResponse> for SearchMessageResult {
+    fn from(message: MessageResponse) -> Self {
+        Self {
+            kind: SearchResultKind::Message,
+            message,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
@@ -640,9 +666,212 @@ pub struct ListMessagesQuery {
 #[derive(Debug, serde::Deserialize, utoipa::IntoParams, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchMessagesQuery {
-    pub q: String,
+    /// Message author UID; cross-chat search still requires a query and current chat access.
+    pub sender_uid: Option<i32>,
+    /// Required for cross-chat search; optional for chat main/thread history filtering.
+    pub q: Option<String>,
+    /// Inclusive creation time, RFC 3339 with timezone; millisecond precision.
+    pub created_from: Option<DateTime<Utc>>,
+    /// Exclusive creation time, RFC 3339 with timezone; millisecond precision.
+    pub created_before: Option<DateTime<Utc>>,
     #[serde(default)]
     pub sort: Option<MessageSearchSort>,
     pub limit: Option<i64>,
-    pub offset: Option<usize>,
+    /// Opaque continuation token; keep all search conditions unchanged.
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Default, Clone, Copy, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ChatSearchScope {
+    #[default]
+    All,
+    Main,
+    Thread,
+    /// Thread roots in which participantUid authored a root or surviving reply.
+    Threads,
+}
+
+#[derive(Debug, serde::Deserialize, utoipa::IntoParams, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatSearchMessagesQuery {
+    /// Group chats only: historical participant in the selected scope. Reserved for scope=threads.
+    pub sender_uid: Option<i32>,
+    /// Required only for scope=threads; root/reply author, independent of membership or subscription.
+    pub participant_uid: Option<i32>,
+    /// Without text, a date boundary or senderUid is required; all requires senderUid. Threads requires participantUid and does not support text.
+    pub q: Option<String>,
+    /// Inclusive creation time, RFC 3339 with timezone; millisecond precision.
+    pub created_from: Option<DateTime<Utc>>,
+    /// Exclusive creation time, RFC 3339 with timezone; millisecond precision.
+    pub created_before: Option<DateTime<Utc>>,
+    pub sort: Option<MessageSearchSort>,
+    pub limit: Option<i64>,
+    /// Opaque continuation token; keep all search conditions unchanged.
+    pub cursor: Option<String>,
+    /// Defaults to all; without keywords, all returns sender messages and participating threads and requires senderUid.
+    #[serde(default)]
+    pub scope: ChatSearchScope,
+    /// Required only for scope=thread; includes the root and its replies.
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[param(value_type = Option<String>)]
+    #[schema(schema_with = crate::serde_i64_string::schema_opt)]
+    pub thread_id: Option<i64>,
+}
+
+impl ChatSearchMessagesQuery {
+    pub fn search_range(
+        &self,
+    ) -> Result<crate::services::message_search::MessageSearchRange, crate::errors::AppError> {
+        use crate::services::message_search::MessageSearchRange;
+        if let ChatSearchScope::Threads = self.scope {
+            if self.thread_id.is_some()
+                || self.sender_uid.is_some()
+                || self.q.as_deref().is_some_and(|q| !q.trim().is_empty())
+            {
+                return Err(crate::errors::AppError::BadRequest(
+                    "scope=threads does not support threadId, senderUid or q",
+                ));
+            }
+            return self
+                .participant_uid
+                .filter(|uid| *uid > 0)
+                .map(MessageSearchRange::Threads)
+                .ok_or(crate::errors::AppError::BadRequest(
+                    "scope=threads requires a positive participantUid",
+                ));
+        }
+        if self.participant_uid.is_some() {
+            return Err(crate::errors::AppError::BadRequest(
+                "participantUid is only supported for scope=threads",
+            ));
+        }
+        match (self.scope, self.thread_id) {
+            (ChatSearchScope::All, None) => Ok(MessageSearchRange::All),
+            (ChatSearchScope::Main, None) => Ok(MessageSearchRange::Main),
+            (ChatSearchScope::Thread, Some(id)) if id > 0 => Ok(MessageSearchRange::Thread(id)),
+            _ => Err(crate::errors::AppError::BadRequest(
+                "threadId must be a positive ID and is required only for scope=thread",
+            )),
+        }
+    }
+
+    pub fn into_query(self) -> SearchMessagesQuery {
+        SearchMessagesQuery {
+            sender_uid: self.sender_uid,
+            q: self.q,
+            created_from: self.created_from,
+            created_before: self.created_before,
+            sort: self.sort,
+            limit: self.limit,
+            cursor: self.cursor,
+        }
+    }
+}
+
+#[cfg(test)]
+mod search_scope_tests {
+    use super::*;
+    use crate::services::message_search::MessageSearchRange;
+
+    #[test]
+    fn sender_filter_uses_uid_in_http_and_rpc_queries() {
+        let cross_chat = axum::extract::Query::<SearchMessagesQuery>::try_from_uri(
+            &"/?q=hello&senderUid=42".parse().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(cross_chat.sender_uid, Some(42));
+        let cross_chat: SearchMessagesQuery =
+            serde_json::from_value(serde_json::json!({"q":"hello","senderUid":42})).unwrap();
+        assert_eq!(cross_chat.sender_uid, Some(42));
+        let query = axum::extract::Query::<ChatSearchMessagesQuery>::try_from_uri(
+            &"/?q=hello&scope=thread&threadId=123&senderUid=42"
+                .parse()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(query.sender_uid, Some(42));
+        let query: crate::dto::rpc::messages::MessagesSearchParams =
+            serde_json::from_value(serde_json::json!({"chatId":"10","q":"hello","senderUid":42}))
+                .unwrap();
+        assert_eq!(query.query.sender_uid, Some(42));
+    }
+    #[test]
+    fn threads_scope_requires_participant_and_reserves_sender() {
+        for uri in [
+            "/?scope=threads&participantUid=42",
+            "/?scope=threads&participantUid=42&sort=newest",
+        ] {
+            let query = axum::extract::Query::<ChatSearchMessagesQuery>::try_from_uri(
+                &uri.parse().unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                query.search_range().unwrap(),
+                MessageSearchRange::Threads(42)
+            );
+        }
+        let rpc: crate::dto::rpc::messages::MessagesSearchParams = serde_json::from_value(
+            serde_json::json!({"chatId":"9007199254740993","scope":"threads","participantUid":42}),
+        )
+        .unwrap();
+        assert_eq!(
+            rpc.query.search_range().unwrap(),
+            MessageSearchRange::Threads(42)
+        );
+        for uri in [
+            "/?scope=threads",
+            "/?scope=threads&participantUid=0",
+            "/?scope=threads&participantUid=-1",
+            "/?scope=threads&participantUid=42&senderUid=43",
+            "/?scope=threads&participantUid=42&threadId=1",
+            "/?scope=threads&participantUid=42&q=test",
+            "/?scope=all&participantUid=42",
+            "/?scope=main&participantUid=42",
+            "/?scope=thread&threadId=1&participantUid=42",
+        ] {
+            let query = axum::extract::Query::<ChatSearchMessagesQuery>::try_from_uri(
+                &uri.parse().unwrap(),
+            )
+            .unwrap();
+            assert!(query.search_range().is_err(), "{uri}");
+        }
+    }
+
+    #[test]
+    fn scope_validation_and_id_precision() {
+        for (uri, expected) in [
+            ("/?q=hello", MessageSearchRange::All),
+            ("/?q=hello&scope=main", MessageSearchRange::Main),
+            (
+                "/?q=hello&scope=thread&threadId=9223372036854775807",
+                MessageSearchRange::Thread(i64::MAX),
+            ),
+        ] {
+            let query = axum::extract::Query::<ChatSearchMessagesQuery>::try_from_uri(
+                &uri.parse().unwrap(),
+            )
+            .unwrap();
+            assert_eq!(query.search_range().unwrap(), expected);
+        }
+        for uri in [
+            "/?q=hello&scope=thread",
+            "/?q=hello&threadId=1",
+            "/?q=hello&scope=main&threadId=1",
+            "/?q=hello&scope=thread&threadId=0",
+        ] {
+            let query = axum::extract::Query::<ChatSearchMessagesQuery>::try_from_uri(
+                &uri.parse().unwrap(),
+            )
+            .unwrap();
+            assert!(query.search_range().is_err());
+        }
+        assert!(serde_json::from_value::<ChatSearchMessagesQuery>(
+            serde_json::json!({"q":"hello","scope":"invalid"})
+        )
+        .is_err());
+    }
 }

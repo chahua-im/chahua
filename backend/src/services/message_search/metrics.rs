@@ -130,6 +130,9 @@ impl MessageSearchMetrics {
         for reason in [
             "missing_db_row",
             "wrong_chat",
+            "wrong_scope",
+            "wrong_sender",
+            "wrong_date",
             "not_searchable",
             "stale_version",
         ] {

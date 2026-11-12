@@ -9,7 +9,7 @@ use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::PgConnection;
 use meilisearch_sdk::client::Client;
 use meilisearch_sdk::errors::Error as MeiliError;
-use meilisearch_sdk::search::Selectors;
+use meilisearch_sdk::search::{MatchingStrategies, SearchQuery, Selectors};
 use meilisearch_sdk::task_info::TaskInfo;
 use meilisearch_sdk::tasks::Task;
 use serde::{Deserialize, Serialize};
@@ -17,14 +17,28 @@ use serde::{Deserialize, Serialize};
 use crate::dto::messages::MessageResponse;
 use crate::models::{Message, MessageType};
 use crate::schema::messages;
+mod filtering;
+pub mod pagination;
+use pagination::{
+    CandidatePageRequest, IndexPosition, SearchPosition, NEWEST_SORT, POSITION_ATTRIBUTES,
+};
 mod metrics;
+pub use filtering::{
+    load_filtered_messages, load_participant_threads, load_sender_history, HistorySearchScope,
+};
 pub use metrics::MessageSearchMetrics;
 
 pub const DEFAULT_INDEX_UID: &str = "messages_v1";
 pub const REINDEX_BATCH_SIZE: i64 = 500;
 
 const SEARCHABLE_ATTRIBUTES: &[&str] = &["text"];
-const FILTERABLE_ATTRIBUTES: &[&str] = &["chatId"];
+const FILTERABLE_ATTRIBUTES: &[&str] = &[
+    "chatId",
+    "messageId",
+    "replyRootId",
+    "senderUid",
+    "createdAtMillis",
+];
 const SORTABLE_ATTRIBUTES: &[&str] = &["createdAtMillis"];
 const RANKING_RULES: &[&str] = &[
     // `sort` is ignored for relevance searches that do not pass a sort parameter,
@@ -112,6 +126,7 @@ pub struct MessageSearchService {
     index_uid: String,
     metrics: Arc<MessageSearchMetrics>,
     setup_ready: Arc<AtomicBool>,
+    cursor_ready: Arc<AtomicBool>,
 }
 
 #[derive(Debug)]
@@ -122,6 +137,7 @@ pub enum MessageSearchError {
     Pool(diesel::r2d2::PoolError),
     TaskFailed(String),
     InvalidPrimaryKey(Option<String>),
+    InvalidHit,
     NotReady,
 }
 
@@ -139,6 +155,10 @@ impl fmt::Display for MessageSearchError {
                     "message search index primary key must be id, got {key:?}"
                 )
             }
+            Self::InvalidHit => write!(
+                f,
+                "Search index has invalid pagination keys; reindex required"
+            ),
             Self::NotReady => write!(f, "message search index setup is not complete"),
         }
     }
@@ -173,11 +193,14 @@ impl From<diesel::r2d2::PoolError> for MessageSearchError {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageSearchDocument {
+    pub sender_uid: i32,
     pub id: String,
     pub message_id: String,
     pub chat_id: String,
     pub reply_root_id: Option<String>,
     pub created_at_millis: i64,
+    #[serde(flatten)]
+    pub position: IndexPosition,
     pub version: i64,
     pub text: String,
 }
@@ -187,24 +210,30 @@ pub struct MessageSearchDocument {
 struct MessageSearchHitDocument {
     message_id: String,
     version: i64,
+    #[serde(flatten)]
+    position: Option<IndexPosition>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SearchHitCandidate {
     pub message_id: i64,
     pub version: i64,
+    pub position: Option<SearchPosition>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageSearchCandidatePage {
     pub candidates: Vec<SearchHitCandidate>,
-    pub next_offset: Option<usize>,
+    pub has_more: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SearchCandidateDropCounts {
     pub missing_db_row: usize,
     pub wrong_chat: usize,
+    pub wrong_scope: usize,
+    pub wrong_sender: usize,
+    pub wrong_date: usize,
     pub not_searchable: usize,
     pub stale_version: usize,
 }
@@ -215,7 +244,66 @@ pub struct AuthoritativeSearchHits {
     pub drops: SearchCandidateDropCounts,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum MessageSearchRange {
+    All,
+    Main,
+    Thread(i64),
+    Threads(i32),
+}
+impl MessageSearchRange {
+    fn filter(self, chats: &str) -> String {
+        match self {
+            Self::Threads(_) => {
+                unreachable!("thread participation search does not use the text index")
+            }
+            Self::All => chats.to_owned(),
+            Self::Main => format!("{chats} AND replyRootId IS NULL"),
+            Self::Thread(id) => {
+                format!(r#"{chats} AND (messageId = "{id}" OR replyRootId = "{id}")"#)
+            }
+        }
+    }
+    fn contains(self, message: &Message) -> bool {
+        match self {
+            Self::Threads(_) => message.reply_root_id.is_none() && message.has_thread,
+            Self::All => true,
+            Self::Main => message.reply_root_id.is_none(),
+            Self::Thread(id) => message.id == id || message.reply_root_id == Some(id),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct MessageSearchFilters {
+    pub created_from: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_before: Option<chrono::DateTime<chrono::Utc>>,
+    pub range: MessageSearchRange,
+    pub sender_uid: Option<i32>,
+}
+impl MessageSearchFilters {
+    fn filter(self, chats: &str) -> String {
+        let mut filter = self.range.filter(chats);
+        if let Some(from) = self.created_from {
+            filter.push_str(&format!(
+                " AND createdAtMillis >= {}",
+                from.timestamp_millis()
+            ));
+        }
+        if let Some(before) = self.created_before {
+            filter.push_str(&format!(
+                " AND createdAtMillis < {}",
+                before.timestamp_millis()
+            ));
+        }
+        match self.sender_uid {
+            Some(uid) => format!("{filter} AND senderUid = {uid}"),
+            None => filter,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum MessageSearchSort {
     Relevance,
@@ -223,6 +311,19 @@ pub enum MessageSearchSort {
 }
 
 impl MessageSearchSort {
+    fn configure(self, search: &mut SearchQuery<'_, meilisearch_sdk::DefaultHttpClient>) {
+        match self {
+            Self::Relevance => {
+                search.with_matching_strategy(MatchingStrategies::LAST);
+            }
+            Self::Newest => {
+                search
+                    .with_matching_strategy(MatchingStrategies::ALL)
+                    .with_sort(NEWEST_SORT);
+            }
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Relevance => "relevance",
@@ -247,6 +348,7 @@ impl MessageSearchService {
             index_uid: config.index_uid,
             metrics,
             setup_ready: Arc::new(AtomicBool::new(false)),
+            cursor_ready: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -301,53 +403,106 @@ impl MessageSearchService {
     pub async fn search_candidates(
         &self,
         query: &str,
-        chat_id: i64,
+        chat_ids: &[i64],
+        filters: MessageSearchFilters,
         sort: MessageSearchSort,
-        limit: usize,
-        offset: usize,
+        page: CandidatePageRequest,
     ) -> Result<MessageSearchCandidatePage, MessageSearchError> {
         if !self.is_setup_ready() {
             return Err(MessageSearchError::NotReady);
         }
+        if sort == MessageSearchSort::Newest {
+            self.ensure_cursor_ready().await?;
+        }
 
-        let filter = format!(r#"chatId = "{}""#, chat_id);
-        let sort_fields = ["createdAtMillis:desc"];
-        let attributes_to_retrieve = DISPLAYED_ATTRIBUTES;
+        let filter = format!(
+            "chatId IN [{}]",
+            chat_ids
+                .iter()
+                .map(|id| format!(r#""{id}""#))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let mut filter = filters.filter(&filter);
+        if let Some(before) = page.before {
+            filter.push_str(&format!(" AND {}", before.older_filter()));
+        }
+        let attributes_to_retrieve = [DISPLAYED_ATTRIBUTES, POSITION_ATTRIBUTES].concat();
         let index = self.index();
         let mut search = index.search();
 
         search
             .with_query(query)
             .with_filter(&filter)
-            .with_limit(limit)
-            .with_offset(offset)
-            .with_attributes_to_retrieve(Selectors::Some(attributes_to_retrieve));
-        if sort == MessageSearchSort::Newest {
-            search.with_sort(&sort_fields);
-        }
+            .with_limit(page.limit)
+            .with_offset(page.offset)
+            .with_attributes_to_retrieve(Selectors::Some(&attributes_to_retrieve));
+        sort.configure(&mut search);
 
         let result = search.execute::<MessageSearchHitDocument>().await?;
+        let has_more = result.hits.len() == page.limit;
         let candidates = result
             .hits
             .into_iter()
-            .filter_map(|hit| {
-                let message_id = hit.result.message_id.parse::<i64>().ok()?;
-                Some(SearchHitCandidate {
+            .map(|hit| {
+                let message_id = hit
+                    .result
+                    .message_id
+                    .parse::<i64>()
+                    .map_err(|_| MessageSearchError::InvalidHit)?;
+                let position = hit.result.position.and_then(IndexPosition::position);
+                if sort == MessageSearchSort::Newest && position.is_none_or(|p| p.id != message_id)
+                {
+                    return Err(MessageSearchError::InvalidHit);
+                }
+                Ok(SearchHitCandidate {
                     message_id,
                     version: hit.result.version,
+                    position,
                 })
             })
-            .collect::<Vec<_>>();
-
-        let next_offset = result
-            .estimated_total_hits
-            .and_then(|total| (offset + limit < total).then_some(offset + limit))
-            .or_else(|| (candidates.len() == limit).then_some(offset + limit));
-
+            .collect::<Result<Vec<_>, MessageSearchError>>()?;
+        if sort == MessageSearchSort::Newest {
+            let mut previous = page.before;
+            for candidate in &candidates {
+                let position = candidate.position.ok_or(MessageSearchError::InvalidHit)?;
+                if previous.is_some_and(|p| position >= p) {
+                    return Err(MessageSearchError::InvalidHit);
+                }
+                previous = Some(position);
+            }
+        }
         Ok(MessageSearchCandidatePage {
             candidates,
-            next_offset,
+            has_more,
         })
+    }
+
+    async fn ensure_cursor_ready(&self) -> Result<(), MessageSearchError> {
+        if self.cursor_ready.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        // Missing keys sort last, but a cursor filter would exclude them entirely.
+        // Check the whole index once before enabling newest pagination. Failed
+        // checks are retried so an externally completed reindex can unblock it.
+        let filter = POSITION_ATTRIBUTES
+            .iter()
+            .map(|field| format!("{field} NOT EXISTS OR {field} IS NULL"))
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        let index = self.index();
+        let hits = index
+            .search()
+            .with_filter(&filter)
+            .with_limit(1)
+            .with_attributes_to_retrieve(Selectors::Some(&["id"]))
+            .execute::<serde_json::Value>()
+            .await?;
+        if !hits.hits.is_empty() {
+            return Err(MessageSearchError::InvalidHit);
+        }
+        self.cursor_ready.store(true, Ordering::Release);
+        Ok(())
     }
 
     pub fn upsert_message_best_effort(self: &Arc<Self>, message: Message) {
@@ -418,6 +573,7 @@ impl MessageSearchService {
         db: &Pool<ConnectionManager<PgConnection>>,
         batch_size: i64,
     ) -> Result<usize, MessageSearchError> {
+        self.cursor_ready.store(false, Ordering::Release);
         self.ensure_index_exists().await?;
         self.apply_settings().await?;
         self.wait_for_task(self.index().delete_all_documents().await?)
@@ -490,16 +646,24 @@ impl MessageSearchService {
         .await?;
         self.wait_for_setup_task(
             index
-                .set_filterable_attributes(FILTERABLE_ATTRIBUTES)
+                .set_filterable_attributes(&[FILTERABLE_ATTRIBUTES, POSITION_ATTRIBUTES].concat())
                 .await?,
         )
         .await?;
-        self.wait_for_setup_task(index.set_sortable_attributes(SORTABLE_ATTRIBUTES).await?)
-            .await?;
+        self.wait_for_setup_task(
+            index
+                .set_sortable_attributes(&[SORTABLE_ATTRIBUTES, POSITION_ATTRIBUTES].concat())
+                .await?,
+        )
+        .await?;
         self.wait_for_setup_task(index.set_ranking_rules(RANKING_RULES).await?)
             .await?;
-        self.wait_for_setup_task(index.set_displayed_attributes(DISPLAYED_ATTRIBUTES).await?)
-            .await?;
+        self.wait_for_setup_task(
+            index
+                .set_displayed_attributes(&[DISPLAYED_ATTRIBUTES, POSITION_ATTRIBUTES].concat())
+                .await?,
+        )
+        .await?;
         Ok(())
     }
 
@@ -646,21 +810,67 @@ pub fn project_message_document(message: &Message) -> Option<MessageSearchDocume
     let text = normalize_search_text(message.message.as_deref()?)?;
 
     Some(MessageSearchDocument {
+        sender_uid: message.sender_uid,
         id: message.id.to_string(),
         message_id: message.id.to_string(),
         chat_id: message.chat_id.to_string(),
         reply_root_id: message.reply_root_id.map(|id| id.to_string()),
         created_at_millis: message.created_at.timestamp_millis(),
+        position: SearchPosition {
+            created_at: message.created_at,
+            id: message.id,
+        }
+        .index(),
         version: message_version(message),
         text,
     })
 }
 
-pub fn filter_authoritative_hits_with_counts(
+#[cfg(test)]
+fn filter_authoritative_hits_with_counts(
     chat_id: i64,
     candidates: &[SearchHitCandidate],
     rows: Vec<Message>,
 ) -> AuthoritativeSearchHits {
+    filter_authoritative_hits_in_chats(&[chat_id], candidates, rows)
+}
+
+#[cfg(test)]
+fn filter_authoritative_hits_in_chats(
+    chat_ids: &[i64],
+    candidates: &[SearchHitCandidate],
+    rows: Vec<Message>,
+) -> AuthoritativeSearchHits {
+    filter_authoritative_hits_in_range(chat_ids, MessageSearchRange::All, candidates, rows)
+}
+
+#[cfg(test)]
+fn filter_authoritative_hits_in_range(
+    chat_ids: &[i64],
+    range: MessageSearchRange,
+    candidates: &[SearchHitCandidate],
+    rows: Vec<Message>,
+) -> AuthoritativeSearchHits {
+    filter_authoritative_hits(
+        chat_ids,
+        MessageSearchFilters {
+            created_from: None,
+            created_before: None,
+            range,
+            sender_uid: None,
+        },
+        candidates,
+        rows,
+    )
+}
+
+pub fn filter_authoritative_hits(
+    chat_ids: &[i64],
+    filters: MessageSearchFilters,
+    candidates: &[SearchHitCandidate],
+    rows: Vec<Message>,
+) -> AuthoritativeSearchHits {
+    let chat_ids: std::collections::HashSet<_> = chat_ids.iter().copied().collect();
     let mut rows_by_id = rows
         .into_iter()
         .map(|message| (message.id, message))
@@ -675,11 +885,33 @@ pub fn filter_authoritative_hits_with_counts(
                 return None;
             };
 
-            if message.chat_id != chat_id {
+            if !chat_ids.contains(&message.chat_id) {
                 drops.wrong_chat += 1;
                 return None;
             }
 
+            if !filters.range.contains(&message) {
+                drops.wrong_scope += 1;
+                return None;
+            }
+
+            if filters
+                .sender_uid
+                .is_some_and(|uid| message.sender_uid != uid)
+            {
+                drops.wrong_sender += 1;
+                return None;
+            }
+            if filters
+                .created_from
+                .is_some_and(|from| message.created_at < from)
+                || filters
+                    .created_before
+                    .is_some_and(|before| message.created_at >= before)
+            {
+                drops.wrong_date += 1;
+                return None;
+            }
             let Some(document) = project_message_document(&message) else {
                 drops.not_searchable += 1;
                 return None;
@@ -705,11 +937,17 @@ fn project_message_response_document(response: &MessageResponse) -> Option<Messa
     let text = normalize_search_text(response.message.as_deref()?)?;
 
     Some(MessageSearchDocument {
+        sender_uid: response.sender.uid,
         id: response.id.to_string(),
         message_id: response.id.to_string(),
         chat_id: response.chat_id.to_string(),
         reply_root_id: response.reply_root_id.map(|id| id.to_string()),
         created_at_millis: response.created_at.timestamp_millis(),
+        position: SearchPosition {
+            created_at: response.created_at,
+            id: response.id,
+        }
+        .index(),
         version: response.created_at.timestamp_micros(),
         text,
     })
@@ -852,6 +1090,197 @@ mod tests {
     }
 
     #[test]
+    fn keyword_requests_serialize_matching_strategy_and_sort_together() {
+        let client =
+            meilisearch_sdk::client::Client::new("http://localhost:7700", None::<String>).unwrap();
+        let index = client.index("messages_test");
+        for (sort, strategy) in [
+            (super::MessageSearchSort::Relevance, "last"),
+            (super::MessageSearchSort::Newest, "all"),
+        ] {
+            let mut query = index.search();
+            query.with_query("release plan");
+            sort.configure(&mut query);
+            let body = serde_json::to_value(&query).unwrap();
+            assert_eq!(body["q"], "release plan");
+            assert_eq!(body["matchingStrategy"], strategy);
+            if strategy == "all" {
+                assert_eq!(body["sort"], serde_json::json!(super::NEWEST_SORT));
+            } else {
+                assert!(body.get("sort").is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn keyword_date_filters_match_half_open_database_boundaries() {
+        let first = message(1, Some("hello"));
+        let last = message(2, Some("hello"));
+        let filters = super::MessageSearchFilters {
+            range: super::MessageSearchRange::All,
+            sender_uid: None,
+            created_from: Some(first.created_at),
+            created_before: Some(last.created_at),
+        };
+        let filter = filters.filter("chatId = 10");
+        assert!(filter.contains(&format!(
+            "createdAtMillis >= {}",
+            first.created_at.timestamp_millis()
+        )));
+        assert!(filter.contains(&format!(
+            "createdAtMillis < {}",
+            last.created_at.timestamp_millis()
+        )));
+        let rows = vec![first, last];
+        let candidates = rows
+            .iter()
+            .map(|m| SearchHitCandidate {
+                position: None,
+                message_id: m.id,
+                version: project_message_document(m).unwrap().version,
+            })
+            .collect::<Vec<_>>();
+        let result = super::filter_authoritative_hits(&[10], filters, &candidates, rows);
+        assert_eq!(
+            result.messages.iter().map(|m| m.id).collect::<Vec<_>>(),
+            vec![1]
+        );
+        assert_eq!(result.drops.wrong_date, 1);
+    }
+
+    #[test]
+    fn sender_filter_applies_to_all_ranges_and_authoritative_hits() {
+        use super::{MessageSearchFilters, MessageSearchRange as Range};
+        let mut first = message(1, Some("hello"));
+        first.sender_uid = 42;
+        let mut second = message(2, Some("hello"));
+        second.reply_root_id = Some(1);
+        assert_eq!(project_message_document(&first).unwrap().sender_uid, 42);
+        let rows = vec![first, second];
+        let candidates = rows
+            .iter()
+            .map(|m| SearchHitCandidate {
+                position: None,
+                message_id: m.id,
+                version: project_message_document(m).unwrap().version,
+            })
+            .collect::<Vec<_>>();
+        for range in [Range::All, Range::Main, Range::Thread(1)] {
+            let filters = MessageSearchFilters {
+                created_from: None,
+                created_before: None,
+                range,
+                sender_uid: Some(42),
+            };
+            assert!(filters
+                .filter("chatId = 10")
+                .ends_with(" AND senderUid = 42"));
+            let result =
+                super::filter_authoritative_hits(&[10], filters, &candidates, rows.clone());
+            assert_eq!(
+                result.messages.iter().map(|m| m.id).collect::<Vec<_>>(),
+                vec![1]
+            );
+        }
+        let result = super::filter_authoritative_hits(
+            &[10],
+            MessageSearchFilters {
+                created_from: None,
+                created_before: None,
+                range: Range::All,
+                sender_uid: Some(999),
+            },
+            &candidates,
+            rows,
+        );
+        assert!(result.messages.is_empty());
+        assert_eq!(result.drops.wrong_sender, 2);
+    }
+
+    #[test]
+    fn search_ranges_include_roots_and_isolate_replies() {
+        use super::{filter_authoritative_hits_in_range, MessageSearchRange as Range};
+        let root = message(1, Some("root"));
+        let mut reply = message(2, Some("reply"));
+        reply.reply_root_id = Some(1);
+        let mut other = message(3, Some("other"));
+        other.reply_root_id = Some(99);
+        let rows = vec![root, reply, other];
+        let candidates = rows
+            .iter()
+            .map(|m| SearchHitCandidate {
+                position: None,
+                message_id: m.id,
+                version: project_message_document(m).unwrap().version,
+            })
+            .collect::<Vec<_>>();
+        for (range, ids) in [
+            (Range::All, vec![1, 2, 3]),
+            (Range::Main, vec![1]),
+            (Range::Thread(1), vec![1, 2]),
+        ] {
+            let result =
+                filter_authoritative_hits_in_range(&[10], range, &candidates, rows.clone());
+            assert_eq!(
+                result.messages.iter().map(|m| m.id).collect::<Vec<_>>(),
+                ids
+            );
+        }
+        let mut deleted = rows.clone();
+        deleted[0].deleted_at = Some(Utc::now());
+        let result =
+            filter_authoritative_hits_in_range(&[10], Range::Thread(1), &candidates, deleted);
+        assert_eq!(
+            result.messages.iter().map(|m| m.id).collect::<Vec<_>>(),
+            vec![2]
+        );
+        assert_eq!(
+            Range::Main.filter("chatId = 10"),
+            "chatId = 10 AND replyRootId IS NULL"
+        );
+        assert_eq!(
+            Range::Thread(i64::MAX).filter("chatId = 10"),
+            format!(
+                r#"chatId = 10 AND (messageId = "{}" OR replyRootId = "{}")"#,
+                i64::MAX,
+                i64::MAX
+            )
+        );
+    }
+
+    #[test]
+    fn cross_chat_hits_preserve_rank_and_recheck_access() {
+        let first = message(1, Some("hello"));
+        let mut second = message(2, Some("hello"));
+        second.chat_id = 20;
+        let mut forbidden = message(3, Some("hello"));
+        forbidden.chat_id = 30;
+        let rows = vec![first, second, forbidden];
+        let candidates = rows
+            .iter()
+            .rev()
+            .map(|row| SearchHitCandidate {
+                position: None,
+                message_id: row.id,
+                version: project_message_document(row).unwrap().version,
+            })
+            .collect::<Vec<_>>();
+        let result =
+            super::filter_authoritative_hits_in_chats(&[10, 20], &candidates, rows.clone());
+        assert_eq!(
+            result.messages.iter().map(|m| m.id).collect::<Vec<_>>(),
+            vec![2, 1]
+        );
+        assert_eq!(result.drops.wrong_chat, 1);
+        let revoked = super::filter_authoritative_hits_in_chats(&[10], &candidates, rows.clone());
+        assert_eq!(revoked.messages.len(), 1);
+        assert!(
+            super::filter_authoritative_hits_in_chats(&[], &candidates, rows)
+                .messages
+                .is_empty()
+        );
+    }
+    #[test]
     fn normalization_strips_mentions_and_preserves_cjk_text() {
         assert_eq!(
             normalize_search_text(" @[uid:7] 你好，世界 \n  hello\t@[uid:8] "),
@@ -938,18 +1367,22 @@ mod tests {
         let rows = vec![fresh.clone(), wrong_chat, deleted, edited.clone()];
         let candidates = vec![
             SearchHitCandidate {
+                position: None,
                 message_id: edited.id,
                 version: 1,
             },
             SearchHitCandidate {
+                position: None,
                 message_id: fresh.id,
                 version: project_message_document(&fresh).unwrap().version,
             },
             SearchHitCandidate {
+                position: None,
                 message_id: 2,
                 version: 1,
             },
             SearchHitCandidate {
+                position: None,
                 message_id: 3,
                 version: 1,
             },
@@ -986,22 +1419,27 @@ mod tests {
         let rows = vec![fresh.clone(), wrong_chat.clone(), deleted, edited.clone()];
         let candidates = vec![
             SearchHitCandidate {
+                position: None,
                 message_id: 99,
                 version: 1,
             },
             SearchHitCandidate {
+                position: None,
                 message_id: wrong_chat.id,
                 version: project_message_document(&wrong_chat).unwrap().version,
             },
             SearchHitCandidate {
+                position: None,
                 message_id: 3,
                 version: 1,
             },
             SearchHitCandidate {
+                position: None,
                 message_id: edited.id,
                 version: 1,
             },
             SearchHitCandidate {
+                position: None,
                 message_id: fresh.id,
                 version: project_message_document(&fresh).unwrap().version,
             },

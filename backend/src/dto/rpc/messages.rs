@@ -2,8 +2,8 @@ use serde::Deserialize;
 use utoipa::ToSchema;
 
 use crate::dto::messages::{
-    BulkDeleteMessagesBody, CreateMessageBody, ForwardMessageBody, ForwardMessagesBody,
-    ListMessagesQuery, SearchMessagesQuery, UpdateMessageBody,
+    BulkDeleteMessagesBody, ChatSearchMessagesQuery, CreateMessageBody, ForwardMessageBody,
+    ForwardMessagesBody, ListMessagesQuery, UpdateMessageBody,
 };
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -33,7 +33,7 @@ pub struct MessagesSearchParams {
     #[schema(schema_with = crate::serde_i64_string::schema)]
     pub chat_id: i64,
     #[serde(flatten)]
-    pub query: SearchMessagesQuery,
+    pub query: ChatSearchMessagesQuery,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
