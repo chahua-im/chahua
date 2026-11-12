@@ -193,6 +193,8 @@ pub struct ForwardedMessagesPreviewResponse {
 #[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ForwardedMessagePreviewResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<MessageMetadataResponse>,
     #[serde(with = "crate::serde_i64_string")]
     #[schema(value_type = String)]
     pub original_message_id: i64,
@@ -226,6 +228,8 @@ pub struct ForwardedMessagesPreviewSnapshot {
 #[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ForwardedMessagePreviewSnapshot {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<MessageMetadataResponse>,
     #[serde(with = "crate::serde_i64_string")]
     #[schema(value_type = String)]
     pub original_message_id: i64,
@@ -471,6 +475,8 @@ pub struct MessagePreviewAttachment {
 #[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MessagePreview {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<MessageMetadataResponse>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_kind: Option<crate::models::SystemMessageKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

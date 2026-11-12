@@ -1,3 +1,4 @@
+import { messageLinkCard } from '../link-card';
 import { Component, computed, input } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { RouterLink } from '@angular/router';
@@ -9,8 +10,11 @@ import { systemMessagePresentation } from '../system-message';
 import { MarkdownSummary } from './markdown-summary';
 
 type PreviewSource = Pick<MessageResponse, 'message' | 'messageType'> &
-  Partial<Pick<MessageResponse, 'isDeleted' | 'mentions' | 'sender' | 'systemLinks' | 'systemKind' | 'chatId'>> & {
+  Partial<
+    Pick<MessageResponse, 'isDeleted' | 'mentions' | 'sender' | 'systemLinks' | 'systemKind' | 'chatId' | 'metadata'>
+  > & {
     attachments: readonly { kind: string }[];
+    sticker?: Pick<NonNullable<MessageResponse['sticker']>, 'emoji'>;
   };
 
 @Component({
@@ -34,6 +38,10 @@ type PreviewSource = Pick<MessageResponse, 'message' | 'messageType'> &
 export class MessagePreview {
   readonly message = input.required<PreviewSource>();
   readonly interactive = input(false);
+  protected readonly sharedTitle = computed(() => {
+    const card = messageLinkCard(this.message());
+    return card ? card.title || new URL(card.url).hostname : undefined;
+  });
   protected readonly MessageType = MessageType;
   protected readonly placeholderLabel = placeholderLabel;
   protected readonly systemMessage = computed(() => systemMessagePresentation(this.message()));

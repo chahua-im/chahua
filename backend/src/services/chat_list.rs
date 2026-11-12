@@ -211,6 +211,10 @@ pub(crate) fn load_last_message_previews(
                 message.chat_id,
                 build_message_preview(
                     MessagePreviewInput {
+                        metadata: message
+                            .metadata
+                            .as_ref()
+                            .and_then(super::link_previews::preview_metadata),
                         system_kind: message.system_kind,
                         forwarded_from_name,
                         id: message.id,

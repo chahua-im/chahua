@@ -403,6 +403,7 @@ pub(crate) fn attachment_previews(
 }
 
 pub struct MessagePreviewInput {
+    pub metadata: Option<crate::dto::link_previews::MessageMetadataResponse>,
     pub system_kind: Option<crate::models::SystemMessageKind>,
     pub forwarded_from_name: Option<String>,
     pub id: i64,
@@ -425,6 +426,7 @@ pub fn build_message_preview(
     user_profiles: &std::collections::HashMap<i32, UserProfile>,
 ) -> MessagePreview {
     let MessagePreviewInput {
+        metadata,
         system_kind,
         forwarded_from_name,
         id,
@@ -443,6 +445,7 @@ pub fn build_message_preview(
     let sticker_emoji = sticker_id.and_then(|sid| sticker_emoji_map.get(&sid).cloned());
     let (message, system_links) = super::system_messages::decode(&message_type, message);
     MessagePreview {
+        metadata: metadata.filter(|_| !is_deleted),
         system_kind,
         system_links: system_links.filter(|_| !is_deleted),
         forwarded_from_name: forwarded_from_name.filter(|_| !is_deleted),
@@ -788,6 +791,10 @@ fn preview_snapshot_from_item(
     match item {
         ForwardedBundlePayloadItem::MessageSnapshot { snapshot } => {
             ForwardedMessagePreviewSnapshot {
+                metadata: snapshot
+                    .metadata
+                    .clone()
+                    .map(super::link_previews::summary_metadata),
                 original_message_id: snapshot.original_message_id,
                 original_chat_id: snapshot.original_chat_id,
                 message: snapshot.message.clone(),
@@ -812,6 +819,7 @@ fn preview_snapshot_from_item(
         }
         ForwardedBundlePayloadItem::ForwardedBundleRef { bundle_ref } => {
             ForwardedMessagePreviewSnapshot {
+                metadata: None,
                 original_message_id: bundle_ref.original_message_id,
                 original_chat_id: bundle_ref.original_chat_id,
                 message: bundle_ref.message.clone(),
@@ -1052,6 +1060,7 @@ fn forwarded_preview_item_response(
     user_profiles: &std::collections::HashMap<i32, UserProfile>,
 ) -> ForwardedMessagePreviewResponse {
     ForwardedMessagePreviewResponse {
+        metadata: item.metadata.clone(),
         original_message_id: item.original_message_id,
         original_chat_id: item.original_chat_id,
         message: item.message.clone(),
@@ -2555,6 +2564,7 @@ pub async fn attach_metadata(
 
                 let preview = build_message_preview(
                     MessagePreviewInput {
+                        metadata: reply_msg.metadata.as_ref().and_then(super::link_previews::preview_metadata),
                         system_kind: reply_msg.system_kind,
                         forwarded_from_name: forward_origins.name_for(reply_msg, &user_profiles),
                         id: reply_msg.id,
@@ -3564,6 +3574,7 @@ mod tests {
     #[test]
     fn serializes_reply_to_message_type_and_camel_case_keys() {
         let reply = MessagePreview {
+            metadata: None,
             system_kind: None,
             system_links: None,
             forwarded_from_name: None,
@@ -3699,6 +3710,7 @@ mod tests {
         for deleted_at in [None, Some(Utc::now())] {
             let preview = build_message_preview(
                 MessagePreviewInput {
+                    metadata: None,
                     system_kind: Some(crate::models::SystemMessageKind::MemberAdded),
                     forwarded_from_name: None,
                     id: 10,
@@ -3743,6 +3755,9 @@ mod tests {
         let sticker_map = HashMap::from([(42, "🙂".to_string())]);
         let preview = build_message_preview(
             MessagePreviewInput {
+                metadata: Some(crate::dto::link_previews::MessageMetadataResponse {
+                    link_previews: vec![],
+                }),
                 system_kind: None,
                 forwarded_from_name: None,
                 id: 10,
@@ -3768,6 +3783,7 @@ mod tests {
         assert_eq!(preview.client_generated_id, "client-10");
         assert_eq!(preview.sender.uid, 7);
         assert!(preview.is_deleted);
+        assert!(preview.metadata.is_none());
         assert_eq!(preview.message, None);
         assert!(preview.sticker.is_none());
         assert!(preview.attachments.is_empty());

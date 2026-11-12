@@ -49,6 +49,8 @@
   }
 } @else if (message().messageType === MessageType.invite) {
   <ng-container>{{ 'messages.preview.invite' | transloco }}</ng-container>
+} @else if (sharedTitle(); as title) {
+  <ng-container>{{ 'messages.preview.share' | transloco }}{{ title }}</ng-container>
 } @else {
   @for (kind of media(); track kind) {
     @switch (kind) {

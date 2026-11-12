@@ -220,6 +220,30 @@ pub fn prepare_edit(
     Ok(prepared)
 }
 
+/// Summary payloads retain URL matching and titles without thumbnails or descriptions.
+pub fn summary_metadata(stored: StoredMessageMetadata) -> MessageMetadataResponse {
+    MessageMetadataResponse {
+        link_previews: stored
+            .link_previews
+            .into_iter()
+            .map(|preview| LinkPreviewResponse {
+                url: preview.url,
+                status: preview.status,
+                title: preview.title,
+                expires_at: None,
+                description: None,
+                image: None,
+            })
+            .collect(),
+    }
+}
+
+pub fn preview_metadata(metadata: &Value) -> Option<MessageMetadataResponse> {
+    StoredMessageMetadata::deserialize(metadata)
+        .ok()
+        .map(summary_metadata)
+}
+
 pub fn project_metadata(
     metadata: &Value,
     media_store: &MediaStore,
@@ -537,5 +561,27 @@ mod tests {
             .unwrap()
             .metadata
             .is_none());
+    }
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::*;
+
+    #[test]
+    fn summary_retains_matching_data_without_image_or_description() {
+        let metadata = serde_json::json!({"linkPreviews": [{
+            "url": "https://example.com/", "status": "ready", "title": "Example",
+            "description": "Long description",
+            "image": {"storageKey": "private/key", "width": 100, "height": 100}
+        }]});
+        let summary = serde_json::to_value(preview_metadata(&metadata).unwrap()).unwrap();
+        assert_eq!(
+            summary,
+            serde_json::json!({"linkPreviews": [{
+                "url": "https://example.com/", "status": "ready", "title": "Example"
+            }]})
+        );
+        assert!(preview_metadata(&Value::Null).is_none());
     }
 }

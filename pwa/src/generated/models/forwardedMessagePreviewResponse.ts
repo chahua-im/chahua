@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { MentionInfo } from './mentionInfo';
+import type { MessageMetadataResponse } from './messageMetadataResponse';
 import type { MessagePreviewAttachment } from './messagePreviewAttachment';
 import type { MessagePreviewSticker } from './messagePreviewSticker';
 import type { MessageType } from './messageType';
@@ -17,6 +18,7 @@ export interface ForwardedMessagePreviewResponse {
   mentions?: MentionInfo[];
   message?: string;
   messageType: MessageType;
+  metadata?: MessageMetadataResponse;
   originalChatId: SnowflakeID;
   originalCreatedAt: string;
   originalMessageId: SnowflakeID;

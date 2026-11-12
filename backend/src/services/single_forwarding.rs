@@ -295,6 +295,10 @@ impl ForwardOrigins {
             .map(|reply| {
                 Box::new(build_message_preview(
                     MessagePreviewInput {
+                        metadata: reply
+                            .metadata
+                            .as_ref()
+                            .and_then(super::link_previews::preview_metadata),
                         system_kind: reply.system_kind,
                         forwarded_from_name: self.name_for(reply, profiles),
                         id: reply.id,
