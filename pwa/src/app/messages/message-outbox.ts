@@ -16,6 +16,7 @@ import { filter, firstValueFrom, from, fromEvent, merge, Subject, takeUntil, tim
 import { RpcApi } from '../../generated/rpc-api';
 import {
   LinkPreviewStatus,
+  LinkPreviewInputStatus,
   MessageType,
   type SpeakingMode,
   ServerWsMessageType,
@@ -178,6 +179,7 @@ export class MessageOutbox {
         messageType: composition.messageType,
         message: composition.messageType === MessageType.text ? text : undefined,
         attachmentIds: [...composition.attachmentIds],
+        metadata: composition.metadata,
         stickerId: composition.sticker?.id,
         replyToId,
       },
@@ -189,6 +191,7 @@ export class MessageOutbox {
         createdAt: new Date().toISOString(),
         messageType: composition.messageType,
         mentions: composition.mentions,
+        metadata: composition.previewMetadata,
         replyToMessage: replyTo && {
           ...replyTo,
           forwardedFromName: replyTo.forwardedFrom?.sender.name,
@@ -214,7 +217,9 @@ export class MessageOutbox {
     const single = messages.length === 1;
     const linkPreviews = single
       ? source.metadata?.linkPreviews
-          .filter((preview) => preview.status === LinkPreviewStatus.ready)
+          .filter(
+            (preview) => preview.status === LinkPreviewStatus.ready || preview.status === LinkPreviewStatus.disabled,
+          )
           .map(({ url, status, title, image }) => ({ url, status, title, image }))
       : undefined;
     const clientGeneratedId = crypto.randomUUID();
@@ -281,6 +286,7 @@ export class MessageOutbox {
           messageType: MessageType.text,
           message: text,
           attachmentIds: [...composition.attachmentIds],
+          metadata: composition.metadata,
         },
         uploads: [...(composition.uploads ?? [])],
         revision: 0,
@@ -288,6 +294,7 @@ export class MessageOutbox {
           ...original,
           isEdited: true,
           mentions: composition.mentions,
+          metadata: composition.previewMetadata ?? original.metadata,
           attachments: original.attachments.filter((attachment) => composition.attachmentIds.includes(attachment.id)),
         },
       },
@@ -314,13 +321,19 @@ export class MessageOutbox {
     const uploads = [...(composition.uploads ?? [])];
     for (const upload of uploads) task.owned.add(upload);
     task.intent.set({
-      body: { ...previous.body, message: text, attachmentIds: [...composition.attachmentIds] },
+      body: {
+        ...previous.body,
+        message: text,
+        attachmentIds: [...composition.attachmentIds],
+        metadata: composition.metadata ?? previous.body.metadata,
+      },
       uploads,
       revision: previous.revision + 1,
       local: {
         ...current,
         isEdited: true,
         mentions: composition.mentions,
+        metadata: composition.previewMetadata ?? current.metadata,
         attachments: (item.confirmed()?.attachments ?? current.attachments).filter(
           (attachment) => attachment.id != null && composition.attachmentIds.includes(attachment.id),
         ),
@@ -369,6 +382,7 @@ export class MessageOutbox {
       !task.inflight &&
       (!task.patch || task.patch.revision <= task.acknowledged()) &&
       !uploads.length &&
+      !intent.body.metadata &&
       (original.message ?? '') === text &&
       original.attachments.length === attachmentIds.length &&
       original.attachments.every((attachment) => attachmentIds.includes(attachment.id))
@@ -382,6 +396,8 @@ export class MessageOutbox {
       attachmentIds,
       uploads,
       mentions,
+      metadata: intent.body.metadata,
+      previewMetadata: intent.local.metadata,
     });
   }
 
@@ -592,6 +608,7 @@ export class MessageOutbox {
               messageId: id,
               message: submitted.body.message!,
               attachmentIds: submitted.body.attachmentIds,
+              metadata: submitted.body.metadata,
             })
           : submitted.forward
             ? submitted.forward.messageIds.length === 1
@@ -882,10 +899,17 @@ export class MessageOutbox {
 
 function matchesBody(
   message: MessageResponse,
-  body: Pick<CreateMessageBody, 'message' | 'attachmentIds'> | MessageResponse,
+  body: Pick<CreateMessageBody, 'message' | 'attachmentIds' | 'metadata'> | MessageResponse,
 ) {
   const ids = 'attachments' in body ? body.attachments.map((attachment) => attachment.id) : (body.attachmentIds ?? []);
   return (
+    (body.metadata?.linkPreviews?.every((preview) => {
+      const actual = message.metadata?.linkPreviews.find((entry) => entry.url === preview.url);
+      if (preview.status === LinkPreviewInputStatus.disabled) return actual?.status === LinkPreviewStatus.disabled;
+      if (preview.status === LinkPreviewInputStatus.enabled) return actual?.status !== LinkPreviewStatus.disabled;
+      return true;
+    }) ??
+      true) &&
     message.message === body.message &&
     message.attachments.length === ids.length &&
     message.attachments.every((attachment) => ids.includes(attachment.id))

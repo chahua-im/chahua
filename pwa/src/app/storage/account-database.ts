@@ -1,3 +1,4 @@
+import type { LinkPreviewInput } from '../../generated/models';
 import type { Emoji, SkinTone } from '@nicematic/emoji-picker';
 import type { DBSchema, IDBPDatabase } from 'idb';
 import type { SnowflakeID } from '../api/snowflake-id';
@@ -12,6 +13,8 @@ export interface Draft {
   text: string;
   replyTo?: string;
   savedAt: number;
+  linkPreviews?: readonly LinkPreviewInput[];
+  edit?: { messageId: string; text: string; linkPreviews: readonly LinkPreviewInput[] };
 }
 
 export interface RecentEmoji extends Readonly<Omit<Emoji, 'keywords'>> {

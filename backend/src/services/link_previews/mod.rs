@@ -1,3 +1,4 @@
+pub mod drafts;
 pub mod fetch;
 pub mod finalize;
 pub mod image;
@@ -14,8 +15,8 @@ use url::{Host, Url};
 
 use crate::{
     dto::link_previews::{
-        LinkPreviewImageResponse, LinkPreviewResponse, LinkPreviewStatus, MessageMetadataInput,
-        MessageMetadataResponse, StoredLinkPreview, StoredMessageMetadata,
+        LinkPreviewImageResponse, LinkPreviewInputStatus, LinkPreviewResponse, LinkPreviewStatus,
+        MessageMetadataInput, MessageMetadataResponse, StoredLinkPreview, StoredMessageMetadata,
     },
     errors::AppError,
     services::media::MediaStore,
@@ -27,8 +28,17 @@ const MAX_TITLE_CHARS: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinkPreviewWork {
-    FetchPage { url: String },
-    CacheImage { url: String, image_url: String },
+    FetchPage {
+        url: String,
+    },
+    CacheImage {
+        url: String,
+        image_url: String,
+    },
+    CacheThumbnail {
+        url: String,
+        thumbnail: image::Thumbnail,
+    },
 }
 
 #[derive(Debug)]
@@ -73,9 +83,6 @@ pub fn select_urls(text: &str) -> Vec<String> {
             let url = url.to_string();
             if !selected.contains(&url) {
                 selected.push(url);
-                if selected.len() == MAX_PREVIEWS {
-                    break;
-                }
             }
         }
     }
@@ -87,10 +94,19 @@ pub fn prepare(
     input: Option<&MessageMetadataInput>,
     prepared_at: DateTime<Utc>,
 ) -> Result<PreparedLinkPreviews, AppError> {
-    let selected = select_urls(text.unwrap_or_default());
+    prepare_with_current(text.unwrap_or_default(), input, None, prepared_at)
+}
+
+fn prepare_with_current(
+    text: &str,
+    input: Option<&MessageMetadataInput>,
+    current: Option<&StoredMessageMetadata>,
+    prepared_at: DateTime<Utc>,
+) -> Result<PreparedLinkPreviews, AppError> {
+    let selected = select_urls(text);
     let mut supplied = HashMap::new();
     if let Some(input) = input {
-        if input.link_previews.len() > MAX_PREVIEWS {
+        if input.link_previews.len() > selected.len() {
             return Err(AppError::BadRequest("Invalid link preview"));
         }
         for item in &input.link_previews {
@@ -117,15 +133,71 @@ pub fn prepare(
                     Ok(validate_url(image).ok_or_else(invalid)?.to_string())
                 })
                 .transpose()?;
-            supplied.insert(url, (item.title.as_deref(), image_url));
+            if item.status == Some(LinkPreviewInputStatus::Disabled)
+                && (item.title.is_some() || image_url.is_some())
+            {
+                return Err(invalid());
+            }
+            supplied.insert(url, (item, image_url));
         }
     }
 
     let mut work = Vec::new();
     let mut previews = Vec::with_capacity(selected.len());
+    let mut active_count = 0;
     for url in selected {
-        if let Some((title, image_url)) = supplied.remove(&url) {
-            let title = title
+        let supplied = supplied.remove(&url);
+        let previous = current.and_then(|current| {
+            current
+                .link_previews
+                .iter()
+                .find(|preview| preview.url == url)
+        });
+        let requested = supplied.as_ref().and_then(|(item, _)| item.status);
+        let disabled = requested.map_or_else(
+            || previous.is_some_and(|preview| preview.status == LinkPreviewStatus::Disabled),
+            |status| status == LinkPreviewInputStatus::Disabled,
+        );
+        if disabled {
+            previews.push(StoredLinkPreview {
+                url,
+                status: LinkPreviewStatus::Disabled,
+                expires_at: None,
+                title: None,
+                description: None,
+                image: None,
+            });
+            continue;
+        }
+        let automatic = supplied.as_ref().is_some_and(|(item, _)| {
+            item.status == Some(LinkPreviewInputStatus::Enabled)
+                && item.title.is_none()
+                && item.image_url.is_none()
+        });
+        if active_count == MAX_PREVIEWS {
+            if supplied.is_some() && !automatic {
+                return Err(AppError::BadRequest("Invalid link preview"));
+            }
+            continue;
+        }
+        active_count += 1;
+        if supplied.is_none()
+            || (automatic
+                && previous.is_some_and(|preview| preview.status == LinkPreviewStatus::Ready))
+        {
+            if let Some(previous) =
+                previous.filter(|preview| preview.status != LinkPreviewStatus::Pending)
+            {
+                previews.push(previous.clone());
+                continue;
+            }
+        }
+        // An explicit enable without content asks the server to fetch, rather than creating a host-only card.
+        let supplied = supplied.filter(|_| !automatic);
+        if let Some((item, image_url)) = supplied {
+            let title = item
+                .title
+                .as_deref()
                 .map(str::trim)
                 .filter(|title| !title.is_empty())
                 .map(str::to_owned)
@@ -185,29 +257,9 @@ pub fn prepare_edit(
     current: Option<&Value>,
     prepared_at: DateTime<Utc>,
 ) -> Result<PreparedLinkPreviews, AppError> {
-    let mut prepared = prepare(Some(text), input, prepared_at)?;
     let old = current
         .and_then(|value| serde_json::from_value::<StoredMessageMetadata>(value.clone()).ok());
-    if let (Some(metadata), Some(old)) = (prepared.metadata.as_mut(), old) {
-        let mut selected: StoredMessageMetadata =
-            serde_json::from_value(metadata.take()).expect("prepared metadata is typed");
-        for preview in &mut selected.link_previews {
-            let supplied = input.is_some_and(|input| {
-                input.link_previews.iter().any(|entry| {
-                    validate_url(&entry.url).is_some_and(|url| url.as_str() == preview.url)
-                })
-            });
-            if !supplied {
-                if let Some(previous) = old.link_previews.iter().find(|previous| {
-                    previous.url == preview.url && previous.status != LinkPreviewStatus::Pending
-                }) {
-                    *preview = previous.clone();
-                    prepared.work.retain(|work| !matches!(work, LinkPreviewWork::FetchPage { url } if url == &preview.url));
-                }
-            }
-        }
-        *metadata = serde_json::to_value(selected).expect("preview metadata is serializable");
-    }
+    let mut prepared = prepare_with_current(text, input, old.as_ref(), prepared_at)?;
     let mut merged = current
         .and_then(Value::as_object)
         .cloned()
@@ -292,12 +344,15 @@ pub fn project_stored_metadata(
     }
 }
 
-/// Snapshots share only already-cached, terminal ready previews.
-pub fn ready_snapshot(metadata: &Value) -> Result<Option<Value>, serde_json::Error> {
+/// Snapshots retain ready content and explicit disabled choices, never pending work.
+pub fn snapshot_metadata(metadata: &Value) -> Result<Option<Value>, serde_json::Error> {
     let mut stored = StoredMessageMetadata::deserialize(metadata)?;
-    stored
-        .link_previews
-        .retain(|preview| preview.status == LinkPreviewStatus::Ready);
+    stored.link_previews.retain(|preview| {
+        matches!(
+            preview.status,
+            LinkPreviewStatus::Ready | LinkPreviewStatus::Disabled
+        )
+    });
     for preview in &mut stored.link_previews {
         preview.expires_at = None;
     }
@@ -315,14 +370,164 @@ mod tests {
 
     fn input(url: &str, title: Option<&str>, image_url: Option<&str>) -> LinkPreviewInput {
         LinkPreviewInput {
+            status: None,
             url: url.to_owned(),
             title: title.map(str::to_owned),
             image_url: image_url.map(str::to_owned),
         }
     }
 
+    fn intent(url: &str, status: LinkPreviewInputStatus) -> LinkPreviewInput {
+        LinkPreviewInput {
+            status: Some(status),
+            ..input(url, None, None)
+        }
+    }
+
     #[test]
-    fn link_preview_selection_is_ordered_distinct_and_bounded() {
+    fn disabled_previews_survive_edits_and_do_not_consume_slots() {
+        let text = "https://one.example/ https://two.example/ https://three.example/ https://four.example/ https://five.example/ https://six.example/";
+        let body = MessageMetadataInput {
+            link_previews: vec![
+                intent("https://ONE.example", LinkPreviewInputStatus::Disabled),
+                intent("https://five.example/", LinkPreviewInputStatus::Disabled),
+                intent("https://six.example/", LinkPreviewInputStatus::Disabled),
+            ],
+        };
+        let now = Utc::now();
+        let prepared = prepare(Some(text), Some(&body), now).unwrap();
+        assert_eq!(prepared.work.len(), 3);
+        let current = prepared.metadata.unwrap();
+        let entries = current["linkPreviews"].as_array().unwrap();
+        assert_eq!(entries.len(), 6);
+        for index in [0, 4, 5] {
+            assert_eq!(
+                entries[index],
+                serde_json::json!({"url": select_urls(text)[index], "status": "disabled"})
+            );
+        }
+        for input in [
+            None,
+            Some(MessageMetadataInput {
+                link_previews: vec![],
+            }),
+        ] {
+            let edited = prepare_edit(text, input.as_ref(), Some(&current), now).unwrap();
+            assert_eq!(
+                edited.metadata.as_ref().unwrap()["linkPreviews"],
+                current["linkPreviews"]
+            );
+            assert_eq!(edited.work.len(), 3);
+        }
+        let supplied_without_enable = MessageMetadataInput {
+            link_previews: vec![input(
+                "https://one.example/",
+                Some("Unrelated title update"),
+                None,
+            )],
+        };
+        let edited =
+            prepare_edit(text, Some(&supplied_without_enable), Some(&current), now).unwrap();
+        assert_eq!(
+            edited.metadata.unwrap()["linkPreviews"][0]["status"],
+            "disabled"
+        );
+        let enable_beyond_limit = MessageMetadataInput {
+            link_previews: vec![intent(
+                "https://five.example/",
+                LinkPreviewInputStatus::Enabled,
+            )],
+        };
+        let edited = prepare_edit(text, Some(&enable_beyond_limit), Some(&current), now).unwrap();
+        assert_eq!(edited.work.len(), 3);
+        assert!(!edited.metadata.unwrap()["linkPreviews"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["url"] == "https://five.example/"));
+        let enabled = MessageMetadataInput {
+            link_previews: vec![intent(
+                "https://one.example/",
+                LinkPreviewInputStatus::Enabled,
+            )],
+        };
+        let edited = prepare_edit(text, Some(&enabled), Some(&current), now).unwrap();
+        let metadata = edited.metadata.unwrap();
+        assert_eq!(metadata["linkPreviews"][0]["status"], "pending");
+        assert!(edited.work.contains(&LinkPreviewWork::FetchPage {
+            url: "https://one.example/".into()
+        }));
+        assert_eq!(metadata["linkPreviews"].as_array().unwrap().len(), 5);
+        assert!(prepare_edit("removed", None, Some(&current), now)
+            .unwrap()
+            .metadata
+            .is_none());
+        let snapshot = snapshot_metadata(&current).unwrap().unwrap();
+        assert_eq!(snapshot["linkPreviews"].as_array().unwrap().len(), 3);
+        assert!(snapshot["linkPreviews"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|p| p["status"] == "disabled"));
+    }
+
+    #[test]
+    fn disabling_ready_content_clears_it_and_accepts_more_than_three_disabled_urls() {
+        let text = "https://one.example/ https://two.example/ https://three.example/ https://four.example/";
+        let body = MessageMetadataInput {
+            link_previews: select_urls(text)
+                .iter()
+                .map(|url| intent(url, LinkPreviewInputStatus::Disabled))
+                .collect(),
+        };
+        let old = serde_json::json!({"linkPreviews":[{"url":"https://one.example/","status":"ready","title":"Title","description":"Description"}]});
+        let prepared = prepare_edit(text, Some(&body), Some(&old), Utc::now()).unwrap();
+        assert!(prepared.work.is_empty());
+        let metadata = prepared.metadata.unwrap();
+        assert_eq!(metadata["linkPreviews"].as_array().unwrap().len(), 4);
+        assert!(metadata["linkPreviews"][0].get("title").is_none());
+        assert!(metadata["linkPreviews"][0].get("description").is_none());
+        let projected = preview_metadata(&metadata).unwrap();
+        assert!(projected
+            .link_previews
+            .iter()
+            .all(|p| p.status == LinkPreviewStatus::Disabled));
+    }
+
+    #[test]
+    fn user_intent_cannot_supply_server_states_or_disabled_content() {
+        for status in ["ready", "pending", "unavailable"] {
+            assert!(serde_json::from_value::<MessageMetadataInput>(
+                serde_json::json!({"linkPreviews":[{"url":"https://one.example/","status":status}]})
+            )
+            .is_err());
+        }
+        for status in ["enabled", "disabled"] {
+            assert!(serde_json::from_value::<MessageMetadataInput>(
+                serde_json::json!({"linkPreviews":[{"url":"https://one.example/","status":status}]})
+            )
+            .is_ok());
+        }
+        let body = MessageMetadataInput {
+            link_previews: vec![LinkPreviewInput {
+                status: Some(LinkPreviewInputStatus::Disabled),
+                ..input("https://one.example/", Some("Title"), None)
+            }],
+        };
+        assert!(prepare(Some("https://one.example/"), Some(&body), Utc::now()).is_err());
+        let body = MessageMetadataInput {
+            link_previews: vec![intent(
+                "https://other.example/",
+                LinkPreviewInputStatus::Disabled,
+            )],
+        };
+        assert!(prepare(Some("https://one.example/"), Some(&body), Utc::now()).is_err());
+        let plain = prepare(Some("https://one.example/ https://two.example/ https://three.example/ https://four.example/"), None, Utc::now()).unwrap();
+        assert_eq!(plain.work.len(), 3);
+    }
+
+    #[test]
+    fn link_preview_selection_is_ordered_and_distinct() {
         let selected = select_urls(
             "https://EXAMPLE.com/a#part https://example.com/a#part https://two.example/ \
              https://three.example/?a=1 https://four.example/",
@@ -333,6 +538,7 @@ mod tests {
                 "https://example.com/a#part",
                 "https://two.example/",
                 "https://three.example/?a=1",
+                "https://four.example/",
             ]
         );
     }
@@ -451,7 +657,7 @@ mod tests {
         .unwrap();
         let mut metadata = prepared.metadata.unwrap();
         metadata["linkPreviews"][0]["description"] = serde_json::json!("A description");
-        let snapshot = ready_snapshot(&metadata).unwrap().unwrap();
+        let snapshot = snapshot_metadata(&metadata).unwrap().unwrap();
         let stored: StoredMessageMetadata = serde_json::from_value(snapshot).unwrap();
         assert_eq!(stored.link_previews.len(), 1);
         assert_eq!(stored.link_previews[0].title.as_deref(), Some("Title"));

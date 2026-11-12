@@ -5,9 +5,12 @@
  * Real-time chat application backend API supporting groups, messaging, threads, stickers, invites, and push notifications.
  * OpenAPI spec version: 0.1.0
  */
+import type { LinkPreviewInputStatus } from './linkPreviewInputStatus';
 
 export interface LinkPreviewInput {
   imageUrl?: string;
+  /** Omit for legacy supplied metadata; enabled requests automatic fetching when no content is supplied. */
+  status?: LinkPreviewInputStatus;
   title?: string;
   url: string;
 }

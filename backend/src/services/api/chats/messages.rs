@@ -593,7 +593,7 @@ pub async fn post_message(
     validate_client_message_type(&body.message_type)?;
     let attachment_ids = parse_attachment_ids(&body.attachment_ids)?;
     let publish_immediately = !matches!(body.message_type, MessageType::Audio);
-    let previews = crate::services::link_previews::prepare(
+    let mut previews = crate::services::link_previews::prepare(
         matches!(
             body.message_type,
             MessageType::Text | MessageType::Audio | MessageType::File
@@ -603,6 +603,7 @@ pub async fn post_message(
         body.metadata.as_ref(),
         Utc::now(),
     )?;
+    deps.link_previews.drafts.apply(uid, &mut previews);
     let (send_result, receipt_advanced) = {
         let mut transaction = AsyncTransaction::begin(conn)?;
         let conn = transaction.connection();
@@ -955,7 +956,7 @@ pub async fn post_thread_message(
     validate_client_message_type(&body.message_type)?;
     let attachment_ids = parse_attachment_ids(&body.attachment_ids)?;
     let publish_immediately = !matches!(body.message_type, MessageType::Audio);
-    let previews = crate::services::link_previews::prepare(
+    let mut previews = crate::services::link_previews::prepare(
         matches!(
             body.message_type,
             MessageType::Text | MessageType::Audio | MessageType::File
@@ -965,6 +966,7 @@ pub async fn post_thread_message(
         body.metadata.as_ref(),
         Utc::now(),
     )?;
+    deps.link_previews.drafts.apply(uid, &mut previews);
     let (send_result, receipt_advanced, subscription_changes) = {
         let mut transaction = AsyncTransaction::begin(conn)?;
         let conn = transaction.connection();
@@ -1225,12 +1227,13 @@ pub async fn patch_message(
                     return Err(AppError::BadRequest("Invalid attachment selection"));
                 }
             }
-            let previews = crate::services::link_previews::prepare_edit(
+            let mut previews = crate::services::link_previews::prepare_edit(
                 &body.message,
                 body.metadata.as_ref(),
                 message.metadata.as_ref(),
                 Utc::now(),
             )?;
+            deps.link_previews.drafts.apply(uid, &mut previews);
             let updated_message: Message =
                 diesel::update(messages::table.filter(dsl::id.eq(message_id)))
                     .set((

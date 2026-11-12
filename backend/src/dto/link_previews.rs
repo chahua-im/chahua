@@ -13,10 +13,21 @@ pub struct MessageMetadataInput {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LinkPreviewInput {
     pub url: String,
+    /// Omit for legacy supplied metadata; enabled requests automatic fetching when no content is supplied.
+    #[serde(default)]
+    pub status: Option<LinkPreviewInputStatus>,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
     pub image_url: Option<String>,
+}
+
+/// User intent, separate from server-owned fetching states.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum LinkPreviewInputStatus {
+    Enabled,
+    Disabled,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -25,6 +36,7 @@ pub enum LinkPreviewStatus {
     Pending,
     Ready,
     Unavailable,
+    Disabled,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

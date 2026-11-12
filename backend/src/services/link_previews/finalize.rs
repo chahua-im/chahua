@@ -44,6 +44,9 @@ pub fn finalize_metadata(
             return Ok(None);
         };
         for preview in &mut previews {
+            if preview.status == LinkPreviewStatus::Disabled {
+                continue;
+            }
             if let Some(result) = completed.iter().find(|result| result.url == preview.url) {
                 if preview.status == LinkPreviewStatus::Ready {
                     // Existing text is authoritative; image work only fills
@@ -178,6 +181,20 @@ mod tests {
         assert!(finalize_metadata(&mut conn, 1, 2, None, &ready())
             .unwrap()
             .is_none());
+        let disabled = serde_json::json!({"linkPreviews":[{"url":"https://example.com/","status":"disabled"}]});
+        diesel::update(dsl::messages.find(1))
+            .set(dsl::metadata.eq(Some(disabled.clone())))
+            .execute(&mut conn)
+            .unwrap();
+        assert!(finalize_metadata(&mut conn, 1, 2, None, &ready())
+            .unwrap()
+            .is_none());
+        let live: Message = dsl::messages
+            .find(1)
+            .select(Message::as_select())
+            .first(&mut conn)
+            .unwrap();
+        assert_eq!(live.metadata, Some(disabled));
         let existing = serde_json::json!({
             "linkPreviews": [{
                 "url": "https://example.com/", "status": "ready",

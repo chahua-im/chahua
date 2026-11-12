@@ -555,6 +555,14 @@
     "newerLoadFailed": "更新的訊息載入失敗"
   },
   "messages": {
+    "linkDraft": {
+      "title": "連結預覽",
+      "enable": "開啟",
+      "disable": "關閉",
+      "disabled": "預覽已關閉",
+      "limit": "等待預覽名額",
+      "failed": "無法取得預覽"
+    },
     "date": {
       "today": "今天",
       "yesterday": "昨天"

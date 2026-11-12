@@ -109,6 +109,8 @@ ChatDetails 的可选 friendRequest 输入承载请求快照，在资料首页�
 | SavedMessageList   | saved、nextCursor、loading/failed、取消收藏状态                                                                                      | 全局收藏接口；快照映射给非交互 Message                                                                                                                                                                    |
 
 ConversationPage.rows 合并已确认区间与队尾，按 clientGeneratedId 保持行身份，在原位置覆盖待保存的编辑，过滤撤回意图不可见的消息（撤回的普通消息整行移除，话题根保留为墓碑行）。日期与连续作者分组从最终可见行派生。
+DraftLinkPreviews 接收 chatId、scope、text、initial、automatic、colors 及双向 choices/open；派生去重 URL 与前三个未关闭链接，持有当前草稿的抓取结果和请求身份，通过 firstReady 提供首个可显示预览，fallbackUrl 在没有就绪预览时提供首个未关闭的失败链接；automatic 在管理区关闭时按顺序获取首个可显示结果，管理列表置于保留内容的独立 IonModal，复用 MessageLinkPreviews 展示内嵌预览。ConversationPage 持有发送／编辑的开关选择并传给 DraftStore；Composition 携带请求 metadata 与乐观展示 previewMetadata，MessageOutbox 将 metadata 保留到发送、编辑和重试，不把客户端展示结果作为可信抓取结果提交。
+
 MessagePreview 与独立链接卡片共用单链接判定；精简消息与转发摘要携带 URL、状态和标题，不携带缩略图或描述，也不发起额外请求。
 
 MessageLinkPreviews 接收完整消息的链接元数据，管理本地待处理过期计时及缩略图失败回退；它不发起预览获取请求。菜单预览和选择模式不可打开卡片，收藏与转发记录仍可浏览链接。

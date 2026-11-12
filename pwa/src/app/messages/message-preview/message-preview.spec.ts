@@ -232,6 +232,16 @@ describe('MessagePreview', () => {
     expect(render(source)).toBe(url);
   });
 
+  it('shows the original link instead of a share title for a disabled preview', () => {
+    const url = 'https://example.com/article';
+    expect(
+      render({
+        message: url,
+        metadata: { linkPreviews: [{ url, status: LinkPreviewStatus.disabled, title: 'Hidden title' }] },
+      }),
+    ).toBe(url);
+  });
+
   it('keeps ordinary text and unmatched links out of share summaries', () => {
     const url = 'https://example.com/article';
     const metadata = { linkPreviews: [{ url, status: LinkPreviewStatus.ready, title: '标题' }] };

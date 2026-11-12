@@ -196,6 +196,12 @@ ion-action-sheet.ios .action-sheet-button {
   line-height: var(--app-line-secondary);
 }
 
+// Ionic's delegate page must participate in layout for this content-sized modal.
+ion-modal.draft-link-preview-modal .ion-delegate-host {
+  position: relative;
+  contain: content;
+}
+
 ion-modal.message-menu-modal,
 ion-modal.emoji-panel-modal,
 ion-modal.media-viewer-overlay {

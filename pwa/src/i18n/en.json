@@ -555,6 +555,14 @@
     "newerLoadFailed": "Could not load newer messages"
   },
   "messages": {
+    "linkDraft": {
+      "title": "Link previews",
+      "enable": "Enable",
+      "disable": "Disable",
+      "disabled": "Preview disabled",
+      "limit": "Waiting for a preview slot",
+      "failed": "Preview unavailable"
+    },
     "date": {
       "today": "Today",
       "yesterday": "Yesterday"

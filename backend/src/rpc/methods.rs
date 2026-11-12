@@ -107,6 +107,7 @@ register_methods! {
     ("conversations.watchUnread", crate::dto::rpc::conversations::ConversationsWatchUnreadParams, (), Control, control::watch_unread),
     ("conversations.watchStates", crate::dto::rpc::conversations::ConversationsWatchStatesParams, (), Control, control::watch_states),
 ("messages.list", crate::dto::rpc::messages::MessagesListParams, crate::dto::messages::ListMessagesResponse, Read, messages::list),
+("messages.previewLinks", crate::dto::rpc::messages::MessagesPreviewLinksParams, Vec<crate::dto::link_previews::LinkPreviewResponse>, Read, messages::preview_links),
 ("messages.send", crate::dto::rpc::messages::MessagesSendParams, crate::dto::messages::MessageResponse, Mutation, messages::send),
 ("messages.search", crate::dto::rpc::messages::MessagesSearchParams, crate::dto::messages::SearchMessagesResponse, Read, messages::search),
 ("messages.get", crate::dto::rpc::messages::MessagesGetParams, crate::dto::messages::MessageResponse, Read, messages::get),

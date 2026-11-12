@@ -38,6 +38,15 @@ describe('MessageLinkPreviews', () => {
     return fixture;
   }
 
+  it('hides disabled previews even with cached content and shows a later ready result', () => {
+    const entry = { url: 'https://example.com/', status: LinkPreviewStatus.disabled, title: 'Hidden title' };
+    const fixture = render([entry]);
+    expect(fixture.nativeElement.querySelector('.card')).toBeNull();
+    fixture.componentRef.setInput('previews', [{ ...entry, status: LinkPreviewStatus.ready }]);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.title')?.textContent).toBe('Hidden title');
+  });
+
   it('replaces pending in place with ready and removes unavailable', () => {
     const fixture = render([pending()]);
     expect(fixture.nativeElement.querySelectorAll('.skeleton')).toHaveLength(1);
