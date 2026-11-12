@@ -38,6 +38,7 @@ ferroid = { version = "1", features = ["snowflake", "lock", "async-tokio"] }
 dashmap = "6"
 moka = { version = "0.12", features = ["future", "sync"] }
 futures = "0.3"
+flate2 = "1"
 web-push = { version = "0.11.0", features = [
     "hyper-client",
 ], default-features = false }
@@ -66,6 +67,7 @@ url = "2"
 linkify = "0.10"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
 scraper = "0.24"
+html5ever = "0.35"
 ipnet = "2"
 bytes = "1"
 

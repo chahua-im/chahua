@@ -36,12 +36,19 @@ struct DraftPreview {
     thumbnail: Option<Thumbnail>,
 }
 
+#[cfg(test)]
 impl Default for DraftPreviews {
     fn default() -> Self {
+        Self::new(Arc::new(super::sites::LinkPreviewConfig::default()))
+    }
+}
+
+impl DraftPreviews {
+    pub(super) fn new(config: Arc<super::sites::LinkPreviewConfig>) -> Self {
         Self {
             entries: Mutex::new(HashMap::new()),
             slots: Semaphore::new(4),
-            fetcher: SecurePreviewFetcher::new(),
+            fetcher: SecurePreviewFetcher::new(config),
         }
     }
 }
