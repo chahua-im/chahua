@@ -319,3 +319,9 @@ app-message-composer[hidden] {
   width: 24px;
   height: 24px;
 }
+
+.group-actions .collapsed-action {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+}

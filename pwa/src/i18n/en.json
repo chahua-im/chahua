@@ -86,7 +86,8 @@
   "presence": {
     "loadFailed": "Unable to load status",
     "online": "Online",
-    "groupCounts": "{{ members }} members  {{ online }} online",
+    "groupMembers": "{{ count }} members",
+    "groupOnline": "{{ count }} online",
     "lastSeen": {
       "recently": "Last seen recently",
       "withinWeek": "Last seen within a week",
@@ -900,6 +901,11 @@
       "threadsOnly": "Threads only",
       "repliesOnly": "Existing thread replies only",
       "readOnly": "Read only"
+    },
+    "placeholder": {
+      "threadsOnly": "Post in topics only",
+      "repliesOnly": "Reply to existing topics only",
+      "readOnly": "Messaging disabled"
     },
     "blocked": {
       "threadsOnly": "You can post in threads, but cannot send or edit main-chat messages.",

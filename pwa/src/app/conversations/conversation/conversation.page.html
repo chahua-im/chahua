@@ -30,34 +30,46 @@
         </div>
       </div>
     </ion-title>
-    <ion-buttons #toolbarActions slot="end" class="ion-hide-md-up">
-      @if (showBackToChat()) {
+    @if (groupToolbar()) {
+      <ion-buttons #groupActions slot="end" class="group-actions">
+        <ng-container [ngTemplateOutlet]="actions" [ngTemplateOutletContext]="{ group: true }" />
         <ion-button
-          class="parent-chat-button"
-          (click)="backToChat()"
-          [title]="'conversation.actions.parentChat' | transloco">
-          <ng-container [ngTemplateOutlet]="parentChatIcon" />
-        </ion-button>
-      }
-      @if (compactToolbar()) {
-        <ion-button (click)="actionsMenu.present($event)">
+          class="overflow-action"
+          [class.collapsed-action]="groupVisibleActions() === 3"
+          (click)="actionsMenu.present($event)">
           <ion-icon slot="icon-only" [icon]="toolbarIcons.ellipsisVertical" />
         </ion-button>
-      } @else {
+      </ion-buttons>
+    } @else {
+      <ion-buttons #toolbarActions slot="end" class="ion-hide-md-up">
+        @if (showBackToChat()) {
+          <ion-button
+            class="parent-chat-button"
+            (click)="backToChat()"
+            [title]="'conversation.actions.parentChat' | transloco">
+            <ng-container [ngTemplateOutlet]="parentChatIcon" />
+          </ion-button>
+        }
+        @if (compactToolbar()) {
+          <ion-button (click)="actionsMenu.present($event)">
+            <ion-icon slot="icon-only" [icon]="toolbarIcons.ellipsisVertical" />
+          </ion-button>
+        } @else {
+          <ng-container [ngTemplateOutlet]="actions" />
+        }
+      </ion-buttons>
+      <ion-buttons slot="end" class="ion-hide-md-down">
+        @if (showBackToChat()) {
+          <ion-button
+            class="parent-chat-button"
+            (click)="backToChat()"
+            [title]="'conversation.actions.parentChat' | transloco">
+            <ng-container [ngTemplateOutlet]="parentChatIcon" />
+          </ion-button>
+        }
         <ng-container [ngTemplateOutlet]="actions" />
-      }
-    </ion-buttons>
-    <ion-buttons slot="end" class="ion-hide-md-down">
-      @if (showBackToChat()) {
-        <ion-button
-          class="parent-chat-button"
-          (click)="backToChat()"
-          [title]="'conversation.actions.parentChat' | transloco">
-          <ng-container [ngTemplateOutlet]="parentChatIcon" />
-        </ion-button>
-      }
-      <ng-container [ngTemplateOutlet]="actions" />
-    </ion-buttons>
+      </ion-buttons>
+    }
   </ion-toolbar>
   @if (selectedPin(); as pin) {
     <ion-toolbar class="pinned-bar">
@@ -463,13 +475,13 @@
     }
   </app-message-composer>
 </ion-footer>
-<ng-template #actions>
+<ng-template #actions let-group="group">
   @if (canForwardTopic()) {
     <ion-button [title]="'messages.forward.action' | transloco" (click)="openTopicForward()">
       <ion-icon slot="icon-only" [icon]="toolbarIcons.forwardOutline" />
     </ion-button>
   }
-  <ion-button (click)="search()">
+  <ion-button class="search-action" [class.collapsed-action]="group && groupVisibleActions() < 1" (click)="search()">
     <ion-icon slot="icon-only" [icon]="toolbarIcons.searchOutline" />
   </ion-button>
   @if (threadAction(); as action) {
@@ -482,14 +494,18 @@
       </span>
     </ion-button>
   } @else {
-    <ion-button [disabled]="muteBusy()" (click)="toggleMute()">
+    <ion-button
+      class="mute-action"
+      [class.collapsed-action]="group && groupVisibleActions() < 2"
+      [disabled]="muteBusy()"
+      (click)="toggleMute()">
       <ion-icon
         class="action-icon"
         slot="icon-only"
         [icon]="muted() ? toolbarIcons.notificationsOffOutline : toolbarIcons.notificationsOutline" />
     </ion-button>
   }
-  <ion-button (click)="details()">
+  <ion-button class="info-action" [class.collapsed-action]="group && groupVisibleActions() < 3" (click)="details()">
     @if (largeScreen()) {
       <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
         <rect x="3" y="4" width="18" height="16" rx="2" />
@@ -513,7 +529,10 @@
           <ion-label>{{ 'messages.forward.action' | transloco }}</ion-label>
         </ion-item>
       }
-      <ion-item [button]="true" (click)="search()">
+      <ion-item
+        [class.ion-display-none]="groupToolbar() && groupVisibleActions() >= 1"
+        [button]="true"
+        (click)="search()">
         <ion-icon slot="start" [icon]="toolbarIcons.searchOutline" />
         <ion-label>{{ 'conversation.actions.search' | transloco }}</ion-label>
       </ion-item>
@@ -523,7 +542,11 @@
           <ion-label>{{ action.label | transloco }}</ion-label>
         </ion-item>
       } @else if (!threadId()) {
-        <ion-item [button]="true" [disabled]="muteBusy()" (click)="toggleMute()">
+        <ion-item
+          [class.ion-display-none]="groupToolbar() && groupVisibleActions() >= 2"
+          [button]="true"
+          [disabled]="muteBusy()"
+          (click)="toggleMute()">
           <ion-icon
             slot="start"
             [icon]="muted() ? toolbarIcons.notificationsOffOutline : toolbarIcons.notificationsOutline" />
@@ -532,7 +555,10 @@
           </ion-label>
         </ion-item>
       }
-      <ion-item [button]="true" (click)="details()">
+      <ion-item
+        [class.ion-display-none]="groupToolbar() && groupVisibleActions() >= 3"
+        [button]="true"
+        (click)="details()">
         <ion-icon slot="start" [icon]="infoIcon" />
         <ion-label>{{ 'conversation.actions.info' | transloco }}</ion-label>
       </ion-item>

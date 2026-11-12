@@ -96,8 +96,9 @@
         <ion-textarea
           appScrollbars
           [disabled]="!!restriction()"
+          [class.restricted]="!!restriction()"
           [placeholder]="
-            (restriction() ? 'speaking.blocked.' + restriction() : 'messages.composer.placeholder') | transloco
+            (restriction() ? 'speaking.placeholder.' + restriction() : 'messages.composer.placeholder') | transloco
           "
           [autoGrow]="true"
           [rows]="1"
@@ -107,6 +108,9 @@
           (ionFocus)="!dockStickers() && closeStickers()"
           (paste)="paste($event)"
           (keydown)="key($event)" />
+        @if (restriction(); as mode) {
+          <span class="restriction-placeholder">{{ 'speaking.placeholder.' + mode | transloco }}</span>
+        }
         @if (!editing() && !forwarding()) {
           <button
             type="button"

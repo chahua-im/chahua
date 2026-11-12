@@ -1189,33 +1189,61 @@ describe('ConversationPage', () => {
     expect(fixture.nativeElement.querySelector('.parent-chat-button')).toBeNull();
   });
 
-  it('opens the collapsed toolbar actions from the narrow-screen button', () => {
+  it('opens the collapsed group toolbar actions from the overflow button', () => {
     const present = vi.spyOn(IonPopover.prototype, 'present').mockResolvedValue();
-    component['compactToolbar'].set(true);
+    component['groupVisibleActions'].set(0);
     fixture.detectChanges();
-    const button = [...fixture.nativeElement.querySelectorAll('ion-header ion-button')].find(
-      (element) => element.querySelector('ion-icon')?.icon === component['toolbarIcons'].ellipsisVertical,
-    );
-    expect(button).toBeDefined();
-    button!.click();
+    const button: HTMLElement = fixture.nativeElement.querySelector('.group-actions .overflow-action');
+    expect(button.classList.contains('collapsed-action')).toBe(false);
+    button.click();
     expect(present).toHaveBeenCalledOnce();
   });
 
-  it('collapses the toolbar actions only when the full title does not fit', () => {
+  it('gives full group counts priority and progressively collapses and restores actions', () => {
     const title: HTMLElement = fixture.nativeElement.querySelector('.conversation-title');
-    const actions: HTMLElement = fixture.nativeElement.querySelector('ion-header ion-buttons[slot="end"]');
+    const actions: HTMLElement = fixture.nativeElement.querySelector('.group-actions');
     const text = title.lastElementChild as HTMLElement;
-    Object.defineProperty(title, 'clientWidth', { value: 300, configurable: true });
-    Object.defineProperty(actions, 'offsetWidth', { value: 132, configurable: true });
-    Object.defineProperties(text, {
-      offsetWidth: { value: 260, configurable: true },
-      scrollWidth: { value: 260, configurable: true },
+    const buttons = [...actions.querySelectorAll<HTMLElement>('ion-button')];
+    const widths = [44, 44, 52, 32];
+    buttons.forEach((button, index) => {
+      Object.defineProperty(button, 'offsetWidth', { value: widths[index], configurable: true });
+      button.style.margin = '0';
     });
-    component['measureToolbar']();
-    expect(component['compactToolbar']()).toBe(false);
-    Object.defineProperty(text, 'scrollWidth', { value: 320, configurable: true });
-    component['measureToolbar']();
-    expect(component['compactToolbar']()).toBe(true);
+    const renderedWidth = () =>
+      widths.slice(0, component['groupVisibleActions']()).reduce((a, b) => a + b, 0) +
+      (component['groupVisibleActions']() < 3 ? 32 : 0);
+    Object.defineProperty(actions, 'offsetWidth', { get: renderedWidth, configurable: true });
+    Object.defineProperty(title, 'clientWidth', { get: () => 432 - renderedWidth(), configurable: true });
+    Object.defineProperty(title.firstElementChild, 'offsetWidth', { value: 32, configurable: true });
+    const range = document.createRange();
+    Object.defineProperty(range, 'getBoundingClientRect', { value: () => new DOMRect(0, 0, 200, 20) });
+    vi.spyOn(document, 'createRange').mockReturnValue(range);
+    const counts = document.createElement('span');
+    counts.className = 'group-counts';
+    counts.style.columnGap = '8px';
+    counts.innerHTML = '<span></span><span></span>';
+    text.append(counts);
+    let naturalWidth = 240;
+    Object.defineProperty(counts.children[0], 'scrollWidth', { get: () => naturalWidth - 88 });
+    Object.defineProperty(counts.children[1], 'scrollWidth', { value: 80 });
+    for (const [natural, visible] of [
+      [240, 3],
+      [270, 2],
+      [300, 1],
+      [380, 0],
+      [300, 1],
+      [240, 3],
+    ]) {
+      naturalWidth = natural;
+      component['measureToolbar']();
+      fixture.detectChanges();
+      expect(component['groupVisibleActions']()).toBe(visible);
+      expect(buttons.slice(0, 3).filter((button) => !button.classList.contains('collapsed-action'))).toHaveLength(
+        visible,
+      );
+      component['measureToolbar']();
+      expect(component['groupVisibleActions']()).toBe(visible);
+    }
   });
 
   it('shares mute updates with the list and reflects websocket changes without another detail request', async () => {

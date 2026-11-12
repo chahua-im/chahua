@@ -86,7 +86,8 @@
   "presence": {
     "loadFailed": "状态加载失败",
     "online": "在线",
-    "groupCounts": "{{ members }}位成员，{{ online }}人在线",
+    "groupMembers": "{{ count }}位成员",
+    "groupOnline": "{{ count }}人在线",
     "lastSeen": {
       "recently": "最近上线",
       "withinWeek": "1 周内上线",
@@ -901,6 +902,7 @@
       "repliesOnly": "仅回复已有话题",
       "readOnly": "禁止发言"
     },
+    "placeholder": { "threadsOnly": "仅限话题内发言", "repliesOnly": "仅可回复已有话题", "readOnly": "当前禁止发言" },
     "blocked": {
       "threadsOnly": "仅能在话题内发言，不能发送或编辑群主聊天消息。",
       "repliesOnly": "仅能回复已有话题，不能在群主聊天发言或创建话题。",
