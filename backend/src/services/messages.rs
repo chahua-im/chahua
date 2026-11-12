@@ -3639,6 +3639,7 @@ mod tests {
                     status: crate::dto::link_previews::LinkPreviewStatus::Ready,
                     expires_at: None,
                     title: Some("secret".to_string()),
+                    description: None,
                     image: None,
                 }],
             }),

@@ -46,8 +46,8 @@ pub fn finalize_metadata(
         for preview in &mut previews {
             if let Some(result) = completed.iter().find(|result| result.url == preview.url) {
                 if preview.status == LinkPreviewStatus::Ready {
-                    // Supplied text is already authoritative; image work only
-                    // fills its cached thumbnail and must not replace its title.
+                    // Existing text is authoritative; image work only fills
+                    // its cached thumbnail.
                     if result.image.is_some() {
                         preview.image = result.image.clone();
                     }
@@ -137,6 +137,7 @@ mod tests {
             status: LinkPreviewStatus::Ready,
             expires_at: None,
             title: Some("Example".into()),
+            description: Some("Description".into()),
             image: None,
         }]
     }
@@ -169,10 +170,37 @@ mod tests {
             updated.metadata.as_ref().unwrap()["linkPreviews"][0]["title"],
             "Example"
         );
+        assert_eq!(
+            updated.metadata.as_ref().unwrap()["linkPreviews"][0]["description"],
+            "Description"
+        );
         // Same terminal result is not rewritten or published.
         assert!(finalize_metadata(&mut conn, 1, 2, None, &ready())
             .unwrap()
             .is_none());
+        let existing = serde_json::json!({
+            "linkPreviews": [{
+                "url": "https://example.com/", "status": "ready",
+                "title": "Existing title", "description": "Existing description"
+            }]
+        });
+        diesel::update(dsl::messages.find(1))
+            .set(dsl::metadata.eq(Some(existing)))
+            .execute(&mut conn)
+            .unwrap();
+        let mut image_result = ready();
+        image_result[0].image = Some(crate::dto::link_previews::StoredLinkPreviewImage {
+            storage_key: "preview.webp".into(),
+            width: 10,
+            height: 10,
+        });
+        let updated = finalize_metadata(&mut conn, 1, 2, None, &image_result)
+            .unwrap()
+            .unwrap();
+        let preview = &updated.metadata.as_ref().unwrap()["linkPreviews"][0];
+        assert_eq!(preview["title"], "Existing title");
+        assert_eq!(preview["description"], "Existing description");
+        assert_eq!(preview["image"]["storageKey"], "preview.webp");
         diesel::update(dsl::messages.find(1))
             .set((
                 dsl::updated_at.eq(Some(Utc::now())),

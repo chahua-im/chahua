@@ -37,6 +37,7 @@ pub enum PreviewFetchError {
 #[derive(Debug)]
 pub struct FetchedLinkPreview {
     pub title: String,
+    pub description: Option<String>,
     pub image_url: Option<Url>,
 }
 
@@ -334,11 +335,24 @@ fn extract_preview(base: &Url, bytes: &[u8]) -> Result<FetchedLinkPreview, Previ
     if let Some((end, _)) = title.char_indices().nth(512) {
         title.truncate(end);
     }
+    let description = metadata("og:description")
+        .map(normalize)
+        .find(|value| !value.is_empty())
+        .map(|mut value| {
+            if let Some((end, _)) = value.char_indices().nth(512) {
+                value.truncate(end);
+            }
+            value
+        });
     let image_url = metadata("og:image")
         .chain(metadata("twitter:image"))
         .filter_map(|raw| resolve_reference(base, raw))
         .next();
-    Ok(FetchedLinkPreview { title, image_url })
+    Ok(FetchedLinkPreview {
+        title,
+        description,
+        image_url,
+    })
 }
 
 #[cfg(test)]
@@ -505,6 +519,40 @@ mod tests {
                 .chars()
                 .count(),
             512
+        );
+    }
+
+    #[test]
+    fn link_preview_description_uses_first_nonempty_open_graph_value() {
+        let base = url("https://example.com/");
+        for html in [
+            "<title>Title</title>",
+            "<title>Title</title><meta property='og:description' content=' &#32; '>",
+            "<title>Title</title><meta name='description' content='fallback'><meta name='twitter:description' content='fallback'>",
+        ] {
+            assert!(extract_preview(&base, html.as_bytes()).unwrap().description.is_none());
+        }
+        let html = "<title>Title</title>\
+            <meta property='og:description' content='  '>\
+            <meta name='OG:DESCRIPTION' content='  One &amp;  Two&#10;三  '>\
+            <meta property='og:description' content='later'>";
+        assert_eq!(
+            extract_preview(&base, html.as_bytes())
+                .unwrap()
+                .description
+                .as_deref(),
+            Some("One & Two 三")
+        );
+        let html = format!(
+            "<title>Title</title><meta property='og:description' content='{}'>",
+            "界".repeat(513)
+        );
+        assert_eq!(
+            extract_preview(&base, html.as_bytes())
+                .unwrap()
+                .description
+                .unwrap(),
+            "界".repeat(512)
         );
     }
 

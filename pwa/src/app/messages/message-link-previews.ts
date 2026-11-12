@@ -18,6 +18,7 @@ import { internalHref } from './message-text/message-text';
         @if (interactive()) {
           <a
             class="card"
+            [class.described]="preview.description"
             [href]="preview.url"
             [attr.target]="internal(preview.url) ? null : '_blank'"
             [attr.rel]="internal(preview.url) ? null : 'noopener noreferrer'"
@@ -26,7 +27,7 @@ import { internalHref } from './message-text/message-text';
             <ng-container [ngTemplateOutlet]="content" />
           </a>
         } @else {
-          <div class="card"><ng-container [ngTemplateOutlet]="content" /></div>
+          <div class="card" [class.described]="preview.description"><ng-container [ngTemplateOutlet]="content" /></div>
         }
         <ng-template #content>
           @if (preview.image?.url && !failedImages().has(preview.image!.url)) {
@@ -43,8 +44,11 @@ import { internalHref } from './message-text/message-text';
             <span class="thumbnail letter">{{ host.charAt(0).toUpperCase() }}</span>
           }
           <span class="text"
-            ><span class="title">{{ preview.title || host }}</span
-            ><span class="domain">{{ host }}</span></span
+            ><span class="title">{{ preview.title || host }}</span>
+            @if (preview.description) {
+              <span class="description">{{ preview.description }}</span>
+            }
+            <span class="domain">{{ host }}</span></span
           >
         </ng-template>
       }
@@ -53,7 +57,6 @@ import { internalHref } from './message-text/message-text';
   styles: `
     :host {
       display: block;
-      width: min(260px, 100%);
       min-width: 0;
     }
     :host(:empty) {
@@ -64,7 +67,7 @@ import { internalHref } from './message-text/message-text';
       display: flex;
       align-items: center;
       gap: 8px;
-      height: 48px;
+      min-height: 48px;
       padding: 6px 8px;
       border-inline-start: 3px solid var(--stripe);
       border-radius: 4px;
@@ -72,6 +75,9 @@ import { internalHref } from './message-text/message-text';
       color: inherit;
       text-decoration: none;
       min-width: 0;
+    }
+    .card.described {
+      align-items: flex-start;
     }
     .card + .card {
       margin-top: 4px;
@@ -115,6 +121,16 @@ import { internalHref } from './message-text/message-text';
     .title {
       font-size: 14px;
       font-weight: 600;
+    }
+    .description {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 3;
+      overflow: hidden;
+      overflow-wrap: anywhere;
+      margin: 2px 0;
+      font-size: 13px;
+      line-height: 18px;
     }
     .domain {
       font-size: 12px;

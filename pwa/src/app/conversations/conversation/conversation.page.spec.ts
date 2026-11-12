@@ -3445,9 +3445,14 @@ describe('ConversationPage', () => {
     expect(component['showDownButton']()).toBe(true);
   });
 
-  it.each([false, true])(
-    'preserves the reading position when a pending preview disappears (following bottom: %s)',
-    async (followingBottom) => {
+  it.each([
+    { followingBottom: false, hasDescription: false },
+    { followingBottom: true, hasDescription: false },
+    { followingBottom: false, hasDescription: true },
+    { followingBottom: true, hasDescription: true },
+  ])(
+    'preserves reading position when a pending preview changes height (following bottom: $followingBottom, description: $hasDescription)',
+    async ({ followingBottom, hasDescription }) => {
       component.ionViewDidEnter();
       await settleMetadata();
       await component['positionAndRead']();
@@ -3468,7 +3473,10 @@ describe('ConversationPage', () => {
       incoming.next({ ...testMessage, id: encodeId('9007199254741004'), clientGeneratedId: 'next-message' });
       await fixture.whenStable();
       const [first, anchor] = [...fixture.nativeElement.querySelectorAll('app-message')] as HTMLElement[];
-      const firstHeight = () => (first.querySelector('app-message-link-previews .card') ? 400 : 348);
+      const firstHeight = () => {
+        if (first.querySelector('app-message-link-previews .description')) return 454;
+        return first.querySelector('app-message-link-previews .card') ? 400 : 348;
+      };
       const contentHeight = () => firstHeight() + 1100;
       let top = followingBottom ? contentHeight() - 500 : 500;
       Object.defineProperties(scroll, {
@@ -3493,15 +3501,27 @@ describe('ConversationPage', () => {
         type: ServerWsMessageType.messageUpdated,
         payload: {
           ...withPreview,
-          metadata: { linkPreviews: [{ url: 'https://example.com/', status: LinkPreviewStatus.unavailable }] },
+          metadata: {
+            linkPreviews: [
+              hasDescription
+                ? {
+                    url: 'https://example.com/',
+                    status: LinkPreviewStatus.ready,
+                    title: 'Example',
+                    description: 'New page description',
+                  }
+                : { url: 'https://example.com/', status: LinkPreviewStatus.unavailable },
+            ],
+          },
         },
       });
       await fixture.whenStable();
-      expect(first.querySelector('app-message-link-previews .card')).toBeNull();
+      if (hasDescription) expect(first.querySelector('.description')?.textContent).toBe('New page description');
+      else expect(first.querySelector('app-message-link-previews .card')).toBeNull();
       expect(fixture.nativeElement.querySelectorAll('app-message')[1]).toBe(anchor);
       expect(anchor.getBoundingClientRect().bottom).toBe(bottom);
       if (followingBottom) expect(scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight).toBe(0);
-      else expect(scroll.scrollTop).toBe(448);
+      else expect(scroll.scrollTop).toBe(hasDescription ? 554 : 448);
     },
   );
 

@@ -147,6 +147,7 @@ pub fn prepare(
                 status: LinkPreviewStatus::Ready,
                 expires_at: None,
                 title: Some(title),
+                description: None,
                 image: None,
             });
         } else {
@@ -156,6 +157,7 @@ pub fn prepare(
                 status: LinkPreviewStatus::Pending,
                 expires_at: Some(prepared_at + Duration::seconds(30)),
                 title: None,
+                description: None,
                 image: None,
             });
         }
@@ -254,6 +256,7 @@ pub fn project_stored_metadata(
                     status,
                     expires_at: preview.expires_at,
                     title: preview.title,
+                    description: preview.description,
                     image: preview.image.map(|image| LinkPreviewImageResponse {
                         url: media_store.public_url(&image.storage_key),
                         width: image.width,
@@ -354,6 +357,8 @@ mod tests {
             Some("one.example")
         );
         assert_eq!(stored.link_previews[1].title.as_deref(), Some("Second"));
+        assert!(stored.link_previews[0].description.is_none());
+        assert!(stored.link_previews[1].description.is_none());
         assert_eq!(stored.link_previews[2].status, LinkPreviewStatus::Pending);
         assert!(
             matches!(&prepared.work[0], LinkPreviewWork::CacheImage { url, .. } if url == "https://two.example/")
@@ -396,6 +401,10 @@ mod tests {
             r#"{"linkPreviews":[{"url":"https://one.example/","status":"ready"}]}"#
         )
         .is_err());
+        assert!(serde_json::from_str::<MessageMetadataInput>(
+            r#"{"linkPreviews":[{"url":"https://one.example/","description":"not accepted"}]}"#
+        )
+        .is_err());
         assert!(
             serde_json::from_str::<MessageMetadataInput>(r#"{"linkPreviews":[],"other":1}"#)
                 .is_err()
@@ -416,12 +425,50 @@ mod tests {
             Utc::now(),
         )
         .unwrap();
-        let snapshot = ready_snapshot(&prepared.metadata.unwrap())
-            .unwrap()
-            .unwrap();
+        let mut metadata = prepared.metadata.unwrap();
+        metadata["linkPreviews"][0]["description"] = serde_json::json!("A description");
+        let snapshot = ready_snapshot(&metadata).unwrap().unwrap();
         let stored: StoredMessageMetadata = serde_json::from_value(snapshot).unwrap();
         assert_eq!(stored.link_previews.len(), 1);
         assert_eq!(stored.link_previews[0].title.as_deref(), Some("Title"));
+        assert_eq!(
+            stored.link_previews[0].description.as_deref(),
+            Some("A description")
+        );
+    }
+
+    #[test]
+    fn link_preview_description_projects_and_old_metadata_remains_readable() {
+        let media = MediaStore::new(
+            aws_sdk_s3::Client::from_conf(
+                aws_sdk_s3::Config::builder()
+                    .behavior_version_latest()
+                    .build(),
+            ),
+            std::sync::Arc::new(crate::config::MediaConfig {
+                bucket: "media-bucket".into(),
+                attachment_prefix: "attachments".into(),
+                base_url: Some("https://media.example".into()),
+                endpoint_url: None,
+                upload_proxy_path: None,
+                max_attachment_file_size_bytes: 1,
+            }),
+        );
+        let metadata = serde_json::json!({
+            "linkPreviews": [
+                {"url":"https://one.example/","status":"ready","title":"Title","description":"Text"},
+                {"url":"https://old.example/","status":"ready","title":"Old"}
+            ]
+        });
+        let projected = project_metadata(&metadata, &media, Utc::now()).unwrap();
+        assert_eq!(
+            projected.link_previews[0].description.as_deref(),
+            Some("Text")
+        );
+        assert!(projected.link_previews[1].description.is_none());
+        let json = serde_json::to_value(projected).unwrap();
+        assert_eq!(json["linkPreviews"][0]["description"], "Text");
+        assert!(json["linkPreviews"][1].get("description").is_none());
     }
 
     #[test]
@@ -430,7 +477,7 @@ mod tests {
         let current = serde_json::json!({
             "other": 42,
             "linkPreviews": [
-                {"url":"https://ready.example/","status":"ready","title":"Original"},
+                {"url":"https://ready.example/","status":"ready","title":"Original","description":"Original description"},
                 {"url":"https://failed.example/","status":"unavailable"},
                 {"url":"https://pending.example/","status":"pending","expiresAt": at}
             ]
@@ -456,6 +503,10 @@ mod tests {
             LinkPreviewStatus::Unavailable
         );
         assert_eq!(stored.link_previews[1].title.as_deref(), Some("Original"));
+        assert_eq!(
+            stored.link_previews[1].description.as_deref(),
+            Some("Original description")
+        );
         assert_eq!(
             stored.link_previews[2].expires_at,
             Some(at + Duration::seconds(30))
