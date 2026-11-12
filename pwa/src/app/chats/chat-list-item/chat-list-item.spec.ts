@@ -1,7 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import { provideRouter } from '@angular/router';
-import { IonButton, IonItemOption, IonItemSliding } from '@ionic/angular';
+import { provideRouter, Router } from '@angular/router';
+import { IonButton, IonItemOption, IonItemSliding, IonPopover, getPlatforms } from '@ionic/angular';
 import { vi } from 'vitest';
 
 import { archiveOutline } from 'ionicons/icons';
@@ -9,6 +9,7 @@ import { MessageDelivery } from '../../messages/message-delivery';
 import { ChatListItem } from './chat-list-item';
 
 describe('ChatListItem', () => {
+  let originalPlatforms: ReturnType<typeof getPlatforms>;
   let component: ChatListItem;
   let fixture: ComponentFixture<ChatListItem>;
 
@@ -21,7 +22,11 @@ describe('ChatListItem', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    const platforms = getPlatforms();
+    originalPlatforms = [...platforms];
+    platforms.splice(0, platforms.length, 'ios');
     vi.spyOn(IonItemSliding.prototype, 'close').mockResolvedValue();
+    vi.spyOn(IonPopover.prototype, 'isOpen', 'set').mockImplementation(() => {});
     await TestBed.configureTestingModule({
       imports: [ChatListItem],
       providers: [provideRouter([])],
@@ -33,7 +38,10 @@ describe('ChatListItem', () => {
     fixture.detectChanges();
   });
 
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    getPlatforms().splice(0, getPlatforms().length, ...originalPlatforms);
+    vi.restoreAllMocks();
+  });
 
   it('renders an archive shortcut without conversation data or conversation actions', async () => {
     fixture.componentRef.setInput('entry', {
@@ -127,6 +135,99 @@ describe('ChatListItem', () => {
       .queryAll(By.directive(IonItemOption))
       .filter((option) => option.nativeElement.parentElement.getAttribute('side') === side);
   }
+
+  function desktopActions(platforms: ReturnType<typeof getPlatforms> = ['desktop']) {
+    fixture.destroy();
+    getPlatforms().splice(0, getPlatforms().length, ...platforms);
+    fixture = TestBed.createComponent(ChatListItem);
+    component = fixture.componentInstance;
+    fixture.componentRef.setInput('entry', entry);
+    const read = { label: '标为已读', icon: archiveOutline, run: vi.fn() };
+    const archive = { label: '归档', icon: archiveOutline, run: vi.fn() };
+    fixture.componentRef.setInput('startActions', [read]);
+    fixture.componentRef.setInput('endActions', [archive]);
+    fixture.detectChanges();
+    return { read, archive };
+  }
+
+  it.each<ReturnType<typeof getPlatforms>>([['desktop'], ['mobile', 'mobileweb']])(
+    'offers mouse actions on desktop systems with Ionic platforms %s',
+    (...platforms) => {
+      desktopActions(platforms);
+      expect(fixture.debugElement.query(By.directive(IonItemSliding)).componentInstance.disabled).toBe(true);
+      expect(fixture.nativeElement.querySelector('ion-item-options')).toBeNull();
+      expect(fixture.nativeElement.querySelector('ion-button')).toBeNull();
+      const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+      fixture.nativeElement.querySelector('.chat-entry').dispatchEvent(event);
+      expect(component['menuEvent']()).toBe(event);
+    },
+  );
+
+  it('opens from right click without selecting or navigating, and clears on dismissal', () => {
+    desktopActions();
+    fixture.componentRef.setInput('button', true);
+    fixture.detectChanges();
+    const selected = vi.fn();
+    component.selected.subscribe(selected);
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl');
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 45, clientY: 70 });
+    fixture.nativeElement.querySelector('.chat-entry').dispatchEvent(event);
+    fixture.detectChanges();
+    expect(event.defaultPrevented).toBe(true);
+    expect(selected).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+    expect(fixture.nativeElement.querySelector('.chat-entry').classList.contains('menu-open')).toBe(true);
+    const menu = fixture.debugElement.query(By.directive(IonPopover));
+    expect(menu.componentInstance.event).toBe(event);
+    expect(menu.componentInstance.reference).toBe('event');
+    menu.triggerEventHandler('didDismiss', {});
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('ion-popover')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.chat-entry').classList.contains('menu-open')).toBe(false);
+  });
+
+  it('dismisses the menu before running an action and blocks repeat actions until failure settles', async () => {
+    const { archive } = desktopActions();
+    let reject!: (error: Error) => void;
+    archive.run.mockImplementation(() => new Promise<void>((_, fail) => (reject = fail)));
+    component['openMenu'](new MouseEvent('contextmenu', { cancelable: true }));
+    fixture.detectChanges();
+    const menu = fixture.debugElement.query(By.directive(IonPopover)).componentInstance as IonPopover;
+    const dismiss = vi.spyOn(menu, 'dismiss').mockImplementation(async () => {
+      expect(archive.run).not.toHaveBeenCalled();
+      component['menuEvent'].set(undefined);
+      return true;
+    });
+    const pending = component['perform'](archive, new Event('click'));
+    await vi.waitFor(() => expect(archive.run).toHaveBeenCalledOnce());
+    fixture.detectChanges();
+    expect(dismiss).toHaveBeenCalledOnce();
+    expect(fixture.nativeElement.querySelector('ion-spinner[slot="end"]')).not.toBeNull();
+    component['openMenu'](new MouseEvent('contextmenu'));
+    await component['perform'](archive, new Event('click'));
+    expect(component['menuEvent']()).toBeUndefined();
+    expect(archive.run).toHaveBeenCalledOnce();
+    reject(new Error('offline'));
+    await pending;
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('ion-spinner[slot="end"]')).toBeNull();
+    expect(fixture.nativeElement.querySelector('ion-label[color="danger"]')).not.toBeNull();
+  });
+
+  it('preserves mobile swipes and native context menus, and excludes always-visible actions', () => {
+    fixture.componentRef.setInput('endActions', [{ label: '归档', icon: archiveOutline, run: vi.fn() }]);
+    fixture.detectChanges();
+    expect(options('end')).toHaveLength(1);
+    const mobileEvent = new MouseEvent('contextmenu', { cancelable: true });
+    component['openMenu'](mobileEvent);
+    expect(mobileEvent.defaultPrevented).toBe(false);
+    desktopActions();
+    fixture.componentRef.setInput('actionsAlwaysVisible', true);
+    fixture.detectChanges();
+    const requestEvent = new MouseEvent('contextmenu', { cancelable: true });
+    component['openMenu'](requestEvent);
+    expect(requestEvent.defaultPrevented).toBe(false);
+  });
 
   it('supports multiple actions on both sides and hides the whole meta column when always visible', async () => {
     const run = vi.fn();

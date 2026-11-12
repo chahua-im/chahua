@@ -1,12 +1,22 @@
 // RouterLinkActive can update before the cached page renders Ionic's color input.
 // Match the rendered palette so foreground and background change together.
-ion-item {
+ion-item.chat-entry {
   --min-height: var(--app-chat-row-height);
   --app-item-spacing: 6px;
 
   &.ion-color ion-label p {
     color: inherit;
   }
+}
+
+ion-item.chat-entry.menu-open::part(native)::after {
+  background: var(--background-hover);
+  opacity: var(--background-hover-opacity);
+}
+
+ion-popover::part(content) {
+  box-sizing: border-box;
+  border: 1px solid rgba(var(--ion-color-medium-rgb), 0.45);
 }
 
 ion-item:not(.ion-color) ion-label p {
