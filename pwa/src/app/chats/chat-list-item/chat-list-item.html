@@ -1,11 +1,13 @@
 <ion-item-sliding
-  [disabled]="actionsAlwaysVisible() || pendingAction() || (!startActions().length && !endActions().length)">
-  @if (!actionsAlwaysVisible() && startActions().length) {
+  [disabled]="desktop || actionsAlwaysVisible() || pendingAction() || (!startActions().length && !endActions().length)">
+  @if (!desktop && !actionsAlwaysVisible() && startActions().length) {
     <ion-item-options side="start">
       <ng-container [ngTemplateOutlet]="swipeOptions" [ngTemplateOutletContext]="{ $implicit: 'start' }"></ng-container>
     </ion-item-options>
   }
   <ion-item
+    class="chat-entry"
+    [class.menu-open]="!!menuEvent()"
     [button]="button()"
     [routerLink]="entry().link"
     [state]="entry().state"
@@ -14,6 +16,7 @@
     #active="routerLinkActive"
     [color]="active.isActive ? 'primary' : undefined"
     [detail]="false"
+    (contextmenu)="openMenu($event)"
     (click)="(button() || active.isActive) && selected.emit()">
     @if (actionsAlwaysVisible() && startActions().length) {
       <ion-buttons slot="start">
@@ -93,12 +96,39 @@
     }
     <ng-content select="[slot=end]"></ng-content>
   </ion-item>
-  @if (!actionsAlwaysVisible() && endActions().length) {
+  @if (!desktop && !actionsAlwaysVisible() && endActions().length) {
     <ion-item-options side="end">
       <ng-container [ngTemplateOutlet]="swipeOptions" [ngTemplateOutletContext]="{ $implicit: 'end' }"></ng-container>
     </ion-item-options>
   }
 </ion-item-sliding>
+@if (menuEvent(); as event) {
+  <ion-popover
+    [isOpen]="true"
+    [event]="event"
+    reference="event"
+    alignment="start"
+    side="bottom"
+    [arrow]="false"
+    [showBackdrop]="false"
+    (didDismiss)="menuEvent.set(undefined)">
+    <ng-template>
+      <ion-list>
+        @for (action of [...startActions(), ...endActions()]; track action.label; let last = $last) {
+          <ion-item
+            [button]="true"
+            [detail]="false"
+            [lines]="last ? 'none' : 'inset'"
+            [disabled]="!!pendingAction()"
+            (click)="perform(action, $event)">
+            <ion-icon slot="start" [icon]="action.icon" [color]="action.color ?? 'primary'" />
+            <ion-label [color]="action.color">{{ action.label }}</ion-label>
+          </ion-item>
+        }
+      </ion-list>
+    </ng-template>
+  </ion-popover>
+}
 @if (error()) {
   <ion-item lines="none">
     <ion-label color="danger">{{ 'chats.listItem.actionFailed' | transloco }}</ion-label>

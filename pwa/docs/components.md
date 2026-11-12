@@ -91,6 +91,8 @@ EscapeNavigation 在捕获阶段统一接收 Esc，按当前可见弹层限定�
 | DirectorySearch    | query、usersOnly；群/用户/邀请结果、群游标和请求版本                                                                                                   | RpcApi.groups/users/invites；分组搜索并打开群聊、用户资料或邀请详情                                                                                  |
 | ChatLink           | 响应式容器、保留关闭动画中的页面；PanelPage 持有解析结果与 failed                                                                                      | 容器负责响应式呈现和弹窗生命周期；PanelPage 解析配置并查询用户／话题／好友请求；PanelNavigation 管理 URL、历史与退出检查（消息短链接由独立守卫解析） |
 
+ChatListItem 在桌面系统将两侧 actions 合并为右键菜单，菜单事件与 pendingAction 保存在行组件内；移动系统继续使用滑动操作，直接可见的好友请求按钮不进入菜单。
+
 ChatListPage 在 ionViewWillEnter 中先同步检测缓存视图，再激活列表查询，使 pop 动画使用已更新的本地行；ionViewDidLeave 同步释放子查询消费者。
 
 ChatListContent 的普通会话行和话题行都是共享资料、查询成员、草稿和待发消息的派生结果；本人发送的最后一条非系统、未撤回消息在预览正文后显示待发队列派生的发送中或已发送，私聊另外使用 ChatStore 的对方回执显示已读；待发消息按聊天或话题根区分，在服务器摘要回显前提供预览和排序时间，话题回复不改变父会话行，已确认后由共享摘要替换。分类内容各自保留滚动位置，仅当前分类激活查询和续页。tab、归档范围属于父组件；操作进度属于被点击的行。固定入口与独立角标不参与初次内容等待。隐私首页摘要失败在对应行显示重试文案，其余加载失败使用 LoadError（message、compact、retryable、busy、disabled → retry），内容投影承载诊断复制等次要操作：页面级居中，列表和设置分区使用紧凑行。

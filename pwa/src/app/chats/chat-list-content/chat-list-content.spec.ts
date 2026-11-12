@@ -3,7 +3,7 @@ import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
-import { IonActionSheet, IonButton, IonItemOption, IonItemSliding } from '@ionic/angular';
+import { IonActionSheet, IonButton, IonItemOption, IonItemSliding, getPlatforms } from '@ionic/angular';
 import { chatbubbles } from 'ionicons/icons';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
@@ -205,7 +205,11 @@ describe('ChatListContent', () => {
     expect(errors[0].textContent).toContain('话题加载失败');
   });
 
+  let originalPlatforms: ReturnType<typeof getPlatforms>;
   beforeEach(async () => {
+    const platforms = getPlatforms();
+    originalPlatforms = [...platforms];
+    platforms.splice(0, platforms.length, 'ios');
     ListVisibilityObserver.instances = [];
     vi.stubGlobal('IntersectionObserver', ListVisibilityObserver);
     presenceEvents = new Subject<ServerWsMessage>();
@@ -290,6 +294,7 @@ describe('ChatListContent', () => {
     await fixture.whenStable();
   });
 
+  afterEach(() => getPlatforms().splice(0, getPlatforms().length, ...originalPlatforms));
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();

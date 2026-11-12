@@ -1,5 +1,5 @@
 import { NgTemplateOutlet } from '@angular/common';
-import { Component, input, output, signal, viewChild } from '@angular/core';
+import { Component, computed, input, output, signal, viewChild } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { TranslocoPipe } from '@jsverse/transloco';
 import {
@@ -12,9 +12,12 @@ import {
   IonItemOptions,
   IonItemSliding,
   IonLabel,
+  IonList,
+  IonPopover,
   IonRouterLink,
   IonSpinner,
   IonText,
+  isPlatform,
 } from '@ionic/angular';
 import { heartOutline, notificationsOffOutline } from 'ionicons/icons';
 import { MessageDelivery } from '../../messages/message-delivery';
@@ -65,12 +68,15 @@ export interface ChatListAction {
     IonItemOptions,
     IonItemOption,
     IonLabel,
+    IonList,
+    IonPopover,
     IonText,
     IonSpinner,
     TranslocoPipe,
   ],
 })
 export class ChatListItem {
+  protected readonly desktop = !isPlatform('ios') && !isPlatform('android');
   protected readonly mutedIcon = notificationsOffOutline;
   protected readonly reactionIcon = heartOutline;
   readonly entry = input.required<ChatListEntry>();
@@ -79,10 +85,22 @@ export class ChatListItem {
   readonly startActions = input<readonly ChatListAction[]>([]);
   readonly endActions = input<readonly ChatListAction[]>([]);
   readonly actionsAlwaysVisible = input(false);
+  protected readonly menuEnabled = computed(
+    () => this.desktop && !this.actionsAlwaysVisible() && !!(this.startActions().length || this.endActions().length),
+  );
+  protected readonly menuEvent = signal<MouseEvent | undefined>(undefined);
   readonly selected = output<void>();
   protected readonly pendingAction = signal<ChatListAction | undefined>(undefined);
   protected readonly error = signal(false);
   private readonly sliding = viewChild(IonItemSliding);
+  private readonly menu = viewChild(IonPopover);
+
+  protected openMenu(event: MouseEvent) {
+    if (!this.menuEnabled()) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!this.pendingAction()) this.menuEvent.set(event);
+  }
 
   protected async perform(action: ChatListAction, event: Event) {
     event.preventDefault();
@@ -91,6 +109,8 @@ export class ChatListItem {
     this.pendingAction.set(action);
     this.error.set(false);
     try {
+      const menu = this.menu();
+      if (menu) await menu.dismiss();
       await this.sliding()?.close();
       await action.run();
     } catch {
