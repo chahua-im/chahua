@@ -233,7 +233,7 @@ describe('Attachment upload tasks', () => {
       const task = create(purpose, file);
       const pending = task.retry();
       expect(task.retry()).toBe(pending);
-      expect(task.state()).toEqual({ status: UploadStatus.Uploading, progress: 0 });
+      expect(task.state()).toEqual({ status: UploadStatus.Uploading, progress: undefined });
       config();
       const request = await peer.expectAsync('attachments.createUploadUrl');
       expect(request.params).toEqual({
@@ -290,14 +290,14 @@ describe('Attachment upload tasks', () => {
     await expect(pending).resolves.toBe(encodeId('100'));
   });
 
-  it('maps compression to the first half and upload to the second half without resetting progress', async () => {
+  it('keeps image processing indeterminate and reports upload bytes until storage confirms success', async () => {
     let compressed!: (blob: Blob) => void;
     convertToBlob.mockReturnValue(new Promise<Blob>((resolve) => (compressed = resolve)));
     const task = create(AttachmentUploadPurpose.media, photo());
     const pending = task.retry();
     config(10);
     await vi.waitFor(() => expect(convertToBlob).toHaveBeenCalledOnce());
-    expect(task.state()).toEqual({ status: UploadStatus.Processing, progress: 0.25 });
+    expect(task.state()).toEqual({ status: UploadStatus.Processing, progress: undefined });
     expect(task.retry()).toBe(pending);
     peer.expectNone('attachments.createUploadUrl');
     compressed(new Blob(['small'], { type: 'image/webp' }));
@@ -310,11 +310,15 @@ describe('Attachment upload tasks', () => {
       width: 1866,
       height: 1400,
     });
+    expect(task.state()).toMatchObject({ status: UploadStatus.Uploading, progress: undefined });
     request.flush({ attachmentId: '100', uploadHeaders: {}, uploadUrl: 'https://storage.invalid/upload' });
     await vi.waitFor(() => expect(FakeUpload.requests).toHaveLength(1));
-    expect(task.state()).toEqual({ status: UploadStatus.Uploading, progress: 0.5, width: 1866, height: 1400 });
+    expect(task.state()).toEqual({ status: UploadStatus.Uploading, progress: 0, width: 1866, height: 1400 });
     FakeUpload.requests[0].progress(1, 2);
-    expect(task.state().progress).toBe(0.75);
+    expect(task.state().progress).toBe(0.5);
+    FakeUpload.requests[0].progress(2, 2);
+    expect(task.state()).toMatchObject({ status: UploadStatus.Uploading, progress: 1 });
+    expect(task.state().id).toBeUndefined();
     FakeUpload.requests[0].finish();
     await expect(pending).resolves.toBe(encodeId('100'));
     expect(task.state()).toMatchObject({ status: UploadStatus.Ready, width: 1866, height: 1400 });
@@ -331,7 +335,7 @@ describe('Attachment upload tasks', () => {
     expect(task.state()).toMatchObject({ status: UploadStatus.Failed, width: 1866, height: 1400 });
     expect(task.state().id).toBeUndefined();
     const retry = task.retry();
-    expect(task.state().progress).toBe(0.5);
+    expect(task.state().progress).toBeUndefined();
     expect(task.retry()).toBe(retry);
     config();
     await sign(encodeId('101'));

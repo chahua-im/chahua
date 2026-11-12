@@ -31,21 +31,25 @@ export async function prepareMedia(source: File, signal: AbortSignal, onProgress
   activity();
   try {
     return await abortable(
-      processMedia(source, processingSignal, {
-        onProgress: (value) => {
-          if (processingSignal.aborted) return;
-          if (value > progress) {
-            progress = value;
-            activity();
-          }
-          onProgress?.(value);
+      processMedia(
+        source,
+        processingSignal,
+        {
+          onProgress: (value) => {
+            if (processingSignal.aborted) return;
+            if (value > progress) {
+              progress = value;
+              activity();
+            }
+          },
+          onQueueWait: (waiting) => {
+            if (processingSignal.aborted) return;
+            if (waiting) clearTimeout(timer);
+            else activity();
+          },
         },
-        onQueueWait: (waiting) => {
-          if (processingSignal.aborted) return;
-          if (waiting) clearTimeout(timer);
-          else activity();
-        },
-      }),
+        onProgress,
+      ),
       processingSignal,
     );
   } finally {
@@ -53,7 +57,12 @@ export async function prepareMedia(source: File, signal: AbortSignal, onProgress
   }
 }
 
-async function processMedia(source: File, signal: AbortSignal, options: MediaProcessingOptions) {
+async function processMedia(
+  source: File,
+  signal: AbortSignal,
+  options: MediaProcessingOptions,
+  onVideoProgress?: (value: number) => void,
+) {
   const file = withDetectedMimeType(source, await detectFileMimeType(source));
   signal.throwIfAborted();
   if (!/^(image|video)\//.test(file.type)) throw new UploadError(UploadErrorCode.UnsupportedMedia);
@@ -64,6 +73,12 @@ async function processMedia(source: File, signal: AbortSignal, options: MediaPro
     return await (file.type.startsWith('image/') ? compressImage : compressVideo)(file, dimensions, {
       signal,
       ...options,
+      onProgress: (value) => {
+        if (signal.aborted) return;
+        options.onProgress?.(value);
+        // Image milestones keep the processing deadline alive, but are not measurable progress.
+        if (file.type.startsWith('video/')) onVideoProgress?.(value);
+      },
     });
   } catch {
     signal.throwIfAborted();

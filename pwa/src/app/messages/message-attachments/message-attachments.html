@@ -53,8 +53,10 @@
             </button>
           }
         }
-        @if (item.progress != null) {
-          <div class="upload-overlay"><app-upload-progress [value]="item.progress" /></div>
+        @if (item.pendingUpload; as state) {
+          <div class="upload-overlay">
+            <app-upload-progress [value]="state.progress" [processing]="state.status === Status.Processing" />
+          </div>
         }
         @if (album() && last && items().length > 9) {
           <button
@@ -95,8 +97,10 @@
               (remove)="removeUpload.emit(upload)" />
           }
         }
-        @if (item.progress != null) {
-          <div class="upload-overlay"><app-upload-progress [value]="item.progress" /></div>
+        @if (item.pendingUpload; as state) {
+          <div class="upload-overlay">
+            <app-upload-progress [value]="state.progress" [processing]="state.status === Status.Processing" />
+          </div>
         }
         @if (last && overlayTime()) {
           <span class="media-time">
@@ -132,8 +136,8 @@
               }
             </span>
           </a>
-          @if (item.progress != null) {
-            <app-upload-progress [value]="item.progress" />
+          @if (item.pendingUpload; as state) {
+            <app-upload-progress [value]="state.progress" [processing]="state.status === Status.Processing" />
           } @else {
             <a
               class="file-download"
@@ -178,8 +182,10 @@
               } @else {
                 <video [src]="item.url" muted playsinline preload="metadata"></video>
               }
-              @if (item.progress != null) {
-                <div class="upload-overlay"><app-upload-progress [value]="item.progress" /></div>
+              @if (item.pendingUpload; as state) {
+                <div class="upload-overlay">
+                  <app-upload-progress [value]="state.progress" [processing]="state.status === Status.Processing" />
+                </div>
               }
               @if (item.upload; as upload) {
                 @if (upload.state().error) {
