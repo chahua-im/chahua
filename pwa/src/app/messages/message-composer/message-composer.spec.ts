@@ -362,10 +362,20 @@ describe('Message composer upload ownership', () => {
 
   it('renders progress from the task signal and permits sending during storage upload', async () => {
     const upload = add();
+    fixture.detectChanges();
+    const indicator = fixture.nativeElement.querySelector('app-upload-progress');
+    expect(indicator.querySelector('ion-spinner')).not.toBeNull();
     const xhr = await startStorage(encodeId('100'), AttachmentUploadPurpose.file);
     xhr.upload.onprogress?.({ lengthComputable: true, loaded: 3, total: 4 });
     fixture.detectChanges();
     expect(fixture.debugElement.query(By.directive(UploadProgress)).componentInstance.value()).toBe(0.75);
+    expect(fixture.nativeElement.querySelector('app-upload-progress')).toBe(indicator);
+    expect(indicator.querySelector('ion-spinner')).toBeNull();
+    xhr.upload.onprogress?.({ lengthComputable: true, loaded: 4, total: 4 });
+    fixture.detectChanges();
+    expect(indicator.querySelector('.progress').getAttribute('stroke-dashoffset')).toBe('0');
+    expect(indicator.querySelector('ion-spinner.inner')).not.toBeNull();
+    expect(upload.state().status).toBe(UploadStatus.Uploading);
     composer['submit']();
     expect(submitted.mock.calls[0][0].uploads).toEqual([upload]);
     composer.reset();
@@ -622,7 +632,7 @@ describe('Message composer upload ownership', () => {
     expect(composer['existing']()).toEqual([existing]);
     expect(composer['visualUploads']()).toEqual([borrowed, owned]);
     expect(fixture.nativeElement.querySelectorAll('.upload')).toHaveLength(3);
-    expect(fixture.debugElement.query(By.directive(UploadProgress)).componentInstance.value()).toBe(0.625);
+    expect(fixture.debugElement.query(By.directive(UploadProgress)).componentInstance.value()).toBe(0.25);
     composer.submitted.subscribe(() => {
       expect(composer['uploads']()).toEqual([]);
       expect(composer['borrowedUploads']()).toEqual([]);

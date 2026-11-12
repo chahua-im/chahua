@@ -203,6 +203,7 @@ describe('Media processing deadlines', () => {
       expect(conversion.cancel).not.toHaveBeenCalled();
       conversion.onProgress!(value);
     }
+    expect(progress.mock.calls).toEqual([[0.1], [0.2], [0.3]]);
     await vi.advanceTimersByTimeAsync(20_000);
     conversion.onProgress!(0.3);
     await vi.advanceTimersByTimeAsync(10_000);

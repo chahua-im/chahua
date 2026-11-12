@@ -19,13 +19,13 @@ export class AttachmentUpload {
   readonly url: string;
   private readonly uploadState = signal<{
     status: UploadStatus;
-    progress: number;
+    progress?: number;
     id?: SnowflakeID;
     width?: number;
     height?: number;
     contentType?: string;
     error?: UploadFailure;
-  }>({ status: UploadStatus.Processing, progress: 0 });
+  }>({ status: UploadStatus.Processing });
   readonly state = this.uploadState.asReadonly();
   private readonly controller = new AbortController();
   private prepared?: Awaited<ReturnType<typeof prepareMedia>>;
@@ -81,12 +81,11 @@ export class AttachmentUpload {
   private async run(): Promise<SnowflakeID | undefined> {
     const signal = this.controller.signal;
     const aborted = fromEvent(signal, 'abort');
-    const uploadStart = this.purpose === AttachmentUploadPurpose.media ? 0.5 : 0;
-    const processing = uploadStart > 0 && !this.prepared;
+    const processing = this.purpose === AttachmentUploadPurpose.media && !this.prepared;
     this.uploadState.update((state) => ({
       ...state,
       status: processing ? UploadStatus.Processing : UploadStatus.Uploading,
-      progress: processing ? 0 : uploadStart,
+      progress: undefined,
     }));
     const progress = (progress: number) => {
       if (!signal.aborted) this.uploadState.update((state) => ({ ...state, progress }));
@@ -104,9 +103,7 @@ export class AttachmentUpload {
       signal.throwIfAborted();
       if (processing) {
         stage = UploadStage.Processing;
-        this.prepared = await firstValueFrom(
-          from(prepareMedia(this.file, signal, (value) => progress(value * uploadStart))).pipe(takeUntil(aborted)),
-        );
+        this.prepared = await firstValueFrom(from(prepareMedia(this.file, signal, progress)).pipe(takeUntil(aborted)));
         signal.throwIfAborted();
       }
       if (
@@ -131,7 +128,7 @@ export class AttachmentUpload {
         ...state,
         ...dimensions,
         status: UploadStatus.Uploading,
-        progress: uploadStart,
+        progress: undefined,
       }));
       const response = await firstValueFrom(
         this.api.attachments
@@ -146,9 +143,8 @@ export class AttachmentUpload {
       );
       signal.throwIfAborted();
       stage = UploadStage.Storage;
-      await uploadBlob(response.uploadUrl, file, response.uploadHeaders, signal, (value) =>
-        progress(uploadStart + value * (1 - uploadStart)),
-      );
+      progress(0);
+      await uploadBlob(response.uploadUrl, file, response.uploadHeaders, signal, progress);
       signal.throwIfAborted();
       this.uploadState.update((state) => ({
         ...state,

@@ -49,7 +49,7 @@
           [ngTemplateOutletContext]="{ $implicit: upload.file.type, url: upload.url }" />
         @if (state.status === Status.Processing || state.status === Status.Uploading) {
           <div class="upload-status">
-            <app-upload-progress [value]="state.progress" />
+            <app-upload-progress [value]="state.progress" [processing]="state.status === Status.Processing" />
           </div>
         }
         @if (state.error) {

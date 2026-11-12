@@ -547,7 +547,7 @@ describe('MessageAttachments', () => {
       file: new File(['local'], '附件', { type: kind }),
       url,
       purpose: AttachmentUploadPurpose.media,
-      state: signal<ReturnType<AttachmentUpload['state']>>({ status: UploadStatus.Processing, progress: 0 }),
+      state: signal<ReturnType<AttachmentUpload['state']>>({ status: UploadStatus.Processing }),
       retry: vi.fn<AttachmentUpload['retry']>(),
     } satisfies Pick<AttachmentUpload, 'file' | 'url' | 'purpose' | 'state' | 'retry'>;
   }
@@ -647,17 +647,36 @@ describe('MessageAttachments', () => {
       ).toBe(local.url);
       expect(element.querySelectorAll(`${frame} app-upload-progress`)).toHaveLength(1);
       const ring = element.querySelector(`${frame} app-upload-progress`)!;
-      expect(ring.querySelector('.progress')?.getAttribute('stroke-dashoffset')).toBe('100');
+      expect(ring.querySelector('ion-spinner')).not.toBeNull();
+      expect(ring.querySelector('.progress')).toBeNull();
       expect(element.textContent).not.toMatch(/加载中|上传中|处理中/);
+      let processingIcon: string | undefined;
+      if (kind === 'video/mp4') {
+        local.state.set({ status: UploadStatus.Processing, progress: 0.6 });
+        await fixture.whenStable();
+        expect(element.querySelector(`${frame} app-upload-progress`)).toBe(ring);
+        expect(ring.querySelector('.progress')?.getAttribute('stroke-dashoffset')).toBe('40');
+        processingIcon = ring.querySelector('ion-icon')?.icon as string;
+        expect(processingIcon).toBeTruthy();
+        local.state.set({ status: UploadStatus.Uploading });
+        await fixture.whenStable();
+        expect(ring.querySelector('.progress')).toBeNull();
+        expect(ring.querySelector('ion-spinner')).not.toBeNull();
+      }
       local.state.set({ status: UploadStatus.Uploading, progress: 0.4, width: 600, height: 1200 });
       await fixture.whenStable();
       expect(element.querySelector(`${frame} app-upload-progress`)).toBe(ring);
       expect(ring.querySelector('.progress')?.getAttribute('stroke-dashoffset')).toBe('60');
+      if (processingIcon) expect(ring.querySelector('ion-icon')?.icon).not.toBe(processingIcon);
       expect(element.querySelector(media)).toBe(node);
       if (frame === '.media-frame') {
         expect(element.querySelector<HTMLElement>(frame)?.style.aspectRatio).toBe('600 / 1200');
       }
-      local.state.set({ status: UploadStatus.Failed, progress: 0.4 });
+      local.state.set({ status: UploadStatus.Uploading, progress: 1 });
+      await fixture.whenStable();
+      expect(element.querySelector(`${frame} app-upload-progress`)).toBe(ring);
+      expect(ring.querySelector('ion-spinner.inner')).not.toBeNull();
+      local.state.set({ status: UploadStatus.Failed, progress: 1 });
       await fixture.whenStable();
       expect(element.querySelector('app-upload-progress')).toBeNull();
       expect(

@@ -137,6 +137,7 @@ export class MessageAttachments {
       : undefined;
   });
   protected readonly MediaKind = MediaKind;
+  protected readonly Status = UploadStatus;
   protected readonly items = computed(() => {
     const message = this.message();
     const sticker = message.messageType === MessageType.sticker ? message.sticker : undefined;
@@ -166,10 +167,8 @@ export class MessageAttachments {
         previewKind: mediaKind(state?.contentType ?? attachment.kind),
         sticker: !!sticker,
         knownSize,
-        progress:
-          state?.status === UploadStatus.Processing || state?.status === UploadStatus.Uploading
-            ? state.progress
-            : undefined,
+        pendingUpload:
+          state?.status === UploadStatus.Processing || state?.status === UploadStatus.Uploading ? state : undefined,
         ...dimensions,
         displayWidth: Math.min(dimensions.width, limit, (limit * dimensions.width) / dimensions.height),
       };
