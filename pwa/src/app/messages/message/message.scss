@@ -204,7 +204,7 @@
   padding-bottom: 0;
 }
 // The menu preview row spans the full overlay width, so the album keeps a fixed size there.
-.preview .media-content {
+.preview .media-content:has(app-message-attachments.album) {
   display: block;
 }
 .media-only app-message-thread {
