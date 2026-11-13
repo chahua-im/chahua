@@ -499,7 +499,11 @@ pub fn recalculate_thread_meta(
                 .and(messages::is_published.eq(true)),
         )
         .select((
-            diesel::dsl::count_star(),
+            // System events may update activity, but cannot keep a thread alive.
+            diesel::dsl::count(diesel::dsl::case_when(
+                messages::message_type.ne(crate::models::MessageType::System),
+                messages::id,
+            )),
             diesel::dsl::max(messages::created_at),
         ))
         .first(conn)
@@ -1275,6 +1279,48 @@ mod tests {
     use crate::dto::messages::MessagePreviewAttachment;
     use crate::models::Attachment;
     use chrono::Utc;
+
+    #[test]
+    fn thread_reply_count_excludes_system_events() {
+        use super::*;
+        use diesel::connection::SimpleConnection;
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        let mut conn = PgConnection::establish(&url).unwrap();
+        conn.test_transaction::<(), diesel::result::Error, _>(|conn| {
+            conn.batch_execute(
+                "INSERT INTO groups(id, name) VALUES (9876790000, 'thread-count');
+                 INSERT INTO messages(id, chat_id, sender_uid, message_type, client_generated_id,
+                                      reply_root_id, has_thread, is_published, deleted_at, system_kind, created_at)
+                 VALUES (9876790001, 9876790000, 1, 'text', 'count-root', NULL, true, true, NULL, NULL, NOW()),
+                        (9876790002, 9876790000, 1, 'text', 'count-reply', 9876790001, false, true, NULL, NULL, NOW()),
+                        (9876790003, 9876790000, 1, 'system', 'count-pin', 9876790001, false, true, NULL, 'thread_message_pinned', NOW()),
+                        (9876790004, 9876790000, 1, 'text', 'count-deleted', 9876790001, false, true, NOW(), NULL, NOW()),
+                        (9876790005, 9876790000, 1, 'audio', 'count-pending', 9876790001, false, false, NULL, NULL, NOW());
+                 INSERT INTO thread_meta(chat_id, thread_root_id, reply_count)
+                 VALUES (9876790000, 9876790001, 2);",
+            )?;
+            let count = |conn: &mut PgConnection| thread_meta::table
+                .find((9876790000_i64, 9876790001_i64))
+                .select(thread_meta::reply_count).first::<i64>(conn);
+            conn.batch_execute(include_str!("../../migrations/2026-11-13-171829-0000_exclude_system_thread_replies/up.sql"))?;
+            assert_eq!(count(conn)?, 1);
+            conn.batch_execute(include_str!("../../migrations/2026-11-13-171829-0000_exclude_system_thread_replies/down.sql"))?;
+            assert_eq!(count(conn)?, 2);
+            recalculate_thread_meta(conn, 9876790000, 9876790001)?;
+            assert_eq!(count(conn)?, 1);
+            conn.batch_execute("UPDATE messages SET deleted_at = NOW() WHERE id = 9876790002")?;
+            recalculate_thread_meta(conn, 9876790000, 9876790001)?;
+            assert!(count(conn).optional()?.is_none());
+            assert!(!messages::table.find(9876790001_i64).select(messages::has_thread).first::<bool>(conn)?);
+            assert_eq!(build_thread_update_payload(conn, 9876790000, 9876790001)?.unwrap().reply_count, 0);
+            // System history is retained even though it no longer defines an existing thread.
+            assert!(messages::table.find(9876790003_i64).select(messages::deleted_at).first::<Option<DateTime<Utc>>>(conn)?.is_none());
+            Ok(())
+        });
+    }
 
     #[test]
     fn thread_browse_keysets_filter_and_deduplicate_authors() {

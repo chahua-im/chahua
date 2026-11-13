@@ -2427,6 +2427,7 @@ pub async fn attach_metadata(
             .filter(m_dsl::reply_root_id.eq_any(&thread_root_ids))
             .filter(m_dsl::deleted_at.is_null())
             .filter(m_dsl::is_published.eq(true))
+            .filter(m_dsl::message_type.ne(MessageType::System))
             .group_by(m_dsl::reply_root_id)
             .select((m_dsl::reply_root_id, diesel::dsl::count_star()))
             .load(conn)
@@ -2668,13 +2669,10 @@ pub async fn attach_metadata(
             is_edited: m.updated_at.is_some(),
             is_deleted,
             has_attachments: !is_deleted && m.has_attachments,
-            thread_info: if m.has_thread {
-                Some(ThreadInfo {
-                    reply_count: *thread_counts_map.get(&m.id).unwrap_or(&0),
-                })
-            } else {
-                None
-            },
+            thread_info: thread_counts_map
+                .get(&m.id)
+                .filter(|&&count| count > 0)
+                .map(|&reply_count| ThreadInfo { reply_count }),
             reply_to_message,
             attachments,
             reactions: reaction_summaries_map.remove(&m.id).unwrap_or_default(),

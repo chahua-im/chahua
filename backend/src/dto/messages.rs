@@ -69,6 +69,7 @@ pub struct MentionInfo {
 #[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadInfo {
+    /// Published, non-deleted replies, excluding system messages.
     pub reply_count: i64,
 }
 
@@ -147,6 +148,7 @@ pub struct MessageResponse {
     pub is_edited: bool,
     pub is_deleted: bool,
     pub has_attachments: bool,
+    /// Present only while at least one published, non-deleted, non-system reply exists.
     pub thread_info: Option<ThreadInfo>,
     pub reply_to_message: Option<Box<MessagePreview>>,
     pub attachments: Vec<AttachmentResponse>,
