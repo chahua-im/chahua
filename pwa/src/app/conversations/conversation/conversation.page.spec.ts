@@ -5832,6 +5832,66 @@ describe('ConversationPage', () => {
     peer.expectNone('reactions.add');
   });
 
+  it('splits same-sender avatars at the unread divider and clips the new sticky avatar to its group', async () => {
+    const opening = component['conversation'].open(encodeId('101'));
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '101' }).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [100, 101, 102].map((id) => ({
+        ...wireMessage,
+        id: String(id),
+        clientGeneratedId: String(id),
+        sender: otherSender,
+      })),
+    });
+    await opening;
+    await fixture.whenStable();
+    await settleMetadata();
+    component['entryReadId'].set(encodeId('100'));
+    fixture.detectChanges();
+    expect(component['firstUnreadId']()).toBe(encodeId('101'));
+    expect(component['rows']().map(({ first, last }) => [first, last])).toEqual([
+      [true, true],
+      [true, false],
+      [false, true],
+    ]);
+    const elements = [...fixture.nativeElement.querySelectorAll('app-message')] as HTMLElement[];
+    expect(elements[0].querySelector('.avatar')).not.toBeNull();
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    component['entered'] = true;
+    component['position'].set(undefined);
+    component['contentGeometry'] = undefined;
+    vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 200));
+    let offset = 0;
+    const tops = [50, 190, 290];
+    elements.forEach((element, index) => {
+      vi.spyOn(element, 'getBoundingClientRect').mockImplementation(
+        () => new DOMRect(0, tops[index] - offset, 300, 100),
+      );
+      vi.spyOn(element.querySelector('.bubble')!, 'getBoundingClientRect').mockImplementation(
+        () => new DOMRect(44, tops[index] - offset, 200, 96),
+      );
+    });
+    for (const [position, row, displacement] of [
+      [0, 1, 24],
+      [40, 1, 0],
+      [-20, undefined, 0],
+      [0, 1, 24],
+    ] as const) {
+      offset = position;
+      await component['trackScroll']();
+      expect(component['stickyRow']()).toBe(row);
+      expect(component['stickyOffset']()).toBe(displacement);
+    }
+    component['entryReadId'].set(undefined);
+    fixture.detectChanges();
+    expect(component['rows']().map(({ first, last }) => [first, last])).toEqual([
+      [true, false],
+      [false, false],
+      [false, true],
+    ]);
+    expect(elements[0].querySelector('.avatar')).toBeNull();
+  });
+
   it('resets the sticky avatar placeholder when scrolling to another sender and ignores late loads', () => {
     component['stickySender'].set({ ...testMessage.sender, name: '小茶', avatarUrl: '/first.png' });
     component['stickyRow'].set(0);
