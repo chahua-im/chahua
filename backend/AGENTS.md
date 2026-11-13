@@ -4,7 +4,7 @@
 
 See [README.md](README.md) for the backend architecture and source layout. The PWA lives in `../pwa/`; a separate Apple client also uses this backend.
 
-Parse server-wide configuration in `src/config.rs` (`AppConfig::from_env`), not in handlers or `main`. The optional search, push, and ID subsystems retain their own configuration loaders. Services take narrow dependencies, never `AppState`; transport adapters extract and pass the required pieces.
+Parse server-wide configuration in `src/config.rs` (`AppConfig::from_env`), not in handlers or `main`. Search, push, and ID settings are resolved there as well and injected into their services. Services take narrow dependencies, never `AppState`; transport adapters extract and pass the required pieces.
 
 ## Documentation
 

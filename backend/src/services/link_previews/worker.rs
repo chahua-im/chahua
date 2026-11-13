@@ -63,8 +63,10 @@ impl LinkPreviewService {
         media: MediaStore,
         avatars: Arc<AvatarService>,
         registry: Arc<ConnectionRegistry>,
+        overrides: Arc<crate::config::LinkPreviewConfig>,
     ) -> Arc<Self> {
-        let config = Arc::new(super::sites::LinkPreviewConfig::default());
+        let config =
+            Arc::new(super::sites::LinkPreviewConfig::default().with_overrides(&overrides));
         let (sender, receiver) = mpsc::channel(CAPACITY);
         let context = Arc::new(Context {
             db,

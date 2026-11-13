@@ -182,7 +182,8 @@ select token versions.
 This deliberately small slice makes no frontend or WebSocket behavior change.
 
 **Backend slice 1a (implemented):** in development builds, and in any build with
-the exact environment override `ENABLE_DEBUG_AUTH=true`, unauthenticated
+the exact environment override `ENABLE_DEBUG_AUTH=true` (or TOML
+`auth.debug_auth_enabled = true` when that environment variable is unset), unauthenticated
 `POST /auth/dev-session` accepts a positive `uid` and required `X-Client-Id`
 and issues the same v2 session shape. The route remains registered and documented,
 but returns `404 Not Found` unless the gate stored in `AppState` is enabled. Setting

@@ -67,14 +67,6 @@ const MESSAGE_SEARCH_REINDEX_COMMAND: &str = "message-search-reindex";
 async fn main() {
     dotenvy::dotenv().ok();
 
-    // Tracing: RUST_LOG controls level (e.g. RUST_LOG=info, or
-    // RUST_LOG=wetty_chat_backend=debug,tower_http=debug for request-level logs).
-    // BACKEND_LOG_FORMAT controls stdout format: pretty for local development,
-    // json for production collection by agents such as Grafana Alloy.
-    // Responses include X-Request-ID for correlation with clients or proxies.
-    init_tracing();
-
-    db_tracing::install();
     let command = read_command();
     if let Some(BackendCommand::ExportApiSchemas(directory)) = command.as_ref() {
         if let Err(error) = export_api_schemas(directory) {
@@ -84,7 +76,18 @@ async fn main() {
         return;
     }
 
-    let config = Arc::new(AppConfig::from_env());
+    // Load TOML once, initialize logging, then resolve and validate runtime settings.
+    let config = Arc::new(
+        tokio::task::spawn_blocking(|| {
+            let file = config::ConfigFile::from_env();
+            let (format, filter) = file.logging_from_env();
+            init_tracing(format, filter);
+            AppConfig::from_env(file)
+        })
+        .await
+        .expect("Failed to load application configuration"),
+    );
+    db_tracing::install();
     let metrics = Arc::new(metrics::Metrics::new());
 
     let manager = ConnectionManager::<PgConnection>::new(&config.database_url);
@@ -106,8 +109,15 @@ async fn main() {
     }
 
     if matches!(command, Some(BackendCommand::MessageSearchReindex)) {
+        let Some(search_config) = config.message_search.clone() else {
+            tracing::error!(
+                "MEILI_URL/message_search.meili_url and MEILI_MASTER_KEY are required for reindex"
+            );
+            std::process::exit(1);
+        };
         if let Err(err) =
-            run_message_search_reindex(pool.clone(), metrics.message_search.clone()).await
+            run_message_search_reindex(pool.clone(), metrics.message_search.clone(), search_config)
+                .await
         {
             tracing::error!(?err, "message search reindex failed");
             std::process::exit(1);
@@ -115,8 +125,20 @@ async fn main() {
         return;
     }
 
-    let message_search = build_message_search_service(metrics.message_search.clone())
-        .expect("Failed to initialize message search service");
+    let push_config = config
+        .push
+        .clone()
+        .expect("VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT must be set for the server");
+
+    let message_search = build_message_search_service(
+        config
+            .message_search
+            .as_ref()
+            .filter(|_| config.message_search_enabled)
+            .cloned(),
+        metrics.message_search.clone(),
+    )
+    .expect("Failed to initialize message search service");
 
     let ws_registry = Arc::new(services::ws_registry::ConnectionRegistry::new(
         metrics.ws.clone(),
@@ -141,11 +163,12 @@ async fn main() {
         media.clone(),
         avatars.clone(),
         ws_registry.clone(),
+        config.link_previews.clone(),
     );
 
     let state = AppState::new(AppInner {
         db: pool.clone(),
-        id_gen: Arc::new(utils::ids::new_generator()),
+        id_gen: Arc::new(utils::ids::new_generator(config.node_id)),
         metrics: metrics.clone(),
         media,
         avatars,
@@ -163,6 +186,7 @@ async fn main() {
             ws_registry.clone(),
             metrics.push.clone(),
             unread_service.clone(),
+            push_config,
         ),
         unread_service: unread_service.clone(),
         client_tracking,
@@ -342,7 +366,11 @@ async fn shutdown_signal() {
 }
 
 async fn build_media_store(config: &AppConfig) -> services::media::MediaStore {
-    let aws_config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
+    let mut loader = aws_config::defaults(aws_config::BehaviorVersion::latest());
+    if let Some(region) = config.aws_region.as_ref() {
+        loader = loader.region(aws_config::Region::new(region.clone()));
+    }
+    let aws_config = loader.load().await;
     let mut s3_config_builder = aws_sdk_s3::config::Builder::from(&aws_config);
 
     if let Some(endpoint) = config.media.endpoint_url.as_deref() {
@@ -404,12 +432,13 @@ fn write_schema_file<T: serde::Serialize>(path: &Path, document: &T) -> std::io:
 }
 
 fn build_message_search_service(
+    config: Option<services::message_search::MessageSearchConfig>,
     metrics: Arc<services::message_search::MessageSearchMetrics>,
 ) -> Result<
     Option<Arc<services::message_search::MessageSearchService>>,
     services::message_search::MessageSearchError,
 > {
-    let Some(config) = services::message_search::MessageSearchConfig::from_env()? else {
+    let Some(config) = config else {
         info!("Message search disabled");
         return Ok(None);
     };
@@ -429,8 +458,8 @@ fn build_message_search_service(
 async fn run_message_search_reindex(
     pool: DbPool,
     metrics: Arc<services::message_search::MessageSearchMetrics>,
+    config: services::message_search::MessageSearchConfig,
 ) -> Result<(), services::message_search::MessageSearchError> {
-    let config = services::message_search::MessageSearchConfig::from_required_env()?;
     let index_uid = config.index_uid.clone();
     let service = services::message_search::MessageSearchService::new(config, metrics)?;
     service.ensure_ready().await?;
@@ -441,9 +470,9 @@ async fn run_message_search_reindex(
     Ok(())
 }
 
-fn init_tracing() {
-    let env_filter = EnvFilter::from_default_env();
-    match config::log_format_from_env() {
+fn init_tracing(format: LogFormat, filter: String) {
+    let env_filter = EnvFilter::try_new(filter).expect("RUST_LOG/logging.filter must be valid");
+    match format {
         LogFormat::Pretty => tracing_subscriber::registry()
             .with(env_filter)
             .with(fmt::layer().pretty().with_target(true))

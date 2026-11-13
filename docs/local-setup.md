@@ -103,6 +103,71 @@ Shared service defaults are loopback-only:
 
 If changing a shared service port, update both its `*_PORT` setting and corresponding URLs in the shared env file, then run `up` and restart affected application processes. For example, `POSTGRES_PORT` and the port in `DATABASE_URL` must match.
 
+## Application configuration
+
+The backend accepts one optional non-secret TOML file selected by `CHAHUA_CONFIG_PATH`.
+Use an absolute path; a relative path is resolved from the backend process's working
+directory. With no file selected, existing environment-only deployments continue to work.
+Resolution is **defaults → TOML → existing environment variables**, including values
+supplied by runspace or the container image. Settings are loaded once; restart to apply changes.
+A missing selected file emits a warning and falls back to environment variables and
+defaults. Other read errors, malformed TOML, and unknown fields fail startup.
+
+Start from [`backend/config.example.toml`](../backend/config.example.toml):
+
+```bash
+cp backend/config.example.toml backend/config.local.toml
+CHAHUA_CONFIG_PATH="$PWD/backend/config.local.toml" node runspace/dev.mjs dev
+```
+
+The file covers server binds/CORS, logging, media settings and region, development
+authentication, avatars, message search, public push/APNs metadata, node IDs, and link-preview request headers.
+Runspace's generated bind/storage environment still wins,
+preserving worktree isolation. The Docker image defaults to `/config/config.toml`;
+if it is absent, the backend warns and uses environment variables and defaults.
+Mount custom TOML read-only at that path, for example with
+`--mount type=bind,src=/absolute/path/config.toml,dst=/config/config.toml,readonly`.
+Set `CHAHUA_CONFIG_PATH` to override the container path. Do not bake environment-specific
+configuration or credentials into the image.
+
+`DATABASE_URL`, JWT/service-token signing keys, `VAPID_PRIVATE_KEY`, `MEILI_MASTER_KEY`,
+`APNS_PRIVATE_KEY_PATH`, and AWS credentials remain environment/provider-chain settings,
+not TOML values. Keep actual private key files protected as before. Public metadata such
+as `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`, APNs key/team IDs and topic may be in TOML.
+
+Each `[[link_previews.sites]]` entry has a required `host` and an optional `headers`
+map. Hosts match exact canonical hostnames, not wildcards or inherited subdomain rules.
+Literal non-secret headers are allowed; secrets use explicit environment references:
+
+```toml
+[[link_previews.sites]]
+host = "example.com"
+headers = {
+    User-Agent = "chahua-link-preview/1.0",
+    Cookie = { env = "PREVIEW_EXAMPLE_COOKIE" },
+}
+
+[[link_previews.sites]]
+host = "news.example.org"
+headers = {
+    Authorization = { env = "PREVIEW_NEWS_AUTHORIZATION" },
+}
+```
+
+Referenced variables must exist. `Cookie` and `Authorization` cannot be literal TOML
+strings; use environment references for other sensitive headers too. Use dedicated
+read-only site credentials because these are server-wide fetch settings, not per-user
+sessions. There is no cookie jar or `Set-Cookie` persistence. Redirects and thumbnail
+requests select only their destination host's settings; credentials never follow another
+host implicitly. Host/connection/framing headers and `Accept-Encoding` cannot be
+overridden. HTTPS, TLS validation, DNS/IP restrictions, address pinning, deadlines and
+response limits remain enforced.
+
+Built-in website profiles and special handlers remain in Rust. TOML headers override
+individual headers on the exact host, preserving other built-in headers and handlers.
+An empty or absent sites list keeps all built-in profiles; it does not disable them.
+TOML cannot select a handler or enable inherited subdomain matching.
+
 ## Port overrides and LAN HTTPS
 
 All frontend modes bind to `127.0.0.1` by default and are accessible only from this machine; pass `--host 0.0.0.0` to allow LAN access, or add `PWA_HOST=0.0.0.0` to the ignored worktree file `runspace/.env`. The command-line `--host` takes precedence over this saved setting.
