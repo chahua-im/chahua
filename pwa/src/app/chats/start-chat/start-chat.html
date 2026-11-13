@@ -41,40 +41,53 @@
           </ion-item>
         </ion-list>
       }
-      @if (preview(); as invite) {
+      @if (preview() || pending() === Action.Lookup) {
+        @let invite = preview();
         <div class="invite-profile ion-text-center ion-padding">
-          <app-chat-avatar [size]="88" [entry]="{ avatar: invite.chat.avatar, title: invite.chat.name }" />
-          <h2>{{ invite.chat.name }}</h2>
+          <app-chat-avatar
+            [size]="88"
+            [entry]="invite ? { avatar: invite.chat.avatar, title: invite.chat.name } : { icon: defaultAvatarIcon }" />
+          <h2>
+            @if (invite) {
+              {{ invite.chat.name }}
+            } @else {
+              <ion-skeleton-text class="name-placeholder" [animated]="true" />
+            }
+          </h2>
           <p class="invite-meta">
-            {{ 'chats.start.groupCreatedOn' | transloco: { date: (invite.chat.createdAt | localDate) } }}
+            @if (invite) {
+              {{ 'chats.start.groupCreatedOn' | transloco: { date: (invite.chat.createdAt | localDate) } }}
+            } @else {
+              <ion-skeleton-text class="meta-placeholder" [animated]="true" />
+            }
           </p>
-          @if (invite.chat.description) {
-            <p class="invite-description">{{ invite.chat.description }}</p>
+          @if (!invite || invite.chat.description) {
+            <p class="invite-description">
+              @if (invite) {
+                {{ invite.chat.description }}
+              } @else {
+                <ion-skeleton-text [animated]="true" />
+                <br />
+                <ion-skeleton-text [animated]="true" />
+              }
+            </p>
           }
-          @if (invite.chat.speakingMode !== SpeakingMode.unrestricted) {
-            <p class="invite-restriction">{{ 'speaking.modes.' + invite.chat.speakingMode | transloco }}</p>
+          @if (invite) {
+            @if (invite.chat.speakingMode !== SpeakingMode.unrestricted) {
+              <p class="invite-restriction">{{ 'speaking.modes.' + invite.chat.speakingMode | transloco }}</p>
+            }
+            @switch (status(invite.invite)) {
+              @case (Status.Expired) {
+                <p class="invite-meta">{{ 'chats.inviteStatus.expired' | transloco }}</p>
+              }
+              @case (Status.Revoked) {
+                <p class="invite-meta">{{ 'chats.inviteStatus.revoked' | transloco }}</p>
+              }
+              @case (Status.Used) {
+                <p class="invite-meta">{{ 'chats.inviteStatus.used' | transloco }}</p>
+              }
+            }
           }
-          @switch (status(invite.invite)) {
-            @case (Status.Expired) {
-              <p class="invite-meta">{{ 'chats.inviteStatus.expired' | transloco }}</p>
-            }
-            @case (Status.Revoked) {
-              <p class="invite-meta">{{ 'chats.inviteStatus.revoked' | transloco }}</p>
-            }
-            @case (Status.Used) {
-              <p class="invite-meta">{{ 'chats.inviteStatus.used' | transloco }}</p>
-            }
-          }
-        </div>
-      } @else if (pending() === Action.Lookup) {
-        <div class="invite-profile ion-text-center ion-padding">
-          <app-chat-avatar [size]="88" [entry]="{ icon: defaultAvatarIcon }" />
-          <h2><ion-skeleton-text class="name-placeholder" [animated]="true" /></h2>
-          <p class="invite-meta"><ion-skeleton-text class="meta-placeholder" [animated]="true" /></p>
-          <p class="invite-description">
-            <ion-skeleton-text [animated]="true" />
-            <ion-skeleton-text [animated]="true" />
-          </p>
         </div>
       } @else if (previewIssue(); as issue) {
         <div class="invite-profile ion-text-center ion-padding">
@@ -114,18 +127,18 @@
         </span>
       </ion-button>
     }
-    @if (kind() === Kind.Join) {
-      @if (preview(); as invite) {
-        <p class="invite-meta invite-validity ion-text-center ion-padding-horizontal">
+    @if (kind() === Kind.Join && (preview() || pending() === Action.Lookup)) {
+      <p class="invite-meta invite-validity ion-text-center ion-padding-horizontal">
+        @if (preview(); as invite) {
           {{
             invite.invite.expiresAt
               ? ('chats.invites.expiresOn' | transloco: { date: (invite.invite.expiresAt | localDate: 'dateTime') })
               : ('chats.start.inviteNeverExpires' | transloco)
           }}
-        </p>
-      } @else if (pending() === Action.Lookup) {
-        <p class="invite-meta invite-validity"><ion-skeleton-text class="meta-placeholder" [animated]="true" /></p>
-      }
+        } @else {
+          <ion-skeleton-text class="meta-placeholder" [animated]="true" />
+        }
+      </p>
     }
   }
   @if (error() && (kind() !== Kind.Join || preview())) {

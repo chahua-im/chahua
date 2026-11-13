@@ -38,7 +38,11 @@
 }
 
 ion-skeleton-text {
-  margin-inline: auto;
+  display: inline-block;
+  vertical-align: middle;
+  height: 0.65em;
+  margin: 0;
+  max-width: 100%;
 }
 
 .name-placeholder {

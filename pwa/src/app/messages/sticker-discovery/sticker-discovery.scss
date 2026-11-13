@@ -87,10 +87,6 @@ ion-progress-bar {
 .preview:has(.loaded) .preview-skeleton {
   display: none;
 }
-.heading-skeleton {
-  height: 40px;
-}
-.button-skeleton {
-  width: 64px;
-  height: 25px;
+.pack-meta .skeleton-line {
+  width: 65%;
 }

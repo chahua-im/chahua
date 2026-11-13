@@ -121,8 +121,16 @@ describe('StartChat', () => {
     const fixture = join('join-code');
     expect(fixture.nativeElement.querySelector('ion-skeleton-text')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('input')).toBeNull();
+    const profile = fixture.nativeElement.querySelector('.invite-profile');
+    const avatar = profile.querySelector('app-chat-avatar');
+    const name = profile.querySelector('h2');
+    const validity = fixture.nativeElement.querySelector('.invite-validity');
     peer.expect('invites.getByCode', { inviteCode: 'join-code' }).flush(preview());
     fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.invite-profile')).toBe(profile);
+    expect(profile.querySelector('app-chat-avatar')).toBe(avatar);
+    expect(profile.querySelector('h2')).toBe(name);
+    expect(fixture.nativeElement.querySelector('.invite-validity')).toBe(validity);
     expect(fixture.nativeElement.textContent).toContain(details.name);
     expect(fixture.nativeElement.textContent).not.toContain('查看邀请');
     peer.expectNone('invites.redeem');

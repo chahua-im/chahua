@@ -30,19 +30,25 @@
     }
     @if (!refreshing() && (!ready() || (loading() && !rows().length))) {
       @for (row of [0, 1, 2, 3, 4, 5, 6, 7]; track row) {
-        <div class="chat-skeleton-row" [class.short-title]="row % 3 === 1" [class.short-preview]="row % 3 === 2">
-          <span class="skeleton-block chat-skeleton-avatar"></span>
-          <span class="chat-skeleton-lines">
-            <span class="skeleton-block chat-skeleton-title"></span>
-            <span class="skeleton-block chat-skeleton-preview"></span>
-          </span>
-          <span class="chat-skeleton-meta">
-            <span class="skeleton-block chat-skeleton-time"></span>
-            @if (row % 2 === 0) {
-              <span class="skeleton-block chat-skeleton-badge"></span>
-            }
-          </span>
-        </div>
+        <ion-item
+          class="chat-entry chat-skeleton-row"
+          [detail]="false"
+          [class.short-title]="row % 3 === 1"
+          [class.short-preview]="row % 3 === 2">
+          <span slot="start" class="skeleton-block chat-skeleton-avatar"></span>
+          <ion-label class="ion-text-nowrap">
+            <h3><span class="skeleton-line chat-skeleton-title"></span></h3>
+            <p><span class="skeleton-line chat-skeleton-preview"></span></p>
+          </ion-label>
+          <div slot="end" class="meta">
+            <div class="timestamp"><span class="skeleton-line chat-skeleton-time"></span></div>
+            <div class="badges">
+              @if (row % 2 === 0) {
+                <ion-badge class="chat-skeleton-badge"><span></span></ion-badge>
+              }
+            </div>
+          </div>
+        </ion-item>
       }
     }
     @if (ready()) {
