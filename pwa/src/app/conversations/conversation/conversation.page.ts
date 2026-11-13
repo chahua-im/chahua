@@ -833,12 +833,11 @@ export class ConversationPage {
     }
   }
 
-  /** Start a new Ionic navigation stack at the parent conversation and replace this browser entry. */
+  /** Opening the parent chat is a destination jump, not a history Back action. */
   protected backToChat() {
     const threadId = this.threadId();
     if (!threadId) return;
-    void this.nav.navigateRoot(['/chats/chat', decodeId(this.id())], {
-      replaceUrl: true,
+    void this.nav.navigateForward(['/chats/chat', decodeId(this.id())], {
       fragment: `msg=${decodeId(threadId)}`,
     });
   }

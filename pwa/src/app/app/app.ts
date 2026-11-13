@@ -16,6 +16,7 @@ import {
   IonButton,
   IonContent,
   IonMenu,
+  NavController,
   IonRouterOutlet,
   IonSpinner,
   IonSplitPane,
@@ -73,6 +74,7 @@ enum EntryState {
 })
 export class App {
   private readonly router = inject(Router);
+  private readonly nav = inject(NavController);
   private readonly panels = inject(PanelNavigation);
   private readonly notifications = inject(PushNotifications);
   protected readonly landingPage = toSignal(
@@ -148,9 +150,9 @@ export class App {
   protected async escapeKey() {
     const segments = this.router.parseUrl(this.router.url).root.children['primary']?.segments.map((s) => s.path);
     if (segments?.length === 5 && segments[0] === 'chats' && segments[1] === 'chat' && segments[3] === 'thread')
-      await this.router.navigate(['/chats/chat', segments[2]], { replaceUrl: true, fragment: `msg=${segments[4]}` });
+      await this.nav.navigateBack(['/chats/chat', segments[2]], { replaceUrl: true, fragment: `msg=${segments[4]}` });
     else if (segments?.length === 3 && segments[0] === 'chats' && segments[1] === 'chat')
-      await this.router.navigate(['/chats'], { replaceUrl: true });
+      await this.nav.navigateBack(['/chats'], { replaceUrl: true });
     else return false;
     return true;
   }

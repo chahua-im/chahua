@@ -199,10 +199,6 @@ textarea.profile-input {
   height: 18px;
 }
 
-ion-content[hidden] {
-  display: none;
-}
-
 .quick-actions ion-button.destructive {
   --background: rgba(var(--ion-color-danger-rgb), 0.1);
   --background-activated: rgba(var(--ion-color-danger-rgb), 0.18);
@@ -212,4 +208,11 @@ ion-content[hidden] {
 }
 .quick-actions ion-button.destructive:hover span {
   color: var(--ion-color-danger-shade);
+}
+
+.detail-page {
+  background: var(--ion-background-color);
+}
+.overview-covered {
+  pointer-events: none;
 }

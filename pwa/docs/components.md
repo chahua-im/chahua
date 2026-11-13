@@ -71,7 +71,7 @@ flowchart TD
 
 panel-definitions 集中定义面板路径、类型、参数输入绑定、设置父子关系与可读地址；它不导入页面组件。panel-routes 静态映射内容类型到组件，并从协议定义生成旧入口路由。panel-url 将按类型命名的有序查询参数转换为内部面板路径，并归并同类面板；PanelNavigation 管理面板链、替换退出检查与历史，PanelUrlSerializer 保留参数顺序和查询值中的可读斜杠。
 
-ChatLink 在应用壳中承载稳定的普通路由面板容器与独立媒体弹层；媒体弹层覆盖已有面板时保留底层实例、尺寸与滚动位置，关闭动画完成后释放媒体内容。PanelPage 使用同一协议匹配路径并绑定无损 ID 等输入，按 panel-routes 的组件映射加载 MediaViewer、ChatDetails、StartChat、StickerPicker 和设置页面；父页隐藏时保留组件，返回后恢复。PanelPage 仅在已挂载的隐藏页面变为可见时调用 panelResume，包括从复制链接创建后首次显示的父页；初始可见页面由组件自身加载。简单展示组件不为数据传递新建服务。
+ChatLink 在应用壳中承载稳定的普通路由面板容器与独立媒体弹层；媒体弹层覆盖已有面板时保留底层实例、尺寸与滚动位置，关闭动画完成后释放媒体内容。PanelPage 使用同一协议匹配路径并绑定无损 ID 等输入，按 panel-routes 的组件映射加载 MediaViewer、ChatDetails、StartChat、StickerPicker 和设置页面；父页隐藏时保留组件，返回后恢复。ChatLink 在内部转场完成前保留退出页，快速导航取消旧动画；PanelNavigation 从已提交的面板历史深度判断进退方向，并记录浏览器原生转场以避免重复动画。PanelPage 仅在已挂载的隐藏页面变为可见时调用 panelResume，包括从复制链接创建后首次显示的父页；初始可见页面由组件自身加载。简单展示组件不为数据传递新建服务。
 
 SidebarFrame 是详情与贴纸共用的侧栏容器，通过内容投影保留内部组件；`docked` 控制右栏外观，`overlay` 表示由 Ionic 弹窗承载。组件统一定义侧栏表面、布局与动画，尺寸和时序见[外观](appearance.md#导航动画)。贴纸使用 Angular 的进出生命周期，关闭动画完成后移除内容；详情使用组件提供的 Ionic 动画，弹窗与路由关闭时机仍由 ChatLink 管理。窗口断点切换只更新容器呈现，不搬移或重建内容。
 

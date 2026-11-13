@@ -133,6 +133,37 @@ describe('Panel route history', () => {
     await expectHistoryNavigation(() => panels.close(), '/chats/chat/100');
   });
 
+  it('uses committed history depth for Back and Forward, including same-kind replacements', async () => {
+    await RouterTestingHarness.create('/chats/chat/100');
+    await router.navigateByUrl('/profile/2');
+    await router.navigateByUrl('/profile/3');
+    expect(panels.backwards()).toBe(false);
+    await panels.back();
+    await vi.waitFor(() => expect(router.url).toBe('/chats/chat/100?profile=2'));
+    expect(panels.backwards()).toBe(true);
+    TestBed.inject(Location).forward();
+    await vi.waitFor(() => expect(router.url).toBe('/chats/chat/100?profile=3'));
+    expect(panels.backwards()).toBe(false);
+    panels.registerLeaveCheck('/profile/3', () => false);
+    await panels.back();
+    await vi.waitFor(() => expect(TestBed.inject(Location).path()).toBe('/chats/chat/100?profile=3'));
+    expect(panels.backwards()).toBe(false);
+  });
+
+  it('records native history motion only for the corresponding history navigation', async () => {
+    await RouterTestingHarness.create('/chats/chat/100');
+    await router.navigateByUrl('/settings');
+    await router.navigateByUrl('/settings/privacy');
+    const event = new PopStateEvent('popstate');
+    Object.defineProperty(event, 'hasUAVisualTransition', { value: true });
+    window.dispatchEvent(event);
+    await panels.back();
+    await vi.waitFor(() => expect(router.url).toBe('/chats/chat/100?settings'));
+    expect(panels.nativeTransition()).toBe(true);
+    await router.navigateByUrl('/settings/privacy');
+    expect(panels.nativeTransition()).toBe(false);
+  });
+
   it('gives directly opened chat information its own chat as the background and close target', async () => {
     await RouterTestingHarness.create('/chats/chat/100/thread/200/info');
     expect(router.url.split('?')[0]).toBe('/chats/chat/100/thread/200');
@@ -428,6 +459,8 @@ describe('Panel presentation', () => {
           provide: PanelNavigation,
           useValue: {
             paths,
+            backwards: signal(false),
+            nativeTransition: signal(false),
             media: computed(() => paths().at(-1) === '/media'),
             largeScreen: signal(wide),
             close,
@@ -448,6 +481,92 @@ describe('Panel presentation', () => {
     };
     return { paths, close, back, fixture, panel, media, settle };
   }
+
+  it.each([
+    ['/settings', 'X'],
+    ['/profile/2', 'X'],
+    ['/chats/chat/100/info', 'X'],
+    ['/chats/new', 'Y'],
+    ['/chats/add-friend', 'Y'],
+    ['/chats/join/abc', 'Y'],
+  ])('pairs entry and dismissal for %s along the %s axis', async (path, axis) => {
+    const { paths, panel, settle } = setup([path]);
+    await settle();
+    expect(panel.animations[0].getKeyframes()).toEqual([
+      { offset: 0, transform: `translate${axis}(100%)` },
+      { offset: 1, transform: 'translate(0)' },
+    ]);
+    paths.set([]);
+    await settle();
+    expect(panel.animations[1].getKeyframes()).toEqual([
+      { offset: 0, transform: 'translate(0)' },
+      { offset: 1, transform: `translate${axis}(100%)` },
+    ]);
+  });
+
+  it('retains both pages through rapid forward/back transitions and restores the parent instance', async () => {
+    const original = Object.getOwnPropertyDescriptor(Element.prototype, 'animate');
+    const running: { onfinish: (() => void) | null; cancel: ReturnType<typeof vi.fn> }[] = [];
+    vi.stubGlobal('AnimationEffect', class {});
+    Object.defineProperty(Element.prototype, 'animate', {
+      configurable: true,
+      value: () => {
+        const animation = { pause: vi.fn(), play: vi.fn(), cancel: vi.fn(), onfinish: null as (() => void) | null };
+        running.push(animation);
+        return animation;
+      },
+    });
+    try {
+      const { paths, fixture, settle } = setup(['/settings']);
+      await settle();
+      const parent = fixture.nativeElement.querySelector('app-panel-page');
+      paths.set(['/settings', '/settings/privacy']);
+      await settle();
+      const child = fixture.nativeElement.querySelectorAll('app-panel-page')[1];
+      expect(parent.closest('.panel-layer').hidden).toBe(false);
+      const navigation = TestBed.inject(PanelNavigation);
+      navigation.backwards.set(true);
+      paths.set(['/settings']);
+      await settle();
+      expect(running[0].cancel).toHaveBeenCalled();
+      expect(fixture.nativeElement.querySelectorAll('app-panel-page')).toHaveLength(2);
+      expect(child.closest('.panel-layer').style.zIndex).toBe('1');
+      running[0].onfinish?.();
+      running[1].onfinish?.();
+      await settle();
+      expect(fixture.nativeElement.querySelectorAll('app-panel-page')).toHaveLength(2);
+      running.at(-2)!.onfinish?.();
+      running.at(-1)!.onfinish?.();
+      await Promise.resolve();
+      await settle();
+      expect(fixture.nativeElement.querySelectorAll('app-panel-page')).toHaveLength(1);
+      expect(fixture.nativeElement.querySelector('app-panel-page')).toBe(parent);
+      expect(parent.closest('.panel-layer').hidden).toBe(false);
+      expect(parent.closest('.panel-layer').style.pointerEvents).toBe('');
+    } finally {
+      if (original) Object.defineProperty(Element.prototype, 'animate', original);
+      else delete (Element.prototype as { animate?: unknown }).animate;
+    }
+  });
+
+  it('skips panel motion after a native history transition and restores normal entry afterwards', async () => {
+    const { paths, fixture, panel, settle } = setup(['/settings', '/settings/privacy']);
+    await settle();
+    const navigation = TestBed.inject(PanelNavigation);
+    navigation.nativeTransition.set(true);
+    navigation.backwards.set(true);
+    paths.set(['/settings']);
+    await settle();
+    expect(fixture.nativeElement.querySelectorAll('app-panel-page')).toHaveLength(1);
+    expect(fixture.componentInstance['rendered']().leaving).toBeUndefined();
+    paths.set([]);
+    await settle();
+    expect(panel.animations.at(-1)!.getDuration()).toBe(1);
+    navigation.nativeTransition.set(false);
+    paths.set(['/settings']);
+    await settle();
+    expect(panel.animations.at(-1)!.getDuration()).toBe(240);
+  });
 
   it('goes back one page on Escape while other close actions close the panel flow', async () => {
     const { panel, back, close, settle } = setup(['/settings', '/settings/privacy']);

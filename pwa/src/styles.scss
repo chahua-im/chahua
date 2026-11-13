@@ -505,3 +505,12 @@ ion-alert.invite-revoke-confirmation {
     color: var(--ion-color-danger);
   }
 }
+
+// Browsing panels share the mobile page surface; task forms remain sheets.
+@media (max-width: 767px) {
+  ion-modal.route-panel.panel-page {
+    --width: 100%;
+    --height: 100%;
+    --border-radius: 0;
+  }
+}

@@ -1156,7 +1156,7 @@ describe('ConversationPage', () => {
   it('returns a thread to its root message from the top-right desktop button', async () => {
     await enterThread();
     await settleMetadata();
-    const navigate = vi.spyOn(TestBed.inject(NavController), 'navigateRoot').mockResolvedValue(true);
+    const navigate = vi.spyOn(TestBed.inject(NavController), 'navigateForward').mockResolvedValue(true);
     const button = fixture.nativeElement.querySelector(
       'ion-buttons.ion-hide-md-down[slot="end"] .parent-chat-button',
     ) as HTMLElement;
@@ -1164,24 +1164,22 @@ describe('ConversationPage', () => {
     expect(fixture.nativeElement.querySelector('ion-buttons[slot="start"] .parent-chat-button')).toBeNull();
     button.click();
     expect(navigate).toHaveBeenCalledWith(['/chats/chat', wireChat.id], {
-      replaceUrl: true,
       fragment: 'msg=100',
     });
   });
 
-  it('keeps the parent-chat action visible in the collapsed mobile toolbar and starts a new navigation stack', async () => {
+  it('keeps the parent-chat action visible in the collapsed mobile toolbar and navigates forward', async () => {
     await enterThread();
     await settleMetadata();
     component['compactToolbar'].set(true);
     fixture.detectChanges();
-    const navigate = vi.spyOn(TestBed.inject(NavController), 'navigateRoot').mockResolvedValue(true);
+    const navigate = vi.spyOn(TestBed.inject(NavController), 'navigateForward').mockResolvedValue(true);
     const button = fixture.nativeElement.querySelector(
       'ion-buttons.ion-hide-md-up[slot="end"] .parent-chat-button',
     ) as HTMLElement;
     expect(button).toBeTruthy();
     button.click();
     expect(navigate).toHaveBeenCalledWith(['/chats/chat', wireChat.id], {
-      replaceUrl: true,
       fragment: 'msg=100',
     });
   });
