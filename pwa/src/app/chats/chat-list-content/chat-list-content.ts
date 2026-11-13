@@ -20,6 +20,7 @@ import {
 import { Router } from '@angular/router';
 import { TranslocoPipe } from '@jsverse/transloco';
 import {
+  IonBadge,
   IonContent,
   IonInfiniteScroll,
   IonInfiniteScrollContent,
@@ -84,6 +85,7 @@ enum ListRowKind {
     ChatMute,
     ContentScrollbars,
     LoadError,
+    IonBadge,
     IonContent,
     IonItem,
     IonLabel,

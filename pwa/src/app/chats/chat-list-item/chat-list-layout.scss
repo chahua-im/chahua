@@ -1,0 +1,27 @@
+ion-item.chat-entry {
+  --min-height: var(--app-chat-row-height);
+  --app-item-spacing: 6px;
+}
+
+.meta {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  font-size: var(--app-font-caption);
+  line-height: var(--app-line-caption);
+}
+
+.badges {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.timestamp {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}

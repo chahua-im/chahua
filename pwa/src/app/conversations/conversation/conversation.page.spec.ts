@@ -1022,6 +1022,16 @@ describe('ConversationPage', () => {
     const request = peer.expect('messages.list', { chatId: wireChat.id, max: 50 });
     expect(fixture.nativeElement.querySelector('.message-skeleton')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('.message-skeleton-avatar')).toBeNull();
+    expect(fixture.nativeElement.querySelectorAll('.message-skeleton .chat-row.no-details')).toHaveLength(6);
+    dmDetails.set(true);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.message-skeleton .sent .message-skeleton-avatar')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.message-skeleton .chat-row.no-details')).toBeNull();
+    avatars.set(true);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('.message-skeleton-avatar')).toHaveLength(6);
+    avatars.set(false);
+    dmDetails.set(false);
     request.flush({
       chatSettings: { showMembershipMessages: true },
       messages: [{ ...wireMessage }],

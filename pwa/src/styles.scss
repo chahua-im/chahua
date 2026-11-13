@@ -266,9 +266,34 @@ ion-content.load-error-page::part(scroll) {
   flex: 1;
 }
 
-.skeleton-block {
+.skeleton-block,
+.skeleton-line::after,
+.skeleton-label::after {
   background: var(--ion-background-color-step-100, #f0f0f0);
   animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.skeleton-label {
+  position: relative;
+  color: transparent;
+}
+
+// Preserve the real text line box while drawing a shorter placeholder inside it.
+.skeleton-line {
+  display: inline-block;
+  position: relative;
+  width: 100%;
+  height: 1lh;
+  vertical-align: top;
+}
+.skeleton-line::after,
+.skeleton-label::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  top: calc((100% - 0.65em) / 2);
+  height: 0.65em;
+  border-radius: 0.325em;
 }
 
 @keyframes skeleton-pulse {

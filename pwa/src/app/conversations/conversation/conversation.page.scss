@@ -1,3 +1,4 @@
+@use '../../messages/message/message-layout' as message;
 @use '../sticky-avatar';
 :host.details-open {
   padding-inline-end: var(--app-sidebar-width);
@@ -192,54 +193,36 @@ ion-title app-message-preview {
 }
 
 .message-skeleton {
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  gap: 10px;
-  min-height: 100%;
-  padding: 16px 7px 8px;
+  @include message.metrics;
+  padding-block: 8px;
 }
-
-.message-skeleton-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  padding-inline: 7px;
+.message-skeleton-item {
+  container-type: inline-size;
 }
-
-.message-skeleton-row.sent {
-  justify-content: flex-end;
-}
-
 .message-skeleton-avatar {
-  flex-shrink: 0;
   width: 34px;
   height: 34px;
   border-radius: 50%;
 }
-
 .message-skeleton-bubble {
-  flex-shrink: 0;
-  width: 62%;
-  height: 42px;
-  border-radius: 16px 16px 16px 8px;
+  position: relative;
+  width: 24ch;
+  max-width: 100%;
+  .skeleton-line {
+    display: block;
+    &::after {
+      background: var(--ion-background-color-step-200, var(--ion-color-light-shade));
+    }
+  }
 }
-
-.message-skeleton-row.sent .message-skeleton-bubble {
-  width: 48%;
-  border-radius: 16px 16px 8px 16px;
+.short .message-skeleton-bubble {
+  width: 14ch;
 }
-
-.message-skeleton-row.short .message-skeleton-bubble {
-  width: 38%;
-}
-
-.message-skeleton-row.sent.short .message-skeleton-bubble {
-  width: 32%;
-}
-
-.message-skeleton-row.tall .message-skeleton-bubble {
-  height: 58px;
+.message-skeleton-author {
+  width: 60%;
+  margin-bottom: 2px;
+  font-size: var(--app-font-compact);
+  line-height: var(--app-line-compact);
 }
 
 .pinned-bar {
