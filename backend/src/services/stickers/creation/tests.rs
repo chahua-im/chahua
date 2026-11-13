@@ -118,7 +118,7 @@ async fn failed_sticker_creation_removes_only_new_object() {
     let result = create_sticker(
         &pool,
         &storage.store,
-        &ids::new_generator(0),
+        &ids::new_generator(),
         1,
         20,
         StickerInput {
@@ -226,7 +226,7 @@ async fn media_io_releases_connections_and_commit_failures_cleanup() {
             create_sticker_from_message(
                 &request_pool,
                 &store,
-                &ids::new_generator(0),
+                &ids::new_generator(),
                 1,
                 20,
                 CreateStickerFromMessageBody {

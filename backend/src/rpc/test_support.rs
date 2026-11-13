@@ -54,7 +54,7 @@ pub(crate) async fn services() -> Option<RpcServices> {
         eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
         return None;
     };
-    let mut config = AppConfig::from_env(crate::config::ConfigFile::from_env());
+    let mut config = AppConfig::from_env();
     config.database_url = database_url.clone();
     let config = Arc::new(config);
     let metrics = Arc::new(Metrics::new());
@@ -87,11 +87,10 @@ pub(crate) async fn services() -> Option<RpcServices> {
         media.clone(),
         avatars.clone(),
         ws_registry.clone(),
-        config.link_previews.clone(),
     );
     Some(RpcServices::new(RpcServiceHandles {
         db: db.clone(),
-        id_gen: Arc::new(crate::utils::ids::new_generator(config.node_id)),
+        id_gen: Arc::new(crate::utils::ids::new_generator()),
         media,
         avatars,
         link_previews,
@@ -103,7 +102,6 @@ pub(crate) async fn services() -> Option<RpcServices> {
             ws_registry.clone(),
             metrics.push.clone(),
             unread_service.clone(),
-            config.push.clone(),
         ),
         unread_service,
         client_tracking,

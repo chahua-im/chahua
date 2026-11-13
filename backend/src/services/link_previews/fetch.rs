@@ -1,7 +1,7 @@
 use std::{
     net::{IpAddr, SocketAddr},
     pin::Pin,
-    sync::{Arc, LazyLock},
+    sync::LazyLock,
     time::Duration,
 };
 
@@ -10,8 +10,6 @@ use ipnet::IpNet;
 use reqwest::{header, redirect::Policy, StatusCode};
 use scraper::{Html, Selector};
 use url::Url;
-
-use crate::config::LinkPreviewConfig;
 
 use super::validate_url;
 
@@ -61,7 +59,6 @@ trait Transport: Send + Sync {
         &'a self,
         url: &'a Url,
         address: SocketAddr,
-        headers: Option<&'a header::HeaderMap>,
     ) -> BoxFuture<'a, Result<Response, PreviewFetchError>>;
 }
 
@@ -84,7 +81,6 @@ impl Transport for SystemTransport {
         &'a self,
         url: &'a Url,
         address: SocketAddr,
-        headers: Option<&'a header::HeaderMap>,
     ) -> BoxFuture<'a, Result<Response, PreviewFetchError>> {
         Box::pin(async move {
             let host = url.host_str().ok_or(PreviewFetchError::InvalidUrl)?;
@@ -98,15 +94,12 @@ impl Transport for SystemTransport {
                 .user_agent("chahua-link-preview/1.0")
                 .build()
                 .map_err(|_| PreviewFetchError::Http)?;
-            let mut request = client
+            let response = client
                 .get(url.clone())
-                .header(header::ACCEPT_ENCODING, "identity");
-            if let Some(headers) = headers {
-                for (name, value) in headers {
-                    request = request.header(name, value);
-                }
-            }
-            let response = request.send().await.map_err(|_| PreviewFetchError::Http)?;
+                .header(header::ACCEPT_ENCODING, "identity")
+                .send()
+                .await
+                .map_err(|_| PreviewFetchError::Http)?;
             let status = response.status();
             let headers = response.headers().clone();
             let body = response
@@ -123,14 +116,18 @@ impl Transport for SystemTransport {
 
 pub struct SecurePreviewFetcher {
     transport: Box<dyn Transport>,
-    config: Arc<LinkPreviewConfig>,
+}
+
+impl Default for SecurePreviewFetcher {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SecurePreviewFetcher {
-    pub fn new(config: Arc<LinkPreviewConfig>) -> Self {
+    pub fn new() -> Self {
         Self {
             transport: Box::new(SystemTransport),
-            config,
         }
     }
 
@@ -175,10 +172,7 @@ impl SecurePreviewFetcher {
             }
             // Pin exactly one vetted address; the original URL retains its host for TLS/SNI.
             let address = SocketAddr::new(addresses[0].ip(), 443);
-            let mut response = self
-                .transport
-                .get(&checked, address, self.config.headers_for(host))
-                .await?;
+            let mut response = self.transport.get(&checked, address).await?;
             for value in response.headers.get_all(header::CONTENT_ENCODING) {
                 let value = value
                     .to_str()
@@ -364,14 +358,16 @@ fn extract_preview(base: &Url, bytes: &[u8]) -> Result<FetchedLinkPreview, Previ
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{collections::VecDeque, sync::Mutex};
+    use std::{
+        collections::VecDeque,
+        sync::{Arc, Mutex},
+    };
 
     #[derive(Default)]
     struct State {
         answers: VecDeque<Vec<SocketAddr>>,
         responses: VecDeque<Response>,
         calls: Vec<(String, SocketAddr)>,
-        request_headers: Vec<Option<header::HeaderMap>>,
         dns_hangs: bool,
         http_hangs: bool,
     }
@@ -402,13 +398,11 @@ mod tests {
             &'a self,
             url: &'a Url,
             address: SocketAddr,
-            headers: Option<&'a header::HeaderMap>,
         ) -> BoxFuture<'a, Result<Response, PreviewFetchError>> {
             Box::pin(async move {
                 let (hang, response) = {
                     let mut state = self.0.lock().unwrap();
                     state.calls.push((url.to_string(), address));
-                    state.request_headers.push(headers.cloned());
                     (state.http_hangs, state.responses.pop_front())
                 };
                 if hang {
@@ -428,42 +422,6 @@ mod tests {
     fn fetcher(state: Arc<Mutex<State>>) -> SecurePreviewFetcher {
         SecurePreviewFetcher {
             transport: Box::new(Fake(state)),
-            config: Arc::new(LinkPreviewConfig::default()),
-        }
-    }
-    fn configured_fetcher(state: Arc<Mutex<State>>) -> SecurePreviewFetcher {
-        let settings: crate::config::LinkPreviewSettings = toml::from_str(
-            r#"
-[[sites]]
-host = "example.com"
-[sites.headers]
-Cookie = { env = "ORIGIN_COOKIE" }
-Authorization = { env = "ORIGIN_AUTH" }
-
-[[sites]]
-host = "other.example"
-[sites.headers]
-Cookie = { env = "DESTINATION_COOKIE" }
-Referer = "https://other.example/"
-
-[[sites]]
-host = "blocked.example"
-[sites.headers]
-Cookie = { env = "BLOCKED_COOKIE" }
-"#,
-        )
-        .unwrap();
-        let config = LinkPreviewConfig::from_settings(settings, |name| match name {
-            "ORIGIN_COOKIE" => Some("origin=session".into()),
-            "ORIGIN_AUTH" => Some("Bearer origin".into()),
-            "DESTINATION_COOKIE" => Some("destination=session".into()),
-            "BLOCKED_COOKIE" => Some("blocked=session".into()),
-            _ => None,
-        })
-        .unwrap();
-        SecurePreviewFetcher {
-            transport: Box::new(Fake(state)),
-            config: Arc::new(config),
         }
     }
     fn response(status: StatusCode, headers: &[(&str, &str)], chunks: Vec<Vec<u8>>) -> Response {
@@ -595,103 +553,6 @@ Cookie = { env = "BLOCKED_COOKIE" }
                 .description
                 .unwrap(),
             "界".repeat(512)
-        );
-    }
-
-    #[tokio::test]
-    async fn link_preview_site_headers_follow_each_redirect_target() {
-        for (target, expected_cookie, expected_authorization, expected_referer) in [
-            ("/next", Some("origin=session"), Some("Bearer origin"), None),
-            (
-                "https://other.example/next",
-                Some("destination=session"),
-                None,
-                Some("https://other.example/"),
-            ),
-            ("https://sub.example.com/next", None, None, None),
-        ] {
-            let state = Arc::new(Mutex::new(State {
-                answers: VecDeque::from([vec![addr("8.8.8.8")], vec![addr("1.1.1.1")]]),
-                responses: VecDeque::from([redirect(target), ok_html("<title>ok</title>")]),
-                ..State::default()
-            }));
-            configured_fetcher(state.clone())
-                .fetch_page(&url("https://example.com/start"))
-                .await
-                .unwrap();
-            let state = state.lock().unwrap();
-            let origin = state.request_headers[0].as_ref().unwrap();
-            assert_eq!(origin.get(header::COOKIE).unwrap(), "origin=session");
-            assert_eq!(origin.get(header::AUTHORIZATION).unwrap(), "Bearer origin");
-            let destination = state.request_headers[1].as_ref();
-            let get = |name| {
-                destination
-                    .and_then(|headers| headers.get(name))
-                    .map(|v| v.to_str().unwrap())
-            };
-            assert_eq!(get(header::COOKIE), expected_cookie);
-            assert_eq!(get(header::AUTHORIZATION), expected_authorization);
-            assert_eq!(get(header::REFERER), expected_referer);
-        }
-    }
-
-    #[tokio::test]
-    async fn link_preview_site_headers_use_thumbnail_host() {
-        let state = Arc::new(Mutex::new(State {
-            answers: VecDeque::from([vec![addr("8.8.8.8")], vec![addr("1.1.1.1")]]),
-            responses: VecDeque::from([
-                ok_html("<title>ok</title><meta property='og:image' content='https://other.example/image'>"),
-                response(StatusCode::OK, &[], vec![b"image".to_vec()]),
-            ]),
-            ..State::default()
-        }));
-        let fetcher = configured_fetcher(state.clone());
-        let page = fetcher
-            .fetch_page(&url("https://example.com/"))
-            .await
-            .unwrap();
-        assert_eq!(
-            fetcher
-                .fetch_thumbnail(&page.image_url.unwrap())
-                .await
-                .unwrap(),
-            b"image"
-        );
-        let state = state.lock().unwrap();
-        let image_headers = state.request_headers[1].as_ref().unwrap();
-        assert_eq!(
-            image_headers.get(header::COOKIE).unwrap(),
-            "destination=session"
-        );
-        assert!(image_headers.get(header::AUTHORIZATION).is_none());
-        assert_eq!(
-            image_headers.get(header::REFERER).unwrap(),
-            "https://other.example/"
-        );
-    }
-
-    #[tokio::test]
-    async fn link_preview_site_headers_cannot_bypass_redirect_address_policy() {
-        let state = Arc::new(Mutex::new(State {
-            answers: VecDeque::from([vec![addr("8.8.8.8")], vec![addr("127.0.0.1")]]),
-            responses: VecDeque::from([redirect("https://blocked.example/")]),
-            ..State::default()
-        }));
-        assert!(matches!(
-            configured_fetcher(state.clone())
-                .fetch_page(&url("https://example.com/"))
-                .await,
-            Err(PreviewFetchError::ForbiddenAddress)
-        ));
-        let state = state.lock().unwrap();
-        assert_eq!(state.calls.len(), 1);
-        assert_eq!(
-            state.request_headers[0]
-                .as_ref()
-                .unwrap()
-                .get(header::COOKIE)
-                .unwrap(),
-            "origin=session"
         );
     }
 

@@ -13,7 +13,6 @@
 
 # Local runspace configuration
 /runspace/.env*
-/backend/config.local.toml
 /runspace/__pycache__/
 /reference
 /ci-deploy/
