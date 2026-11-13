@@ -4,6 +4,7 @@ const MAX_GROUP_SPAN_MS = 10 * 60 * 1000;
 
 export function messageRows<T extends Pick<MessageResponse, 'createdAt' | 'messageType' | 'sender'>>(
   messages: readonly T[],
+  groupBreakIndex = -1,
 ) {
   const dates = messages.map((message) => new Date(message.createdAt).toDateString());
   const continuesGroup = (left: number, right: number) => {
@@ -21,6 +22,7 @@ export function messageRows<T extends Pick<MessageResponse, 'createdAt' | 'messa
   let groupStart = 0;
   const rows = messages.map((message, index) => {
     const first =
+      index === groupBreakIndex ||
       !continuesGroup(index - 1, index) ||
       Date.parse(message.createdAt) - Date.parse(messages[groupStart].createdAt) > MAX_GROUP_SPAN_MS;
     if (first) groupStart = index;

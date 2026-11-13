@@ -969,7 +969,7 @@ export class ConversationPage {
       this.chatInfo.get(this.id())?.kind !== GroupKind.dm &&
       (!this.preferences.showMembershipMessages() || this.chatInfo.membershipPolicy(this.id())?.canView === false),
   );
-  protected readonly rows = computed(() => {
+  private readonly messageEntries = computed(() => {
     if (!this.accessible()) return [];
     const messages = this.conversation.items();
     const hideMembershipMessages = this.hideMembershipMessages();
@@ -1008,7 +1008,19 @@ export class ConversationPage {
         continue;
       entries.push({ key: outgoing.clientGeneratedId, message: outgoing.message(), outgoing });
     }
-    return messageRows(entries.map((entry) => entry.message)).map((row, index) => ({ ...row, ...entries[index] }));
+    return entries;
+  });
+  protected readonly rows = computed(() => {
+    const entries = this.messageEntries();
+    const unreadId = this.firstUnreadId();
+    const unreadIndex = unreadId == null ? -1 : entries.findIndex((entry) => entry.message.id === unreadId);
+    return messageRows(
+      entries.map((entry) => entry.message),
+      unreadIndex,
+    ).map((row, index) => ({
+      ...row,
+      ...entries[index],
+    }));
   });
   private readonly confirmedElements = computed(() => {
     const rows = this.rows();
@@ -1050,7 +1062,7 @@ export class ConversationPage {
   private firstUnreadAfter(boundary?: SnowflakeID) {
     if (!boundary) return undefined;
     const uid = this.session.user()?.uid;
-    return this.rows().find(
+    return this.messageEntries().find(
       ({ confirmed }) => confirmed && !confirmed.isDeleted && confirmed.id > boundary && confirmed.sender.uid !== uid,
     )?.confirmed?.id;
   }
