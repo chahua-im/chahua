@@ -51,6 +51,8 @@ WORKDIR /app
 # Copy the built binary from builder
 COPY --from=builder /app/wetty-chat-backend /app/wetty-chat-backend
 
+ENV CHAHUA_CONFIG_PATH=/config/config.toml
+
 # Server listens on 3000 and exposes Prometheus metrics on 3001
 EXPOSE 3000
 EXPOSE 3001

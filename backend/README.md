@@ -13,6 +13,9 @@ HTTP APIs, JSON-RPC operations, and real-time updates for the PWA and other clie
 | `src/services/` | Domain logic and integrations: messages, users, unread state, presence, media, search, and push. |
 | `src/dto/`, `src/models.rs`, `src/schema/` | Wire contracts, database models, and Diesel schema definitions. |
 
+Configuration is resolved once at startup from optional TOML plus environment
+overrides; secret values remain outside TOML. See [application configuration](../docs/local-setup.md#application-configuration).
+
 Transport adapters call shared application services rather than duplicating business
 logic. Services receive the dependencies they need, not the entire `AppState`.
 Blocking database and filesystem work runs outside async executor threads.

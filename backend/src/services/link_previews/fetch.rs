@@ -565,24 +565,36 @@ mod tests {
         }
     }
     fn configured_fetcher(state: Arc<Mutex<State>>) -> SecurePreviewFetcher {
-        let config = LinkPreviewConfig::empty()
-            .with_site(
-                "example.com",
-                None,
-                &[
-                    ("Cookie", "origin=session"),
-                    ("Authorization", "Bearer origin"),
-                ],
-            )
-            .with_site(
-                "other.example",
-                None,
-                &[
-                    ("Cookie", "destination=session"),
-                    ("Referer", "https://other.example/"),
-                ],
-            )
-            .with_site("blocked.example", None, &[("Cookie", "blocked=session")]);
+        let settings: crate::config::LinkPreviewSettings = toml::from_str(
+            r#"
+[[sites]]
+host = "example.com"
+[sites.headers]
+Cookie = { env = "ORIGIN_COOKIE" }
+Authorization = { env = "ORIGIN_AUTH" }
+
+[[sites]]
+host = "other.example"
+[sites.headers]
+Cookie = { env = "DESTINATION_COOKIE" }
+Referer = "https://other.example/"
+
+[[sites]]
+host = "blocked.example"
+[sites.headers]
+Cookie = { env = "BLOCKED_COOKIE" }
+"#,
+        )
+        .unwrap();
+        let config = crate::config::LinkPreviewConfig::from_settings(settings, |name| match name {
+            "ORIGIN_COOKIE" => Some("origin=session".into()),
+            "ORIGIN_AUTH" => Some("Bearer origin".into()),
+            "DESTINATION_COOKIE" => Some("destination=session".into()),
+            "BLOCKED_COOKIE" => Some("blocked=session".into()),
+            _ => None,
+        })
+        .unwrap();
+        let config = LinkPreviewConfig::default().with_overrides(&config);
         SecurePreviewFetcher {
             transport: Box::new(Fake(state)),
             config: Arc::new(config),
@@ -696,14 +708,19 @@ mod tests {
             ok_html("<title>Answer</title>"),
         ]);
         let mut fetcher = fetcher(state.clone());
-        fetcher.config = Arc::new(LinkPreviewConfig::empty().with_site(
-            "www.zhihu.com",
-            Some(LinkPreviewHandler::Zhihu),
-            &[
-                ("User-Agent", "custom-agent"),
-                ("Cookie", "session=keep; __zse_ck=old; preference=keep"),
-            ],
-        ));
+        let overrides = crate::config::LinkPreviewConfig::from_settings(
+            toml::from_str(
+                r#"
+[[sites]]
+host = "www.zhihu.com"
+headers = { User-Agent = "custom-agent", Cookie = { env = "COOKIE" } }
+"#,
+            )
+            .unwrap(),
+            |_| Some("session=keep; __zse_ck=old; preference=keep".into()),
+        )
+        .unwrap();
+        fetcher.config = Arc::new(LinkPreviewConfig::default().with_overrides(&overrides));
         fetcher
             .fetch_page(&url("https://www.zhihu.com/question/1"))
             .await

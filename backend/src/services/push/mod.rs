@@ -39,9 +39,7 @@ pub struct PushJob {
 
 pub struct PushService {
     pub client: HyperWebPushClient,
-    pub vapid_public_key: String,
-    pub vapid_private_key: String,
-    pub vapid_subject: String,
+    pub config: Arc<crate::config::PushConfig>,
     apns_sender: Option<ApnsSender>,
     metrics: Arc<PushMetrics>,
     unread_service: Arc<UnreadService>,
@@ -58,28 +56,24 @@ impl PushService {
         ws_registry: Arc<ConnectionRegistry>,
         metrics: Arc<PushMetrics>,
         unread_service: Arc<UnreadService>,
+        config: Arc<crate::config::PushConfig>,
     ) -> Arc<Self> {
-        let public_key = std::env::var("VAPID_PUBLIC_KEY")
-            .expect("VAPID_PUBLIC_KEY environment variable must be set");
-        let private_key = std::env::var("VAPID_PRIVATE_KEY")
-            .expect("VAPID_PRIVATE_KEY environment variable must be set");
-        let subject =
-            std::env::var("VAPID_SUBJECT").expect("VAPID_SUBJECT environment variable must be set");
-
         // Validate the private key parses correctly.
-        let _ = web_push::VapidSignatureBuilder::from_base64_no_sub(&private_key)
+        let _ = web_push::VapidSignatureBuilder::from_base64_no_sub(&config.vapid_private_key)
             .expect("Failed to create VapidSignatureBuilder from VAPID_PRIVATE_KEY");
 
-        let apns_sender =
-            ApnsSender::from_env().expect("invalid APNS configuration; set all vars or none");
+        let apns_sender = config
+            .apns
+            .as_ref()
+            .map(ApnsSender::from_config)
+            .transpose()
+            .expect("invalid APNS configuration");
 
         let (tx, rx) = mpsc::channel(CHANNEL_BUFFER);
 
         let service = Arc::new(Self {
             client: HyperWebPushClient::new(),
-            vapid_public_key: public_key,
-            vapid_private_key: private_key,
-            vapid_subject: subject,
+            config,
             apns_sender,
             metrics,
             unread_service,
@@ -801,9 +795,12 @@ mod tests {
     fn apns_support_requires_sender_configuration() {
         let service = PushService {
             client: HyperWebPushClient::new(),
-            vapid_public_key: "public".to_string(),
-            vapid_private_key: "private".to_string(),
-            vapid_subject: "mailto:test@example.com".to_string(),
+            config: Arc::new(crate::config::PushConfig {
+                vapid_public_key: "public".to_string(),
+                vapid_private_key: "private".to_string(),
+                vapid_subject: "mailto:test@example.com".to_string(),
+                apns: None,
+            }),
             apns_sender: None,
             metrics: Arc::new(PushMetrics::new(&prometheus::Registry::new())),
             unread_service: Arc::new(UnreadService::new()),

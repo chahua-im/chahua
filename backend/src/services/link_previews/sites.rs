@@ -17,6 +17,18 @@ pub(crate) struct LinkPreviewConfig {
     sites: HashMap<String, Site>,
 }
 impl LinkPreviewConfig {
+    /// Deployment headers override individual built-in headers, never handlers.
+    pub(super) fn with_overrides(mut self, overrides: &crate::config::LinkPreviewConfig) -> Self {
+        for (host, headers) in overrides.sites() {
+            let site = self.sites.entry(host.to_owned()).or_insert_with(|| Site {
+                headers: HeaderMap::new(),
+                handler: None,
+            });
+            site.headers.extend(headers.clone());
+        }
+        self
+    }
+
     fn insert(
         &mut self,
         host: &str,
@@ -47,16 +59,6 @@ impl LinkPreviewConfig {
         Self {
             sites: HashMap::new(),
         }
-    }
-    #[cfg(test)]
-    pub(super) fn with_site(
-        mut self,
-        host: &str,
-        handler: Option<LinkPreviewHandler>,
-        headers: &[(&str, &str)],
-    ) -> Self {
-        self.insert(host, handler, headers);
-        self
     }
 }
 impl Default for LinkPreviewConfig {
@@ -129,5 +131,63 @@ mod tests {
             assert!(config.headers_for(host).is_none());
             assert_eq!(config.handler_for(host), None);
         }
+    }
+    #[test]
+    fn deployment_headers_override_only_the_exact_host_and_preserve_handlers() {
+        let settings = toml::from_str(
+            r#"
+[[sites]]
+host = "MP.WEIXIN.QQ.COM"
+headers = { User-Agent = "custom-agent", Cookie = { env = "COOKIE" } }
+[[sites]]
+host = "example.com"
+headers = { User-Agent = "other-agent" }
+"#,
+        )
+        .unwrap();
+        let overrides = crate::config::LinkPreviewConfig::from_settings(settings, |_| {
+            Some("session=secret".into())
+        })
+        .unwrap();
+        let config = LinkPreviewConfig::default().with_overrides(&overrides);
+        let headers = config.headers_for("mp.weixin.qq.com").unwrap();
+        assert_eq!(headers["user-agent"], "custom-agent");
+        assert_eq!(headers["cookie"], "session=secret");
+        assert!(headers["cookie"].is_sensitive());
+        assert!(headers.contains_key("accept"));
+        assert!(headers.contains_key("accept-language"));
+        assert_eq!(
+            config.handler_for("mp.weixin.qq.com"),
+            Some(LinkPreviewHandler::Weixin)
+        );
+        assert_eq!(
+            config.handler_for("www.zhihu.com"),
+            Some(LinkPreviewHandler::Zhihu)
+        );
+        assert!(!config
+            .headers_for("www.zhihu.com")
+            .unwrap()
+            .contains_key("cookie"));
+        assert_eq!(
+            config.headers_for("example.com").unwrap()["user-agent"],
+            "other-agent"
+        );
+        assert_eq!(config.handler_for("example.com"), None);
+        assert!(config.headers_for("sub.example.com").is_none());
+        assert!(!format!("{config:?}").contains("session=secret"));
+    }
+
+    #[test]
+    fn empty_deployment_configuration_keeps_built_in_profiles() {
+        let config = LinkPreviewConfig::default()
+            .with_overrides(&crate::config::LinkPreviewConfig::default());
+        assert_eq!(
+            config.handler_for("www.zhihu.com"),
+            Some(LinkPreviewHandler::Zhihu)
+        );
+        assert!(config
+            .headers_for("mp.weixin.qq.com")
+            .unwrap()
+            .contains_key("user-agent"));
     }
 }
