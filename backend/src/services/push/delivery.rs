@@ -168,30 +168,29 @@ impl PushService {
         let subscription_info =
             web_push::SubscriptionInfo::new(endpoint.clone(), data.p256dh, data.auth);
 
-        let sig_builder = match web_push::VapidSignatureBuilder::from_base64_no_sub(
-            &self.config.vapid_private_key,
-        ) {
-            Ok(b) => b,
-            Err(e) => {
-                error!(
-                    "Vapid config error (should have been caught on startup): {:?}",
-                    e
-                );
-                self.metrics
-                    .record_notification(PushProvider::WebPush.as_metrics_label(), false);
-                return Err(DeliveryFailure::from_details(
-                    sub,
-                    DeliveryFailureDetails {
-                        class: DeliveryFailureClass::BackendConfig,
-                        reason: "vapid_config".to_string(),
-                        action: DeliveryFailureAction::None,
-                    },
-                ));
-            }
-        };
+        let sig_builder =
+            match web_push::VapidSignatureBuilder::from_base64_no_sub(&self.vapid_private_key) {
+                Ok(b) => b,
+                Err(e) => {
+                    error!(
+                        "Vapid config error (should have been caught on startup): {:?}",
+                        e
+                    );
+                    self.metrics
+                        .record_notification(PushProvider::WebPush.as_metrics_label(), false);
+                    return Err(DeliveryFailure::from_details(
+                        sub,
+                        DeliveryFailureDetails {
+                            class: DeliveryFailureClass::BackendConfig,
+                            reason: "vapid_config".to_string(),
+                            action: DeliveryFailureAction::None,
+                        },
+                    ));
+                }
+            };
 
         let mut b = sig_builder.add_sub_info(&subscription_info);
-        b.add_claim("sub", self.config.vapid_subject.clone());
+        b.add_claim("sub", self.vapid_subject.clone());
         let signature = match b.build() {
             Ok(sig) => sig,
             Err(e) => {
@@ -374,25 +373,36 @@ impl PushService {
 }
 
 impl ApnsSender {
-    pub(super) fn from_config(config: &crate::config::ApnsConfig) -> Result<Self, String> {
-        let sandbox_client = Self::build_client(
-            &config.private_key_path,
-            &config.key_id,
-            &config.team_id,
-            ApnsEndpoint::Sandbox,
-        )?;
+    pub(super) fn from_env() -> Result<Option<Self>, String> {
+        let key_id = std::env::var("APNS_KEY_ID").ok();
+        let team_id = std::env::var("APNS_TEAM_ID").ok();
+        let private_key_path = std::env::var("APNS_PRIVATE_KEY_PATH").ok();
+        let topic = std::env::var("APNS_TOPIC").ok();
+
+        if key_id.is_none() && team_id.is_none() && private_key_path.is_none() && topic.is_none() {
+            return Ok(None);
+        }
+
+        let key_id = key_id.ok_or_else(|| "APNS_KEY_ID must be set".to_string())?;
+        let team_id = team_id.ok_or_else(|| "APNS_TEAM_ID must be set".to_string())?;
+        let private_key_path =
+            private_key_path.ok_or_else(|| "APNS_PRIVATE_KEY_PATH must be set".to_string())?;
+        let topic = topic.ok_or_else(|| "APNS_TOPIC must be set".to_string())?;
+
+        let sandbox_client =
+            Self::build_client(&private_key_path, &key_id, &team_id, ApnsEndpoint::Sandbox)?;
         let production_client = Self::build_client(
-            &config.private_key_path,
-            &config.key_id,
-            &config.team_id,
+            &private_key_path,
+            &key_id,
+            &team_id,
             ApnsEndpoint::Production,
         )?;
 
-        Ok(Self {
+        Ok(Some(Self {
             sandbox_client,
             production_client,
-            topic: config.topic.clone(),
-        })
+            topic,
+        }))
     }
 
     fn build_client(

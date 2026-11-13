@@ -20,7 +20,6 @@ diesel = { version = "2", features = [
 diesel_migrations = { version = "2", features = ["postgres"] }
 dotenvy = "0.15"
 serde = { version = "1", features = ["derive"] }
-toml = "0.9"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }
 tower = "0.5"

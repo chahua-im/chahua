@@ -75,7 +75,7 @@ impl SubscribeBody {
 
 pub fn get_vapid_public_key(push_service: &PushService) -> VapidPublicKeyResponse {
     VapidPublicKeyResponse {
-        public_key: push_service.config.vapid_public_key.clone(),
+        public_key: push_service.vapid_public_key.clone(),
     }
 }
 
