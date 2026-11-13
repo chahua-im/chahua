@@ -1,8 +1,8 @@
 import { DOCUMENT, Location } from '@angular/common';
 import { computed, inject, Service, signal } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
-import { NavigationEnd, RedirectCommand, Router, type CanActivateFn } from '@angular/router';
-import { filter, map } from 'rxjs';
+import { NavigationEnd, NavigationStart, RedirectCommand, Router, type CanActivateFn } from '@angular/router';
+import { filter, fromEvent, map } from 'rxjs';
 
 import { panelDefinition, PanelKind } from './panel-definitions';
 import { appendPanel, clearPanelParameters, panelIdentity, panelParent, panelPaths, setPanelPaths } from './panel-url';
@@ -30,10 +30,35 @@ export class PanelNavigation {
   readonly state = signal<Record<string, unknown>>(this.location.getState() as Record<string, unknown>);
   private readonly leaveChecks = new Map<string, () => boolean | Promise<boolean>>();
   private closing = false;
+  readonly backwards = signal(false);
+  readonly nativeTransition = signal(false);
 
   constructor() {
+    let nativeTransition = false;
+    fromEvent<PopStateEvent>(this.document.defaultView!, 'popstate')
+      .pipe(takeUntilDestroyed())
+      .subscribe((event) => {
+        nativeTransition = event.hasUAVisualTransition;
+      });
+    let previousPaths = this.paths();
     this.router.events.pipe(takeUntilDestroyed()).subscribe((event) => {
-      if (event instanceof NavigationEnd) this.state.set(this.location.getState() as Record<string, unknown>);
+      if (event instanceof NavigationStart) {
+        this.nativeTransition.set(event.navigationTrigger === 'popstate' && nativeTransition);
+      }
+      if (event instanceof NavigationEnd) {
+        const next = this.location.getState() as Record<string, unknown>;
+        const paths = panelPaths(this.router.parseUrl(event.urlAfterRedirects));
+        const depth = Number(next?.['panelDepth'] ?? 0);
+        const previousDepth = Number(this.state()?.['panelDepth'] ?? 0);
+        this.backwards.set(
+          depth !== previousDepth
+            ? depth < previousDepth
+            : paths.length < previousPaths.length ||
+                (paths.at(-1) !== previousPaths.at(-1) && paths.at(-1) === panelIdentity(previousPaths.at(-1) ?? '')),
+        );
+        this.state.set(next);
+        previousPaths = paths;
+      }
     });
   }
 

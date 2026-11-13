@@ -303,12 +303,12 @@ describe('ChatDetails', () => {
     const selected = component['tab']();
     await component['openPage'](DetailView.Management);
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('ion-content').hidden).toBe(true);
+    expect(fixture.nativeElement.querySelector('ion-content').classList.contains('overview-covered')).toBe(true);
     expect(fixture.nativeElement.querySelector('app-chat-threads')).toBe(threads);
     expect(fixture.nativeElement.querySelector('ion-title').textContent).toContain('群管理');
     component['back']();
     await fixture.whenStable();
-    expect(fixture.nativeElement.querySelector('ion-content').hidden).toBe(false);
+    expect(fixture.nativeElement.querySelector('ion-content').classList.contains('overview-covered')).toBe(false);
     expect(component['tab']()).toBe(selected);
     expect(fixture.nativeElement.querySelector('app-chat-threads')).toBe(threads);
     expect(restore).toHaveBeenCalledWith(0, 246, 0);

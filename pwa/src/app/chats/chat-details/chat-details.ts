@@ -2,6 +2,7 @@ import { DetailView } from './detail-view';
 import { registerEscape } from '../../navigation/escape-navigation';
 import { DiscardChanges } from '../../navigation/discard-changes';
 import {
+  type AnimationCallbackEvent,
   afterNextRender,
   afterRenderEffect,
   Component,
@@ -88,6 +89,7 @@ import { mediaDimensions } from '../../messages/media-processing/prepare-media';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
 import { uploadBlob } from '../../messages/upload';
 import { UploadProgress } from '../../messages/upload-progress/upload-progress';
+import { panelSlide } from '../../navigation/panel-animation';
 import { PanelNavigation } from '../../navigation/panel-navigation';
 import { Presence } from '../../presence/presence';
 import { GroupPresenceDisplay, UserPresenceDisplay } from '../../presence/presence-display';
@@ -318,6 +320,23 @@ export class ChatDetails {
   protected readonly busy = computed(() => this.pending() != null);
   protected readonly error = linkedSignal({ source: this.scope, computation: () => false });
   protected readonly View = DetailView;
+  protected animateDetail(event: AnimationCallbackEvent, entering: boolean) {
+    if (this.panels.largeScreen() || this.panels.nativeTransition() || (entering && !this.overviewVisited())) {
+      event.animationComplete();
+      return;
+    }
+    const animation = panelSlide(event.target as HTMLElement, entering, this.panels.backwards());
+    const finish = () => {
+      animation.destroy();
+      for (const property of ['pointer-events', 'z-index', 'transform'])
+        (event.target as HTMLElement).style.removeProperty(property);
+      event.animationComplete();
+      unregister();
+    };
+    const unregister = this.destroy.onDestroy(finish);
+    animation.onFinish(finish, { oneTimeCallback: true });
+    void animation.play();
+  }
   protected readonly overviewVisited = linkedSignal({ source: this.scope, computation: () => false });
   protected readonly page = linkedSignal<DetailPage>(() => {
     this.scope();
