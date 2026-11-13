@@ -14,7 +14,6 @@ export interface Draft {
   replyTo?: string;
   savedAt: number;
   linkPreviews?: readonly LinkPreviewInput[];
-  edit?: { messageId: string; text: string; linkPreviews: readonly LinkPreviewInput[] };
 }
 
 export interface RecentEmoji extends Readonly<Omit<Emoji, 'keywords'>> {

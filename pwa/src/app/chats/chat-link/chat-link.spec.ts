@@ -74,6 +74,37 @@ describe('Panel route history', () => {
     }
   });
 
+  it('checks conversation edits on page changes while allowing panels and message anchors', async () => {
+    await RouterTestingHarness.create('/chats/chat/100');
+    const leave = vi.fn().mockResolvedValue(false);
+    panels.registerLeaveCheck('/chats/chat/100', leave);
+    await router.navigateByUrl('/profile/2');
+    expect(router.url).toBe('/chats/chat/100?profile=2');
+    await router.navigateByUrl('/chats/chat/100#msg=200');
+    expect(leave).not.toHaveBeenCalled();
+    for (const destination of ['/chats/chat/101', '/chats/chat/100/thread/200', '/chats/chat/100/pins', '/chats']) {
+      expect(await router.navigateByUrl(destination)).toBe(false);
+      expect(router.url).toBe('/chats/chat/100#msg=200');
+    }
+    expect(leave).toHaveBeenCalledTimes(4);
+    leave.mockResolvedValue(true);
+    expect(await router.navigateByUrl('/chats/chat/101')).toBe(true);
+  });
+
+  it('restores browser history when a conversation edit rejects Back', async () => {
+    await RouterTestingHarness.create('/chats');
+    await router.navigateByUrl('/chats/chat/100');
+    const leave = vi.fn().mockResolvedValue(false);
+    panels.registerLeaveCheck('/chats/chat/100', leave);
+    TestBed.inject(Location).back();
+    await vi.waitFor(() => expect(leave).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(TestBed.inject(Location).path()).toBe('/chats/chat/100'));
+    expect(router.url).toBe('/chats/chat/100');
+    leave.mockResolvedValue(true);
+    TestBed.inject(Location).back();
+    await vi.waitFor(() => expect(router.url).toBe('/chats'));
+  });
+
   it('preserves the panel chain and restores it with Back and Forward', async () => {
     const expectHistoryNavigation = async (action: () => unknown, expectedUrl: string) => {
       const completed = firstValueFrom(

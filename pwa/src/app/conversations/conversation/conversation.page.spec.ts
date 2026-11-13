@@ -2421,62 +2421,114 @@ describe('ConversationPage', () => {
     expect(fixture.nativeElement.querySelector('.draft-link-fallback')).toBeNull();
   });
 
-  it('restores editing text and link choices separately from the unsent draft without fetching previews', async () => {
-    const url = 'https://example.com/';
-    const choices = [{ url, status: LinkPreviewInputStatus.disabled }];
-    component['updateDraft']('Next message');
-    component['startEdit']({ ...testMessage, message: url });
-    component['updateDraft'](url + ' edited');
+  it('discards transient editing on leave and restores only the ordinary send draft', async () => {
+    const text = 'Next https://example.com/';
+    const choices = [{ url: 'https://example.com/', status: LinkPreviewInputStatus.disabled }];
+    component['updateDraft'](text);
     component['setLinkChoices'](choices);
+    component['startReply'](testMessage);
+    component['startEdit'](testMessage);
+    component['updateDraft']('Transient edit');
     component.ionViewDidLeave();
     const drafts = TestBed.inject(DraftStore);
-    expect(drafts.get(testChat.id)).toMatchObject({
-      text: 'Next message',
-      edit: { messageId: wireMessage.id, text: url + ' edited', linkPreviews: choices },
-    });
+    expect(drafts.get(testChat.id)).toMatchObject({ text, replyTo: wireMessage.id, linkPreviews: choices });
+    expect(drafts.get(testChat.id)).not.toHaveProperty('edit');
     component.ionViewWillEnter();
     await fixture.whenStable();
-    const restore = peer.expect('messages.get', { chatId: wireChat.id, messageId: wireMessage.id });
     peer.expect('messages.list', { chatId: wireChat.id, max: 50 }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [structuredClone(wireMessage)],
     });
-    component['saveDraft']();
-    expect(drafts.get(testChat.id)?.edit?.linkPreviews).toEqual(choices);
-    restore.flush({ ...wireMessage, message: url });
+    peer.expect('messages.get', { chatId: wireChat.id, messageId: wireMessage.id }).flush(structuredClone(wireMessage));
     await fixture.whenStable();
     fixture.detectChanges();
-    expect(component['editText']()).toBe(url + ' edited');
-    expect(component['editLinks']()).toEqual(choices);
-    expect(component['draft']()).toBe('Next message');
+    expect(component['editing']()).toBeUndefined();
+    expect(component['draft']()).toBe(text);
+    expect(component['draftLinks']()).toEqual(choices);
+    expect(component['replyTo']()?.id).toBe(testMessage.id);
+    peer.expectNone('messages.get');
     peer.expectNone('messages.previewLinks');
-    component['cancelEdit']();
-    expect(drafts.get(testChat.id)?.edit).toBeUndefined();
-    expect(component['draft']()).toBe('Next message');
   });
 
-  it('does not let a delayed saved edit replace newly typed input', async () => {
+  it('preserves the ordinary draft after visiting a topic while editing', async () => {
+    const router = TestBed.inject(Router);
+    const parent = `/chats/chat/${wireChat.id}`;
+    const url = vi.spyOn(router, 'url', 'get').mockReturnValue(`${parent}/thread/${wireMessage.id}`);
+    const text = 'Ordinary https://example.com/';
+    const choices = [{ url: 'https://example.com/', status: LinkPreviewInputStatus.disabled }];
+    component['updateDraft'](text);
+    component['setLinkChoices'](choices);
+    component['startReply'](testMessage);
+    component['startEdit'](testMessage);
+    component['updateDraft']('Transient edit');
+    component.ionViewWillLeave();
     component.ionViewDidLeave();
-    const drafts = TestBed.inject(DraftStore);
-    drafts.save(testChat.id, undefined, '', undefined, [], {
-      messageId: wireMessage.id,
-      text: 'Saved edit',
-      linkPreviews: [],
-    });
+    url.mockReturnValue(parent);
     component.ionViewWillEnter();
-    await fixture.whenStable();
-    const restore = peer.expect('messages.get', { chatId: wireChat.id, messageId: wireMessage.id });
-    peer.expect('messages.list', { chatId: wireChat.id, max: 50 }).flush({
+    fixture.detectChanges();
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, after: wireMessage.id }).flush({
       chatSettings: { showMembershipMessages: true },
-      messages: [structuredClone(wireMessage)],
+      messages: [],
     });
-    component['updateDraft']('New input');
-    restore.flush(structuredClone(wireMessage));
+    await settleMetadata();
     await fixture.whenStable();
     expect(component['editing']()).toBeUndefined();
-    expect(component['draft']()).toBe('New input');
+    expect(component['draft']()).toBe(text);
+    expect(component['draftLinks']()).toEqual(choices);
+    expect(component['replyTo']()?.id).toBe(testMessage.id);
     component['saveDraft']();
-    expect(drafts.get(testChat.id)?.edit?.text).toBe('Saved edit');
+    expect(TestBed.inject(DraftStore).get(testChat.id)).toMatchObject({
+      text,
+      replyTo: wireMessage.id,
+      linkPreviews: choices,
+    });
+    expect(TestBed.inject(DraftStore).get(testChat.id)).not.toHaveProperty('edit');
+  });
+
+  it('confirms changed message text, attachments and link choices before leaving', async () => {
+    const discard = vi.spyOn(TestBed.inject(DiscardChanges), 'confirm').mockResolvedValue(false);
+    component['updateDraft']('Ordinary draft');
+    expect(await component['confirmLeaveEdit']()).toBe(true);
+    component['startEdit'](testMessage);
+    expect(await component['confirmLeaveEdit']()).toBe(true);
+    expect(discard).not.toHaveBeenCalled();
+    component['updateDraft']('Edited text');
+    expect(await component['confirmLeaveEdit']()).toBe(false);
+    expect(discard).toHaveBeenCalledWith(DiscardReason.MessageEdit);
+    expect(component['editText']()).toBe('Edited text');
+    discard.mockResolvedValue(true);
+    expect(await component['confirmLeaveEdit']()).toBe(true);
+    // The router may still cancel navigation: approval alone must not clear input.
+    expect(component['editText']()).toBe('Edited text');
+    component['startEdit'](testMessage);
+    const attachments = vi.spyOn(component['composer']()!, 'hasAttachmentEdits').mockReturnValue(true);
+    discard.mockResolvedValue(false);
+    expect(await component['confirmLeaveEdit']()).toBe(false);
+    attachments.mockReturnValue(false);
+    const url = 'https://example.com/';
+    component['startEdit']({ ...testMessage, message: url });
+    component['setLinkChoices']([{ url, status: LinkPreviewInputStatus.disabled }]);
+    expect(await component['confirmLeaveEdit']()).toBe(false);
+    component['setLinkChoices']([{ url, status: LinkPreviewInputStatus.enabled }]);
+    expect(await component['confirmLeaveEdit']()).toBe(true);
+    expect(component['draft']()).toBe('Ordinary draft');
+  });
+
+  it('requests the browser unload confirmation only for an active changed edit', () => {
+    const unload = () => {
+      fixture.detectChanges();
+      const event = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    component['updateDraft']('Ordinary draft');
+    expect(unload()).toBe(false);
+    component['startEdit'](testMessage);
+    expect(unload()).toBe(false);
+    component['updateDraft']('Changed');
+    expect(unload()).toBe(true);
+    component['cancelEdit']();
+    expect(unload()).toBe(false);
   });
 
   it('keeps typing and reply selection local, persisting once when navigation starts', () => {

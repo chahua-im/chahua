@@ -1,11 +1,12 @@
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { readFile, writeFile } from 'node:fs/promises';
 
 const workspace = new URL('../', import.meta.url);
 const { status, error } = spawnSync(
   process.execPath,
   [
-    new URL('node_modules/@angular/cli/bin/ng.js', workspace).pathname,
+    fileURLToPath(new URL('node_modules/@angular/cli/bin/ng.js', workspace)),
     'build',
     '--configuration=production,prod',
     ...process.argv.slice(2),
@@ -26,7 +27,5 @@ const assetUrl = (url) =>
     ? new URL(url.slice(1), deployUrl).href
     : url;
 for (const group of manifest.assetGroups) group.urls = group.urls.map(assetUrl);
-manifest.hashTable = Object.fromEntries(
-  Object.entries(manifest.hashTable).map(([url, hash]) => [assetUrl(url), hash]),
-);
+manifest.hashTable = Object.fromEntries(Object.entries(manifest.hashTable).map(([url, hash]) => [assetUrl(url), hash]));
 await writeFile(manifestFile, JSON.stringify(manifest, null, 2) + '\n');

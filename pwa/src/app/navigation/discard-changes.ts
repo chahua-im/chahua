@@ -6,6 +6,7 @@ export enum DiscardReason {
   Changes = 'changes',
   Attachments = 'attachments',
   Recording = 'recording',
+  MessageEdit = 'messageEdit',
 }
 
 @Service()
