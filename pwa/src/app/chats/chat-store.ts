@@ -7,6 +7,7 @@ import { allowsSpeaking, effectiveSpeakingMode, SpeakingAction } from './speakin
 import type { FriendRelationshipResponse } from '../../generated/models';
 import {
   ServerWsMessageType,
+  MessageType,
   type PrivacyExceptionKind,
   type MembershipMessagePolicy,
   SpeakingMode,
@@ -892,7 +893,10 @@ export class ChatStore {
           ...current.value,
           lastReply: messagePreview(message),
           lastReplyAt: message.createdAt,
-          replyCount: Math.max(1, current.value.replyCount),
+          replyCount:
+            message.messageType === MessageType.system
+              ? current.value.replyCount
+              : Math.max(1, current.value.replyCount),
         },
         version: ++this.version,
       }),

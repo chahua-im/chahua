@@ -250,6 +250,48 @@ describe('ChatStore', () => {
     expect(store.mutedUntil(testChat.id)).toBe(mutedUntil);
   });
 
+  it('hides a system-only thread until an ordinary reply arrives', () => {
+    const rootId = encodeId('100');
+    store.acceptThreads(
+      [
+        {
+          chatId: testChat.id,
+          chatKind: GroupKind.group,
+          chatName: 'Thread',
+          threadRootMessage: { ...testMessage, id: rootId, mentions: [] },
+          replyCount: 0,
+          lastReplyAt: testMessage.createdAt,
+          subscribedAt: testMessage.createdAt,
+          archived: false,
+          unreadCount: 0,
+        },
+      ],
+      store.snapshot(),
+      store.subscriptionSnapshot(),
+    );
+    const message = {
+      ...testMessage,
+      id: encodeId('101'),
+      replyRootId: rootId,
+      messageType: MessageType.system,
+      systemKind: SystemMessageKind.thread_message_pinned,
+    };
+    events.next({ type: ServerWsMessageType.message, payload: message });
+    expect(store.threadSummary(rootId)?.lastReply?.id).toBe(message.id);
+    expect(store.threadSummary(rootId)?.replyCount).toBe(0);
+    expect(store.thread(rootId)).toBeUndefined();
+    events.next({
+      type: ServerWsMessageType.message,
+      payload: {
+        ...testMessage,
+        id: encodeId('102'),
+        replyRootId: rootId,
+      },
+    });
+    expect(store.threadSummary(rootId)?.replyCount).toBe(1);
+    expect(store.thread(rootId)?.replyCount).toBe(1);
+  });
+
   describe('peer receipt invalidation', () => {
     const rootId = encodeId('9007199254741999');
     const thread = {
