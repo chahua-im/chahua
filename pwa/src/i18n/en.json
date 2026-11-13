@@ -60,6 +60,7 @@
       "changes": "Discard unsaved changes?",
       "attachments": "Discard unsent attachments and leave?",
       "recording": "Discard this recording?",
+      "messageEdit": "Discard your edits to this message?",
       "confirm": "Discard"
     },
     "done": "Done",

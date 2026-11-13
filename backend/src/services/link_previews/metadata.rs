@@ -21,14 +21,14 @@ const IMAGE_META: &[&str] = &[
     "twitter:image",
 ];
 
-struct Metadata {
-    tags: HashMap<String, Vec<String>>,
-    items: HashMap<String, Vec<String>>,
+struct Metadata<'a> {
+    tags: HashMap<String, Vec<&'a str>>,
+    items: HashMap<&'static str, Vec<&'a str>>,
     json_ld: Vec<Value>,
 }
 
-impl Metadata {
-    fn from_document(document: &Html) -> Self {
+impl<'doc> Metadata<'doc> {
+    fn from_document(document: &'doc Html) -> Self {
         let mut metadata = Self {
             tags: HashMap::new(),
             items: HashMap::new(),
@@ -48,15 +48,18 @@ impl Metadata {
                     .tags
                     .entry(key.trim().to_ascii_lowercase())
                     .or_default()
-                    .push(content.into());
+                    .push(content);
             }
             if let Some(keys) = value.attr("itemprop") {
-                for key in keys.split_whitespace() {
-                    metadata
-                        .items
-                        .entry(key.to_ascii_lowercase())
-                        .or_default()
-                        .push(content.into());
+                // Only the three consumed properties can retain this borrowed value.
+                // Repeated or unknown itemprop tokens cannot amplify content allocations.
+                for key in ["headline", "description", "image"] {
+                    if keys
+                        .split_whitespace()
+                        .any(|part| part.eq_ignore_ascii_case(key))
+                    {
+                        metadata.items.entry(key).or_default().push(content);
+                    }
                 }
             }
         }
@@ -75,21 +78,12 @@ impl Metadata {
     }
 
     fn meta<'a>(&'a self, keys: &'a [&'a str]) -> impl Iterator<Item = &'a str> {
-        keys.iter().flat_map(|key| {
-            self.tags
-                .get(*key)
-                .into_iter()
-                .flatten()
-                .map(String::as_str)
-        })
+        keys.iter()
+            .flat_map(|key| self.tags.get(*key).into_iter().flatten().copied())
     }
 
     fn item(&self, key: &str) -> impl Iterator<Item = &str> {
-        self.items
-            .get(key)
-            .into_iter()
-            .flatten()
-            .map(String::as_str)
+        self.items.get(key).into_iter().flatten().copied()
     }
 
     fn objects(&self) -> Vec<&Value> {
@@ -238,6 +232,39 @@ mod tests {
             html.as_bytes(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn repeated_itemprops_borrow_content_once_per_supported_property() {
+        let content = "x".repeat(65536);
+        let keys = "image IMAGE unknown ".repeat(4096);
+        let html = format!("<meta itemprop='{keys} headline description' content='{content}'>");
+        let document = Html::parse_document(&html);
+        let metadata = Metadata::from_document(&document);
+        assert_eq!(metadata.items.len(), 3);
+        let original = document
+            .select(&selector("meta"))
+            .next()
+            .unwrap()
+            .value()
+            .attr("content")
+            .unwrap();
+        for values in metadata.items.values() {
+            assert_eq!(values.len(), 1);
+            assert!(std::ptr::eq(values[0], original));
+        }
+        let preview = extract(&html);
+        assert_eq!(preview.title, "x".repeat(512));
+        assert_eq!(preview.description.as_deref(), Some(preview.title.as_str()));
+    }
+
+    #[test]
+    fn repeated_image_property_preserves_later_safe_candidates() {
+        let preview = extract("<title>Title</title><meta itemprop='image IMAGE' content='http://unsafe.example/a'><meta itemprop='image image' content='/cover.jpg'>");
+        assert_eq!(
+            preview.image_url.unwrap().as_str(),
+            "https://example.com/cover.jpg"
+        );
     }
 
     #[test]

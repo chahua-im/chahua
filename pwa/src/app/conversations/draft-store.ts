@@ -41,19 +41,17 @@ export class DraftStore {
     text: string,
     replyTo?: SnowflakeID,
     linkPreviews?: readonly LinkPreviewInput[],
-    edit?: Draft['edit'],
   ) {
     const previous = this.get(chatId, threadId);
     const replyId = replyTo ? decodeId(replyTo) : undefined;
-    if (!text.trim() && !replyId && !edit) {
+    if (!text.trim() && !replyId) {
       this.clear(chatId, threadId);
       return;
     }
     if (
       previous?.text === text &&
       previous?.replyTo === replyId &&
-      JSON.stringify(previous?.linkPreviews) === JSON.stringify(linkPreviews?.length ? linkPreviews : undefined) &&
-      JSON.stringify(previous?.edit) === JSON.stringify(edit)
+      JSON.stringify(previous?.linkPreviews) === JSON.stringify(linkPreviews?.length ? linkPreviews : undefined)
     )
       return;
     this.update(chatId, threadId, {
@@ -61,7 +59,6 @@ export class DraftStore {
       replyTo: replyId,
       savedAt: Date.now(),
       ...(linkPreviews?.length ? { linkPreviews } : {}),
-      ...(edit ? { edit } : {}),
     });
   }
 

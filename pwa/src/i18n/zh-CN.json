@@ -60,6 +60,7 @@
       "changes": "放弃未保存的修改？",
       "attachments": "放弃未发送的附件并离开？",
       "recording": "放弃这段录音？",
+      "messageEdit": "放弃对这条消息的编辑？",
       "confirm": "放弃"
     },
     "done": "完成",

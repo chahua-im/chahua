@@ -54,20 +54,17 @@ describe('DraftStore', () => {
     expect(drafts.forward(chat)).toBeUndefined();
   });
 
-  it('restores link choices and an edit draft separately from the send draft', async () => {
+  it('restores ordinary send text and link choices within the same account', async () => {
     const choices = [{ url: 'https://example.com/', status: LinkPreviewInputStatus.disabled }];
-    const edit = { messageId: '9007199254741003', text: 'https://other.example/', linkPreviews: choices };
     const drafts = TestBed.inject(DraftStore);
-    drafts.save(chat, thread, 'https://example.com/', undefined, choices, edit);
+    drafts.save(chat, thread, 'https://example.com/', undefined, choices);
     await TestBed.inject(AccountStorage).settled();
     await TestBed.inject(AccountStorage).activate(2);
     user.set({ uid: 2 });
     expect(drafts.get(chat, thread)).toBeUndefined();
     await TestBed.inject(AccountStorage).activate(1);
     user.set({ uid: 1 });
-    expect(drafts.get(chat, thread)).toMatchObject({ text: 'https://example.com/', linkPreviews: choices, edit });
-    drafts.save(chat, thread, '', undefined, undefined, edit);
-    expect(drafts.get(chat, thread)?.edit).toEqual(edit);
+    expect(drafts.get(chat, thread)).toMatchObject({ text: 'https://example.com/', linkPreviews: choices });
     drafts.save(chat, thread, '', undefined);
     expect(drafts.get(chat, thread)).toBeUndefined();
   });

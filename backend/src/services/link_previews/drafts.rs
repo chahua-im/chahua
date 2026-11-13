@@ -23,6 +23,7 @@ use crate::{
 
 const TTL: Duration = Duration::from_secs(600);
 const CAPACITY: usize = 128;
+const CONCURRENCY: usize = 8;
 type Cache = HashMap<(i32, String), (Instant, Arc<OnceCell<DraftPreview>>)>;
 
 pub struct DraftPreviews {
@@ -47,7 +48,7 @@ impl DraftPreviews {
     pub(super) fn new(config: Arc<super::sites::LinkPreviewConfig>) -> Self {
         Self {
             entries: Mutex::new(HashMap::new()),
-            slots: Semaphore::new(4),
+            slots: Semaphore::new(CONCURRENCY),
             fetcher: SecurePreviewFetcher::new(config),
         }
     }
@@ -168,10 +169,14 @@ impl DraftPreviews {
             let Some(entry) = cell.get().filter(|_| at.elapsed() < TTL) else {
                 continue;
             };
-            preview.status = entry.preview.status;
+            preview.status = if entry.thumbnail.is_some() {
+                LinkPreviewStatus::Pending
+            } else {
+                entry.preview.status
+            };
             preview.title = entry.preview.title.clone();
             preview.description = entry.preview.description.clone();
-            preview.expires_at = None;
+            preview.expires_at = entry.thumbnail.as_ref().map(|_| prepared.expires_at);
             prepared.work.retain(
                 |work| !matches!(work, LinkPreviewWork::FetchPage { url } if url == &preview.url),
             );
@@ -241,6 +246,52 @@ mod tests {
         assert!(
             matches!(&prepared.work[..], [LinkPreviewWork::CacheThumbnail { thumbnail, .. }] if thumbnail.bytes == [1, 2, 3])
         );
+    }
+
+    #[test]
+    fn editing_before_thumbnail_publication_requeues_pending_work() {
+        let cache = DraftPreviews::default();
+        seed(&cache, 7, Instant::now());
+        let mut sent = prepare(Some("https://example.com/"), None, Utc::now()).unwrap();
+        cache.apply(7, &mut sent);
+        assert_eq!(
+            sent.metadata.as_ref().unwrap()["linkPreviews"][0]["status"],
+            "pending"
+        );
+        assert!(sent.metadata.as_ref().unwrap()["linkPreviews"][0]["expiresAt"].is_string());
+        let mut edited = super::super::prepare_edit(
+            "https://example.com/ edited",
+            None,
+            sent.metadata.as_ref(),
+            Utc::now(),
+        )
+        .unwrap();
+        cache.apply(7, &mut edited);
+        assert!(matches!(
+            &edited.work[..],
+            [LinkPreviewWork::CacheThumbnail { .. }]
+        ));
+        assert_eq!(
+            edited.metadata.as_ref().unwrap()["linkPreviews"][0]["title"],
+            "Cached"
+        );
+        assert_eq!(
+            edited.metadata.as_ref().unwrap()["linkPreviews"][0]["status"],
+            "pending"
+        );
+        cache.entries.lock().unwrap().clear();
+        let mut uncached = super::super::prepare_edit(
+            "https://example.com/ edited again",
+            None,
+            edited.metadata.as_ref(),
+            Utc::now(),
+        )
+        .unwrap();
+        cache.apply(7, &mut uncached);
+        assert!(matches!(
+            &uncached.work[..],
+            [LinkPreviewWork::FetchPage { .. }]
+        ));
     }
 
     #[test]

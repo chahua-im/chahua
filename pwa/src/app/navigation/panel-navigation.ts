@@ -82,6 +82,10 @@ export class PanelNavigation {
         state: { ...navigation?.extras.state, panelDepth: 0 },
       });
     }
+    // Query-only panels retain the underlying editor; changing the primary page does not.
+    const currentPage = this.currentUrl().split(/[?#]/)[0];
+    const nextPage = next.split(/[?#]/)[0];
+    if (currentPage !== nextPage && (await this.leaveChecks.get(currentPage)?.()) === false) return false;
     return true;
   }
 

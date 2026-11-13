@@ -48,15 +48,7 @@ pub fn finalize_metadata(
                 continue;
             }
             if let Some(result) = completed.iter().find(|result| result.url == preview.url) {
-                if preview.status == LinkPreviewStatus::Ready {
-                    // Existing text is authoritative; image work only fills
-                    // its cached thumbnail.
-                    if result.image.is_some() {
-                        preview.image = result.image.clone();
-                    }
-                } else {
-                    *preview = result.clone();
-                }
+                merge_completed(preview, result);
             }
         }
         let merged = serde_json::to_value(previews).expect("preview metadata is serializable");
@@ -76,6 +68,23 @@ pub fn finalize_metadata(
         .get_result(conn)
         .optional()
     })
+}
+
+// Image-only work completes the preview without replacing its already acquired text.
+fn merge_completed(preview: &mut StoredLinkPreview, result: &StoredLinkPreview) {
+    if preview.status == LinkPreviewStatus::Ready
+        || (preview.title.is_some() && result.title.is_none())
+    {
+        if preview.status == LinkPreviewStatus::Pending {
+            preview.status = result.status;
+            preview.expires_at = result.expires_at;
+        }
+        if result.image.is_some() {
+            preview.image = result.image.clone();
+        }
+    } else {
+        *preview = result.clone();
+    }
 }
 
 /// PostgreSQL stores microseconds; each edit must supersede even a regressed clock.
@@ -109,6 +118,41 @@ mod tests {
             Utc::now() + chrono::Duration::seconds(30),
             completed,
         )
+    }
+
+    #[test]
+    fn pending_thumbnail_completion_preserves_text_on_success_and_failure() {
+        for image in [
+            None,
+            Some(crate::dto::link_previews::StoredLinkPreviewImage {
+                storage_key: "link-previews/test.webp".into(),
+                width: 10,
+                height: 12,
+            }),
+        ] {
+            let mut preview = StoredLinkPreview {
+                url: "https://example.com/".into(),
+                status: LinkPreviewStatus::Pending,
+                expires_at: Some(Utc::now()),
+                title: Some("Cached title".into()),
+                description: Some("Cached description".into()),
+                image: None,
+            };
+            let result = StoredLinkPreview {
+                url: preview.url.clone(),
+                status: LinkPreviewStatus::Ready,
+                expires_at: None,
+                title: None,
+                description: None,
+                image,
+            };
+            merge_completed(&mut preview, &result);
+            assert_eq!(preview.status, LinkPreviewStatus::Ready);
+            assert!(preview.expires_at.is_none());
+            assert_eq!(preview.title.as_deref(), Some("Cached title"));
+            assert_eq!(preview.description.as_deref(), Some("Cached description"));
+            assert_eq!(preview.image.is_some(), result.image.is_some());
+        }
     }
 
     struct FixtureSchema {

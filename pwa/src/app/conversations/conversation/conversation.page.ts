@@ -1,7 +1,6 @@
 import { MessageLinkPreviews } from '../../messages/message-link-previews';
 import { DraftLinkPreviews } from '../../messages/draft-link-previews';
 import { draftLinkUrls } from '../../messages/draft-link-urls';
-import type { Draft } from '../../storage/account-database';
 import { DOCUMENT, NgTemplateOutlet } from '@angular/common';
 import {
   afterNextRender,
@@ -381,16 +380,13 @@ export class ConversationPage {
     const target = this.editTarget();
     return target && 'delivery' in target ? untracked(() => target.uploads) : [];
   });
-  private editRestoreVersion = 0;
   protected startEdit(message: MessageResponse | OutgoingMessage) {
-    this.editRestoreVersion++;
     const content = 'delivery' in message ? message.message() : message;
     if (
       !this.chatInfo.canSpeak(this.id(), content.replyRootId ? SpeakingAction.ThreadReply : SpeakingAction.ChatMessage)
     )
       return;
     this.cancelForward();
-    this.savedEdit.set(undefined);
     this.editTarget.set(message);
     this.editText.set(this.editing()?.message ?? '');
     this.editLinks.set(
@@ -440,17 +436,7 @@ export class ConversationPage {
     if (this.pendingForward()) this.cancelForward();
     else if (this.editing()) {
       const target = this.editTarget();
-      const changed =
-        this.editText() !== (this.editing()?.message ?? '') ||
-        composer?.hasAttachmentEdits() ||
-        this.editLinks().some(
-          (p) =>
-            p.status === LinkPreviewInputStatus.enabled ||
-            !this.editing()?.metadata?.linkPreviews.some(
-              (old) => old.url === p.url && old.status === LinkPreviewStatus.disabled,
-            ),
-        );
-      if (changed && !(await this.discardChanges.confirm())) return true;
+      if (this.hasEditChanges() && !(await this.discardChanges.confirm(DiscardReason.MessageEdit))) return true;
       if (!this.isCurrent(entry) || target !== this.editTarget()) return true;
       this.cancelEdit();
     } else if (this.replyTo() || this.savedReplyId()) this.cancelReply();
@@ -464,14 +450,43 @@ export class ConversationPage {
     return true;
   }
   protected cancelEdit() {
-    this.editRestoreVersion++;
-    this.savedEdit.set(undefined);
     this.editTarget.set(undefined);
     this.editText.set('');
     this.editLinks.set([]);
     this.linkPreviewOpen.set(false);
-    if (this.drafts.get(this.id(), this.threadId())?.edit) this.saveDraft();
   }
+  private hasEditChanges() {
+    const editing = this.editing();
+    if (!editing) return false;
+    const disabled = new Set(
+      this.editLinks()
+        .filter((choice) => choice.status === LinkPreviewInputStatus.disabled)
+        .map(({ url }) => url),
+    );
+    return (
+      this.editText() !== (editing.message ?? '') ||
+      !!this.composer()?.hasAttachmentEdits() ||
+      draftLinkUrls(this.editText()).some(
+        (url) =>
+          disabled.has(url) !==
+          !!editing.metadata?.linkPreviews.some(
+            (preview) => preview.url === url && preview.status === LinkPreviewStatus.disabled,
+          ),
+      )
+    );
+  }
+
+  private async confirmLeaveEdit() {
+    if (!this.hasEditChanges()) return true;
+    const entry = this.entryKey();
+    const target = this.editTarget();
+    return (
+      (await this.discardChanges.confirm(DiscardReason.MessageEdit)) &&
+      entry === this.entryKey() &&
+      target === this.editTarget()
+    );
+  }
+
   protected readonly PageDirection = PageDirection;
   protected readonly ConversationTargetKind = ConversationTargetKind;
   protected readonly ConversationError = ConversationError;
@@ -1098,10 +1113,6 @@ export class ConversationPage {
   // Route cleanup saves the previous input before activate advances entryVersion.
   protected readonly draft = linkedSignal({ source: this.entryVersion, computation: () => '' });
   protected readonly editText = linkedSignal({ source: this.entryVersion, computation: () => '' });
-  private readonly savedEdit = linkedSignal({
-    source: this.entryVersion,
-    computation: (): Draft['edit'] => undefined,
-  });
   protected readonly draftLinks = linkedSignal({
     source: this.entryVersion,
     computation: (): readonly LinkPreviewInput[] => [],
@@ -1234,6 +1245,18 @@ export class ConversationPage {
           void this.leaveReactionSession(entry);
         }),
       );
+    });
+    effect((onCleanup) => {
+      if (!this.active()) return;
+      const path = `/chats/chat/${decodeId(this.id())}${this.threadId() ? `/thread/${decodeId(this.threadId()!)}` : ''}`;
+      onCleanup(this.panels.registerLeaveCheck(path, () => this.confirmLeaveEdit()));
+    });
+    effect((onCleanup) => {
+      if (!this.active() || !this.hasEditChanges()) return;
+      // Keep the browser's back/forward cache available when no edit needs protection.
+      const beforeUnload = (event: BeforeUnloadEvent) => event.preventDefault();
+      window.addEventListener('beforeunload', beforeUnload);
+      onCleanup(() => window.removeEventListener('beforeunload', beforeUnload));
     });
     effect(() => {
       if (this.active() && this.pendingForward()) {
@@ -1496,8 +1519,6 @@ export class ConversationPage {
     const draft = this.drafts.get(id, threadId);
     this.draft.set(draft?.text ?? '');
     this.draftLinks.set(draft?.linkPreviews ?? []);
-    this.savedEdit.set(draft?.edit);
-    if (draft?.edit) void this.restoreEdit(draft.edit);
     this.savedReplyId.set(draft?.replyTo ? encodeId(draft.replyTo) : undefined);
     if (draft?.replyTo && !this.reply()) void this.restoreReply(encodeId(draft.replyTo));
     this.conversation.reset(id, threadId);
@@ -1575,6 +1596,7 @@ export class ConversationPage {
     this.linkPreviewOpen.set(false);
     this.scrolling.reset();
     this.active.set(false);
+    this.cancelEdit();
     this.entered = false;
     this.navigationVersion++;
     this.position.set(undefined);
@@ -1582,7 +1604,6 @@ export class ConversationPage {
     this.resetMentionSession(retainRange);
     if (retainRange) {
       this.conversation.cancelLoading();
-      if (!retainComposer) this.cancelEdit();
       this.playback.pause();
     } else {
       this.membershipScrollPosition = undefined;
@@ -2340,7 +2361,6 @@ export class ConversationPage {
   }
 
   protected updateDraft(text: string) {
-    this.editRestoreVersion++;
     (!this.pendingForward() && this.editing() ? this.editText : this.draft).set(text);
     const urls = draftLinkUrls(text);
     const choices = !this.pendingForward() && this.editing() ? this.editLinks : this.draftLinks;
@@ -2350,16 +2370,7 @@ export class ConversationPage {
 
   protected saveDraft({ chatId, threadId } = { chatId: this.id(), threadId: this.threadId() }) {
     if (this.active() && this.session.user())
-      this.drafts.save(
-        chatId,
-        threadId,
-        this.draft(),
-        this.replyTo()?.id ?? this.savedReplyId(),
-        this.draftLinks(),
-        this.editing()?.id
-          ? { messageId: decodeId(this.editing()!.id!), text: this.editText(), linkPreviews: this.editLinks() }
-          : this.savedEdit(),
-      );
+      this.drafts.save(chatId, threadId, this.draft(), this.replyTo()?.id ?? this.savedReplyId(), this.draftLinks());
   }
 
   protected cancelReply() {
@@ -2388,27 +2399,6 @@ export class ConversationPage {
     this.saveDraft();
     this.position.set({ type: PositionKind.Bottom });
     if (!this.conversation.atLatest()) void this.goTo({ type: ConversationTargetKind.Latest });
-  }
-
-  private async restoreEdit(draft: NonNullable<Draft['edit']>) {
-    const version = this.editRestoreVersion;
-    const entry = this.entryKey();
-    try {
-      const message = await firstValueFrom(
-        this.api.messages
-          .get({ chatId: entry.chatId, messageId: encodeId(draft.messageId) })
-          .pipe(takeUntilDestroyed(this.destroyRef)),
-      );
-      if (entry !== this.entryKey() || version !== this.editRestoreVersion || !this.active() || this.editTarget())
-        return;
-      this.savedEdit.set(undefined);
-      if (message.isDeleted) return;
-      this.editTarget.set(message);
-      this.editText.set(draft.text);
-      this.editLinks.set(draft.linkPreviews);
-    } catch {
-      /* Preserve the saved draft for a later visit. */
-    }
   }
 
   private async restoreReply(messageId: SnowflakeID) {
