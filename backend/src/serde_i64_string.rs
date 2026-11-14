@@ -85,6 +85,23 @@ pub mod vec {
     }
 }
 
+pub mod opt_vec {
+    use serde::{Serialize, Serializer};
+
+    pub fn serialize<S>(value: &Option<Vec<i64>>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        #[derive(Serialize)]
+        struct StringId(#[serde(with = "super")] i64);
+
+        match value {
+            Some(ids) => serializer.collect_seq(ids.iter().copied().map(StringId)),
+            None => serializer.serialize_none(),
+        }
+    }
+}
+
 pub mod double_opt {
     use serde::{Deserialize, Deserializer};
 
