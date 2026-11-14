@@ -69,6 +69,21 @@ impl SubscribeBody {
                         .map_err(|_| AppError::Internal("failed to serialize APNs data"))?,
                 })
             }
+            ApiPushProvider::Fcm => {
+                let device_token = self
+                    .device_token
+                    .clone()
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or(AppError::BadRequest("deviceToken is required for fcm"))?;
+
+                Ok(ValidatedSubscription {
+                    provider: PushProvider::Fcm,
+                    endpoint: None,
+                    device_token: Some(device_token),
+                    apns_environment: None,
+                    provider_data: serde_json::json!({}),
+                })
+            }
         }
     }
 }
@@ -145,6 +160,13 @@ pub async fn post_subscribe(
                         );
                 }
             }
+            PushProvider::Fcm => {
+                if let Some(device_token) = &device_token {
+                    replace_scope = replace_scope.filter(
+                        push_subscriptions::dsl::device_token.ne(Some(device_token.clone())),
+                    );
+                }
+            }
         }
 
         let replace_ids = replace_scope
@@ -157,6 +179,9 @@ pub async fn post_subscribe(
             .execute(conn)?;
         }
 
+        // FCM tokens are unique per provider rather than per user, so a token
+        // that already exists (e.g. after switching accounts on one device)
+        // moves to the current user instead of being inserted again.
         let existing_id = match provider {
             PushProvider::WebPush => push_subscriptions::table
                 .filter(push_subscriptions::dsl::user_id.eq(uid))
@@ -166,11 +191,13 @@ pub async fn post_subscribe(
                 .first::<i64>(conn)
                 .optional()?,
             PushProvider::Apns => None,
+            PushProvider::Fcm => find_fcm_subscription(conn, device_token.as_deref())?,
         };
 
         if let Some(existing_id) = existing_id {
             diesel::update(push_subscriptions::table.find(existing_id))
                 .set((
+                    push_subscriptions::user_id.eq(uid),
                     push_subscriptions::client_id.eq(&current_client_id),
                     push_subscriptions::created_at.eq(created_at),
                     push_subscriptions::provider_data.eq(&provider_data),
@@ -182,7 +209,7 @@ pub async fn post_subscribe(
                 .execute(conn)?;
         } else {
             match provider {
-                PushProvider::WebPush => {
+                PushProvider::WebPush | PushProvider::Fcm => {
                     diesel::insert_into(push_subscriptions::table)
                         .values(&new_sub)
                         .execute(conn)?;
@@ -220,6 +247,22 @@ pub async fn post_subscribe(
     Ok(())
 }
 
+/// Look up an FCM subscription by device token, regardless of its current owner.
+fn find_fcm_subscription(
+    conn: &mut PgConnection,
+    device_token: Option<&str>,
+) -> Result<Option<i64>, diesel::result::Error> {
+    let Some(device_token) = device_token else {
+        return Ok(None);
+    };
+    push_subscriptions::table
+        .filter(push_subscriptions::dsl::provider.eq(PushProvider::Fcm))
+        .filter(push_subscriptions::dsl::device_token.eq(Some(device_token.to_owned())))
+        .select(push_subscriptions::dsl::id)
+        .first::<i64>(conn)
+        .optional()
+}
+
 pub fn post_unsubscribe(
     uid: i32,
     client_id: String,
@@ -250,6 +293,12 @@ pub fn post_unsubscribe(
             query = query
                 .filter(push_subscriptions::dsl::device_token.eq(Some(device_token)))
                 .filter(push_subscriptions::dsl::apns_environment.eq(Some(environment)));
+        }
+        PushProvider::Fcm => {
+            let device_token = body.device_token.ok_or(AppError::BadRequest(
+                "deviceToken is required for fcm unsubscribe",
+            ))?;
+            query = query.filter(push_subscriptions::dsl::device_token.eq(Some(device_token)));
         }
     }
 
@@ -313,6 +362,22 @@ pub fn get_subscription_status(
             ),
             _ => None,
         },
+        PushProvider::Fcm => query
+            .device_token
+            .as_ref()
+            .map(|device_token| {
+                diesel::select(diesel::dsl::exists(
+                    push_subscriptions::table
+                        .filter(push_subscriptions::dsl::user_id.eq(uid))
+                        .filter(push_subscriptions::dsl::client_id.eq(Some(client_id.clone())))
+                        .filter(push_subscriptions::dsl::provider.eq(provider))
+                        .filter(
+                            push_subscriptions::dsl::device_token.eq(Some(device_token.clone())),
+                        ),
+                ))
+                .get_result::<bool>(conn)
+            })
+            .transpose()?,
     };
 
     Ok(SubscriptionStatusResponse {
@@ -349,6 +414,31 @@ mod tests {
         assert_eq!(validated.provider, PushProvider::Apns);
         assert_eq!(validated.device_token.as_deref(), Some("token-123"));
         assert_eq!(validated.apns_environment, Some(PushEnvironment::Sandbox));
+    }
+
+    #[test]
+    fn subscribe_validates_fcm_payload_without_environment() {
+        let body: SubscribeBody =
+            serde_json::from_str(r#"{"provider":"fcm","deviceToken":"fcm-token-123"}"#)
+                .expect("parse FCM body");
+
+        let validated = body.validate().expect("validate FCM body");
+        assert_eq!(validated.provider, PushProvider::Fcm);
+        assert_eq!(validated.device_token.as_deref(), Some("fcm-token-123"));
+        assert_eq!(validated.apns_environment, None);
+        assert_eq!(validated.endpoint, None);
+        assert_eq!(validated.provider_data, serde_json::json!({}));
+    }
+
+    #[test]
+    fn subscribe_rejects_missing_fcm_device_token() {
+        let body: SubscribeBody = serde_json::from_str(r#"{"provider":"fcm","deviceToken":"  "}"#)
+            .expect("parse malformed FCM body");
+
+        assert!(matches!(
+            body.validate(),
+            Err(AppError::BadRequest("deviceToken is required for fcm"))
+        ));
     }
 
     #[test]

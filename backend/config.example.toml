@@ -43,6 +43,11 @@ vapid_subject = "mailto:admin@example.com"
 # topic = "app.example.chahua"
 # APNS_PRIVATE_KEY_PATH stays in env and points to the existing private-key file.
 
+# [push.fcm]
+# project_id = "Your FCM project ID"
+# FCM_SERVICE_ACCOUNT_PATH stays in env and points to the Firebase
+# service-account JSON ("Firebase Admin SDK" private key).
+
 # [avatars]
 # public_url = "https://avatars.example.com"
 # path = "/srv/discuz/uc_server/data/avatar"

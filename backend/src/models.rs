@@ -308,6 +308,8 @@ pub enum TranscodeStatus {
 pub enum PushProvider {
     WebPush,
     Apns,
+    /// Google Firebase Cloud Messaging (Android).
+    Fcm,
 }
 
 impl PushProvider {
@@ -315,6 +317,7 @@ impl PushProvider {
         match self {
             Self::WebPush => "web_push",
             Self::Apns => "apns",
+            Self::Fcm => "fcm",
         }
     }
 }

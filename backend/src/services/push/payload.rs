@@ -117,6 +117,34 @@ pub(super) struct ApnsNotification {
     pub(super) custom_data: ApnsCustomData,
 }
 
+/// Data-only FCM message. The Android client renders the notification itself so
+/// it can reuse its own channels, grouping and localized message copy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct FcmNotification {
+    /// Collapsing key so a stack of undelivered messages for one conversation
+    /// wakes the device once with the newest message.
+    pub(super) collapse_key: String,
+    pub(super) data: FcmData,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct FcmData {
+    #[serde(rename = "type")]
+    pub(super) type_: PushPayloadType,
+    pub(super) chat_id: String,
+    pub(super) message_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) thread_root_id: Option<String>,
+    pub(super) sender_name: String,
+    pub(super) chat_name: String,
+    pub(super) body: String,
+    pub(super) unread_count: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) mentioned_uid: Option<i32>,
+    pub(super) message_preview: PushMessagePreview,
+}
+
 pub(super) fn build_push_payload(
     job: &PushJob,
     unread_count: i64,
@@ -263,6 +291,35 @@ pub(super) fn build_apns_notification(
             mentioned_uid: is_mention.then_some(recipient_uid),
         },
     }
+}
+
+/// Derive the data-only FCM message from the already-built web push payload so
+/// both providers carry the same recipient-specific fields.
+pub(super) fn build_fcm_notification(payload: &PushPayload) -> FcmNotification {
+    let collapse_key = match &payload.data.thread_root_id {
+        Some(root_id) => format!("chat_{}_thread_{}", payload.data.chat_id, root_id),
+        None => format!("chat_{}", payload.data.chat_id),
+    };
+    let data = FcmData {
+        type_: payload.type_,
+        chat_id: payload.data.chat_id.clone(),
+        message_id: payload.data.message_id.clone(),
+        thread_root_id: payload.data.thread_root_id.clone(),
+        sender_name: payload.sender_name.clone(),
+        chat_name: payload.title.clone(),
+        body: payload.body.clone(),
+        unread_count: payload.unread_count,
+        mentioned_uid: payload.mentioned_uid,
+        message_preview: PushMessagePreview {
+            message: payload
+                .message_preview
+                .message
+                .as_deref()
+                .map(truncate_preview),
+            ..payload.message_preview.clone()
+        },
+    };
+    FcmNotification { collapse_key, data }
 }
 
 fn attachment_kind_loc_key(kind: &str, with_preview: bool) -> &'static str {
