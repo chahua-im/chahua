@@ -51,10 +51,13 @@ struct SavedForwardedBundleMessagesPath {
 async fn list_saved_messages(
     State(state): State<AppState>,
     CurrentUid(uid): CurrentUid,
-    mut conn: DbConn,
+    conn: DbConn,
     Query(query): Query<ListSavedMessagesQuery>,
 ) -> Result<Json<ListSavedMessagesResponse>, AppError> {
-    saved_messages_api::list_saved_messages(uid, query, &mut conn, &state.media).map(Json)
+    conn.run(move |mut conn| async move {
+        saved_messages_api::list_saved_messages(uid, query, &mut conn, &state.media).map(Json)
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -72,19 +75,22 @@ async fn list_saved_messages(
 async fn put_saved_message(
     State(state): State<AppState>,
     CurrentUid(uid): CurrentUid,
-    mut conn: DbConn,
+    conn: DbConn,
     Path(MessageIdPath { message_id }): Path<MessageIdPath>,
 ) -> Result<Json<SavedMessageResponse>, AppError> {
-    saved_messages_api::put_saved_message(
-        uid,
-        message_id,
-        &mut conn,
-        &state.media,
-        &state.avatars,
-        state.id_gen.as_ref(),
-    )
+    conn.run(move |mut conn| async move {
+        saved_messages_api::put_saved_message(
+            uid,
+            message_id,
+            &mut conn,
+            &state.media,
+            &state.avatars,
+            state.id_gen.as_ref(),
+        )
+        .await
+        .map(Json)
+    })
     .await
-    .map(Json)
 }
 
 #[utoipa::path(
@@ -101,12 +107,14 @@ async fn put_saved_message(
 )]
 async fn delete_saved_message_by_original(
     CurrentUid(uid): CurrentUid,
-    mut conn: DbConn,
+    conn: DbConn,
     Path(MessageIdPath { message_id }): Path<MessageIdPath>,
 ) -> Result<StatusCode, AppError> {
-    saved_messages_api::delete_saved_message_by_original(uid, message_id, &mut conn)?;
-
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        saved_messages_api::delete_saved_message_by_original(uid, message_id, &mut conn)?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -123,12 +131,14 @@ async fn delete_saved_message_by_original(
 )]
 async fn delete_saved_message_by_id(
     CurrentUid(uid): CurrentUid,
-    mut conn: DbConn,
+    conn: DbConn,
     Path(SavedMessageIdPath { saved_message_id }): Path<SavedMessageIdPath>,
 ) -> Result<StatusCode, AppError> {
-    saved_messages_api::delete_saved_message_by_id(uid, saved_message_id, &mut conn)?;
-
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        saved_messages_api::delete_saved_message_by_id(uid, saved_message_id, &mut conn)?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -147,16 +157,19 @@ async fn get_saved_forwarded_messages(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(SavedMessageIdPath { saved_message_id }): Path<SavedMessageIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<ForwardedMessagesResponse>, AppError> {
-    saved_messages_api::get_saved_forwarded_messages(
-        uid,
-        saved_message_id,
-        &mut conn,
-        &state.media,
-        &state.avatars,
-    )
-    .map(Json)
+    conn.run(move |mut conn| async move {
+        saved_messages_api::get_saved_forwarded_messages(
+            uid,
+            saved_message_id,
+            &mut conn,
+            &state.media,
+            &state.avatars,
+        )
+        .map(Json)
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -179,17 +192,20 @@ async fn get_saved_forwarded_bundle_messages(
         saved_message_id,
         bundle_id,
     }): Path<SavedForwardedBundleMessagesPath>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<ForwardedMessagesResponse>, AppError> {
-    saved_messages_api::get_saved_forwarded_bundle_messages(
-        uid,
-        saved_message_id,
-        bundle_id,
-        &mut conn,
-        &state.media,
-        &state.avatars,
-    )
-    .map(Json)
+    conn.run(move |mut conn| async move {
+        saved_messages_api::get_saved_forwarded_bundle_messages(
+            uid,
+            saved_message_id,
+            bundle_id,
+            &mut conn,
+            &state.media,
+            &state.avatars,
+        )
+        .map(Json)
+    })
+    .await
 }
 
 pub fn router() -> OpenApiRouter<AppState> {

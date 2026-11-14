@@ -34,12 +34,15 @@ struct InviteIdPath {
 async fn post_invite(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<CreateInviteBody>,
 ) -> Result<(StatusCode, Json<InviteResponse>), AppError> {
-    let response =
-        crate::services::api::invites::post_invite(uid, body, &mut conn, &state.id_gen).await?;
-    Ok((StatusCode::CREATED, Json(response)))
+    conn.run(move |mut conn| async move {
+        let response =
+            crate::services::api::invites::post_invite(uid, body, &mut conn, &state.id_gen).await?;
+        Ok((StatusCode::CREATED, Json(response)))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -55,24 +58,27 @@ async fn post_invite(
 async fn post_send_invite_message(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<SendInviteMessageBody>,
 ) -> Result<(StatusCode, Json<SendInviteMessageResponse>), AppError> {
-    let response = crate::services::api::invites::post_send_invite_message(
-        uid,
-        body,
-        &mut conn,
-        crate::services::api::invites::PostSendInviteMessageDeps {
-            id_gen: &state.id_gen,
-            media: &state.media,
-            avatars: &state.avatars,
-            metrics: &state.metrics,
-            ws_registry: &state.ws_registry,
-            push_service: &state.push_service,
-        },
-    )
-    .await?;
-    Ok((StatusCode::CREATED, Json(response)))
+    conn.run(move |mut conn| async move {
+        let response = crate::services::api::invites::post_send_invite_message(
+            uid,
+            body,
+            &mut conn,
+            crate::services::api::invites::PostSendInviteMessageDeps {
+                id_gen: &state.id_gen,
+                media: &state.media,
+                avatars: &state.avatars,
+                metrics: &state.metrics,
+                ws_registry: &state.ws_registry,
+                push_service: &state.push_service,
+            },
+        )
+        .await?;
+        Ok((StatusCode::CREATED, Json(response)))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -87,10 +93,13 @@ async fn post_send_invite_message(
 )]
 async fn get_invites(
     CurrentUid(uid): CurrentUid,
-    mut conn: DbConn,
+    conn: DbConn,
     Query(query): Query<ListInvitesQuery>,
 ) -> Result<Json<ListInvitesResponse>, AppError> {
-    crate::services::api::invites::get_invites(uid, query, &mut conn).map(Json)
+    conn.run(move |mut conn| async move {
+        crate::services::api::invites::get_invites(uid, query, &mut conn).map(Json)
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -108,9 +117,12 @@ async fn get_invites(
 async fn get_invite(
     CurrentUid(uid): CurrentUid,
     Path(InviteIdPath { invite_id }): Path<InviteIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<InviteResponse>, AppError> {
-    crate::services::api::invites::get_invite(uid, invite_id, &mut conn).map(Json)
+    conn.run(move |mut conn| async move {
+        crate::services::api::invites::get_invite(uid, invite_id, &mut conn).map(Json)
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -129,17 +141,20 @@ async fn get_invite(
 async fn get_invite_by_code(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Query(query): Query<GetInviteByCodeQuery>,
 ) -> Result<Json<InvitePreviewResponse>, AppError> {
-    crate::services::api::invites::get_invite_by_code(
-        uid,
-        query,
-        &mut conn,
-        &state.media,
-        &state.avatars,
-    )
-    .map(Json)
+    conn.run(move |mut conn| async move {
+        crate::services::api::invites::get_invite_by_code(
+            uid,
+            query,
+            &mut conn,
+            &state.media,
+            &state.avatars,
+        )
+        .map(Json)
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -158,10 +173,13 @@ async fn get_invite_by_code(
 async fn patch_invite(
     CurrentUid(uid): CurrentUid,
     Path(InviteIdPath { invite_id }): Path<InviteIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<PatchInviteBody>,
 ) -> Result<Json<InviteResponse>, AppError> {
-    crate::services::api::invites::patch_invite(uid, invite_id, body, &mut conn).map(Json)
+    conn.run(move |mut conn| async move {
+        crate::services::api::invites::patch_invite(uid, invite_id, body, &mut conn).map(Json)
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -179,10 +197,13 @@ async fn patch_invite(
 async fn delete_invite(
     CurrentUid(uid): CurrentUid,
     Path(InviteIdPath { invite_id }): Path<InviteIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    crate::services::api::invites::delete_invite(uid, invite_id, &mut conn)?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        crate::services::api::invites::delete_invite(uid, invite_id, &mut conn)?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -203,24 +224,27 @@ async fn delete_invite(
 async fn post_redeem_invite(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<RedeemInviteBody>,
 ) -> Result<Json<RedeemInviteResponse>, AppError> {
-    crate::services::api::invites::post_redeem_invite(
-        uid,
-        body,
-        &mut conn,
-        crate::services::api::invites::PostRedeemInviteDeps {
-            id_gen: &state.id_gen,
-            media: &state.media,
-            avatars: &state.avatars,
-            metrics: &state.metrics,
-            ws_registry: &state.ws_registry,
-            push_service: &state.push_service,
-        },
-    )
+    conn.run(move |mut conn| async move {
+        crate::services::api::invites::post_redeem_invite(
+            uid,
+            body,
+            &mut conn,
+            crate::services::api::invites::PostRedeemInviteDeps {
+                id_gen: &state.id_gen,
+                media: &state.media,
+                avatars: &state.avatars,
+                metrics: &state.metrics,
+                ws_registry: &state.ws_registry,
+                push_service: &state.push_service,
+            },
+        )
+        .await
+        .map(Json)
+    })
     .await
-    .map(Json)
 }
 
 pub fn router() -> OpenApiRouter<crate::AppState> {

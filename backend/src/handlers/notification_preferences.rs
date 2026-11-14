@@ -17,9 +17,12 @@ use crate::AppState;
     responses((status = OK, body = NotificationSettingsResponse)), security(("bearer_jwt" = [])))]
 async fn get_settings(
     CurrentUid(uid): CurrentUid,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<NotificationSettingsResponse>, AppError> {
-    notification_preferences::get_settings(uid, &mut conn).map(Json)
+    conn.run(move |mut conn| async move {
+        notification_preferences::get_settings(uid, &mut conn).map(Json)
+    })
+    .await
 }
 
 #[utoipa::path(patch, path = "/me/notification-settings", tag = "users", request_body = UpdateNotificationSettingsRequest,
@@ -27,10 +30,13 @@ async fn get_settings(
 async fn patch_settings(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<UpdateNotificationSettingsRequest>,
 ) -> Result<Json<NotificationSettingsResponse>, AppError> {
-    notification_preferences::patch_settings(uid, body, &mut conn, &state.ws_registry).map(Json)
+    conn.run(move |mut conn| async move {
+        notification_preferences::patch_settings(uid, body, &mut conn, &state.ws_registry).map(Json)
+    })
+    .await
 }
 
 #[utoipa::path(get, path = "/me/notification-exceptions", tag = "users", params(ExceptionsQuery),
@@ -38,11 +44,20 @@ async fn patch_settings(
 async fn get_exceptions(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Query(query): Query<ExceptionsQuery>,
 ) -> Result<Json<NotificationExceptionsResponse>, AppError> {
-    notification_preferences::get_exceptions(uid, query, &mut conn, &state.avatars, &state.media)
+    conn.run(move |mut conn| async move {
+        notification_preferences::get_exceptions(
+            uid,
+            query,
+            &mut conn,
+            &state.avatars,
+            &state.media,
+        )
         .map(Json)
+    })
+    .await
 }
 
 #[utoipa::path(delete, path = "/me/notification-exceptions", tag = "users", params(ClearExceptionsQuery),
@@ -50,10 +65,14 @@ async fn get_exceptions(
 async fn clear_exceptions(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Query(query): Query<ClearExceptionsQuery>,
 ) -> Result<Json<NotificationExceptionsCleared>, AppError> {
-    notification_preferences::clear_exceptions(uid, query, &mut conn, &state.ws_registry).map(Json)
+    conn.run(move |mut conn| async move {
+        notification_preferences::clear_exceptions(uid, query, &mut conn, &state.ws_registry)
+            .map(Json)
+    })
+    .await
 }
 
 pub fn router() -> OpenApiRouter<AppState> {

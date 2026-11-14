@@ -18,7 +18,8 @@ overrides; secret values remain outside TOML. See [application configuration](..
 
 Transport adapters call shared application services rather than duplicating business
 logic. Services receive the dependencies they need, not the entire `AppState`.
-Blocking database and filesystem work runs outside async executor threads.
+HTTP database operations and DB-capable authentication run on blocking workers;
+request-body streaming stays on the async side.
 
 ## Storage and integrations
 

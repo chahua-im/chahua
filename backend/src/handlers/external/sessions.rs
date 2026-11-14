@@ -21,15 +21,18 @@ use crate::AppState;
 async fn get_session_generation(
     principal: Principal,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Path(uid): Path<i32>,
 ) -> Result<Json<SessionGenerationResponse>, AppError> {
-    let conn = &mut *conn;
-    principal.require_service_action(conn, &state.authz_service, AuthzAction::SessionRead)?;
-    validate_uid(uid)?;
-    let token_gen = state.token_generation.stored(conn, uid)?;
+    conn.run(move |mut conn| async move {
+        let conn = &mut *conn;
+        principal.require_service_action(conn, &state.authz_service, AuthzAction::SessionRead)?;
+        validate_uid(uid)?;
+        let token_gen = state.token_generation.stored(conn, uid)?;
 
-    Ok(Json(SessionGenerationResponse { uid, token_gen }))
+        Ok(Json(SessionGenerationResponse { uid, token_gen }))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -43,15 +46,18 @@ async fn get_session_generation(
 async fn post_revoke_sessions(
     principal: Principal,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Path(uid): Path<i32>,
 ) -> Result<Json<SessionGenerationResponse>, AppError> {
-    let conn = &mut *conn;
-    principal.require_service_action(conn, &state.authz_service, AuthzAction::SessionRevoke)?;
-    validate_uid(uid)?;
-    let token_gen = state.token_generation.bump(conn, uid)?;
+    conn.run(move |mut conn| async move {
+        let conn = &mut *conn;
+        principal.require_service_action(conn, &state.authz_service, AuthzAction::SessionRevoke)?;
+        validate_uid(uid)?;
+        let token_gen = state.token_generation.bump(conn, uid)?;
 
-    Ok(Json(SessionGenerationResponse { uid, token_gen }))
+        Ok(Json(SessionGenerationResponse { uid, token_gen }))
+    })
+    .await
 }
 
 pub fn router() -> OpenApiRouter<crate::AppState> {

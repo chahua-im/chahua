@@ -29,15 +29,18 @@ struct BlockPath {
 async fn get_blocks(
     principal: Principal,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<ListBlocksResponse>, AppError> {
-    let blocks = blocks::get_blocks(
-        principal,
-        &mut conn,
-        &state.authz_service,
-        state.avatars.as_ref(),
-    )?;
-    Ok(Json(blocks))
+    conn.run(move |mut conn| async move {
+        let blocks = blocks::get_blocks(
+            principal,
+            &mut conn,
+            &state.authz_service,
+            state.avatars.as_ref(),
+        )?;
+        Ok(Json(blocks))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -52,18 +55,21 @@ async fn get_blocks(
 async fn block_user(
     principal: Principal,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<BlockRequestBody>,
 ) -> Result<StatusCode, AppError> {
-    blocks::block_user(
-        principal,
-        body,
-        &mut conn,
-        &state.authz_service,
-        state.presence_service.as_ref(),
-        &state.ws_registry,
-    )?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        blocks::block_user(
+            principal,
+            body,
+            &mut conn,
+            &state.authz_service,
+            state.presence_service.as_ref(),
+            &state.ws_registry,
+        )?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -80,18 +86,21 @@ async fn block_user(
 async fn unblock_user(
     principal: Principal,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Path(BlockPath { uid: other }): Path<BlockPath>,
 ) -> Result<StatusCode, AppError> {
-    blocks::unblock_user(
-        principal,
-        other,
-        &mut conn,
-        &state.authz_service,
-        state.presence_service.as_ref(),
-        &state.ws_registry,
-    )?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        blocks::unblock_user(
+            principal,
+            other,
+            &mut conn,
+            &state.authz_service,
+            state.presence_service.as_ref(),
+            &state.ws_registry,
+        )?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 pub fn router() -> OpenApiRouter<AppState> {

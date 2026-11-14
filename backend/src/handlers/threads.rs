@@ -38,16 +38,19 @@ use crate::{
 async fn get_threads(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Query(query): Query<ListThreadsQuery>,
 ) -> Result<Json<ListThreadsResponse>, AppError> {
-    Ok(Json(threads::get_threads(
-        uid,
-        query,
-        &mut conn,
-        &state.media,
-        &state.avatars,
-    )?))
+    conn.run(move |mut conn| async move {
+        Ok(Json(threads::get_threads(
+            uid,
+            query,
+            &mut conn,
+            &state.media,
+            &state.avatars,
+        )?))
+    })
+    .await
 }
 
 #[derive(serde::Deserialize)]
@@ -76,13 +79,16 @@ pub(super) async fn get_chat_threads(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(ChatThreadsPath { chat_id }): Path<ChatThreadsPath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Query(query): Query<ListChatThreadsQuery>,
 ) -> Result<Json<ListChatThreadsResponse>, AppError> {
-    Ok(Json(
-        threads::get_chat_threads(uid, chat_id, query, &mut conn, &state.media, &state.avatars)
-            .await?,
-    ))
+    conn.run(move |mut conn| async move {
+        Ok(Json(
+            threads::get_chat_threads(uid, chat_id, query, &mut conn, &state.media, &state.avatars)
+                .await?,
+        ))
+    })
+    .await
 }
 
 /// List root/reply authors in ascending UID order, not thread subscribers.
@@ -110,17 +116,20 @@ async fn get_thread_participants(
         chat_id,
         thread_root_id,
     }): Path<ThreadSubscribePath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Query(query): Query<ListThreadParticipantsQuery>,
 ) -> Result<Json<ListThreadParticipantsResponse>, AppError> {
-    Ok(Json(threads::get_thread_participants(
-        uid,
-        chat_id,
-        thread_root_id,
-        query,
-        &mut conn,
-        &state.avatars,
-    )?))
+    conn.run(move |mut conn| async move {
+        Ok(Json(threads::get_thread_participants(
+            uid,
+            chat_id,
+            thread_root_id,
+            query,
+            &mut conn,
+            &state.avatars,
+        )?))
+    })
+    .await
 }
 
 #[derive(serde::Deserialize)]
@@ -150,17 +159,20 @@ async fn mark_thread_read(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(ThreadRootIdPath { thread_root_id }): Path<ThreadRootIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<MarkThreadReadBody>,
 ) -> Result<Json<MarkThreadReadResponse>, AppError> {
-    Ok(Json(threads::mark_thread_read(
-        uid,
-        thread_root_id,
-        body,
-        &mut conn,
-        &state.unread_service,
-        &state.ws_registry,
-    )?))
+    conn.run(move |mut conn| async move {
+        Ok(Json(threads::mark_thread_read(
+            uid,
+            thread_root_id,
+            body,
+            &mut conn,
+            &state.unread_service,
+            &state.ws_registry,
+        )?))
+    })
+    .await
 }
 
 /// GET /threads/:thread_root_id/read-state — Get the user's read position for a thread.
@@ -183,14 +195,17 @@ async fn get_thread_read_state(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(ThreadRootIdPath { thread_root_id }): Path<ThreadRootIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<ThreadReadStateResponse>, AppError> {
-    Ok(Json(threads::get_thread_read_state(
-        uid,
-        thread_root_id,
-        &mut conn,
-        &state.unread_service,
-    )?))
+    conn.run(move |mut conn| async move {
+        Ok(Json(threads::get_thread_read_state(
+            uid,
+            thread_root_id,
+            &mut conn,
+            &state.unread_service,
+        )?))
+    })
+    .await
 }
 
 /// GET /threads/unread — Get total unread thread and message counts for the current user.
@@ -205,9 +220,12 @@ async fn get_thread_read_state(
 )]
 async fn get_unread_thread_count(
     CurrentUid(uid): CurrentUid,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<UnreadThreadCountResponse>, AppError> {
-    Ok(Json(threads::get_unread_thread_count(uid, &mut conn)?))
+    conn.run(
+        move |mut conn| async move { Ok(Json(threads::get_unread_thread_count(uid, &mut conn)?)) },
+    )
+    .await
 }
 
 #[derive(serde::Deserialize)]
@@ -239,18 +257,21 @@ async fn mark_thread_read_in_chat(
         chat_id,
         thread_root_id,
     }): Path<ThreadSubscribePath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<MarkThreadReadBody>,
 ) -> Result<Json<MarkThreadReadResponse>, AppError> {
-    Ok(Json(threads::mark_thread_read_in_chat(
-        uid,
-        chat_id,
-        thread_root_id,
-        body,
-        &mut conn,
-        &state.unread_service,
-        &state.ws_registry,
-    )?))
+    conn.run(move |mut conn| async move {
+        Ok(Json(threads::mark_thread_read_in_chat(
+            uid,
+            chat_id,
+            thread_root_id,
+            body,
+            &mut conn,
+            &state.unread_service,
+            &state.ws_registry,
+        )?))
+    })
+    .await
 }
 
 /// GET /chats/:chat_id/threads/:thread_root_id/read-state — Read position in a thread.
@@ -274,15 +295,18 @@ async fn get_thread_read_state_in_chat(
         chat_id,
         thread_root_id,
     }): Path<ThreadSubscribePath>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<ThreadReadStateResponse>, AppError> {
-    Ok(Json(threads::get_thread_read_state_in_chat(
-        uid,
-        chat_id,
-        thread_root_id,
-        &mut conn,
-        &state.unread_service,
-    )?))
+    conn.run(move |mut conn| async move {
+        Ok(Json(threads::get_thread_read_state_in_chat(
+            uid,
+            chat_id,
+            thread_root_id,
+            &mut conn,
+            &state.unread_service,
+        )?))
+    })
+    .await
 }
 
 /// PUT /chats/:chat_id/threads/:thread_root_id/subscribe — Follow a thread.
@@ -306,10 +330,13 @@ async fn subscribe_thread(
         chat_id,
         thread_root_id,
     }): Path<ThreadSubscribePath>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    threads::subscribe_thread(uid, chat_id, thread_root_id, &mut conn, &state.ws_registry)?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        threads::subscribe_thread(uid, chat_id, thread_root_id, &mut conn, &state.ws_registry)?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 /// DELETE /chats/:chat_id/threads/:thread_root_id/subscribe — Unfollow a thread.
@@ -333,10 +360,13 @@ async fn unsubscribe_thread(
         chat_id,
         thread_root_id,
     }): Path<ThreadSubscribePath>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    threads::unsubscribe_thread(uid, chat_id, thread_root_id, &mut conn, &state.ws_registry)?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        threads::unsubscribe_thread(uid, chat_id, thread_root_id, &mut conn, &state.ws_registry)?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 #[derive(serde::Deserialize)]
@@ -366,14 +396,17 @@ async fn get_subscription_status(
         chat_id,
         thread_root_id,
     }): Path<ThreadSubscriptionStatusPath>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<ThreadSubscriptionStatusResponse>, AppError> {
-    Ok(Json(threads::get_subscription_status(
-        uid,
-        chat_id,
-        thread_root_id,
-        &mut conn,
-    )?))
+    conn.run(move |mut conn| async move {
+        Ok(Json(threads::get_subscription_status(
+            uid,
+            chat_id,
+            thread_root_id,
+            &mut conn,
+        )?))
+    })
+    .await
 }
 
 /// PUT /chats/:chat_id/threads/:thread_root_id/archive — Archive a thread subscription.
@@ -397,10 +430,13 @@ async fn archive_thread(
         chat_id,
         thread_root_id,
     }): Path<ThreadSubscribePath>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    threads::archive_thread(uid, chat_id, thread_root_id, &mut conn, &state.ws_registry)?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        threads::archive_thread(uid, chat_id, thread_root_id, &mut conn, &state.ws_registry)?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 /// DELETE /chats/:chat_id/threads/:thread_root_id/archive — Unarchive a thread subscription.
@@ -424,10 +460,13 @@ async fn unarchive_thread(
         chat_id,
         thread_root_id,
     }): Path<ThreadSubscribePath>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    threads::unarchive_thread(uid, chat_id, thread_root_id, &mut conn, &state.ws_registry)?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        threads::unarchive_thread(uid, chat_id, thread_root_id, &mut conn, &state.ws_registry)?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 /// Top-level `/threads` routes.

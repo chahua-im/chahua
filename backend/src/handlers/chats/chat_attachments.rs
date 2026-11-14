@@ -35,17 +35,20 @@ async fn get_chat_attachments(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Query(query): Query<ListChatAttachmentsQuery>,
 ) -> Result<Json<ListChatAttachmentsResponse>, AppError> {
-    Ok(Json(chat_attachments::get_chat_attachments(
-        uid,
-        chat_id,
-        query,
-        &mut conn,
-        &state.media,
-        state.avatars.as_ref(),
-    )?))
+    conn.run(move |mut conn| async move {
+        Ok(Json(chat_attachments::get_chat_attachments(
+            uid,
+            chat_id,
+            query,
+            &mut conn,
+            &state.media,
+            state.avatars.as_ref(),
+        )?))
+    })
+    .await
 }
 
 pub fn router() -> OpenApiRouter<crate::AppState> {

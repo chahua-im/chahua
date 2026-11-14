@@ -60,13 +60,6 @@ fn verified_session(
     .map_err(auth_error_rejection)
 }
 
-pub fn extract_current_uid(
-    headers: &HeaderMap,
-    state: &crate::AppState,
-) -> Result<i32, (StatusCode, &'static str)> {
-    extract_auth_context(headers, state).map(|context| context.uid)
-}
-
 pub fn extract_auth_context(
     headers: &HeaderMap,
     state: &crate::AppState,
@@ -85,27 +78,24 @@ enum Credential {
     ServiceToken(ServiceTokenPrincipal),
 }
 
-fn authenticate_credential(
-    headers: &HeaderMap,
-    state: &crate::AppState,
-) -> Result<Credential, AppError> {
-    if let Some(token) = bearer_token(headers).map_err(AppError::from)? {
-        if token.starts_with(service_tokens::TOKEN_PREFIX) {
-            let mut conn = state.db.get()?;
-            let service_token = service_tokens::authenticate(
-                &mut conn,
-                &state.config.auth.service_token_hash_key,
-                token,
-            )?;
-            return Ok(Credential::ServiceToken(ServiceTokenPrincipal::from(
-                service_token,
-            )));
-        }
+fn authenticate_credential(token: &str, state: &crate::AppState) -> Result<Credential, AppError> {
+    if token.starts_with(service_tokens::TOKEN_PREFIX) {
+        let mut conn = state.db.get()?;
+        let service_token = service_tokens::authenticate(
+            &mut conn,
+            &state.config.auth.service_token_hash_key,
+            token,
+        )?;
+        return Ok(Credential::ServiceToken(ServiceTokenPrincipal::from(
+            service_token,
+        )));
     }
 
-    extract_auth_context(headers, state)
-        .map(Credential::User)
-        .map_err(AppError::from)
+    let session = verified_session(token, state).map_err(AppError::from)?;
+    Ok(Credential::User(AuthContext {
+        uid: session.uid,
+        client_id: session.client_id,
+    }))
 }
 
 /// Apply the `X-On-Behalf-Of` header to an authenticated credential.
@@ -166,13 +156,6 @@ fn required_bearer_token(headers: &HeaderMap) -> Result<&str, (StatusCode, &'sta
     bearer_token(headers)?.ok_or((StatusCode::UNAUTHORIZED, "Missing auth token"))
 }
 
-pub fn resolve_client_id(
-    headers: &HeaderMap,
-    state: &crate::AppState,
-) -> Result<String, (StatusCode, &'static str)> {
-    Ok(extract_auth_context(headers, state)?.client_id)
-}
-
 impl FromRequestParts<crate::AppState> for BearerSession {
     type Rejection = (StatusCode, &'static str);
 
@@ -180,8 +163,14 @@ impl FromRequestParts<crate::AppState> for BearerSession {
         parts: &mut Parts,
         state: &crate::AppState,
     ) -> Result<Self, Self::Rejection> {
-        let token = required_bearer_token(&parts.headers)?;
-        verified_session(token, state).map(BearerSession)
+        let token = required_bearer_token(&parts.headers)?.to_owned();
+        let state = state.clone();
+        tokio::task::spawn_blocking(move || verified_session(&token, &state).map(BearerSession))
+            .await
+            .map_err(|error| {
+                tracing::error!(?error, "bearer authentication worker failed");
+                auth_error_rejection(AppError::Internal("Authentication worker failed"))
+            })?
     }
 }
 
@@ -192,7 +181,9 @@ impl FromRequestParts<crate::AppState> for CurrentUid {
         parts: &mut Parts,
         state: &crate::AppState,
     ) -> Result<Self, Self::Rejection> {
-        extract_current_uid(&parts.headers, state).map(CurrentUid)
+        BearerSession::from_request_parts(parts, state)
+            .await
+            .map(|BearerSession(session)| CurrentUid(session.uid))
     }
 }
 
@@ -203,10 +194,19 @@ impl FromRequestParts<crate::AppState> for Principal {
         parts: &mut Parts,
         state: &crate::AppState,
     ) -> Result<Self, Self::Rejection> {
-        apply_delegation(
-            authenticate_credential(&parts.headers, state)?,
-            on_behalf_of_uid(&parts.headers)?,
-        )
+        let token = required_bearer_token(&parts.headers)
+            .map_err(AppError::from)?
+            .to_owned();
+        let delegation = on_behalf_of_uid(&parts.headers);
+        let state = state.clone();
+        tokio::task::spawn_blocking(move || {
+            apply_delegation(authenticate_credential(&token, &state)?, delegation?)
+        })
+        .await
+        .map_err(|error| {
+            tracing::error!(?error, "principal authentication worker failed");
+            AppError::Internal("Authentication worker failed")
+        })?
     }
 }
 
@@ -217,7 +217,9 @@ impl FromRequestParts<crate::AppState> for ClientId {
         parts: &mut Parts,
         state: &crate::AppState,
     ) -> Result<Self, Self::Rejection> {
-        resolve_client_id(&parts.headers, state).map(ClientId)
+        BearerSession::from_request_parts(parts, state)
+            .await
+            .map(|BearerSession(session)| ClientId(session.client_id))
     }
 }
 

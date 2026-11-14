@@ -27,16 +27,19 @@ async fn get_reaction_details(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path((chat_id, message_id)): Path<(i64, i64)>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<ReactionDetailResponse>, AppError> {
-    crate::services::api::chats::reactions::get_reaction_details(
-        uid,
-        chat_id,
-        message_id,
-        &mut conn,
-        &state.avatars,
-    )
-    .map(Json)
+    conn.run(move |mut conn| async move {
+        crate::services::api::chats::reactions::get_reaction_details(
+            uid,
+            chat_id,
+            message_id,
+            &mut conn,
+            &state.avatars,
+        )
+        .map(Json)
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -57,18 +60,21 @@ async fn put_reaction(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path((chat_id, message_id, emoji)): Path<(i64, i64, String)>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    crate::services::api::chats::reactions::put_reaction(
-        uid,
-        chat_id,
-        message_id,
-        emoji,
-        &mut conn,
-        &state.avatars,
-        &state.ws_registry,
-    )?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        crate::services::api::chats::reactions::put_reaction(
+            uid,
+            chat_id,
+            message_id,
+            emoji,
+            &mut conn,
+            &state.avatars,
+            &state.ws_registry,
+        )?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -89,18 +95,21 @@ async fn delete_reaction(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path((chat_id, message_id, emoji)): Path<(i64, i64, String)>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    crate::services::api::chats::reactions::delete_reaction(
-        uid,
-        chat_id,
-        message_id,
-        emoji,
-        &mut conn,
-        &state.avatars,
-        &state.ws_registry,
-    )?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        crate::services::api::chats::reactions::delete_reaction(
+            uid,
+            chat_id,
+            message_id,
+            emoji,
+            &mut conn,
+            &state.avatars,
+            &state.ws_registry,
+        )?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 pub fn router() -> OpenApiRouter<crate::AppState> {

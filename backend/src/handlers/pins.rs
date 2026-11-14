@@ -53,11 +53,14 @@ async fn list_pins(
     State(state): State<AppState>,
     Path(path): Path<ChatIdPath>,
     CurrentUid(uid): CurrentUid,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<ListPinsResponse>, AppError> {
-    let response =
-        pins::list_pins(uid, path.chat_id, &mut conn, &state.media, &state.avatars).await?;
-    Ok(Json(response))
+    conn.run(move |mut conn| async move {
+        let response =
+            pins::list_pins(uid, path.chat_id, &mut conn, &state.media, &state.avatars).await?;
+        Ok(Json(response))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -77,25 +80,28 @@ async fn create_pin(
     State(state): State<AppState>,
     Path(path): Path<ChatIdPath>,
     CurrentUid(uid): CurrentUid,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<CreatePinBody>,
 ) -> Result<(StatusCode, Json<PinResponse>), AppError> {
-    let pin_response = pins::create_pin(
-        uid,
-        path.chat_id,
-        body,
-        &mut conn,
-        CreatePinDeps {
-            id_gen: &state.id_gen,
-            media: &state.media,
-            avatars: &state.avatars,
-            metrics: &state.metrics,
-            ws_registry: &state.ws_registry,
-            push_service: &state.push_service,
-        },
-    )
-    .await?;
-    Ok((StatusCode::CREATED, Json(pin_response)))
+    conn.run(move |mut conn| async move {
+        let pin_response = pins::create_pin(
+            uid,
+            path.chat_id,
+            body,
+            &mut conn,
+            CreatePinDeps {
+                id_gen: &state.id_gen,
+                media: &state.media,
+                avatars: &state.avatars,
+                metrics: &state.metrics,
+                ws_registry: &state.ws_registry,
+                push_service: &state.push_service,
+            },
+        )
+        .await?;
+        Ok((StatusCode::CREATED, Json(pin_response)))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -115,24 +121,27 @@ async fn delete_pin(
     State(state): State<AppState>,
     Path(path): Path<PinIdPath>,
     CurrentUid(uid): CurrentUid,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    pins::delete_pin(
-        uid,
-        path.chat_id,
-        path.pin_id,
-        &mut conn,
-        DeletePinDeps {
-            id_gen: &state.id_gen,
-            media: &state.media,
-            avatars: &state.avatars,
-            metrics: &state.metrics,
-            ws_registry: &state.ws_registry,
-            push_service: &state.push_service,
-        },
-    )
-    .await?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        pins::delete_pin(
+            uid,
+            path.chat_id,
+            path.pin_id,
+            &mut conn,
+            DeletePinDeps {
+                id_gen: &state.id_gen,
+                media: &state.media,
+                avatars: &state.avatars,
+                metrics: &state.metrics,
+                ws_registry: &state.ws_registry,
+                push_service: &state.push_service,
+            },
+        )
+        .await?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -152,18 +161,21 @@ async fn list_thread_pins(
     State(state): State<AppState>,
     Path(path): Path<ThreadPinsPath>,
     CurrentUid(uid): CurrentUid,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<ListPinsResponse>, AppError> {
-    let response = pins::list_thread_pins(
-        uid,
-        path.chat_id,
-        path.thread_root_id,
-        &mut conn,
-        &state.media,
-        &state.avatars,
-    )
-    .await?;
-    Ok(Json(response))
+    conn.run(move |mut conn| async move {
+        let response = pins::list_thread_pins(
+            uid,
+            path.chat_id,
+            path.thread_root_id,
+            &mut conn,
+            &state.media,
+            &state.avatars,
+        )
+        .await?;
+        Ok(Json(response))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -184,26 +196,29 @@ async fn create_thread_pin(
     State(state): State<AppState>,
     Path(path): Path<ThreadPinsPath>,
     CurrentUid(uid): CurrentUid,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<CreatePinBody>,
 ) -> Result<(StatusCode, Json<PinResponse>), AppError> {
-    let pin_response = pins::create_thread_pin(
-        uid,
-        path.chat_id,
-        path.thread_root_id,
-        body,
-        &mut conn,
-        CreatePinDeps {
-            id_gen: &state.id_gen,
-            media: &state.media,
-            avatars: &state.avatars,
-            metrics: &state.metrics,
-            ws_registry: &state.ws_registry,
-            push_service: &state.push_service,
-        },
-    )
-    .await?;
-    Ok((StatusCode::CREATED, Json(pin_response)))
+    conn.run(move |mut conn| async move {
+        let pin_response = pins::create_thread_pin(
+            uid,
+            path.chat_id,
+            path.thread_root_id,
+            body,
+            &mut conn,
+            CreatePinDeps {
+                id_gen: &state.id_gen,
+                media: &state.media,
+                avatars: &state.avatars,
+                metrics: &state.metrics,
+                ws_registry: &state.ws_registry,
+                push_service: &state.push_service,
+            },
+        )
+        .await?;
+        Ok((StatusCode::CREATED, Json(pin_response)))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -224,25 +239,28 @@ async fn delete_thread_pin(
     State(state): State<AppState>,
     Path(path): Path<ThreadPinIdPath>,
     CurrentUid(uid): CurrentUid,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    pins::delete_thread_pin(
-        uid,
-        path.chat_id,
-        path.thread_root_id,
-        path.pin_id,
-        &mut conn,
-        DeletePinDeps {
-            id_gen: &state.id_gen,
-            media: &state.media,
-            avatars: &state.avatars,
-            metrics: &state.metrics,
-            ws_registry: &state.ws_registry,
-            push_service: &state.push_service,
-        },
-    )
-    .await?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        pins::delete_thread_pin(
+            uid,
+            path.chat_id,
+            path.thread_root_id,
+            path.pin_id,
+            &mut conn,
+            DeletePinDeps {
+                id_gen: &state.id_gen,
+                media: &state.media,
+                avatars: &state.avatars,
+                metrics: &state.metrics,
+                ws_registry: &state.ws_registry,
+                push_service: &state.push_service,
+            },
+        )
+        .await?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 pub fn router() -> OpenApiRouter<AppState> {

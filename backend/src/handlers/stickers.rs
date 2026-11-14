@@ -24,35 +24,41 @@ use crate::services::stickers::creation::MAX_STICKER_UPLOAD_BYTES;
 async fn get_packs(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Query(query): Query<StickerPackDiscoveryQuery>,
 ) -> Result<AxumJson<StickerPackDiscoveryResponse>, AppError> {
-    Ok(AxumJson(stickers::get_packs(
-        uid,
-        query,
-        &mut conn,
-        &state.media,
-    )?))
+    conn.run(move |mut conn| async move {
+        Ok(AxumJson(stickers::get_packs(
+            uid,
+            query,
+            &mut conn,
+            &state.media,
+        )?))
+    })
+    .await
 }
 
 #[utoipa::path(post, path = "/packs", tag = "stickers", request_body = CreateStickerPackBody, responses((status = 200, description = "Sticker pack created", body = StickerPackSummary)), security(("bearer_jwt" = [])))]
 async fn post_pack(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<CreateStickerPackBody>,
 ) -> Result<AxumJson<StickerPackSummary>, AppError> {
-    Ok(AxumJson(
-        stickers::post_pack(
-            uid,
-            body,
-            &mut conn,
-            state.id_gen.as_ref(),
-            &state.media,
-            state.ws_registry.as_ref(),
-        )
-        .await?,
-    ))
+    conn.run(move |mut conn| async move {
+        Ok(AxumJson(
+            stickers::post_pack(
+                uid,
+                body,
+                &mut conn,
+                state.id_gen.as_ref(),
+                &state.media,
+                state.ws_registry.as_ref(),
+            )
+            .await?,
+        ))
+    })
+    .await
 }
 
 #[utoipa::path(patch, path = "/packs/{pack_id}", tag = "stickers", request_body = UpdateStickerPackBody, params(("pack_id" = String, Path, description = "Sticker pack ID")), responses((status = 200, description = "Sticker pack updated", body = StickerPackSummary)), security(("bearer_jwt" = [])))]
@@ -60,17 +66,20 @@ async fn patch_pack(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(pack_id): Path<i64>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<UpdateStickerPackBody>,
 ) -> Result<AxumJson<StickerPackSummary>, AppError> {
-    Ok(AxumJson(stickers::patch_pack(
-        uid,
-        pack_id,
-        body,
-        &mut conn,
-        &state.media,
-        state.ws_registry.as_ref(),
-    )?))
+    conn.run(move |mut conn| async move {
+        Ok(AxumJson(stickers::patch_pack(
+            uid,
+            pack_id,
+            body,
+            &mut conn,
+            &state.media,
+            state.ws_registry.as_ref(),
+        )?))
+    })
+    .await
 }
 
 #[utoipa::path(delete, path = "/packs/{pack_id}", tag = "stickers", params(("pack_id" = String, Path, description = "Sticker pack ID")), responses((status = 204, description = "Sticker pack deleted")), security(("bearer_jwt" = [])))]
@@ -78,10 +87,13 @@ async fn delete_pack(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(pack_id): Path<i64>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    stickers::delete_pack(uid, pack_id, &mut conn, state.ws_registry.as_ref())?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        stickers::delete_pack(uid, pack_id, &mut conn, state.ws_registry.as_ref())?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 #[utoipa::path(get, path = "/packs/{pack_id}", tag = "stickers", params(("pack_id" = String, Path, description = "Sticker pack ID")), responses((status = 200, description = "Sticker pack details", body = StickerPackDetailResponse), (status = 404, description = "Sticker pack not found or private")), security(("bearer_jwt" = [])))]
@@ -89,40 +101,49 @@ async fn get_pack(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(pack_id): Path<i64>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<AxumJson<StickerPackDetailResponse>, AppError> {
-    Ok(AxumJson(stickers::get_pack(
-        uid,
-        pack_id,
-        &mut conn,
-        &state.media,
-    )?))
+    conn.run(move |mut conn| async move {
+        Ok(AxumJson(stickers::get_pack(
+            uid,
+            pack_id,
+            &mut conn,
+            &state.media,
+        )?))
+    })
+    .await
 }
 
 #[utoipa::path(get, path = "/packs/mine/subscribed", tag = "stickers", responses((status = 200, description = "Subscribed sticker packs", body = StickerPackListResponse)), security(("bearer_jwt" = [])))]
 async fn get_my_subscribed_packs(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<AxumJson<StickerPackListResponse>, AppError> {
-    Ok(AxumJson(stickers::get_my_subscribed_packs(
-        uid,
-        &mut conn,
-        &state.media,
-    )?))
+    conn.run(move |mut conn| async move {
+        Ok(AxumJson(stickers::get_my_subscribed_packs(
+            uid,
+            &mut conn,
+            &state.media,
+        )?))
+    })
+    .await
 }
 
 #[utoipa::path(get, path = "/packs/mine/owned", tag = "stickers", responses((status = 200, description = "Owned sticker packs", body = StickerPackListResponse)), security(("bearer_jwt" = [])))]
 async fn get_my_owned_packs(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<AxumJson<StickerPackListResponse>, AppError> {
-    Ok(AxumJson(stickers::get_my_owned_packs(
-        uid,
-        &mut conn,
-        &state.media,
-    )?))
+    conn.run(move |mut conn| async move {
+        Ok(AxumJson(stickers::get_my_owned_packs(
+            uid,
+            &mut conn,
+            &state.media,
+        )?))
+    })
+    .await
 }
 
 #[utoipa::path(put, path = "/packs/{pack_id}/subscription", tag = "stickers", params(("pack_id" = String, Path, description = "Sticker pack ID")), responses((status = 204, description = "Subscribed to sticker pack"), (status = 404, description = "Sticker pack not found or private")), security(("bearer_jwt" = [])))]
@@ -130,10 +151,13 @@ async fn put_subscription(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(pack_id): Path<i64>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    stickers::put_subscription(uid, pack_id, &mut conn, state.ws_registry.as_ref())?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        stickers::put_subscription(uid, pack_id, &mut conn, state.ws_registry.as_ref())?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 #[utoipa::path(delete, path = "/packs/{pack_id}/subscription", tag = "stickers", params(("pack_id" = String, Path, description = "Sticker pack ID")), responses((status = 204, description = "Unsubscribed from sticker pack")), security(("bearer_jwt" = [])))]
@@ -141,10 +165,13 @@ async fn delete_subscription(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(pack_id): Path<i64>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    stickers::delete_subscription(uid, pack_id, &mut conn, state.ws_registry.as_ref())?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        stickers::delete_subscription(uid, pack_id, &mut conn, state.ws_registry.as_ref())?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 #[utoipa::path(post, path = "/packs/{pack_id}/stickers", tag = "stickers", params(("pack_id" = String, Path, description = "Sticker pack ID")), request_body(content = PostStickerMultipart, content_type = "multipart/form-data"), responses((status = 201, description = "Sticker created", body = StickerSummary)), security(("bearer_jwt" = [])))]
@@ -224,20 +251,26 @@ async fn post_pack_sticker(
 async fn put_pack_sticker(
     CurrentUid(uid): CurrentUid,
     Path((pack_id, sticker_id)): Path<(i64, i64)>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    stickers::put_pack_sticker(uid, pack_id, sticker_id, &mut conn)?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        stickers::put_pack_sticker(uid, pack_id, sticker_id, &mut conn)?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 #[utoipa::path(delete, path = "/packs/{pack_id}/stickers/{sticker_id}", tag = "stickers", params(("pack_id" = String, Path, description = "Sticker pack ID"), ("sticker_id" = String, Path, description = "Sticker ID")), responses((status = 204, description = "Sticker removed from pack")), security(("bearer_jwt" = [])))]
 async fn delete_pack_sticker(
     CurrentUid(uid): CurrentUid,
     Path((pack_id, sticker_id)): Path<(i64, i64)>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    stickers::delete_pack_sticker(uid, pack_id, sticker_id, &mut conn)?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        stickers::delete_pack_sticker(uid, pack_id, sticker_id, &mut conn)?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 #[utoipa::path(get, path = "/{sticker_id}", tag = "stickers", params(("sticker_id" = String, Path, description = "Sticker ID")), responses((status = 200, description = "Sticker details", body = StickerDetailResponse)), security(("bearer_jwt" = [])))]
@@ -245,47 +278,59 @@ async fn get_sticker(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(sticker_id): Path<i64>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<AxumJson<StickerDetailResponse>, AppError> {
-    Ok(AxumJson(stickers::get_sticker(
-        uid,
-        sticker_id,
-        &mut conn,
-        &state.media,
-    )?))
+    conn.run(move |mut conn| async move {
+        Ok(AxumJson(stickers::get_sticker(
+            uid,
+            sticker_id,
+            &mut conn,
+            &state.media,
+        )?))
+    })
+    .await
 }
 
 #[utoipa::path(put, path = "/{sticker_id}/favorite", tag = "stickers", params(("sticker_id" = String, Path, description = "Sticker ID")), responses((status = 204, description = "Sticker favorited")), security(("bearer_jwt" = [])))]
 async fn put_favorite(
     CurrentUid(uid): CurrentUid,
     Path(sticker_id): Path<i64>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    stickers::put_favorite(uid, sticker_id, &mut conn)?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        stickers::put_favorite(uid, sticker_id, &mut conn)?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 #[utoipa::path(delete, path = "/{sticker_id}/favorite", tag = "stickers", params(("sticker_id" = String, Path, description = "Sticker ID")), responses((status = 204, description = "Sticker unfavorited")), security(("bearer_jwt" = [])))]
 async fn delete_favorite(
     CurrentUid(uid): CurrentUid,
     Path(sticker_id): Path<i64>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    stickers::delete_favorite(uid, sticker_id, &mut conn)?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        stickers::delete_favorite(uid, sticker_id, &mut conn)?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 #[utoipa::path(get, path = "/mine/favorites", tag = "stickers", responses((status = 200, description = "Favorite stickers", body = FavoriteStickerListResponse)), security(("bearer_jwt" = [])))]
 async fn get_my_favorites(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<AxumJson<FavoriteStickerListResponse>, AppError> {
-    Ok(AxumJson(stickers::get_my_favorites(
-        uid,
-        &mut conn,
-        &state.media,
-    )?))
+    conn.run(move |mut conn| async move {
+        Ok(AxumJson(stickers::get_my_favorites(
+            uid,
+            &mut conn,
+            &state.media,
+        )?))
+    })
+    .await
 }
 
 pub fn router() -> OpenApiRouter<crate::AppState> {

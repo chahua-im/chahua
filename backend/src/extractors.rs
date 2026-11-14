@@ -1,43 +1,39 @@
+use std::future::Future;
+
 use axum::extract::{FromRef, FromRequestParts};
 use diesel::r2d2::{ConnectionManager, PooledConnection};
 use diesel::PgConnection;
-use std::ops::{Deref, DerefMut};
 
 use crate::errors::AppError;
 use crate::state::DbPool;
 
-/// Axum extractor that acquires a pooled database connection from the router state.
-///
-/// Usage in handler functions:
-/// ```ignore
-/// async fn my_handler(
-///     mut conn: DbConn,
-///     // ...
-/// ) -> Result<..., AppError> {
-///     some_query.load(&mut *conn)?;
-/// }
-/// ```
-///
-/// Implements `Deref`/`DerefMut` to `PgConnection` so it can be passed directly
-/// to Diesel query methods.
-pub struct DbConn(pub PooledConnection<ConnectionManager<PgConnection>>);
+/// Request-scoped access to the synchronous database through a blocking worker.
+/// Extraction does not acquire a connection; decoding the request body therefore
+/// cannot hold a pool connection. Connections are only exposed inside `run`.
+pub struct DbConn(DbPool);
 
-impl Deref for DbConn {
-    type Target = PgConnection;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
+impl DbConn {
+    /// Runs the complete application operation, including transaction and
+    /// post-commit work, off the async executor. Existing application operations
+    /// may await other services while retaining their synchronous connection.
+    pub async fn run<T, F, Fut>(self, operation: F) -> Result<T, AppError>
+    where
+        F: FnOnce(PooledConnection<ConnectionManager<PgConnection>>) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<T, AppError>>,
+        T: Send + 'static,
+    {
+        tokio::task::spawn_blocking(move || {
+            let conn = self.0.get()?;
+            futures::executor::block_on(operation(conn))
+        })
+        .await
+        .map_err(|error| {
+            tracing::error!(?error, "database operation worker failed");
+            AppError::Internal("Database operation worker failed")
+        })?
     }
 }
 
-impl DerefMut for DbConn {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-/// Generic over the router state, following axum's guidance for state-dependent
-/// extractors: any state that can produce a [`DbPool`] can produce a `DbConn`.
 impl<S> FromRequestParts<S> for DbConn
 where
     DbPool: FromRef<S>,
@@ -49,7 +45,6 @@ where
         _parts: &mut axum::http::request::Parts,
         state: &S,
     ) -> Result<Self, Self::Rejection> {
-        let conn = DbPool::from_ref(state).get()?;
-        Ok(DbConn(conn))
+        Ok(Self(DbPool::from_ref(state)))
     }
 }
