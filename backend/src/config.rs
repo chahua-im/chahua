@@ -364,7 +364,12 @@ impl AppConfig {
                 project_id,
                 service_account_path,
             }),
-            _ => panic!("FCM configuration requires FCM_PROJECT_ID and FCM_SERVICE_ACCOUNT_PATH"),
+            (Some(_), None) => panic!(
+                "FCM_PROJECT_ID is set but FCM_SERVICE_ACCOUNT_PATH is missing; unset FCM_PROJECT_ID to disable FCM"
+            ),
+            (None, Some(_)) => panic!(
+                "FCM_SERVICE_ACCOUNT_PATH is set but FCM_PROJECT_ID is missing; unset FCM_SERVICE_ACCOUNT_PATH to disable FCM"
+            ),
         };
         let node_id = match env("NODE_ID") {
             Some(value) => value.parse::<u64>().ok(),
