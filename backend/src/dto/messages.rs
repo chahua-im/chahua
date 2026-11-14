@@ -542,6 +542,7 @@ mod tests {
             },
             chat_settings: crate::dto::users::ChatSettings {
                 show_membership_messages: true,
+                show_unread_message_count: false,
             },
             messages: vec![],
             next_cursor: Some(10),
@@ -555,7 +556,7 @@ mod tests {
         assert_eq!(
             value,
             json!({
-                "chatSettings": {"showMembershipMessages": true},
+                "chatSettings": {"showMembershipMessages": true, "showUnreadMessageCount": false},
                 "membershipMessagePolicy": {"visibility": "members", "canView": true},
                 "messages": [],
                 "nextCursor": "10",

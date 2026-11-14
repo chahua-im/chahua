@@ -447,7 +447,7 @@ fn prepare_push_job(
         job.message_id
     );
 
-    // 3.5 Calculate unread counts only for users with push subscriptions
+    // 3.5 Select each subscribed user's Main app badge unit from their account preference.
     let sub_uids: Vec<i32> = {
         let mut seen = std::collections::HashSet::with_capacity(subs.len());
         subs.iter()
@@ -455,7 +455,7 @@ fn prepare_push_job(
             .collect()
     };
     let unread_counts = unread_service
-        .count_users_unread_totals(conn, &sub_uids)
+        .count_users_app_badges(conn, &sub_uids)
         .unwrap_or_else(|error| {
             warn!("Failed to load unread counts for push job: {error}");
             std::collections::HashMap::new()

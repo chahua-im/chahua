@@ -106,6 +106,8 @@ export type {
   ListServiceTokensResponse,
   ListThreadParticipantsResponse,
   ListThreadsResponse,
+  MainUnread,
+  MainUnreadChat,
   MarkAsReadBody,
   MarkAsUnreadBody,
   MarkChatReadStateResponse,
@@ -643,7 +645,7 @@ export type UsersListNotificationExceptionsParams = {
   limit?: number;
 };
 export type UsersSearchParams = { excludeMemberOf?: Shared.SnowflakeID; limit?: number; q?: string };
-export type UsersUpdateChatSettingsParams = { showMembershipMessages: boolean };
+export type UsersUpdateChatSettingsParams = { showMembershipMessages?: boolean; showUnreadMessageCount?: boolean };
 export type UsersUpdateNotificationSettingsParams = {
   muteDirectChatsByDefault?: boolean;
   muteGroupChatsByDefault?: boolean;

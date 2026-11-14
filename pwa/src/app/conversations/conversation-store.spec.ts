@@ -170,7 +170,7 @@ describe('ConversationStore', () => {
       });
       await opening;
 
-      const settings = { showMembershipMessages: afterShow };
+      const settings = { showMembershipMessages: afterShow, showUnreadMessageCount: false };
       const updatedPolicy = policy(afterView);
       if (knownBeforeRequest) {
         session.acceptChatSettings(settings, testUser.uid);
@@ -258,7 +258,7 @@ describe('ConversationStore', () => {
         olderCursor: '100',
       });
       await opening;
-      const settings = { showMembershipMessages: false };
+      const settings = { showMembershipMessages: false, showUnreadMessageCount: false };
       if (savedLocally) session.acceptChatSettings(settings, testUser.uid);
       const loading = timeline.load(PageDirection.Older);
       messages({ ...threadParams, before: '100' }).flush({
@@ -288,7 +288,7 @@ describe('ConversationStore', () => {
         messages: [wire('100')],
       });
       await opening;
-      const settings = { showMembershipMessages: false };
+      const settings = { showMembershipMessages: false, showUnreadMessageCount: false };
       if (savedLocally) session.acceptChatSettings(settings, testUser.uid);
       const reconnecting = timeline.reconnect();
       messages({ ...threadParams, after: '100' }).flush({
@@ -469,7 +469,7 @@ describe('ConversationStore', () => {
     });
     await opening;
     const previous = timeline.page();
-    session.acceptChatSettings({ showMembershipMessages: !show }, testUser.uid);
+    session.acceptChatSettings({ showMembershipMessages: !show, showUnreadMessageCount: false }, testUser.uid);
     const switching = timeline.open(undefined, false, show);
     const obsolete = messages();
     timeline.receive(message('101'));
@@ -479,7 +479,7 @@ describe('ConversationStore', () => {
       systemKind: SystemMessageKind.member_joined,
     };
     timeline.receive({ ...membership, id: encodeId('102'), chatId: testChat.id });
-    session.acceptChatSettings({ showMembershipMessages: show }, testUser.uid);
+    session.acceptChatSettings({ showMembershipMessages: show, showUnreadMessageCount: false }, testUser.uid);
     const restoring = timeline.open(around, around != null, !show);
     expect(timeline.page()).toBe(previous);
     expect(timeline.loading()).toBe(true);
@@ -511,11 +511,11 @@ describe('ConversationStore', () => {
     });
     await opening;
     const previous = timeline.page();
-    session.acceptChatSettings({ showMembershipMessages: false }, testUser.uid);
+    session.acceptChatSettings({ showMembershipMessages: false, showUnreadMessageCount: false }, testUser.uid);
     const hiding = timeline.open(undefined, false, true);
     const obsolete = messages();
     timeline.receive(message('101'));
-    session.acceptChatSettings({ showMembershipMessages: true }, testUser.uid);
+    session.acceptChatSettings({ showMembershipMessages: true, showUnreadMessageCount: false }, testUser.uid);
     const restoring = timeline.open(undefined, false, false);
     obsolete.flush({ chatSettings: { showMembershipMessages: false }, messages: [wire('100'), wire('101')] });
     expect(timeline.page()).toBe(previous);

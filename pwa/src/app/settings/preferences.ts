@@ -54,6 +54,7 @@ export class Preferences {
   readonly showAllAvatars = computed(() => this.storage.read(AccountStore.Preferences, AVATARS_KEY, false));
   readonly showDmDetails = computed(() => this.storage.read(AccountStore.Preferences, DM_DETAILS_KEY, true));
   readonly showMembershipMessages = computed(() => this.session.user()?.showMembershipMessages ?? true);
+  readonly showUnreadMessageCount = computed(() => this.session.user()?.showUnreadMessageCount ?? false);
   readonly colorMode = this.mode.asReadonly();
   readonly selectedLocale = this.locale.asReadonly();
 
@@ -76,6 +77,10 @@ export class Preferences {
 
   setShowMembershipMessages(value: boolean) {
     return this.session.setShowMembershipMessages(value);
+  }
+
+  setShowUnreadMessageCount(value: boolean) {
+    return this.session.setShowUnreadMessageCount(value);
   }
 
   setColorMode(value: ColorMode) {

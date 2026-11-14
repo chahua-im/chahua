@@ -81,6 +81,7 @@ pub(super) struct PushPayload {
     pub(super) body: String,
     pub(super) sender_name: String,
     pub(super) message_preview: PushMessagePreview,
+    /// Server-owned Main app badge: unread chats by default, capped messages when enabled.
     pub(super) unread_count: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) mentioned_uid: Option<i32>,
@@ -141,6 +142,7 @@ pub(super) fn build_push_payload(
     }
 }
 
+/// The worker supplies the same preference-selected Main badge as conversationUnread.
 pub(super) fn build_apns_notification(
     job: &PushJob,
     unread_count: i64,

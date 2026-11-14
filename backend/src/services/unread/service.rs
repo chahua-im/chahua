@@ -46,6 +46,7 @@ pub struct UserChatUnreadMembership {
     pub archived: bool,
     pub is_muted: bool,
     pub hide_membership_messages: bool,
+    pub show_unread_message_count: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -282,13 +283,14 @@ impl UnreadService {
         self.count_membership_unread_summary(conn, &memberships)
     }
 
-    pub fn count_users_unread_totals(
+    /// Preference-selected Main badge for APNs; excludes archived/muted chats and all replies.
+    pub fn count_users_app_badges(
         &self,
         conn: &mut PgConnection,
         target_uids: &[i32],
     ) -> Result<HashMap<i32, i64>, DieselError> {
         let memberships = Self::load_users_chat_memberships(conn, target_uids)?;
-        self.count_user_membership_unread_totals(conn, target_uids, &memberships)
+        self.count_user_membership_app_badges(conn, target_uids, &memberships)
     }
 
     /// Per-chat unread @mention counts (main scope, non-thread messages) for a user.
@@ -705,7 +707,7 @@ impl UnreadService {
         Ok(summarize_membership_unreads(memberships, &counts))
     }
 
-    fn count_user_membership_unread_totals(
+    fn count_user_membership_app_badges(
         &self,
         conn: &mut PgConnection,
         target_uids: &[i32],
@@ -743,7 +745,11 @@ impl UnreadService {
                 .copied()
                 .unwrap_or(0);
             let current = totals.entry(membership.uid).or_insert(0);
-            *current = capped_add(*current, count);
+            if membership.show_unread_message_count {
+                *current = capped_add(*current, count);
+            } else if count > 0 {
+                *current += 1;
+            }
         }
 
         Ok(totals)
@@ -1006,6 +1012,7 @@ impl UnreadService {
                 groups::kind,
                 crate::services::system_messages::membership_allowed(),
                 crate::schema::user_extra::show_membership_messages.nullable(),
+                crate::schema::user_extra::show_unread_message_count.nullable(),
             ))
             .load::<(
                 i32,
@@ -1016,12 +1023,24 @@ impl UnreadService {
                 GroupKind,
                 bool,
                 Option<bool>,
+                Option<bool>,
             )>(conn)?;
         Ok(rows
             .into_iter()
             .map(
-                |(uid, chat_id, last_read_message_id, archived, setting, kind, allowed, show)| {
+                |(
+                    uid,
+                    chat_id,
+                    last_read_message_id,
+                    archived,
+                    setting,
+                    kind,
+                    allowed,
+                    show,
+                    show_unread_message_count,
+                )| {
                     UserChatUnreadMembership {
+                        show_unread_message_count: show_unread_message_count.unwrap_or(false),
                         hide_membership_messages:
                             crate::services::system_messages::hides_membership_messages(
                                 show.unwrap_or(true) && allowed,
@@ -1208,15 +1227,28 @@ mod tests {
             .bind::<diesel::sql_types::BigInt, _>(chat_id)
             .bind::<diesel::sql_types::BigInt, _>(cursor)
             .execute(conn)?;
-            let totals = service.count_users_unread_totals(
+            let totals = service.count_users_app_badges(
                 conn,
                 &[891001, 891002, 891003, 891004, 891005, 891006, 891007],
             )?;
+            assert_eq!(totals[&891001], 1);
+            assert_eq!(totals[&891002], 1);
+            assert_eq!(totals[&891003], 0);
+            assert_eq!(totals[&891004], 0);
+            assert_eq!(totals[&891005], 1);
+            assert_eq!(totals[&891006], 0);
+            assert_eq!(totals[&891007], 1);
+            for uid in [891001, 891002, 891007] {
+                crate::services::user::save_chat_settings(conn, uid, crate::dto::users::UpdateChatSettings {
+                    show_unread_message_count: Some(true), ..Default::default()
+                })?;
+            }
+            let totals = service.count_users_app_badges(conn, &[891001, 891002, 891003, 891004, 891005, 891006, 891007])?;
             assert_eq!(totals[&891001], 4);
             assert_eq!(totals[&891002], 5);
             assert_eq!(totals[&891003], 0);
             assert_eq!(totals[&891004], 0);
-            assert_eq!(totals[&891005], 4);
+            assert_eq!(totals[&891005], 1);
             assert_eq!(totals[&891006], 0);
             assert_eq!(totals[&891007], MAX_UNREAD_COUNT);
 

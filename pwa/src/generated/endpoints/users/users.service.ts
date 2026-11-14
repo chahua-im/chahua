@@ -193,6 +193,10 @@ export class UsersService {
       observe: 'body',
     });
   }
+  /**
+ * @summary Patch account preferences: omitted fields retain their stored values.
+The response and chatSettingsChanged event contain both absolute settings.
+ */
   putChatSettings<TData = ChatSettings>(
     updateChatSettings: UpdateChatSettings,
     options?: HttpClientBodyOptions,

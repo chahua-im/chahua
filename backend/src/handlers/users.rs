@@ -60,6 +60,8 @@ async fn get_me(
     .await
 }
 
+/// Patch account preferences: omitted fields retain their stored values.
+/// The response and chatSettingsChanged event contain both absolute settings.
 #[utoipa::path(
     put, path = "/me/chat-settings", tag = "users", request_body = UpdateChatSettings,
     responses((status = 200, description = "Saved account chat settings", body = ChatSettings)),

@@ -57,11 +57,11 @@
         <span class="ion-text-wrap">{{ 'settings.general.showDmDetails' | transloco }}</span>
       </ion-toggle>
     </ion-item>
-    <ion-item lines="none">
+    <ion-item>
       <ion-icon slot="start" [icon]="membershipIcon" color="primary" />
       <ion-toggle
         [checked]="preferences.showMembershipMessages()"
-        [disabled]="saving() || !session.user()"
+        [disabled]="saving() || savingUnread() || !session.user()"
         (ionChange)="saveMembershipMessages($event)">
         <span class="ion-text-wrap">{{ 'settings.general.showMembershipMessages' | transloco }}</span>
       </ion-toggle>
@@ -70,6 +70,23 @@
       }
     </ion-item>
     @if (saveError()) {
+      <ion-item lines="none">
+        <ion-label class="ion-text-wrap" color="danger">{{ 'settings.general.saveFailed' | transloco }}</ion-label>
+      </ion-item>
+    }
+    <ion-item lines="none">
+      <ion-icon slot="start" [icon]="unreadIcon" color="primary" />
+      <ion-toggle
+        [checked]="preferences.showUnreadMessageCount()"
+        [disabled]="savingUnread() || saving() || !session.user()"
+        (ionChange)="saveUnreadMessageCount($event)">
+        <span class="ion-text-wrap">{{ 'settings.general.showUnreadMessageCount' | transloco }}</span>
+      </ion-toggle>
+      @if (savingUnread()) {
+        <ion-spinner slot="end" />
+      }
+    </ion-item>
+    @if (unreadSaveError()) {
       <ion-item lines="none">
         <ion-label class="ion-text-wrap" color="danger">{{ 'settings.general.saveFailed' | transloco }}</ion-label>
       </ion-item>

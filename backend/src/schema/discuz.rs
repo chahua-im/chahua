@@ -1,5 +1,617 @@
 // @generated automatically by Diesel CLI.
 
+pub mod sql_types {
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "friend_add_verification_mode"))]
+    pub struct FriendAddVerificationMode;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "friend_request_status"))]
+    pub struct FriendRequestStatus;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "group_join_reason"))]
+    pub struct GroupJoinReason;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "group_kind"))]
+    pub struct GroupKind;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "group_role"))]
+    pub struct GroupRole;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "group_visibility"))]
+    pub struct GroupVisibility;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "invite_type"))]
+    pub struct InviteType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "media_purpose"))]
+    pub struct MediaPurpose;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "membership_message_visibility"))]
+    pub struct MembershipMessageVisibility;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "mention_kind"))]
+    pub struct MentionKind;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "message_type"))]
+    pub struct MessageType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "permission_resource_type"))]
+    pub struct PermissionResourceType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "policy_subject_type"))]
+    pub struct PolicySubjectType;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "presence_visibility"))]
+    pub struct PresenceVisibility;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "push_environment"))]
+    pub struct PushEnvironment;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "push_provider"))]
+    pub struct PushProvider;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "read_receipt_visibility"))]
+    pub struct ReadReceiptVisibility;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "speaking_mode"))]
+    pub struct SpeakingMode;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "sticker_pack_visibility"))]
+    pub struct StickerPackVisibility;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "system_message_kind"))]
+    pub struct SystemMessageKind;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "transcode_status"))]
+    pub struct TranscodeStatus;
+}
+
+diesel::table! {
+    activity_daily_metrics (day) {
+        day -> Date,
+        active_users -> Int8,
+        new_users -> Int8,
+        active_clients -> Int8,
+        new_clients -> Int8,
+        client_rebinds -> Int8,
+        stale_clients_purged -> Int8,
+        legacy_subscriptions_purged -> Int8,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    attachments (id) {
+        id -> Int8,
+        message_id -> Nullable<Int8>,
+        #[max_length = 255]
+        kind -> Varchar,
+        external_reference -> Text,
+        size -> Int8,
+        created_at -> Timestamptz,
+        deleted_at -> Nullable<Timestamptz>,
+        #[max_length = 255]
+        file_name -> Varchar,
+        width -> Nullable<Int4>,
+        height -> Nullable<Int4>,
+        order -> Int2,
+        uploader_uid -> Nullable<Int4>,
+    }
+}
+
+diesel::table! {
+    blocks (blocker_uid, blocked_uid) {
+        blocker_uid -> Int4,
+        blocked_uid -> Int4,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    chat_unread_revisions (chat_id) {
+        chat_id -> Int8,
+        revision -> Int8,
+    }
+}
+
+diesel::table! {
+    clients (client_id) {
+        #[max_length = 64]
+        client_id -> Varchar,
+        created_at -> Timestamp,
+        last_active -> Timestamp,
+        last_active_uid -> Int4,
+        last_app_version -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    forwarded_bundles (id) {
+        id -> Int8,
+        created_by_uid -> Int4,
+        created_at -> Timestamptz,
+        item_count -> Int4,
+        payload -> Jsonb,
+        child_bundle_ids -> Array<Int8>,
+        preview -> Jsonb,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::FriendRequestStatus;
+
+    friend_requests (id) {
+        id -> Int8,
+        from_uid -> Int4,
+        to_uid -> Int4,
+        status -> FriendRequestStatus,
+        created_at -> Timestamptz,
+        decided_at -> Nullable<Timestamptz>,
+        message -> Nullable<Text>,
+        question -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    friendships (uid1, uid2) {
+        uid1 -> Int4,
+        uid2 -> Int4,
+        initiated_by -> Int4,
+        created_at -> Timestamptz,
+        uid1_shares_presence -> Nullable<Bool>,
+        uid2_shares_presence -> Nullable<Bool>,
+        uid1_shares_read_receipts -> Nullable<Bool>,
+        uid2_shares_read_receipts -> Nullable<Bool>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::GroupRole;
+    use super::sql_types::GroupJoinReason;
+    use super::sql_types::SpeakingMode;
+
+    group_membership (chat_id, uid) {
+        chat_id -> Int8,
+        uid -> Int4,
+        role -> GroupRole,
+        joined_at -> Timestamptz,
+        last_read_message_id -> Nullable<Int8>,
+        muted_until -> Nullable<Timestamptz>,
+        join_reason -> GroupJoinReason,
+        join_reason_extra -> Nullable<Jsonb>,
+        archived -> Bool,
+        last_reactions_read_at -> Timestamptz,
+        last_read_receipt_message_id -> Nullable<Int8>,
+        mute_override -> Nullable<Bool>,
+        speaking_mode -> SpeakingMode,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::GroupVisibility;
+    use super::sql_types::GroupKind;
+    use super::sql_types::SpeakingMode;
+    use super::sql_types::MembershipMessageVisibility;
+
+    groups (id) {
+        id -> Int8,
+        #[max_length = 255]
+        name -> Varchar,
+        description -> Nullable<Text>,
+        created_at -> Timestamptz,
+        visibility -> GroupVisibility,
+        last_message_id -> Nullable<Int8>,
+        last_message_at -> Nullable<Timestamptz>,
+        avatar_image_id -> Nullable<Int8>,
+        kind -> GroupKind,
+        dm_uid1 -> Nullable<Int4>,
+        dm_uid2 -> Nullable<Int4>,
+        speaking_mode -> SpeakingMode,
+        membership_message_visibility -> MembershipMessageVisibility,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::InviteType;
+
+    invites (id) {
+        id -> Int8,
+        #[max_length = 12]
+        code -> Varchar,
+        chat_id -> Int8,
+        invite_type -> InviteType,
+        creator_uid -> Nullable<Int4>,
+        target_uid -> Nullable<Int4>,
+        required_chat_id -> Nullable<Int8>,
+        created_at -> Timestamptz,
+        expires_at -> Nullable<Timestamptz>,
+        revoked_at -> Nullable<Timestamptz>,
+        used_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::MediaPurpose;
+
+    media (id) {
+        id -> Int8,
+        #[max_length = 255]
+        content_type -> Varchar,
+        storage_key -> Text,
+        size -> Int8,
+        created_at -> Timestamptz,
+        deleted_at -> Nullable<Timestamptz>,
+        #[max_length = 255]
+        file_name -> Varchar,
+        width -> Nullable<Int4>,
+        height -> Nullable<Int4>,
+        purpose -> MediaPurpose,
+        #[max_length = 255]
+        reference -> Nullable<Varchar>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::MentionKind;
+
+    message_mentions (message_id, mentioned_uid) {
+        message_id -> Int8,
+        mentioned_uid -> Int4,
+        chat_id -> Int8,
+        thread_root_id -> Nullable<Int8>,
+        kind -> MentionKind,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    message_reactions (message_id, user_uid, emoji) {
+        message_id -> Int8,
+        user_uid -> Int4,
+        #[max_length = 32]
+        emoji -> Varchar,
+        created_at -> Timestamptz,
+        message_author_uid -> Int4,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::MessageType;
+    use super::sql_types::TranscodeStatus;
+    use super::sql_types::SystemMessageKind;
+
+    messages (id) {
+        id -> Int8,
+        message -> Nullable<Text>,
+        message_type -> MessageType,
+        reply_to_id -> Nullable<Int8>,
+        reply_root_id -> Nullable<Int8>,
+        client_generated_id -> Varchar,
+        sender_uid -> Int4,
+        chat_id -> Int8,
+        created_at -> Timestamptz,
+        updated_at -> Nullable<Timestamptz>,
+        deleted_at -> Nullable<Timestamptz>,
+        has_attachments -> Bool,
+        has_thread -> Bool,
+        has_reactions -> Bool,
+        sticker_id -> Nullable<Int8>,
+        is_published -> Bool,
+        transcode_status -> TranscodeStatus,
+        forwarded_bundle_id -> Nullable<Int8>,
+        forwarded_from_message_id -> Nullable<Int8>,
+        system_kind -> Nullable<SystemMessageKind>,
+        metadata -> Nullable<Jsonb>,
+    }
+}
+
+diesel::table! {
+    pinned_messages (id) {
+        id -> Int8,
+        chat_id -> Int8,
+        message_id -> Int8,
+        pinned_by -> Int4,
+        pinned_at -> Timestamptz,
+        expires_at -> Nullable<Timestamptz>,
+        thread_root_id -> Nullable<Int8>,
+    }
+}
+
+diesel::table! {
+    policies (id) {
+        id -> Int8,
+        name -> Text,
+        metadata -> Jsonb,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::PolicySubjectType;
+
+    policy_assignments (id) {
+        id -> Int8,
+        subject_type -> PolicySubjectType,
+        subject_id -> Int8,
+        policy_id -> Int8,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::PermissionResourceType;
+
+    policy_permissions (id) {
+        id -> Int8,
+        policy_id -> Int8,
+        action -> Text,
+        resource_type -> PermissionResourceType,
+        resource_id -> Nullable<Int8>,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::PushProvider;
+    use super::sql_types::PushEnvironment;
+
+    push_subscriptions (id) {
+        id -> Int8,
+        user_id -> Int4,
+        endpoint -> Nullable<Text>,
+        created_at -> Timestamp,
+        #[max_length = 64]
+        client_id -> Nullable<Varchar>,
+        provider -> PushProvider,
+        device_token -> Nullable<Text>,
+        apns_environment -> Nullable<PushEnvironment>,
+        provider_data -> Jsonb,
+        delivery_failure_count -> Int4,
+        last_delivery_error -> Nullable<Text>,
+        last_delivery_error_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::MessageType;
+
+    saved_messages (id) {
+        id -> Int8,
+        uid -> Int4,
+        original_chat_id -> Int8,
+        original_thread_root_id -> Nullable<Int8>,
+        original_message_id -> Int8,
+        original_reply_to_message_id -> Nullable<Int8>,
+        original_sender_uid -> Int4,
+        original_created_at -> Timestamptz,
+        saved_at -> Timestamptz,
+        snapshot_message -> Nullable<Text>,
+        snapshot_message_type -> MessageType,
+        snapshot_attachments -> Jsonb,
+        snapshot_sticker -> Nullable<Jsonb>,
+        snapshot_mentions -> Jsonb,
+        snapshot_sender -> Jsonb,
+        snapshot_chat -> Jsonb,
+        forwarded_bundle_id -> Nullable<Int8>,
+    }
+}
+
+diesel::table! {
+    service_tokens (id) {
+        id -> Int8,
+        token -> Text,
+        secret_hash -> Text,
+        name -> Text,
+        created_by_uid -> Int4,
+        revoked_at -> Nullable<Timestamptz>,
+        last_used_at -> Nullable<Timestamptz>,
+        metadata -> Jsonb,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    sticker_pack_stickers (pack_id, sticker_id) {
+        pack_id -> Int8,
+        sticker_id -> Int8,
+        added_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::StickerPackVisibility;
+
+    sticker_packs (id) {
+        id -> Int8,
+        owner_uid -> Int4,
+        #[max_length = 255]
+        name -> Varchar,
+        description -> Nullable<Text>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+        visibility -> StickerPackVisibility,
+    }
+}
+
+diesel::table! {
+    stickers (id) {
+        id -> Int8,
+        media_id -> Int8,
+        #[max_length = 32]
+        emoji -> Varchar,
+        #[max_length = 255]
+        name -> Nullable<Varchar>,
+        description -> Nullable<Text>,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    thread_meta (chat_id, thread_root_id) {
+        chat_id -> Int8,
+        thread_root_id -> Int8,
+        reply_count -> Int8,
+        last_reply_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    thread_user_states (chat_id, thread_root_id, uid) {
+        chat_id -> Int8,
+        thread_root_id -> Int8,
+        uid -> Int4,
+        last_read_message_id -> Nullable<Int8>,
+        subscribed_at -> Timestamptz,
+        archived -> Bool,
+        subscribed -> Bool,
+        last_reactions_read_at -> Timestamptz,
+        last_read_receipt_message_id -> Nullable<Int8>,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::FriendAddVerificationMode;
+    use super::sql_types::PresenceVisibility;
+    use super::sql_types::ReadReceiptVisibility;
+
+    user_extra (uid) {
+        uid -> Int4,
+        first_seen_at -> Timestamp,
+        last_seen_at -> Timestamp,
+        sticker_pack_order -> Jsonb,
+        verification_mode -> FriendAddVerificationMode,
+        verification_question -> Nullable<Text>,
+        token_gen -> Int4,
+        presence_visibility -> PresenceVisibility,
+        read_receipt_visibility -> ReadReceiptVisibility,
+        mute_group_chats_by_default -> Bool,
+        mute_direct_chats_by_default -> Bool,
+        show_membership_messages -> Bool,
+        show_unread_message_count -> Bool,
+    }
+}
+
+diesel::table! {
+    user_favorite_stickers (uid, sticker_id) {
+        uid -> Int4,
+        sticker_id -> Int8,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    user_sticker_pack_subscriptions (uid, pack_id) {
+        uid -> Int4,
+        pack_id -> Int8,
+        subscribed_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    usergroup_extra (groupid) {
+        groupid -> Int4,
+        #[max_length = 8]
+        chat_group_color -> Nullable<Varchar>,
+        #[max_length = 8]
+        chat_group_color_dark -> Nullable<Varchar>,
+    }
+}
+
+diesel::joinable!(attachments -> messages (message_id));
+diesel::joinable!(chat_unread_revisions -> groups (chat_id));
+diesel::joinable!(group_membership -> groups (chat_id));
+diesel::joinable!(groups -> media (avatar_image_id));
+diesel::joinable!(message_mentions -> groups (chat_id));
+diesel::joinable!(message_mentions -> messages (message_id));
+diesel::joinable!(message_reactions -> messages (message_id));
+diesel::joinable!(messages -> forwarded_bundles (forwarded_bundle_id));
+diesel::joinable!(messages -> stickers (sticker_id));
+diesel::joinable!(pinned_messages -> groups (chat_id));
+diesel::joinable!(policy_assignments -> policies (policy_id));
+diesel::joinable!(policy_permissions -> policies (policy_id));
+diesel::joinable!(saved_messages -> forwarded_bundles (forwarded_bundle_id));
+diesel::joinable!(saved_messages -> groups (original_chat_id));
+diesel::joinable!(sticker_pack_stickers -> sticker_packs (pack_id));
+diesel::joinable!(sticker_pack_stickers -> stickers (sticker_id));
+diesel::joinable!(stickers -> media (media_id));
+diesel::joinable!(thread_meta -> groups (chat_id));
+diesel::joinable!(thread_meta -> messages (thread_root_id));
+diesel::joinable!(thread_user_states -> groups (chat_id));
+diesel::joinable!(thread_user_states -> messages (thread_root_id));
+diesel::joinable!(user_favorite_stickers -> stickers (sticker_id));
+diesel::joinable!(user_sticker_pack_subscriptions -> sticker_packs (pack_id));
+
+diesel::allow_tables_to_appear_in_same_query!(
+    activity_daily_metrics,
+    attachments,
+    blocks,
+    chat_unread_revisions,
+    clients,
+    forwarded_bundles,
+    friend_requests,
+    friendships,
+    group_membership,
+    groups,
+    invites,
+    media,
+    message_mentions,
+    message_reactions,
+    messages,
+    pinned_messages,
+    policies,
+    policy_assignments,
+    policy_permissions,
+    push_subscriptions,
+    saved_messages,
+    service_tokens,
+    sticker_pack_stickers,
+    sticker_packs,
+    stickers,
+    thread_meta,
+    thread_user_states,
+    user_extra,
+    user_favorite_stickers,
+    user_sticker_pack_subscriptions,
+    usergroup_extra,
+);
+// @generated automatically by Diesel CLI.
+
 pub mod discuz {
     pub mod sql_types {
         #[derive(diesel::sql_types::SqlType)]

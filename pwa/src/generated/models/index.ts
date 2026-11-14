@@ -37,6 +37,8 @@ export * from './conversationSelector';
 export * from './conversationState';
 export * from './conversationStatesPayload';
 export * from './conversationUnreadErrorPayload';
+export * from './mainUnreadChat';
+export * from './mainUnread';
 export * from './conversationUnreadSummary';
 export * from './conversationUnreadPayload';
 export * from './conversationView';

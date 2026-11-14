@@ -9,6 +9,7 @@ import type { ChatArchiveStateChangedPayload } from './chatArchiveStateChangedPa
 import type { ChatMembershipChangedPayload } from './chatMembershipChangedPayload';
 import type { ChatNotificationSettingResponse } from './chatNotificationSettingResponse';
 import type { BulkDeletedPayload } from './chats/bulkDeletedPayload';
+import type { ChatSettings } from './chatSettings';
 import type { ConversationStatesPayload } from './conversationStatesPayload';
 import type { ConversationUnreadErrorPayload } from './conversationUnreadErrorPayload';
 import type { ConversationUnreadPayload } from './conversationUnreadPayload';
@@ -103,6 +104,10 @@ export type ServerWsMessage =
   | {
       payload: NotificationSettingsResponse;
       type: 'notificationSettingsChanged';
+    }
+  | {
+      payload: ChatSettings;
+      type: 'chatSettingsChanged';
     }
   | {
       payload: ChatNotificationSettingResponse;

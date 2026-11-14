@@ -598,6 +598,7 @@ describe('SessionStore', () => {
     const saving = session.setShowMembershipMessages(false);
     (await peer.expectAsync('users.updateChatSettings', { showMembershipMessages: false })).flush({
       showMembershipMessages: false,
+      showUnreadMessageCount: false,
     });
     await saving;
     expect(session.user()?.showMembershipMessages).toBe(false);
@@ -606,7 +607,7 @@ describe('SessionStore', () => {
     const request = await peer.expectAsync('users.updateChatSettings', { showMembershipMessages: true });
     const canceled = expect(delayed).rejects.toMatchObject({ kind: 'disconnected' });
     session.logout();
-    request.flush({ showMembershipMessages: true });
+    request.flush({ showMembershipMessages: true, showUnreadMessageCount: false });
     await canceled;
     expect(session.user()).toBeUndefined();
   });
@@ -615,7 +616,9 @@ describe('SessionStore', () => {
     session.user.set(testUser);
     const requested = session.user();
     session.user.set({ ...testUser, showMembershipMessages: false });
-    expect(() => session.requireChatSettings({ showMembershipMessages: true }, requested)).toThrow(ChatSettingsChanged);
+    expect(() =>
+      session.requireChatSettings({ showMembershipMessages: true, showUnreadMessageCount: false }, requested),
+    ).toThrow(ChatSettingsChanged);
   });
 
   it('loads account membership visibility at startup and after refreshing the session', async () => {
@@ -639,7 +642,7 @@ describe('SessionStore', () => {
     const request = await peer.expectAsync('users.updateChatSettings', { showMembershipMessages: false });
     expect(session.user()?.showMembershipMessages).toBe(true);
     session.user.update((user) => user && { ...user, username: '新名字' });
-    request.flush({ showMembershipMessages: false });
+    request.flush({ showMembershipMessages: false, showUnreadMessageCount: false });
     await saving;
     expect(session.user()).toMatchObject({ showMembershipMessages: false, username: '新名字' });
     expect(localStorage.getItem('chahua.preferences.showMembershipMessages')).toBeNull();
@@ -658,9 +661,10 @@ describe('SessionStore', () => {
     const saving = session.setShowMembershipMessages(false);
     (await peer.expectAsync('users.updateChatSettings', { showMembershipMessages: false })).flush({
       showMembershipMessages: false,
+      showUnreadMessageCount: false,
     });
     await saving;
-    session.acceptChatSettings({ showMembershipMessages: true }, testUser.uid);
+    session.acceptChatSettings({ showMembershipMessages: true, showUnreadMessageCount: false }, testUser.uid);
     expect(session.user()?.showMembershipMessages).toBe(true);
   });
 
@@ -672,9 +676,51 @@ describe('SessionStore', () => {
     const canceled = expect(saving).rejects.toMatchObject({ kind: 'disconnected' });
     session.logout();
     session.user.set({ ...testUser, uid, showMembershipMessages: true });
-    request.flush({ showMembershipMessages: false });
+    request.flush({ showMembershipMessages: false, showUnreadMessageCount: false });
     await canceled;
     expect(session.user()?.showMembershipMessages).toBe(true);
+  });
+
+  it('patches only the badge preference, retains confirmed values on failure and accepts cross-device changes', async () => {
+    peer.authenticate();
+    session.user.set({ ...testUser, showMembershipMessages: false });
+    const saving = session.setShowUnreadMessageCount(true);
+    (await peer.expectAsync('users.updateChatSettings', { showUnreadMessageCount: true })).flush({
+      showMembershipMessages: false,
+      showUnreadMessageCount: true,
+    });
+    await saving;
+    expect(session.user()).toMatchObject({ showMembershipMessages: false, showUnreadMessageCount: true });
+    const failed = session.setShowUnreadMessageCount(false);
+    (await peer.expectAsync('users.updateChatSettings', { showUnreadMessageCount: false })).error(
+      RpcErrorCode.Unavailable,
+    );
+    await expect(failed).rejects.toMatchObject({ code: RpcErrorCode.Unavailable });
+    expect(session.user()?.showUnreadMessageCount).toBe(true);
+    peer.notify('events.chatSettingsChanged', { showMembershipMessages: true, showUnreadMessageCount: false });
+    expect(session.user()).toMatchObject({ showMembershipMessages: true, showUnreadMessageCount: false });
+    expect(localStorage.getItem('chahua.preferences.showUnreadMessageCount')).toBeNull();
+  });
+
+  it('keeps a newer cross-device preference when an earlier save response arrives', async () => {
+    peer.authenticate();
+    session.user.set(testUser);
+    const saving = session.setShowUnreadMessageCount(true);
+    const request = await peer.expectAsync('users.updateChatSettings', { showUnreadMessageCount: true });
+    peer.notify('events.chatSettingsChanged', { showMembershipMessages: false, showUnreadMessageCount: false });
+    request.flush({ showMembershipMessages: true, showUnreadMessageCount: true });
+    await saving;
+    expect(session.user()).toMatchObject({ showMembershipMessages: false, showUnreadMessageCount: false });
+  });
+
+  it('does not replace a newer badge setting with an in-flight page or rebuild its membership filter', () => {
+    session.user.set(testUser);
+    const requested = session.user();
+    session.acceptChatSettings({ showMembershipMessages: true, showUnreadMessageCount: true }, testUser.uid);
+    expect(() =>
+      session.requireChatSettings({ showMembershipMessages: true, showUnreadMessageCount: false }, requested),
+    ).not.toThrow();
+    expect(session.user()?.showUnreadMessageCount).toBe(true);
   });
 
   it('does not issue a development session when a matching URL token retains the stored token', async () => {

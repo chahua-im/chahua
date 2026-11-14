@@ -197,7 +197,7 @@ describe('ChatListStore', () => {
       );
       await settle();
       if (!show) {
-        session.acceptChatSettings({ showMembershipMessages: false }, testUser.uid);
+        session.acceptChatSettings({ showMembershipMessages: false, showUnreadMessageCount: false }, testUser.uid);
         await settle();
         expectChats().flush(
           structuredClone({

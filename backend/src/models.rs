@@ -1008,6 +1008,7 @@ pub struct UserExtra {
     pub mute_group_chats_by_default: bool,
     pub mute_direct_chats_by_default: bool,
     pub show_membership_messages: bool,
+    pub show_unread_message_count: bool,
 }
 
 #[derive(Debug, Clone, Insertable)]

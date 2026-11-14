@@ -60,6 +60,9 @@ export const jsonSchemas: Record<string, JsonCodec> = {
   ConversationStatesPayload: {
     states: ['ConversationState'],
   },
+  ConversationUnreadPayload: {
+    mainUnread: 'MainUnread',
+  },
   ConversationView: {
     selector: 'ConversationSelector',
   },
@@ -202,6 +205,12 @@ export const jsonSchemas: Record<string, JsonCodec> = {
   },
   ListThreadsResponse: {
     threads: ['ThreadListItem'],
+  },
+  MainUnread: {
+    chats: ['MainUnreadChat'],
+  },
+  MainUnreadChat: {
+    chatId: 1,
   },
   MarkAsReadBody: {
     messageId: 1,
@@ -1105,6 +1114,7 @@ export const wsPayloadCodecs: Record<string, JsonCodec> = {
   chatArchiveStateChanged: 'ChatArchiveStateChangedPayload',
   notificationExceptionsCleared: 'NotificationExceptionsCleared',
   notificationSettingsChanged: 'NotificationSettingsResponse',
+  chatSettingsChanged: 'ChatSettings',
   chatNotificationSettingChanged: 'ChatNotificationSettingResponse',
   groupSpeakingModeChanged: 'GroupSpeakingModeResponse',
   memberSpeakingModeChanged: 'MemberSpeakingModeResponse',

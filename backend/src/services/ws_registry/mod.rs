@@ -233,6 +233,17 @@ impl ConnectionRegistry {
         }
     }
 
+    /// Refresh collection/app badges without reloading watched message visibility.
+    pub fn invalidate_unread_counts(&self, uids: &[i32]) {
+        for uid in uids {
+            if let Some(entries) = self.inner.get(uid) {
+                for entry in entries.iter() {
+                    entry.unread_changed.notify_one();
+                }
+            }
+        }
+    }
+
     /// Call after committing read/mute/membership changes that have no ordinary WS event.
     pub fn invalidate_unread(&self, uids: &[i32]) {
         for uid in uids {

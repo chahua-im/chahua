@@ -376,7 +376,7 @@ mod tests {
             let next = load_chat_page(conn, uid, false, None, Some(987665202), 2, true)?;
             assert_eq!(next[0].last_message.as_ref().unwrap().id, 987665301);
             assert!(crate::services::user::load_chat_settings(conn, uid)?.show_membership_messages);
-            crate::services::user::save_chat_settings(conn, uid, crate::dto::users::UpdateChatSettings { show_membership_messages: false })?;
+            crate::services::user::save_chat_settings(conn, uid, crate::dto::users::UpdateChatSettings { show_membership_messages: Some(false), ..Default::default() })?;
             assert!(!crate::services::user::load_chat_settings(conn, uid)?.show_membership_messages);
             Ok(())
         });

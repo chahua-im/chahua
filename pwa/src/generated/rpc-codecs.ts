@@ -292,6 +292,7 @@ export const rpcSchemas: Record<string, JsonCodec> = {
     states: ['ConversationState'],
   },
   ConversationUnreadPayload: {
+    mainUnread: 'MainUnread',
     summaries: ['ConversationUnreadSummary'],
   },
   ConversationView: {
@@ -659,6 +660,12 @@ export const rpcSchemas: Record<string, JsonCodec> = {
   },
   ListThreadsResponse: {
     threads: ['ThreadListItem'],
+  },
+  MainUnread: {
+    chats: ['MainUnreadChat'],
+  },
+  MainUnreadChat: {
+    chatId: 1,
   },
   MarkAsReadBody: {
     messageId: 1,
@@ -2028,6 +2035,7 @@ export const rpcEvents: Record<string, JsonCodec> = {
   'events.chatArchiveStateChanged': 'ChatArchiveStateChangedPayload',
   'events.notificationExceptionsCleared': 'NotificationExceptionsCleared',
   'events.notificationSettingsChanged': 'NotificationSettingsResponse',
+  'events.chatSettingsChanged': 'ChatSettings',
   'events.chatNotificationSettingChanged': 'ChatNotificationSettingResponse',
   'events.groupSpeakingModeChanged': 'GroupSpeakingModeResponse',
   'events.memberSpeakingModeChanged': 'MemberSpeakingModeResponse',
@@ -2063,6 +2071,7 @@ export interface RpcEventMap {
   'events.chatArchiveStateChanged': Shared.ChatArchiveStateChangedPayload;
   'events.notificationExceptionsCleared': Shared.NotificationExceptionsCleared;
   'events.notificationSettingsChanged': Shared.NotificationSettingsResponse;
+  'events.chatSettingsChanged': Shared.ChatSettings;
   'events.chatNotificationSettingChanged': Shared.ChatNotificationSettingResponse;
   'events.groupSpeakingModeChanged': Shared.GroupSpeakingModeResponse;
   'events.memberSpeakingModeChanged': Shared.MemberSpeakingModeResponse;

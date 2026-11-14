@@ -21,6 +21,7 @@ export const testUser: MeResponse = {
   muteGroupChatsByDefault: true,
   muteDirectChatsByDefault: false,
   showMembershipMessages: true,
+  showUnreadMessageCount: false,
 };
 export const testChat: ChatListItem = {
   membershipMessagePolicy: { visibility: MembershipMessageVisibility.members, canView: true },

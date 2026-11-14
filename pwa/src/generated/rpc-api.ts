@@ -410,7 +410,7 @@ export class RpcApi {
     getMe: (params: UsersGetMeParams = {}) => this.#call<Shared.MeResponse>('users.getMe', params),
     updateStickerPackOrder: (params: UsersUpdateStickerPackOrderParams) =>
       this.#call<null>('users.updateStickerPackOrder', params),
-    updateChatSettings: (params: UsersUpdateChatSettingsParams) =>
+    updateChatSettings: (params: UsersUpdateChatSettingsParams = {}) =>
       this.#call<Shared.ChatSettings>('users.updateChatSettings', params),
     search: (params: UsersSearchParams = {}) => this.#call<Shared.SearchUsersResponse>('users.search', params),
     getNotificationSettings: (params: UsersGetNotificationSettingsParams = {}) =>

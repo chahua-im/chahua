@@ -103,6 +103,19 @@ describe('Preferences', () => {
     expect(localStorage.getItem('chahua.preferences.showMembershipMessages')).toBe('false');
   });
 
+  it('defaults to chat counts and follows the account rather than browser storage', () => {
+    localStorage.setItem('chahua.preferences.showUnreadMessageCount', 'true');
+    const preferences = TestBed.inject(Preferences);
+    const session = TestBed.inject(SessionStore);
+    expect(preferences.showUnreadMessageCount()).toBe(false);
+    session.user.set({ ...testUser, showUnreadMessageCount: true });
+    expect(preferences.showUnreadMessageCount()).toBe(true);
+    session.user.set({ ...testUser, uid: 2 });
+    expect(preferences.showUnreadMessageCount()).toBe(false);
+    session.user.set(undefined);
+    expect(preferences.showUnreadMessageCount()).toBe(false);
+  });
+
   it('remembers the last five distinct reactions across fresh service instances', async () => {
     const preferences = TestBed.inject(Preferences);
     for (const emoji of ['👍', '❤️', '😂', '😮', '😢', '🍵', '❤️']) preferences.rememberReaction(emoji);

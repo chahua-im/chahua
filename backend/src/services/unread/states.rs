@@ -417,7 +417,7 @@ mod tests {
             )?;
             let uid = 987671000;
             crate::services::user::save_chat_settings(conn, uid, crate::dto::users::UpdateChatSettings {
-                show_membership_messages: false,
+                show_membership_messages: Some(false), ..Default::default()
             })?;
             let queries = Arc::new(Mutex::new(Vec::new()));
             let recorded = queries.clone();
@@ -464,7 +464,7 @@ mod tests {
             }
             assert!(queries.lock().unwrap().len() <= 8, "snapshot queries must not grow per scope");
             crate::services::user::save_chat_settings(conn, uid, crate::dto::users::UpdateChatSettings {
-                show_membership_messages: true,
+                show_membership_messages: Some(true), ..Default::default()
             })?;
             queries.lock().unwrap().clear();
             let shown = load_states(conn, &service, uid, &scopes)?;

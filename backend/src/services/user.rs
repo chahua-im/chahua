@@ -10,14 +10,18 @@ pub fn load_chat_settings(
     uid: i32,
 ) -> QueryResult<crate::dto::users::ChatSettings> {
     use crate::schema::user_extra;
-    let show_membership_messages = user_extra::table
+    let (show_membership_messages, show_unread_message_count) = user_extra::table
         .find(uid)
-        .select(user_extra::show_membership_messages)
-        .first::<bool>(conn)
+        .select((
+            user_extra::show_membership_messages,
+            user_extra::show_unread_message_count,
+        ))
+        .first::<(bool, bool)>(conn)
         .optional()?
-        .unwrap_or(true);
+        .unwrap_or((true, false));
     Ok(crate::dto::users::ChatSettings {
         show_membership_messages,
+        show_unread_message_count,
     })
 }
 
@@ -32,7 +36,7 @@ pub fn load_chat_settings_for_chat(
     crate::dto::groups::MembershipMessagePolicy,
 )> {
     use crate::schema::{group_membership, groups, user_extra};
-    let (kind, show, visibility, role) = groups::table
+    let (kind, show, show_unread_message_count, visibility, role) = groups::table
         .left_join(user_extra::table.on(user_extra::uid.eq(uid)))
         .left_join(
             group_membership::table.on(group_membership::chat_id
@@ -43,11 +47,13 @@ pub fn load_chat_settings_for_chat(
         .select((
             groups::kind,
             user_extra::show_membership_messages.nullable(),
+            user_extra::show_unread_message_count.nullable(),
             groups::membership_message_visibility,
             group_membership::role.nullable(),
         ))
         .first::<(
             crate::models::GroupKind,
+            Option<bool>,
             Option<bool>,
             crate::models::MembershipMessageVisibility,
             Option<crate::models::GroupRole>,
@@ -55,6 +61,7 @@ pub fn load_chat_settings_for_chat(
     Ok((
         crate::dto::users::ChatSettings {
             show_membership_messages: show.unwrap_or(true),
+            show_unread_message_count: show_unread_message_count.unwrap_or(false),
         },
         kind,
         crate::dto::groups::MembershipMessagePolicy {
@@ -71,20 +78,21 @@ pub fn save_chat_settings(
 ) -> QueryResult<crate::dto::users::ChatSettings> {
     use crate::models::NewUserExtra;
     use crate::schema::user_extra;
-    let user = NewUserExtra::new(uid, chrono::Utc::now().naive_utc());
-    // Update only this preference; concurrent callers use the last committed value.
-    let show_membership_messages = diesel::insert_into(user_extra::table)
-        .values((
-            user,
-            user_extra::show_membership_messages.eq(settings.show_membership_messages),
-        ))
-        .on_conflict(user_extra::uid)
-        .do_update()
-        .set(user_extra::show_membership_messages.eq(settings.show_membership_messages))
-        .returning(user_extra::show_membership_messages)
-        .get_result(conn)?;
-    Ok(crate::dto::users::ChatSettings {
-        show_membership_messages,
+    conn.transaction(|conn| {
+        diesel::insert_into(user_extra::table)
+            .values(NewUserExtra::new(uid, chrono::Utc::now().naive_utc()))
+            .on_conflict(user_extra::uid)
+            .do_nothing()
+            .execute(conn)?;
+        // Diesel's optional changeset writes only supplied fields, never a stale sibling.
+        if settings.show_membership_messages.is_some()
+            || settings.show_unread_message_count.is_some()
+        {
+            diesel::update(user_extra::table.find(uid))
+                .set(settings)
+                .execute(conn)?;
+        }
+        load_chat_settings(conn, uid)
     })
 }
 
@@ -320,6 +328,7 @@ mod tests {
         conn.test_transaction::<_, diesel::result::Error, _>(|conn| {
             let uid = 987_665_100;
             assert!(super::load_chat_settings(conn, uid)?.show_membership_messages);
+            assert!(!super::load_chat_settings(conn, uid)?.show_unread_message_count);
             // Existing accounts acquire the migration's default; a new row also defaults to visible.
             let now = chrono::Utc::now().naive_utc();
             diesel::insert_into(u::table)
@@ -333,6 +342,10 @@ mod tests {
                 .find(uid)
                 .select(u::show_membership_messages)
                 .first::<bool>(conn)?);
+            assert!(!u::table
+                .find(uid)
+                .select(u::show_unread_message_count)
+                .first::<bool>(conn)?);
             diesel::update(u::table.find(uid))
                 .set((u::mute_group_chats_by_default.eq(true), u::token_gen.eq(7)))
                 .execute(conn)?;
@@ -341,7 +354,8 @@ mod tests {
                     conn,
                     uid,
                     UpdateChatSettings {
-                        show_membership_messages: false
+                        show_membership_messages: Some(false),
+                        ..Default::default()
                     }
                 )?
                 .show_membership_messages
@@ -351,7 +365,8 @@ mod tests {
                     conn,
                     uid + 1,
                     UpdateChatSettings {
-                        show_membership_messages: false
+                        show_membership_messages: Some(false),
+                        ..Default::default()
                     }
                 )?
                 .show_membership_messages
@@ -361,10 +376,33 @@ mod tests {
                     conn,
                     uid,
                     UpdateChatSettings {
-                        show_membership_messages: true
+                        show_membership_messages: Some(true),
+                        ..Default::default()
                     }
                 )?
                 .show_membership_messages
+            );
+            let saved = super::save_chat_settings(
+                conn,
+                uid,
+                UpdateChatSettings {
+                    show_unread_message_count: Some(true),
+                    ..Default::default()
+                },
+            )?;
+            assert!(saved.show_membership_messages && saved.show_unread_message_count);
+            let saved = super::save_chat_settings(
+                conn,
+                uid,
+                UpdateChatSettings {
+                    show_membership_messages: Some(false),
+                    ..Default::default()
+                },
+            )?;
+            assert!(!saved.show_membership_messages && saved.show_unread_message_count);
+            assert_eq!(
+                super::save_chat_settings(conn, uid, UpdateChatSettings::default())?,
+                saved
             );
             let saved: (bool, bool, i32) = u::table
                 .find(uid)
@@ -374,11 +412,12 @@ mod tests {
                     u::token_gen,
                 ))
                 .first(conn)?;
-            assert_eq!(saved, (true, true, 7));
+            assert_eq!(saved, (false, true, 7));
             assert!(!u::table
                 .find(uid + 1)
                 .select(u::show_membership_messages)
                 .first::<bool>(conn)?);
+            assert!(!super::load_chat_settings(conn, uid + 1)?.show_unread_message_count);
             Ok(())
         });
     }

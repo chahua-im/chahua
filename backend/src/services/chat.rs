@@ -263,11 +263,17 @@ mod tests {
                 INSERT INTO messages(id, chat_id, sender_uid, client_generated_id, message_type, system_kind, created_at)
                     SELECT 987669304 + n, 987669200, 1717, 'tail-' || n, 'system', 'member_left', NOW()
                     FROM generate_series(1, 1200) n;")?;
-            crate::services::user::save_chat_settings(conn, uid, UpdateChatSettings {show_membership_messages: false})?;
+            crate::services::user::save_chat_settings(conn, uid, UpdateChatSettings {show_membership_messages: Some(false), ..Default::default()})?;
             let unread = UnreadService::new();
             assert_eq!(unread.count_chat_unread(conn, uid, chat, Some(987669300))?, 2);
             assert_eq!(unread.count_chat_unread(conn, other, chat, Some(987669300))?, 1000);
-            let counts = unread.count_users_unread_totals(conn, &[uid, other])?;
+            let counts = unread.count_users_app_badges(conn, &[uid, other])?;
+            assert_eq!(counts[&uid], 1);
+            assert_eq!(counts[&other], 1);
+            for user in [uid, other] {
+                crate::services::user::save_chat_settings(conn, user, UpdateChatSettings {show_unread_message_count: Some(true), ..Default::default()})?;
+            }
+            let counts = unread.count_users_app_badges(conn, &[uid, other])?;
             assert_eq!(counts[&uid], 2);
             assert_eq!(counts[&other], 1000);
             assert_eq!(unread.count_user_unread_summary(conn, uid)?.unread_count, 2);
@@ -285,12 +291,12 @@ mod tests {
             mark_chat_as_read(conn, chat, uid, 987669300)?;
             assert_eq!(get_chat_last_read_message_id(conn, chat, uid)?, state.last_read_message_id);
             // Re-enabling cannot resurrect unread events already covered by the saved cursor.
-            crate::services::user::save_chat_settings(conn, uid, UpdateChatSettings {show_membership_messages: true})?;
+            crate::services::user::save_chat_settings(conn, uid, UpdateChatSettings {show_membership_messages: Some(true), ..Default::default()})?;
             assert_eq!(unread.count_chat_unread(conn, uid, chat, state.last_read_message_id)?, 0);
             mark_chat_as_read(conn, chat, other, 987669302)?;
             assert_eq!(get_chat_last_read_message_id(conn, chat, other)?, Some(987669302));
             // The account switch applies to group main scopes only, never DMs.
-            crate::services::user::save_chat_settings(conn, uid, UpdateChatSettings {show_membership_messages: false})?;
+            crate::services::user::save_chat_settings(conn, uid, UpdateChatSettings {show_membership_messages: Some(false), ..Default::default()})?;
             conn.batch_execute("UPDATE groups SET kind='dm', dm_uid1=987669100, dm_uid2=987669101 WHERE id=987669200;
                 UPDATE group_membership SET last_read_message_id=987669300 WHERE chat_id=987669200 AND uid=987669100;")?;
             assert_eq!(unread.count_chat_unread(conn, uid, chat, Some(987669300))?, 1000);
