@@ -113,6 +113,12 @@ struct Count {
     count: i64,
 }
 
+pub(super) type ConversationUnreadSnapshot = (
+    Vec<ConversationUnreadSummary>,
+    Option<i64>,
+    Option<Vec<i64>>,
+);
+
 impl UnreadService {
     pub fn conversation_summaries(
         &self,
@@ -121,7 +127,7 @@ impl UnreadService {
         views: &[ConversationView],
     ) -> Result<Vec<ConversationUnreadSummary>, diesel::result::Error> {
         self.conversation_summaries_and_badge(conn, uid, views, false)
-            .map(|(summaries, _)| summaries)
+            .map(|(summaries, _, _)| summaries)
     }
 
     pub(super) fn conversation_summaries_and_badge(
@@ -130,9 +136,9 @@ impl UnreadService {
         uid: i32,
         views: &[ConversationView],
         app_badge: bool,
-    ) -> Result<(Vec<ConversationUnreadSummary>, Option<i64>), diesel::result::Error> {
+    ) -> Result<ConversationUnreadSnapshot, diesel::result::Error> {
         if views.is_empty() && !app_badge {
-            return Ok((Vec::new(), None));
+            return Ok((Vec::new(), None, None));
         }
         let defaults =
             crate::services::notification_preferences::load_notification_defaults(conn, uid)?;
@@ -279,16 +285,25 @@ impl UnreadService {
                 .load::<Count>(conn)?;
             attention.extend(rows.into_iter().map(|r| ((is_thread, r.id), r.count)));
         }
-        let badge = app_badge.then(|| {
-            scopes
+        // Reuse the same main counts for both badge forms, regardless of selected views.
+        let (badge, unread_chat_ids) = if app_badge {
+            let mut badge = 0_i64;
+            let mut ids = Vec::new();
+            for scope in scopes
                 .iter()
                 .filter(|scope| scope.thread_id.is_none() && !scope.archived && !scope.muted)
-                .fold(0_i64, |total, scope| {
-                    total
-                        .saturating_add(main_counts.get(&scope.chat_id).copied().unwrap_or(0))
-                        .min(MAX_UNREAD_COUNT)
-                })
-        });
+            {
+                let count = main_counts.get(&scope.chat_id).copied().unwrap_or(0);
+                badge = badge.saturating_add(count).min(MAX_UNREAD_COUNT);
+                if count > 0 {
+                    ids.push(scope.chat_id);
+                }
+            }
+            ids.sort_unstable();
+            (Some(badge), Some(ids))
+        } else {
+            (None, None)
+        };
         Ok((
             aggregate(
                 &selections,
@@ -298,6 +313,7 @@ impl UnreadService {
                 &attention,
             ),
             badge,
+            unread_chat_ids,
         ))
     }
 }
@@ -613,12 +629,40 @@ mod tests {
         let result = service
             .conversation_summaries(&mut conn, 1, &views)
             .unwrap();
-        let (combined, badge) = service
+        let (combined, badge, unread_chat_ids) = service
             .conversation_summaries_and_badge(&mut conn, 1, &views, true)
             .unwrap();
         // The all-view also includes threads and muted conversations; neither
         // may be summed into the main-only, unmuted application badge.
         assert_eq!(badge, Some(1));
+        assert_eq!(unread_chat_ids, Some(vec![2]));
+        // Even an empty view list must return the complete eligible main-chat set.
+        let (empty_views, badge, ids) = service
+            .conversation_summaries_and_badge(&mut conn, 1, &[], true)
+            .unwrap();
+        assert!(empty_views.is_empty());
+        assert_eq!(badge, Some(1));
+        assert_eq!(ids, Some(vec![2]));
+        let (_, badge, ids) = service
+            .conversation_summaries_and_badge(&mut conn, 1, &views, false)
+            .unwrap();
+        assert_eq!(badge, None);
+        assert_eq!(ids, None);
+        conn.batch_execute("UPDATE user_extra SET mute_direct_chats_by_default=TRUE WHERE uid=1")
+            .unwrap();
+        let (_, badge, ids) = service
+            .conversation_summaries_and_badge(&mut conn, 1, &[], true)
+            .unwrap();
+        assert_eq!(badge, Some(0));
+        assert_eq!(ids, Some(vec![]));
+        conn.batch_execute("UPDATE group_membership SET mute_override=FALSE WHERE chat_id=2")
+            .unwrap();
+        let (_, _, ids) = service
+            .conversation_summaries_and_badge(&mut conn, 1, &[], true)
+            .unwrap();
+        assert_eq!(ids, Some(vec![2]));
+        conn.batch_execute("UPDATE user_extra SET mute_direct_chats_by_default=FALSE WHERE uid=1; UPDATE group_membership SET mute_override=NULL WHERE chat_id=2")
+            .unwrap();
         assert_eq!(
             combined
                 .iter()
@@ -675,6 +719,11 @@ mod tests {
             assert_eq!(refreshed[0].unread_message_count, 5);
             assert_eq!(refreshed[0].unread_unmuted_message_count, 5);
             assert_eq!(refreshed[0].unread_unmuted_conversation_count, 4);
+            let (_, badge, ids) = service
+                .conversation_summaries_and_badge(&mut conn, 1, &[], true)
+                .unwrap();
+            assert_eq!(badge, Some(2));
+            assert_eq!(ids, Some(vec![1, 2]));
         }
         // Archived threads keep raw attention, but never add unmuted attention.
         conn.batch_execute("UPDATE group_membership SET muted_until='9999-01-01' WHERE chat_id=1; UPDATE thread_user_states SET archived=TRUE WHERE thread_root_id=10").unwrap();
@@ -750,5 +799,10 @@ mod tests {
         );
         assert_eq!(result[0].unread_unmuted_message_count, 0);
         assert_eq!(result[0].unread_unmuted_conversation_count, 0);
+        let (_, badge, ids) = service
+            .conversation_summaries_and_badge(&mut conn, 1, &[], true)
+            .unwrap();
+        assert_eq!(badge, Some(0));
+        assert_eq!(ids, Some(vec![]));
     }
 }

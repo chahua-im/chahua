@@ -1,5 +1,5 @@
 //! One connection's unread subscription. No periodic polling: commits and mute expiry
-//! schedule snapshots, and only changed absolute counters reach the socket.
+//! schedule snapshots, and only changed absolute counters and chat sets reach the socket.
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
@@ -61,6 +61,7 @@ struct Published {
     full: bool,
     summaries: HashMap<String, ConversationUnreadSummary>,
     app_badge_count: Option<i64>,
+    unread_chat_ids: Option<Vec<i64>>,
 }
 
 impl Published {
@@ -69,6 +70,7 @@ impl Published {
         request_id: u32,
         summaries: Vec<ConversationUnreadSummary>,
         app_badge_count: Option<i64>,
+        unread_chat_ids: Option<Vec<i64>>,
     ) -> Option<ConversationUnreadPayload> {
         let full = !self.full;
         let changed = summaries
@@ -77,15 +79,25 @@ impl Published {
             .cloned()
             .collect::<Vec<_>>();
         let badge_changed = full || app_badge_count != self.app_badge_count;
+        let chats_changed = full || unread_chat_ids != self.unread_chat_ids;
+        let changed_chat_ids = if chats_changed {
+            unread_chat_ids.clone()
+        } else {
+            None
+        };
         self.full = true;
         self.summaries = summaries.into_iter().map(|s| (s.key.clone(), s)).collect();
         self.app_badge_count = app_badge_count;
-        (full || !changed.is_empty() || badge_changed).then_some(ConversationUnreadPayload {
-            request_id,
-            full,
-            summaries: changed,
-            app_badge_count: if badge_changed { app_badge_count } else { None },
-        })
+        self.unread_chat_ids = unread_chat_ids;
+        (full || !changed.is_empty() || badge_changed || chats_changed).then_some(
+            ConversationUnreadPayload {
+                request_id,
+                full,
+                summaries: changed,
+                app_badge_count: if badge_changed { app_badge_count } else { None },
+                unread_chat_ids: changed_chat_ids,
+            },
+        )
     }
 }
 
@@ -140,6 +152,7 @@ pub async fn run_tagged(
 type Snapshot = (
     Vec<ConversationUnreadSummary>,
     Option<i64>,
+    Option<Vec<i64>>,
     Option<DateTime<Utc>>,
 );
 
@@ -179,12 +192,12 @@ async fn run_with<F, Fut>(
                     Err(_) => break,
                 }
                 match result {
-                    Ok((summaries, badge, expiry)) => {
+                    Ok((summaries, badge, unread_chat_ids, expiry)) => {
                         retry = Duration::from_secs(1);
                         deadline = expiry.map(|at| {
                             Instant::now() + (at - Utc::now()).to_std().unwrap_or_default()
                         });
-                        if let Some(payload) = published.update(request_id, summaries, badge) {
+                        if let Some(payload) = published.update(request_id, summaries, badge, unread_chat_ids) {
                             if !output
                                 .send(generation, ServerWsMessage::ConversationUnread(payload))
                                 .await
@@ -239,10 +252,10 @@ async fn load_snapshot(
             .select(diesel::dsl::min(group_membership::muted_until))
             .first::<Option<DateTime<Utc>>>(&mut conn)
             .map_err(|e| e.to_string())?;
-        let (summaries, badge) = service
+        let (summaries, badge, unread_chat_ids) = service
             .conversation_summaries_and_badge(&mut conn, uid, &watch.views, watch.app_badge)
             .map_err(|e| e.to_string())?;
-        Ok((summaries, badge, expiry))
+        Ok((summaries, badge, unread_chat_ids, expiry))
     })
     .await
     .map_err(|error| error.to_string())?
@@ -272,15 +285,70 @@ mod tests {
     #[test]
     fn publishes_only_changed_absolute_counters_including_zero() {
         let mut state = Published::default();
-        assert!(state.update(1, vec![summary(8)], Some(7)).unwrap().full);
-        assert!(state.update(1, vec![summary(8)], Some(7)).is_none());
-        let update = state.update(1, vec![summary(0)], Some(0)).unwrap();
+        assert!(
+            state
+                .update(1, vec![summary(8)], Some(7), None)
+                .unwrap()
+                .full
+        );
+        assert!(state.update(1, vec![summary(8)], Some(7), None).is_none());
+        let update = state.update(1, vec![summary(0)], Some(0), None).unwrap();
         assert!(!update.full);
         assert_eq!(update.summaries[0].unread_message_count, 0);
         assert_eq!(update.app_badge_count, Some(0));
-        let badge_only = state.update(1, vec![summary(0)], Some(2)).unwrap();
+        let badge_only = state.update(1, vec![summary(0)], Some(2), None).unwrap();
         assert!(badge_only.summaries.is_empty());
         assert_eq!(badge_only.app_badge_count, Some(2));
+    }
+
+    #[test]
+    fn publishes_whole_chat_set_for_same_count_swap_and_empty_replacement() {
+        let mut state = Published::default();
+        let first = state
+            .update(1, vec![], Some(1), Some(vec![9007199254740993]))
+            .unwrap();
+        assert!(first.full);
+        assert_eq!(
+            serde_json::to_value(first).unwrap()["unreadChatIds"],
+            serde_json::json!(["9007199254740993"])
+        );
+        let swap = state
+            .update(1, vec![], Some(1), Some(vec![i64::MAX]))
+            .unwrap();
+        assert!(!swap.full);
+        assert!(swap.summaries.is_empty());
+        assert_eq!(swap.app_badge_count, None);
+        assert_eq!(
+            serde_json::to_value(swap).unwrap()["unreadChatIds"],
+            serde_json::json!(["9223372036854775807"])
+        );
+        assert!(state
+            .update(1, vec![], Some(1), Some(vec![i64::MAX]))
+            .is_none());
+        let counters_only = state
+            .update(1, vec![summary(2)], Some(2), Some(vec![i64::MAX]))
+            .unwrap();
+        assert_eq!(counters_only.unread_chat_ids, None);
+        assert!(serde_json::to_value(counters_only)
+            .unwrap()
+            .get("unreadChatIds")
+            .is_none());
+        let cleared = state.update(1, vec![], Some(0), Some(vec![])).unwrap();
+        assert!(!cleared.full);
+        assert_eq!(
+            serde_json::to_value(cleared).unwrap()["unreadChatIds"],
+            serde_json::json!([])
+        );
+        assert!(state.update(1, vec![], Some(0), Some(vec![])).is_none());
+    }
+
+    #[test]
+    fn full_publication_without_app_badge_omits_chat_set() {
+        let payload = Published::default().update(1, vec![], None, None).unwrap();
+        assert!(payload.full);
+        let json = serde_json::to_value(payload).unwrap();
+        assert!(json.get("appBadgeCount").is_none());
+        assert!(json.get("unreadChatIds").is_none());
     }
 
     // A controlled loader verifies races without production DB access or wall-clock sleeps.
@@ -306,13 +374,16 @@ mod tests {
         let (id, old) = requests.recv().await.unwrap();
         assert_eq!(id, 1);
         config.send_replace(subscription(2));
-        old.send(Ok((vec![summary(99)], Some(99), None))).unwrap();
+        old.send(Ok((vec![summary(99)], Some(99), Some(vec![99]), None)))
+            .unwrap();
         let (id, current) = requests.recv().await.unwrap();
         assert_eq!(id, 2);
         assert!(messages.try_recv().is_err());
         dirty.notify_one();
         dirty.notify_one();
-        current.send(Ok((vec![summary(4)], Some(4), None))).unwrap();
+        current
+            .send(Ok((vec![summary(4)], Some(4), Some(vec![4]), None)))
+            .unwrap();
         let ServerWsMessage::ConversationUnread(first) = messages.recv().await.unwrap() else {
             panic!()
         };
@@ -322,12 +393,14 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        next.send(Ok((vec![summary(0)], Some(0), None))).unwrap();
+        next.send(Ok((vec![summary(0)], Some(0), Some(vec![]), None)))
+            .unwrap();
         let ServerWsMessage::ConversationUnread(update) = messages.recv().await.unwrap() else {
             panic!()
         };
         assert!(!update.full);
         assert_eq!(update.app_badge_count, Some(0));
+        assert_eq!(update.unread_chat_ids, Some(vec![]));
         config.send_replace(None);
         tokio::task::yield_now().await;
         dirty.notify_one();
@@ -364,6 +437,7 @@ mod tests {
             .send(Ok((
                 vec![summary(1)],
                 Some(1),
+                Some(vec![1]),
                 Some(Utc::now() + chrono::Duration::milliseconds(30)),
             )))
             .unwrap();
@@ -385,12 +459,13 @@ mod tests {
             .unwrap()
             .unwrap();
         recovered
-            .send(Ok((vec![summary(1)], Some(1), None)))
+            .send(Ok((vec![summary(1)], Some(1), Some(vec![1]), None)))
             .unwrap();
         let Some(ServerWsMessage::ConversationUnread(payload)) = messages.recv().await else {
             panic!()
         };
         assert!(payload.full); // Identical counters must still clear the client's error state.
+        assert_eq!(payload.unread_chat_ids, Some(vec![1]));
         drop(config);
         task.await.unwrap();
     }

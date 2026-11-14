@@ -70,6 +70,16 @@ pub struct ConversationUnreadPayload {
     pub summaries: Vec<ConversationUnreadSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub app_badge_count: Option<i64>,
+    /// Sorted IDs of all nonarchived, unmuted main group/DM chats with unread messages,
+    /// independent of views. Requested by appBadge; threads never contribute.
+    /// When present, replaces the whole set (including []); omitted partials retain it,
+    /// while omission from a full publication means unknown.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::serde_i64_string::opt_vec::serialize"
+    )]
+    #[schema(value_type = Option<Vec<String>>)]
+    pub unread_chat_ids: Option<Vec<i64>>,
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
