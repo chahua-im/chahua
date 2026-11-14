@@ -137,6 +137,15 @@ configuration or credentials into the image.
 not TOML values. Keep actual private key files protected as before. Public metadata such
 as `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`, APNs key/team IDs and topic may be in TOML.
 
+Push providers are independently optional. Normal server startup requires at least one;
+offline reindexing permits none. Web Push requires all of `VAPID_PUBLIC_KEY`,
+`VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT`, or none to disable it. Empty or whitespace-only
+environment overrides clear the corresponding file values; partial groups fail startup.
+APNs requires key ID, team ID, topic, and the environment-only private-key path.
+FCM requires project ID and the environment-only service-account path.
+When Web Push is disabled, its public-key endpoint returns HTTP 503 (RPC `Unavailable`)
+with `web push is not configured`; subscription registration rejects any disabled provider.
+
 Each `[[link_previews.sites]]` entry has a required `host` and an optional `headers`
 map. Hosts match exact canonical hostnames, not wildcards or inherited subdomain rules.
 Literal non-secret headers are allowed; secrets use explicit environment references:

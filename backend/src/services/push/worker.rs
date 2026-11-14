@@ -12,18 +12,15 @@ use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
 use crate::models::{GroupKind, PushProvider, PushSubscription};
-use crate::schema::push_subscriptions;
 use crate::services::ws_registry::ConnectionRegistry;
 
 use super::delivery::{DeliveryFailure, DeliveryFailureAction};
-use super::payload::{
-    build_apns_notification, build_fcm_notification, build_push_payload, format_push_body,
-    format_reply_push_body, payload_type_for, PushPayloadType,
-};
+use super::payload::RecipientNotification;
 use super::policy::{
     should_send_push, should_send_web_push, PushDecision, PushRecipientContext, PushSkipReason,
     ThreadPushState,
 };
+use super::subscriptions::{apply_delivery_changes, load_for_users, DeliveryChanges};
 use super::{panic_payload_message, PushJob, PushService};
 
 const PUSH_CONCURRENCY: usize = 10;
@@ -287,32 +284,17 @@ async fn process_push_job(
     let delivery_results: Vec<DeliveryAttemptResult> = stream::iter(subs)
         .map(|sub| {
             let service = service.clone();
-
+            let job = &job;
             let unread = unread_counts.get(&sub.user_id).copied().unwrap_or(0);
-            let body_text = match payload_type_for(&job, sub.user_id) {
-                PushPayloadType::Reply => {
-                    format_reply_push_body(&job.sender_username, job.body_preview.as_deref())
-                }
-                PushPayloadType::Mention | PushPayloadType::NewMessage => {
-                    format_push_body(&job.sender_username, job.body_preview.as_deref())
-                }
-            };
-            let mut push_payload = build_push_payload(&job, unread, &body_text, sub.user_id);
-            if is_dm {
-                push_payload.ordinary_message_body = Some(format_push_body(
-                    &job.sender_username,
-                    job.body_preview.as_deref(),
-                ));
-            }
-            let fcm_notification = build_fcm_notification(&push_payload);
-            let web_payload = serde_json::to_vec(&push_payload).unwrap_or_default();
-            let apns_notification = build_apns_notification(&job, unread, sub.user_id);
 
             async move {
-                match service
-                    .send_to_subscription(&sub, &web_payload, &apns_notification, &fcm_notification)
-                    .await
-                {
+                let input = RecipientNotification {
+                    job,
+                    recipient_uid: sub.user_id,
+                    unread_count: unread,
+                    is_dm,
+                };
+                match service.send_to_subscription(&sub, &input).await {
                     Ok(()) => DeliveryAttemptResult::Success {
                         subscription_id: sub.id,
                         should_reset_failure_state: sub.delivery_failure_count != 0
@@ -420,10 +402,7 @@ fn prepare_push_job(
     }
 
     // 3. Load push subscriptions for the target users.
-    let mut subs: Vec<PushSubscription> = push_subscriptions::table
-        .filter(push_subscriptions::dsl::user_id.eq_any(&target_uids))
-        .select(PushSubscription::as_select())
-        .load(conn)
+    let mut subs = load_for_users(conn, &target_uids)
         .map_err(|e| format!("Failed to load push subscriptions: {:?}", e))?;
 
     // Do not send silent Push events: browsers require a visible notification.
@@ -467,18 +446,6 @@ fn prepare_push_job(
         unread_counts,
         is_dm,
     }))
-}
-
-struct DeliveryChanges {
-    reset_ids: Vec<i64>,
-    prune_ids: Vec<i64>,
-    counted_failures: Vec<(DeliveryFailure, i32)>,
-}
-
-impl DeliveryChanges {
-    fn is_empty(&self) -> bool {
-        self.reset_ids.is_empty() && self.prune_ids.is_empty() && self.counted_failures.is_empty()
-    }
 }
 
 fn collect_delivery_changes(
@@ -571,49 +538,6 @@ fn collect_delivery_changes(
     }
 }
 
-fn apply_delivery_changes(conn: &mut PgConnection, changes: DeliveryChanges) -> Result<(), String> {
-    let DeliveryChanges {
-        reset_ids,
-        prune_ids,
-        counted_failures,
-    } = changes;
-    let now = chrono::Utc::now();
-    if !reset_ids.is_empty() {
-        diesel::update(
-            push_subscriptions::table.filter(push_subscriptions::dsl::id.eq_any(&reset_ids)),
-        )
-        .set((
-            push_subscriptions::dsl::delivery_failure_count.eq(0),
-            push_subscriptions::dsl::last_delivery_error.eq::<Option<String>>(None),
-            push_subscriptions::dsl::last_delivery_error_at
-                .eq::<Option<chrono::DateTime<chrono::Utc>>>(None),
-        ))
-        .execute(conn)
-        .map_err(|e| format!("Failed to reset push delivery failure state: {:?}", e))?;
-    }
-
-    for (failure, next_failure_count) in counted_failures {
-        diesel::update(push_subscriptions::table.find(failure.subscription_id))
-            .set((
-                push_subscriptions::dsl::delivery_failure_count.eq(next_failure_count),
-                push_subscriptions::dsl::last_delivery_error.eq(Some(failure.reason)),
-                push_subscriptions::dsl::last_delivery_error_at.eq(Some(now)),
-            ))
-            .execute(conn)
-            .map_err(|e| format!("Failed to update push delivery failure state: {:?}", e))?;
-    }
-
-    if !prune_ids.is_empty() {
-        diesel::delete(
-            push_subscriptions::table.filter(push_subscriptions::dsl::id.eq_any(&prune_ids)),
-        )
-        .execute(conn)
-        .map_err(|e| format!("Failed to prune push subscriptions: {:?}", e))?;
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 fn maybe_panic_for_test(job: &PushJob) {
     if job.message_id == TEST_PANIC_MESSAGE_ID.load(std::sync::atomic::Ordering::SeqCst) {
@@ -664,6 +588,7 @@ mod tests {
     #[test]
     fn database_delivery_cleanup_resets_records_and_prunes() {
         use super::*;
+        use crate::schema::push_subscriptions;
         use crate::services::push::delivery::DeliveryFailureClass;
         use diesel::connection::SimpleConnection;
 
@@ -671,10 +596,28 @@ mod tests {
             return;
         };
         let mut conn = PgConnection::establish(&url).unwrap();
+        conn.begin_test_transaction().unwrap();
         conn.batch_execute(
-            "CREATE TEMP TABLE push_subscriptions (id BIGINT PRIMARY KEY, delivery_failure_count INTEGER NOT NULL, last_delivery_error TEXT, last_delivery_error_at TIMESTAMPTZ);
-             INSERT INTO push_subscriptions VALUES (1, 2, 'old', now()), (2, 0, NULL, NULL), (3, 2, 'old', now()), (4, 0, NULL, NULL);",
+            "CREATE TEMP TABLE push_subscriptions (LIKE public.push_subscriptions INCLUDING ALL);
+             INSERT INTO push_subscriptions
+                 (id, user_id, client_id, provider, endpoint, provider_data,
+                  delivery_failure_count, last_delivery_error, last_delivery_error_at)
+             VALUES
+                 (1, 7, 'client', 'web_push', 'https://example.test/1', '{\"p256dh\":\"key\",\"auth\":\"secret\"}', 2, 'old', now()),
+                 (2, 7, 'client', 'web_push', 'https://example.test/2', '{\"p256dh\":\"key\",\"auth\":\"secret\"}', 0, NULL, NULL),
+                 (3, 7, 'client', 'web_push', 'https://example.test/3', '{\"p256dh\":\"key\",\"auth\":\"secret\"}', 2, 'old', now()),
+                 (4, 7, 'client', 'web_push', 'https://example.test/4', '{\"p256dh\":\"key\",\"auth\":\"secret\"}', 0, NULL, NULL),
+                 (5, 7, 'client', 'web_push', 'https://example.test/5', '{\"p256dh\":\"key\",\"auth\":\"secret\"}', 2, 'unchanged', now());",
         ).unwrap();
+        let unchanged_before = push_subscriptions::table
+            .find(5)
+            .select((
+                push_subscriptions::delivery_failure_count,
+                push_subscriptions::last_delivery_error,
+                push_subscriptions::last_delivery_error_at,
+            ))
+            .first::<(i32, Option<String>, Option<chrono::DateTime<chrono::Utc>>)>(&mut conn)
+            .unwrap();
         let failure = |id, action| DeliveryFailure {
             subscription_id: id,
             user_id: 7,
@@ -703,6 +646,10 @@ mod tests {
                     failure: failure(4, DeliveryFailureAction::PruneImmediate),
                     next_failure_count: 1,
                 },
+                DeliveryAttemptResult::Failure {
+                    failure: failure(5, DeliveryFailureAction::None),
+                    next_failure_count: 3,
+                },
             ],
         );
         apply_delivery_changes(&mut conn, changes).unwrap();
@@ -721,13 +668,15 @@ mod tests {
                 Option<chrono::DateTime<chrono::Utc>>,
             )>(&mut conn)
             .unwrap();
-        assert_eq!(rows.len(), 2);
+        assert_eq!(rows.len(), 3);
         assert_eq!(rows[0], (1, 0, None, None));
         assert_eq!(
             (rows[1].0, rows[1].1, rows[1].2.as_deref()),
             (2, 1, Some("rejected"))
         );
         assert!(rows[1].3.is_some());
+        assert_eq!(rows[2].0, 5);
+        assert_eq!((rows[2].1, rows[2].2.clone(), rows[2].3), unchanged_before);
     }
 
     #[test]

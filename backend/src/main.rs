@@ -128,7 +128,7 @@ async fn main() {
     let push_config = config
         .push
         .clone()
-        .expect("VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT must be set for the server");
+        .expect("at least one push provider must be configured for the server");
 
     let message_search = build_message_search_service(
         config
