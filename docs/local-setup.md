@@ -6,11 +6,13 @@ All Git worktrees share PostgreSQL, Meilisearch, RustFS, development keys, and s
 
 - Docker with Compose, accessible to your user without `sudo`.
 - Rust and native backend dependencies. On Debian/Ubuntu: `sudo apt install build-essential pkg-config libssl-dev libpq-dev`. On macOS: Xcode command line tools and `brew install pkg-config openssl@3 libpq`.
-- Node.js matching `pwa/.nvmrc`, npm, and Python 3.10+ for seeding.
+- Node.js matching `pwa/.nvmrc`, npm, and Python 3.10+ for seeding. The launcher accepts `python3`, `python`, or the Windows `py` launcher.
 - Bacon for backend rebuild/restart: `cargo install --locked bacon`.
 - FFmpeg when testing audio/voice transcoding.
 
 The launcher supports Linux and macOS and requires `pkill` to stop Cargo's child during rebuilds. Host PostgreSQL, S3 tools, and Diesel CLI are not required. Frontend-only online development needs Git, Node.js, and npm; it does not need Docker or Rust.
+
+Seeding needs a way to reach PostgreSQL. When Docker is unavailable, or the backend uses a host PostgreSQL from the Windows/Linux installer, set `SEED_DATABASE_URL` to that cluster's loopback URL in `runspace/.env`. The seeder then uses a local `psql` client (found on `PATH` or through the Windows PostgreSQL registry entries) instead of `docker compose exec postgres`. Without `SEED_DATABASE_URL` it falls back to `DATABASE_URL` and finally to the shared Compose container.
 
 ## Start development
 
@@ -73,7 +75,7 @@ Each worktree keeps its own `backend/target` and `pwa/node_modules`. Removing a 
 | File                                        | Scope and creation                                                                                                       |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `<git-common-dir>/runspace/.env`            | Shared service settings and credentials; created by `init` or `up`. Required for local mode, optional for `pwa --online` |
-| `runspace/.env`                             | This worktree's four application ports and optional `PWA_HOST`; automatically created if absent                          |
+| `runspace/.env`                             | This worktree's four application ports, optional `PWA_HOST`, and optional `SEED_DATABASE_URL`; automatically created if absent |
 | `<git-common-dir>/runspace/seed-state.json` | Shared fixture progress, written by seeding                                                                              |
 | `pwa/.env.local`                            | Optional `CHAHUA_DEV_TOKEN` preset; not required for startup                                                             |
 
@@ -216,6 +218,7 @@ In `pwa/`:
 - **Interrupted initialization:** fix the cause and rerun `init`; backend output is in `runspace/backend-init.log`. Remove a reported stale lock directory only after confirming its owning command is no longer running.
 - **Frontend dependency errors:** run `(cd pwa && npm ci)`.
 - **Development login returns 404:** use local mode and check `ENABLE_DEBUG_AUTH=true` in shared configuration, then restart the backend.
+- **Seeding fails with "docker is required":** Docker is missing or the backend uses a host PostgreSQL. Set `SEED_DATABASE_URL` in `runspace/.env` to the cluster the backend uses and rerun. Seeding also needs a `psql` client; on Windows the installer's registry entry is detected automatically.
 
 Launcher regression checks use temporary Git worktrees and local test servers, without writes to the application's database or S3:
 
