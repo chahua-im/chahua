@@ -47,10 +47,13 @@ async fn get_members(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Query(query): Query<ListMembersQuery>,
 ) -> Result<Json<ListMembersResponse>, AppError> {
-    members::get_members(uid, chat_id, query, &mut conn, &state.avatars).map(Json)
+    conn.run(move |mut conn| async move {
+        members::get_members(uid, chat_id, query, &mut conn, &state.avatars).map(Json)
+    })
+    .await
 }
 
 /// POST /group/:chat_id/members — Add a member to the chat (caller must be admin).
@@ -71,25 +74,28 @@ async fn post_add_member(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<AddMemberBody>,
 ) -> Result<(StatusCode, Json<MemberResponse>), AppError> {
-    let response = members::post_add_member(
-        uid,
-        chat_id,
-        body,
-        &mut conn,
-        PostAddMemberDeps {
-            id_gen: &state.id_gen,
-            media: &state.media,
-            avatars: &state.avatars,
-            metrics: &state.metrics,
-            ws_registry: &state.ws_registry,
-            push_service: &state.push_service,
-        },
-    )
-    .await?;
-    Ok((StatusCode::CREATED, Json(response)))
+    conn.run(move |mut conn| async move {
+        let response = members::post_add_member(
+            uid,
+            chat_id,
+            body,
+            &mut conn,
+            PostAddMemberDeps {
+                id_gen: &state.id_gen,
+                media: &state.media,
+                avatars: &state.avatars,
+                metrics: &state.metrics,
+                ws_registry: &state.ws_registry,
+                push_service: &state.push_service,
+            },
+        )
+        .await?;
+        Ok((StatusCode::CREATED, Json(response)))
+    })
+    .await
 }
 
 /// DELETE /group/:chat_id/members/:uid — Remove a member from the chat (caller must be admin).
@@ -116,26 +122,29 @@ async fn delete_remove_member(
     }): Path<MemberPath>,
     Query(query): Query<RemoveMemberQuery>,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    members::delete_remove_member(
-        uid,
-        chat_id,
-        target_uid,
-        query,
-        &mut conn,
-        DeleteRemoveMemberDeps {
-            id_gen: &state.id_gen,
-            media: &state.media,
-            avatars: &state.avatars,
-            metrics: &state.metrics,
-            ws_registry: &state.ws_registry,
-            push_service: &state.push_service,
-            background_service: &state.background_service,
-        },
-    )
-    .await?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        members::delete_remove_member(
+            uid,
+            chat_id,
+            target_uid,
+            query,
+            &mut conn,
+            DeleteRemoveMemberDeps {
+                id_gen: &state.id_gen,
+                media: &state.media,
+                avatars: &state.avatars,
+                metrics: &state.metrics,
+                ws_registry: &state.ws_registry,
+                push_service: &state.push_service,
+                background_service: &state.background_service,
+            },
+        )
+        .await?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 /// PATCH /group/:chat_id/members/:uid — Update member role (admin only).
@@ -160,19 +169,22 @@ async fn patch_member(
         chat_id,
         uid: target_uid,
     }): Path<MemberPath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<UpdateMemberBody>,
 ) -> Result<Json<MemberResponse>, AppError> {
-    members::patch_member(
-        requester_uid,
-        chat_id,
-        target_uid,
-        body,
-        &mut conn,
-        &state.avatars,
-        &state.ws_registry,
-    )
-    .map(Json)
+    conn.run(move |mut conn| async move {
+        members::patch_member(
+            requester_uid,
+            chat_id,
+            target_uid,
+            body,
+            &mut conn,
+            &state.avatars,
+            &state.ws_registry,
+        )
+        .map(Json)
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -199,18 +211,21 @@ async fn put_member_speaking_mode(
         chat_id,
         uid: target_uid,
     }): Path<MemberPath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<crate::dto::speaking::UpdateSpeakingModeRequest>,
 ) -> Result<Json<crate::dto::speaking::MemberSpeakingModeResponse>, AppError> {
-    members::put_member_speaking_mode(
-        uid,
-        chat_id,
-        target_uid,
-        body,
-        &mut conn,
-        &state.ws_registry,
-    )
-    .map(Json)
+    conn.run(move |mut conn| async move {
+        members::put_member_speaking_mode(
+            uid,
+            chat_id,
+            target_uid,
+            body,
+            &mut conn,
+            &state.ws_registry,
+        )
+        .map(Json)
+    })
+    .await
 }
 
 pub fn router() -> OpenApiRouter<crate::AppState> {

@@ -46,17 +46,20 @@ struct RequestIdPath {
 async fn get_friends(
     principal: Principal,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<ListFriendsResponse>, AppError> {
-    Ok(Json(
-        friends::get_friends(
-            principal,
-            &mut conn,
-            &state.authz_service,
-            state.avatars.as_ref(),
-        )
-        .await?,
-    ))
+    conn.run(move |mut conn| async move {
+        Ok(Json(
+            friends::get_friends(
+                principal,
+                &mut conn,
+                &state.authz_service,
+                state.avatars.as_ref(),
+            )
+            .await?,
+        ))
+    })
+    .await
 }
 
 /// GET /friends/:uid — The current user's relationship with one profile user.
@@ -74,13 +77,16 @@ async fn get_friends(
 async fn get_friend_relationship(
     principal: Principal,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Path(FriendPath { uid: peer_uid }): Path<FriendPath>,
 ) -> Result<Json<FriendRelationshipResponse>, AppError> {
-    Ok(Json(
-        friends::get_friend_relationship(principal, peer_uid, &mut conn, &state.authz_service)
-            .await?,
-    ))
+    conn.run(move |mut conn| async move {
+        Ok(Json(
+            friends::get_friend_relationship(principal, peer_uid, &mut conn, &state.authz_service)
+                .await?,
+        ))
+    })
+    .await
 }
 #[utoipa::path(
     delete,
@@ -96,19 +102,22 @@ async fn get_friend_relationship(
 async fn delete_friend(
     principal: Principal,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Path(FriendPath { uid: other }): Path<FriendPath>,
 ) -> Result<StatusCode, AppError> {
-    friends::delete_friend(
-        principal,
-        other,
-        &mut conn,
-        &state.authz_service,
-        state.presence_service.as_ref(),
-        &state.ws_registry,
-    )
-    .await?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        friends::delete_friend(
+            principal,
+            other,
+            &mut conn,
+            &state.authz_service,
+            state.presence_service.as_ref(),
+            &state.ws_registry,
+        )
+        .await?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -127,29 +136,36 @@ async fn delete_friend(
 async fn create_friend_request(
     principal: Principal,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<CreateFriendRequestBody>,
 ) -> Result<(StatusCode, Json<FriendRequestResponse>), AppError> {
-    match friends::create_friend_request(
-        principal,
-        body,
-        &mut conn,
-        CreateFriendRequestDeps {
-            authz_service: &state.authz_service,
-            avatars: &state.avatars,
-            id_gen: &state.id_gen,
-            media: &state.media,
-            metrics: &state.metrics,
-            ws_registry: &state.ws_registry,
-            presence_service: &state.presence_service,
-            push_service: &state.push_service,
-        },
-    )
-    .await?
-    {
-        CreateFriendRequestResult::Created(response) => Ok((StatusCode::CREATED, Json(response))),
-        CreateFriendRequestResult::AutoAccepted(response) => Ok((StatusCode::OK, Json(response))),
-    }
+    conn.run(move |mut conn| async move {
+        match friends::create_friend_request(
+            principal,
+            body,
+            &mut conn,
+            CreateFriendRequestDeps {
+                authz_service: &state.authz_service,
+                avatars: &state.avatars,
+                id_gen: &state.id_gen,
+                media: &state.media,
+                metrics: &state.metrics,
+                ws_registry: &state.ws_registry,
+                presence_service: &state.presence_service,
+                push_service: &state.push_service,
+            },
+        )
+        .await?
+        {
+            CreateFriendRequestResult::Created(response) => {
+                Ok((StatusCode::CREATED, Json(response)))
+            }
+            CreateFriendRequestResult::AutoAccepted(response) => {
+                Ok((StatusCode::OK, Json(response)))
+            }
+        }
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -163,12 +179,15 @@ async fn create_friend_request(
 async fn count_pending_incoming_requests(
     principal: Principal,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<PendingFriendRequestCountResponse>, AppError> {
-    Ok(Json(
-        friends::count_pending_incoming_requests(principal, &mut conn, &state.authz_service)
-            .await?,
-    ))
+    conn.run(move |mut conn| async move {
+        Ok(Json(
+            friends::count_pending_incoming_requests(principal, &mut conn, &state.authz_service)
+                .await?,
+        ))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -185,19 +204,22 @@ async fn count_pending_incoming_requests(
 async fn list_friend_request_history(
     principal: Principal,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Query(query): Query<ListFriendRequestsQuery>,
 ) -> Result<Json<ListFriendRequestHistoryResponse>, AppError> {
-    Ok(Json(
-        friends::list_friend_request_history(
-            principal,
-            query,
-            &mut conn,
-            &state.authz_service,
-            state.avatars.as_ref(),
-        )
-        .await?,
-    ))
+    conn.run(move |mut conn| async move {
+        Ok(Json(
+            friends::list_friend_request_history(
+                principal,
+                query,
+                &mut conn,
+                &state.authz_service,
+                state.avatars.as_ref(),
+            )
+            .await?,
+        ))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -214,27 +236,30 @@ async fn list_friend_request_history(
 async fn accept_friend_request(
     principal: Principal,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Path(RequestIdPath { request_id }): Path<RequestIdPath>,
 ) -> Result<Json<FriendRequestResponse>, AppError> {
-    Ok(Json(
-        friends::accept_friend_request(
-            principal,
-            request_id,
-            &mut conn,
-            AcceptFriendRequestDeps {
-                authz_service: &state.authz_service,
-                avatars: &state.avatars,
-                id_gen: &state.id_gen,
-                media: &state.media,
-                metrics: &state.metrics,
-                ws_registry: &state.ws_registry,
-                presence_service: &state.presence_service,
-                push_service: &state.push_service,
-            },
-        )
-        .await?,
-    ))
+    conn.run(move |mut conn| async move {
+        Ok(Json(
+            friends::accept_friend_request(
+                principal,
+                request_id,
+                &mut conn,
+                AcceptFriendRequestDeps {
+                    authz_service: &state.authz_service,
+                    avatars: &state.avatars,
+                    id_gen: &state.id_gen,
+                    media: &state.media,
+                    metrics: &state.metrics,
+                    ws_registry: &state.ws_registry,
+                    presence_service: &state.presence_service,
+                    push_service: &state.push_service,
+                },
+            )
+            .await?,
+        ))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -254,27 +279,30 @@ async fn accept_friend_request(
 async fn reject_friend_request(
     principal: Principal,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Path(RequestIdPath { request_id }): Path<RequestIdPath>,
 ) -> Result<Json<FriendRequestResponse>, AppError> {
-    Ok(Json(
-        friends::reject_friend_request(
-            principal,
-            request_id,
-            &mut conn,
-            RejectFriendRequestDeps {
-                authz_service: &state.authz_service,
-                avatars: &state.avatars,
-                id_gen: &state.id_gen,
-                media: &state.media,
-                metrics: &state.metrics,
-                ws_registry: &state.ws_registry,
-                presence_service: &state.presence_service,
-                push_service: &state.push_service,
-            },
-        )
-        .await?,
-    ))
+    conn.run(move |mut conn| async move {
+        Ok(Json(
+            friends::reject_friend_request(
+                principal,
+                request_id,
+                &mut conn,
+                RejectFriendRequestDeps {
+                    authz_service: &state.authz_service,
+                    avatars: &state.avatars,
+                    id_gen: &state.id_gen,
+                    media: &state.media,
+                    metrics: &state.metrics,
+                    ws_registry: &state.ws_registry,
+                    presence_service: &state.presence_service,
+                    push_service: &state.push_service,
+                },
+            )
+            .await?,
+        ))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -291,11 +319,15 @@ async fn reject_friend_request(
 async fn archive_friend_request(
     principal: Principal,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Path(RequestIdPath { request_id }): Path<RequestIdPath>,
 ) -> Result<StatusCode, AppError> {
-    friends::archive_friend_request(principal, request_id, &mut conn, &state.authz_service).await?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        friends::archive_friend_request(principal, request_id, &mut conn, &state.authz_service)
+            .await?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -307,9 +339,12 @@ async fn archive_friend_request(
 )]
 async fn get_my_friend_settings(
     CurrentUid(uid): CurrentUid,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<FriendSettingsResponse>, AppError> {
-    Ok(Json(friends::get_my_friend_settings(uid, &mut conn).await?))
+    conn.run(move |mut conn| async move {
+        Ok(Json(friends::get_my_friend_settings(uid, &mut conn).await?))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -322,12 +357,15 @@ async fn get_my_friend_settings(
 )]
 async fn update_my_friend_settings(
     CurrentUid(uid): CurrentUid,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<UpdateFriendSettingsBody>,
 ) -> Result<Json<FriendSettingsResponse>, AppError> {
-    Ok(Json(
-        friends::update_my_friend_settings(uid, body, &mut conn).await?,
-    ))
+    conn.run(move |mut conn| async move {
+        Ok(Json(
+            friends::update_my_friend_settings(uid, body, &mut conn).await?,
+        ))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -344,12 +382,16 @@ async fn update_my_friend_settings(
 async fn get_user_friend_add_info(
     principal: Principal,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Path(FriendPath { uid }): Path<FriendPath>,
 ) -> Result<Json<FriendAddInfoResponse>, AppError> {
-    Ok(Json(
-        friends::get_user_friend_add_info(principal, uid, &mut conn, &state.authz_service).await?,
-    ))
+    conn.run(move |mut conn| async move {
+        Ok(Json(
+            friends::get_user_friend_add_info(principal, uid, &mut conn, &state.authz_service)
+                .await?,
+        ))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -362,11 +404,14 @@ async fn get_user_friend_add_info(
 )]
 async fn get_my_presence_settings(
     CurrentUid(uid): CurrentUid,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<PresenceSettingsResponse>, AppError> {
-    Ok(Json(
-        friends::get_my_presence_settings(uid, &mut conn).await?,
-    ))
+    conn.run(move |mut conn| async move {
+        Ok(Json(
+            friends::get_my_presence_settings(uid, &mut conn).await?,
+        ))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -381,13 +426,21 @@ async fn get_my_presence_settings(
 async fn update_my_presence_settings(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<UpdatePresenceSettingsBody>,
 ) -> Result<Json<PresenceSettingsResponse>, AppError> {
-    Ok(Json(
-        friends::update_my_presence_settings(uid, body, &mut conn, state.presence_service.as_ref())
+    conn.run(move |mut conn| async move {
+        Ok(Json(
+            friends::update_my_presence_settings(
+                uid,
+                body,
+                &mut conn,
+                state.presence_service.as_ref(),
+            )
             .await?,
-    ))
+        ))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -400,11 +453,14 @@ async fn update_my_presence_settings(
 )]
 async fn get_my_read_receipt_settings(
     CurrentUid(uid): CurrentUid,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<ReadReceiptSettingsResponse>, AppError> {
-    Ok(Json(
-        friends::get_my_read_receipt_settings(uid, &mut conn).await?,
-    ))
+    conn.run(move |mut conn| async move {
+        Ok(Json(
+            friends::get_my_read_receipt_settings(uid, &mut conn).await?,
+        ))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -419,12 +475,16 @@ async fn get_my_read_receipt_settings(
 async fn update_my_read_receipt_settings(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<UpdateReadReceiptSettingsBody>,
 ) -> Result<Json<ReadReceiptSettingsResponse>, AppError> {
-    Ok(Json(
-        friends::update_my_read_receipt_settings(uid, body, &mut conn, &state.ws_registry).await?,
-    ))
+    conn.run(move |mut conn| async move {
+        Ok(Json(
+            friends::update_my_read_receipt_settings(uid, body, &mut conn, &state.ws_registry)
+                .await?,
+        ))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -441,12 +501,15 @@ async fn update_my_read_receipt_settings(
 )]
 async fn get_friend_presence_settings(
     CurrentUid(uid): CurrentUid,
-    mut conn: DbConn,
+    conn: DbConn,
     Path(FriendPath { uid: peer_uid }): Path<FriendPath>,
 ) -> Result<Json<FriendPresenceSettingsResponse>, AppError> {
-    Ok(Json(
-        friends::get_friend_presence_settings(uid, peer_uid, &mut conn).await?,
-    ))
+    conn.run(move |mut conn| async move {
+        Ok(Json(
+            friends::get_friend_presence_settings(uid, peer_uid, &mut conn).await?,
+        ))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -465,20 +528,23 @@ async fn get_friend_presence_settings(
 async fn update_friend_presence_settings(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Path(FriendPath { uid: peer_uid }): Path<FriendPath>,
     Json(body): Json<UpdateFriendPresenceSettingsBody>,
 ) -> Result<Json<FriendPresenceSettingsResponse>, AppError> {
-    Ok(Json(
-        friends::update_friend_presence_settings(
-            uid,
-            peer_uid,
-            body,
-            &mut conn,
-            state.presence_service.as_ref(),
-        )
-        .await?,
-    ))
+    conn.run(move |mut conn| async move {
+        Ok(Json(
+            friends::update_friend_presence_settings(
+                uid,
+                peer_uid,
+                body,
+                &mut conn,
+                state.presence_service.as_ref(),
+            )
+            .await?,
+        ))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -495,12 +561,15 @@ async fn update_friend_presence_settings(
 )]
 async fn get_friend_read_receipt_settings(
     CurrentUid(uid): CurrentUid,
-    mut conn: DbConn,
+    conn: DbConn,
     Path(FriendPath { uid: peer_uid }): Path<FriendPath>,
 ) -> Result<Json<FriendReadReceiptSettingsResponse>, AppError> {
-    Ok(Json(
-        friends::get_friend_read_receipt_settings(uid, peer_uid, &mut conn).await?,
-    ))
+    conn.run(move |mut conn| async move {
+        Ok(Json(
+            friends::get_friend_read_receipt_settings(uid, peer_uid, &mut conn).await?,
+        ))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -519,20 +588,23 @@ async fn get_friend_read_receipt_settings(
 async fn update_friend_read_receipt_settings(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Path(FriendPath { uid: peer_uid }): Path<FriendPath>,
     Json(body): Json<UpdateFriendReadReceiptSettingsBody>,
 ) -> Result<Json<FriendReadReceiptSettingsResponse>, AppError> {
-    Ok(Json(
-        friends::update_friend_read_receipt_settings(
-            uid,
-            peer_uid,
-            body,
-            &mut conn,
-            &state.ws_registry,
-        )
-        .await?,
-    ))
+    conn.run(move |mut conn| async move {
+        Ok(Json(
+            friends::update_friend_read_receipt_settings(
+                uid,
+                peer_uid,
+                body,
+                &mut conn,
+                &state.ws_registry,
+            )
+            .await?,
+        ))
+    })
+    .await
 }
 
 pub fn router() -> OpenApiRouter<AppState> {
@@ -564,12 +636,16 @@ pub fn router() -> OpenApiRouter<AppState> {
 async fn get_privacy_exceptions(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Query(query): Query<PrivacyExceptionsQuery>,
 ) -> Result<Json<PrivacyExceptionsResponse>, AppError> {
-    Ok(Json(
-        friends::get_privacy_exceptions(uid, query.kind, &mut conn, state.avatars.as_ref()).await?,
-    ))
+    conn.run(move |mut conn| async move {
+        Ok(Json(
+            friends::get_privacy_exceptions(uid, query.kind, &mut conn, state.avatars.as_ref())
+                .await?,
+        ))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -581,18 +657,21 @@ async fn get_privacy_exceptions(
 async fn clear_privacy_exceptions(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Query(query): Query<PrivacyExceptionsQuery>,
 ) -> Result<StatusCode, AppError> {
-    friends::clear_privacy_exceptions(
-        uid,
-        query.kind,
-        &mut conn,
-        state.presence_service.as_ref(),
-        &state.ws_registry,
-    )
-    .await?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        friends::clear_privacy_exceptions(
+            uid,
+            query.kind,
+            &mut conn,
+            state.presence_service.as_ref(),
+            &state.ws_registry,
+        )
+        .await?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 pub fn presence_settings_router() -> OpenApiRouter<AppState> {

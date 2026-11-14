@@ -29,8 +29,8 @@ impl Drop for Server {
     }
 }
 
-fn router(services: &RpcServices) -> Router {
-    let state = AppState::new(AppInner {
+fn state(services: &RpcServices) -> AppState {
+    AppState::new(AppInner {
         db: services.db.clone(),
         id_gen: services.id_gen.clone(),
         metrics: services.metrics.clone(),
@@ -48,10 +48,18 @@ fn router(services: &RpcServices) -> Router {
         message_search: services.message_search.clone(),
         auth_token_service: services.auth_token_service.clone(),
         token_generation: services.token_generation.clone(),
-    });
+    })
+}
+
+fn router(services: &RpcServices) -> Router {
+    let state = state(services);
     Router::new()
         .route("/ws", get(super::ws_handler))
         .route("/activity-probe", get(|| async { "ok" }))
+        .nest(
+            "/friends",
+            crate::handlers::friends::router().split_for_parts().0,
+        )
         .layer(middleware::from_fn_with_state(
             state.clone(),
             crate::services::client_tracking::track_client_activity,
@@ -166,6 +174,126 @@ async fn warmed_http_activity_does_not_wait_for_a_database_connection() {
             .unwrap()
             .status(),
         axum::http::StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn waiting_http_database_operation_does_not_stall_other_requests() {
+    use tower::ServiceExt;
+
+    let Some(services) = crate::rpc::test_support::services().await else {
+        return;
+    };
+    let token = services
+        .auth_token_service
+        .issue_session(1, "http-database-isolation", 0)
+        .unwrap();
+    let app = router(&services);
+    let request = || {
+        axum::http::Request::builder()
+            .uri("/friends")
+            .header("authorization", format!("Bearer {token}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    assert_eq!(
+        app.clone().oneshot(request()).await.unwrap().status(),
+        axum::http::StatusCode::OK
+    );
+    let connection = services.db.get().unwrap();
+    let pending = tokio::spawn(app.clone().oneshot(request()));
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    let probe = timeout(
+        Duration::from_secs(1),
+        app.oneshot(
+            axum::http::Request::builder()
+                .uri("/activity-probe")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        ),
+    )
+    .await;
+    let still_waiting = !pending.is_finished();
+    drop(connection);
+    assert_eq!(
+        probe
+            .expect("pool wait must not stall the executor")
+            .unwrap()
+            .status(),
+        axum::http::StatusCode::OK
+    );
+    assert!(still_waiting, "database work must wait for a connection");
+    assert_eq!(
+        timeout(Duration::from_secs(5), pending)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()
+            .status(),
+        axum::http::StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn service_token_authentication_wait_does_not_stall_other_requests() {
+    use tower::ServiceExt;
+
+    let Some(services) = crate::rpc::test_support::services().await else {
+        return;
+    };
+    let app = Router::new()
+        .route(
+            "/principal",
+            get(|_: crate::services::authentication::Principal| async { "authorized" }),
+        )
+        .route("/probe", get(|| async { "responsive" }))
+        .with_state(state(&services));
+    let credential = crate::services::service_tokens::generate_credential(
+        &services.config.auth.service_token_hash_key,
+    )
+    .unwrap()
+    .credential;
+    let connection = services.db.get().unwrap();
+    let pending = tokio::spawn(
+        app.clone().oneshot(
+            axum::http::Request::builder()
+                .uri("/principal")
+                .header("authorization", format!("Bearer {credential}"))
+                .header("x-on-behalf-of", "invalid")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        ),
+    );
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    let probe = timeout(
+        Duration::from_secs(1),
+        app.oneshot(
+            axum::http::Request::builder()
+                .uri("/probe")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        ),
+    )
+    .await;
+    let still_waiting = !pending.is_finished();
+    drop(connection);
+    assert_eq!(
+        probe
+            .expect("authentication pool wait must not stall the executor")
+            .unwrap()
+            .status(),
+        axum::http::StatusCode::OK
+    );
+    assert!(still_waiting);
+    assert_eq!(
+        timeout(Duration::from_secs(5), pending)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()
+            .status(),
+        axum::http::StatusCode::UNAUTHORIZED,
+        "invalid credentials must still take precedence over malformed delegation"
     );
 }
 

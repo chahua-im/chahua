@@ -45,17 +45,24 @@ async fn post_dev_session(
     let client_id = headers
         .get(X_CLIENT_ID)
         .map(|value| value.to_str().unwrap_or("").to_owned());
-    let issued = crate::services::api::auth::post_dev_session(
-        request,
-        client_id,
-        crate::services::api::auth::PostDevSessionDeps {
-            config: &state.config,
-            auth_token_service: &state.auth_token_service,
-            token_generation: &state.token_generation,
-            db: &state.db,
-        },
-    )?;
-    Ok(Json(issued.response))
+    tokio::task::spawn_blocking(move || {
+        let issued = crate::services::api::auth::post_dev_session(
+            request,
+            client_id,
+            crate::services::api::auth::PostDevSessionDeps {
+                config: &state.config,
+                auth_token_service: &state.auth_token_service,
+                token_generation: &state.token_generation,
+                db: &state.db,
+            },
+        )?;
+        Ok(Json(issued.response))
+    })
+    .await
+    .map_err(|error| {
+        tracing::error!(?error, "development-session worker failed");
+        AppError::Internal("Authentication worker failed")
+    })?
 }
 
 pub fn router() -> OpenApiRouter<AppState> {

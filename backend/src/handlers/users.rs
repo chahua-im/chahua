@@ -29,11 +29,14 @@ use crate::AppState;
 async fn put_stickerpack_order(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(req): Json<UpdateStickerPackOrderRequest>,
 ) -> Result<Json<()>, AppError> {
-    users::put_stickerpack_order(uid, req, &mut conn, &state.ws_registry)?;
-    Ok(Json(()))
+    conn.run(move |mut conn| async move {
+        users::put_stickerpack_order(uid, req, &mut conn, &state.ws_registry)?;
+        Ok(Json(()))
+    })
+    .await
 }
 
 /// GET /users/me — Get the current logged in user's information
@@ -49,9 +52,12 @@ async fn put_stickerpack_order(
 async fn get_me(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<MeResponse>, AppError> {
-    users::get_me(uid, &mut conn, &state.avatars, &state.authz_service).map(Json)
+    conn.run(move |mut conn| async move {
+        users::get_me(uid, &mut conn, &state.avatars, &state.authz_service).map(Json)
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -62,10 +68,13 @@ async fn get_me(
 async fn put_chat_settings(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(settings): Json<UpdateChatSettings>,
 ) -> Result<Json<ChatSettings>, AppError> {
-    users::put_chat_settings(uid, settings, &mut conn, &state.ws_registry).map(Json)
+    conn.run(move |mut conn| async move {
+        users::put_chat_settings(uid, settings, &mut conn, &state.ws_registry).map(Json)
+    })
+    .await
 }
 
 /// GET /users/search — Search global users for targeted invites.
@@ -82,10 +91,14 @@ async fn put_chat_settings(
 async fn get_user_search(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Query(query): Query<SearchUsersQuery>,
 ) -> Result<Json<SearchUsersResponse>, AppError> {
-    users::get_user_search(uid, query, &mut conn, &state.avatars, &state.authz_service).map(Json)
+    conn.run(move |mut conn| async move {
+        users::get_user_search(uid, query, &mut conn, &state.avatars, &state.authz_service)
+            .map(Json)
+    })
+    .await
 }
 
 #[utoipa::path(

@@ -36,19 +36,22 @@ struct ServiceTokenPath {
 async fn post_service_token(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<CreateServiceTokenRequest>,
 ) -> Result<(StatusCode, Json<CreateServiceTokenResponse>), AppError> {
-    let response = crate::services::api::service_tokens::post_service_token(
-        uid,
-        body,
-        &mut conn,
-        &state.authz_service,
-        &state.id_gen,
-        &state.config.auth.service_token_hash_key,
-    )
-    .await?;
-    Ok((StatusCode::CREATED, Json(response)))
+    conn.run(move |mut conn| async move {
+        let response = crate::services::api::service_tokens::post_service_token(
+            uid,
+            body,
+            &mut conn,
+            &state.authz_service,
+            &state.id_gen,
+            &state.config.auth.service_token_hash_key,
+        )
+        .await?;
+        Ok((StatusCode::CREATED, Json(response)))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -63,10 +66,17 @@ async fn post_service_token(
 async fn get_service_tokens(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<ListServiceTokensResponse>, AppError> {
-    crate::services::api::service_tokens::get_service_tokens(uid, &mut conn, &state.authz_service)
+    conn.run(move |mut conn| async move {
+        crate::services::api::service_tokens::get_service_tokens(
+            uid,
+            &mut conn,
+            &state.authz_service,
+        )
         .map(Json)
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -83,15 +93,18 @@ async fn delete_service_token(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(ServiceTokenPath { id }): Path<ServiceTokenPath>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    crate::services::api::service_tokens::delete_service_token(
-        uid,
-        id,
-        &mut conn,
-        &state.authz_service,
-    )?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        crate::services::api::service_tokens::delete_service_token(
+            uid,
+            id,
+            &mut conn,
+            &state.authz_service,
+        )?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -108,16 +121,19 @@ async fn post_rotate_service_token(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(ServiceTokenPath { id }): Path<ServiceTokenPath>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<RotateServiceTokenResponse>, AppError> {
-    crate::services::api::service_tokens::post_rotate_service_token(
-        uid,
-        id,
-        &mut conn,
-        &state.authz_service,
-        &state.config.auth.service_token_hash_key,
-    )
-    .map(Json)
+    conn.run(move |mut conn| async move {
+        crate::services::api::service_tokens::post_rotate_service_token(
+            uid,
+            id,
+            &mut conn,
+            &state.authz_service,
+            &state.config.auth.service_token_hash_key,
+        )
+        .map(Json)
+    })
+    .await
 }
 
 pub fn router() -> OpenApiRouter<crate::AppState> {

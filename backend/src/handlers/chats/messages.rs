@@ -65,19 +65,22 @@ async fn get_messages(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Query(q): Query<ListMessagesQuery>,
 ) -> Result<Json<ListMessagesResponse>, AppError> {
-    crate::services::api::chats::messages::get_messages(
-        uid,
-        chat_id,
-        q,
-        &mut conn,
-        &state.media,
-        &state.avatars,
-    )
+    conn.run(move |mut conn| async move {
+        crate::services::api::chats::messages::get_messages(
+            uid,
+            chat_id,
+            q,
+            &mut conn,
+            &state.media,
+            &state.avatars,
+        )
+        .await
+        .map(Json)
+    })
     .await
-    .map(Json)
 }
 
 /// GET /chats/:chat_id/messages/search — Search visible messages in a chat.
@@ -100,23 +103,26 @@ async fn search_messages(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Query(params): Query<SearchMessagesQuery>,
 ) -> Result<Json<SearchMessagesResponse>, AppError> {
-    crate::services::api::chats::messages::search_messages(
-        uid,
-        chat_id,
-        params,
-        &mut conn,
-        crate::services::api::chats::messages::SearchMessagesDeps {
-            media: &state.media,
-            avatars: &state.avatars,
-            metrics: &state.metrics,
-            message_search: &state.message_search,
-        },
-    )
+    conn.run(move |mut conn| async move {
+        crate::services::api::chats::messages::search_messages(
+            uid,
+            chat_id,
+            params,
+            &mut conn,
+            crate::services::api::chats::messages::SearchMessagesDeps {
+                media: &state.media,
+                avatars: &state.avatars,
+                metrics: &state.metrics,
+                message_search: &state.message_search,
+            },
+        )
+        .await
+        .map(Json)
+    })
     .await
-    .map(Json)
 }
 
 /// GET /chats/:chat_id/messages/:message_id — Get a single message.
@@ -140,18 +146,21 @@ async fn get_message(
         chat_id,
         message_id,
     }): Path<MessageIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<MessageResponse>, AppError> {
-    crate::services::api::chats::messages::get_message(
-        uid,
-        chat_id,
-        message_id,
-        &mut conn,
-        &state.media,
-        &state.avatars,
-    )
+    conn.run(move |mut conn| async move {
+        crate::services::api::chats::messages::get_message(
+            uid,
+            chat_id,
+            message_id,
+            &mut conn,
+            &state.media,
+            &state.avatars,
+        )
+        .await
+        .map(Json)
+    })
     .await
-    .map(Json)
 }
 
 /// POST /chats/:chat_id/messages — Send a message.
@@ -171,28 +180,31 @@ async fn post_message(
     principal: Principal,
     State(state): State<AppState>,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<CreateMessageBody>,
 ) -> Result<impl IntoResponse, AppError> {
-    let response = crate::services::api::chats::messages::post_message(
-        principal,
-        chat_id,
-        body,
-        &mut conn,
-        crate::services::api::chats::messages::PostMessageDeps {
-            id_gen: &state.id_gen,
-            media: &state.media,
-            avatars: &state.avatars,
-            link_previews: &state.link_previews,
-            metrics: &state.metrics,
-            authz_service: &state.authz_service,
-            ws_registry: &state.ws_registry,
-            push_service: &state.push_service,
-            message_search: &state.message_search,
-        },
-    )
-    .await?;
-    Ok((StatusCode::CREATED, Json(response)))
+    conn.run(move |mut conn| async move {
+        let response = crate::services::api::chats::messages::post_message(
+            principal,
+            chat_id,
+            body,
+            &mut conn,
+            crate::services::api::chats::messages::PostMessageDeps {
+                id_gen: &state.id_gen,
+                media: &state.media,
+                avatars: &state.avatars,
+                link_previews: &state.link_previews,
+                metrics: &state.metrics,
+                authz_service: &state.authz_service,
+                ws_registry: &state.ws_registry,
+                push_service: &state.push_service,
+                message_search: &state.message_search,
+            },
+        )
+        .await?;
+        Ok((StatusCode::CREATED, Json(response)))
+    })
+    .await
 }
 
 /// POST /chats/:chat_id/messages/forward — Merge 2–100 distinct messages into a chat or thread.
@@ -215,25 +227,28 @@ async fn forward_messages(
     Path(ChatIdPath {
         chat_id: dest_chat_id,
     }): Path<ChatIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<ForwardMessagesBody>,
 ) -> Result<impl IntoResponse, AppError> {
-    let response = crate::services::api::chats::messages::forward_messages(
-        uid,
-        dest_chat_id,
-        body,
-        &mut conn,
-        crate::services::api::chats::messages::ForwardMessagesDeps {
-            id_gen: &state.id_gen,
-            media: &state.media,
-            avatars: &state.avatars,
-            metrics: &state.metrics,
-            ws_registry: &state.ws_registry,
-            push_service: &state.push_service,
-        },
-    )
-    .await?;
-    Ok((StatusCode::CREATED, Json(response)))
+    conn.run(move |mut conn| async move {
+        let response = crate::services::api::chats::messages::forward_messages(
+            uid,
+            dest_chat_id,
+            body,
+            &mut conn,
+            crate::services::api::chats::messages::ForwardMessagesDeps {
+                id_gen: &state.id_gen,
+                media: &state.media,
+                avatars: &state.avatars,
+                metrics: &state.metrics,
+                ws_registry: &state.ws_registry,
+                push_service: &state.push_service,
+            },
+        )
+        .await?;
+        Ok((StatusCode::CREATED, Json(response)))
+    })
+    .await
 }
 
 /// Single forwards retain the original message type, with flattened attribution.
@@ -256,27 +271,30 @@ async fn forward_message(
         chat_id,
         message_id,
     }): Path<MessageIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<ForwardMessageBody>,
 ) -> Result<impl IntoResponse, AppError> {
-    let response = crate::services::api::chats::messages::forward_message(
-        uid,
-        chat_id,
-        message_id,
-        body,
-        &mut conn,
-        crate::services::api::chats::messages::ForwardMessageDeps {
-            id_gen: &state.id_gen,
-            media: &state.media,
-            avatars: &state.avatars,
-            metrics: &state.metrics,
-            ws_registry: &state.ws_registry,
-            push_service: &state.push_service,
-            message_search: &state.message_search,
-        },
-    )
-    .await?;
-    Ok((StatusCode::CREATED, Json(response)))
+    conn.run(move |mut conn| async move {
+        let response = crate::services::api::chats::messages::forward_message(
+            uid,
+            chat_id,
+            message_id,
+            body,
+            &mut conn,
+            crate::services::api::chats::messages::ForwardMessageDeps {
+                id_gen: &state.id_gen,
+                media: &state.media,
+                avatars: &state.avatars,
+                metrics: &state.metrics,
+                ws_registry: &state.ws_registry,
+                push_service: &state.push_service,
+                message_search: &state.message_search,
+            },
+        )
+        .await?;
+        Ok((StatusCode::CREATED, Json(response)))
+    })
+    .await
 }
 
 /// GET /chats/:chat_id/messages/:message_id/forwarded-messages — List forwarded message details.
@@ -300,17 +318,20 @@ async fn get_forwarded_messages(
         chat_id,
         message_id,
     }): Path<MessageIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<ForwardedMessagesResponse>, AppError> {
-    crate::services::api::chats::messages::get_forwarded_messages(
-        uid,
-        chat_id,
-        message_id,
-        &mut conn,
-        &state.media,
-        &state.avatars,
-    )
-    .map(Json)
+    conn.run(move |mut conn| async move {
+        crate::services::api::chats::messages::get_forwarded_messages(
+            uid,
+            chat_id,
+            message_id,
+            &mut conn,
+            &state.media,
+            &state.avatars,
+        )
+        .map(Json)
+    })
+    .await
 }
 
 /// GET /chats/:chat_id/messages/:message_id/forwarded-bundles/:bundle_id/messages — List forwarded message details by reachable bundle.
@@ -336,18 +357,21 @@ async fn get_forwarded_bundle_messages(
         message_id,
         bundle_id,
     }): Path<ForwardedBundleMessagesPath>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<ForwardedMessagesResponse>, AppError> {
-    crate::services::api::chats::messages::get_forwarded_bundle_messages(
-        uid,
-        chat_id,
-        message_id,
-        bundle_id,
-        &mut conn,
-        &state.media,
-        &state.avatars,
-    )
-    .map(Json)
+    conn.run(move |mut conn| async move {
+        crate::services::api::chats::messages::get_forwarded_bundle_messages(
+            uid,
+            chat_id,
+            message_id,
+            bundle_id,
+            &mut conn,
+            &state.media,
+            &state.avatars,
+        )
+        .map(Json)
+    })
+    .await
 }
 
 /// POST /chats/:chat_id/threads/:thread_id/messages — Send a message in a thread.
@@ -369,28 +393,31 @@ pub(super) async fn post_thread_message(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(ThreadIdPath { chat_id, thread_id }): Path<ThreadIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<CreateMessageBody>,
 ) -> Result<impl IntoResponse, AppError> {
-    let response = crate::services::api::chats::messages::post_thread_message(
-        uid,
-        chat_id,
-        thread_id,
-        body,
-        &mut conn,
-        crate::services::api::chats::messages::PostThreadMessageDeps {
-            id_gen: &state.id_gen,
-            media: &state.media,
-            avatars: &state.avatars,
-            link_previews: &state.link_previews,
-            metrics: &state.metrics,
-            ws_registry: &state.ws_registry,
-            push_service: &state.push_service,
-            message_search: &state.message_search,
-        },
-    )
-    .await?;
-    Ok((StatusCode::CREATED, Json(response)))
+    conn.run(move |mut conn| async move {
+        let response = crate::services::api::chats::messages::post_thread_message(
+            uid,
+            chat_id,
+            thread_id,
+            body,
+            &mut conn,
+            crate::services::api::chats::messages::PostThreadMessageDeps {
+                id_gen: &state.id_gen,
+                media: &state.media,
+                avatars: &state.avatars,
+                link_previews: &state.link_previews,
+                metrics: &state.metrics,
+                ws_registry: &state.ws_registry,
+                push_service: &state.push_service,
+                message_search: &state.message_search,
+            },
+        )
+        .await?;
+        Ok((StatusCode::CREATED, Json(response)))
+    })
+    .await
 }
 
 /// PATCH /chats/:chat_id/messages/:message_id — Edit a message.
@@ -415,25 +442,28 @@ async fn patch_message(
         chat_id,
         message_id,
     }): Path<MessageIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<UpdateMessageBody>,
 ) -> Result<Json<MessageResponse>, AppError> {
-    crate::services::api::chats::messages::patch_message(
-        uid,
-        chat_id,
-        message_id,
-        body,
-        &mut conn,
-        crate::services::api::chats::messages::PatchMessageDeps {
-            media: &state.media,
-            avatars: &state.avatars,
-            link_previews: &state.link_previews,
-            ws_registry: &state.ws_registry,
-            message_search: &state.message_search,
-        },
-    )
+    conn.run(move |mut conn| async move {
+        crate::services::api::chats::messages::patch_message(
+            uid,
+            chat_id,
+            message_id,
+            body,
+            &mut conn,
+            crate::services::api::chats::messages::PatchMessageDeps {
+                media: &state.media,
+                avatars: &state.avatars,
+                link_previews: &state.link_previews,
+                ws_registry: &state.ws_registry,
+                message_search: &state.message_search,
+            },
+        )
+        .await
+        .map(Json)
+    })
     .await
-    .map(Json)
 }
 
 /// DELETE /chats/:chat_id/messages/:message_id — Delete a message (soft delete).
@@ -458,22 +488,25 @@ async fn delete_message(
         chat_id,
         message_id,
     }): Path<MessageIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    crate::services::api::chats::messages::delete_message(
-        uid,
-        chat_id,
-        message_id,
-        &mut conn,
-        crate::services::api::chats::messages::DeleteMessageDeps {
-            media: &state.media,
-            avatars: &state.avatars,
-            ws_registry: &state.ws_registry,
-            message_search: &state.message_search,
-        },
-    )
-    .await?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        crate::services::api::chats::messages::delete_message(
+            uid,
+            chat_id,
+            message_id,
+            &mut conn,
+            crate::services::api::chats::messages::DeleteMessageDeps {
+                media: &state.media,
+                avatars: &state.avatars,
+                ws_registry: &state.ws_registry,
+                message_search: &state.message_search,
+            },
+        )
+        .await?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 /// Delete a selection atomically. Already deleted messages are accepted on retry.
@@ -495,23 +528,26 @@ async fn bulk_delete_messages(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<BulkDeleteMessagesBody>,
 ) -> Result<Json<BulkDeletedPayload>, AppError> {
-    crate::services::api::chats::messages::bulk_delete_messages(
-        uid,
-        chat_id,
-        body,
-        &mut conn,
-        crate::services::api::chats::messages::BulkDeleteMessagesDeps {
-            media: &state.media,
-            avatars: &state.avatars,
-            ws_registry: &state.ws_registry,
-            message_search: &state.message_search,
-        },
-    )
+    conn.run(move |mut conn| async move {
+        crate::services::api::chats::messages::bulk_delete_messages(
+            uid,
+            chat_id,
+            body,
+            &mut conn,
+            crate::services::api::chats::messages::BulkDeleteMessagesDeps {
+                media: &state.media,
+                avatars: &state.avatars,
+                ws_registry: &state.ws_registry,
+                message_search: &state.message_search,
+            },
+        )
+        .await
+        .map(Json)
+    })
     .await
-    .map(Json)
 }
 
 pub fn router() -> OpenApiRouter<crate::AppState> {

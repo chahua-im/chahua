@@ -35,61 +35,64 @@ use crate::AppState;
 async fn post_external_invite(
     principal: Principal,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<ExternalCreateInviteRequest>,
 ) -> Result<(StatusCode, Json<ExternalCreateInviteResponse>), AppError> {
-    let conn = &mut *conn;
-    principal.require_service_action(conn, &state.authz_service, AuthzAction::InviteCreate)?;
+    conn.run(move |mut conn| async move {
+        let conn = &mut *conn;
+        principal.require_service_action(conn, &state.authz_service, AuthzAction::InviteCreate)?;
 
-    let now = Utc::now();
-    validate_request(&body, now)?;
+        let now = Utc::now();
+        validate_request(&body, now)?;
 
-    let chat = load_chat(conn, body.chat_id)?;
-    if let Some(membership) = load_membership(conn, body.chat_id, body.target_uid)? {
-        return Ok((
-            StatusCode::OK,
+        let chat = load_chat(conn, body.chat_id)?;
+        if let Some(membership) = load_membership(conn, body.chat_id, body.target_uid)? {
+            return Ok((
+                StatusCode::OK,
+                Json(ExternalCreateInviteResponse {
+                    status: ExternalInviteStatus::AlreadyMember,
+                    invite: None,
+                    chat: chat_to_response(chat),
+                    membership: Some(membership_to_response(membership)),
+                }),
+            ));
+        }
+
+        if let Some(invite) =
+            invite_service::find_active_targeted_invite(conn, body.chat_id, body.target_uid, now)?
+        {
+            return Ok((
+                StatusCode::OK,
+                Json(ExternalCreateInviteResponse {
+                    status: ExternalInviteStatus::Existing,
+                    invite: Some(invite_service::invite_to_response(invite)),
+                    chat: chat_to_response(chat),
+                    membership: None,
+                }),
+            ));
+        }
+
+        let invite = invite_service::create_targeted_invite(
+            conn,
+            state.id_gen.as_ref(),
+            body.chat_id,
+            body.target_uid,
+            None,
+            body.expires_at,
+        )
+        .await?;
+
+        Ok((
+            StatusCode::CREATED,
             Json(ExternalCreateInviteResponse {
-                status: ExternalInviteStatus::AlreadyMember,
-                invite: None,
-                chat: chat_to_response(chat),
-                membership: Some(membership_to_response(membership)),
-            }),
-        ));
-    }
-
-    if let Some(invite) =
-        invite_service::find_active_targeted_invite(conn, body.chat_id, body.target_uid, now)?
-    {
-        return Ok((
-            StatusCode::OK,
-            Json(ExternalCreateInviteResponse {
-                status: ExternalInviteStatus::Existing,
+                status: ExternalInviteStatus::Created,
                 invite: Some(invite_service::invite_to_response(invite)),
                 chat: chat_to_response(chat),
                 membership: None,
             }),
-        ));
-    }
-
-    let invite = invite_service::create_targeted_invite(
-        conn,
-        state.id_gen.as_ref(),
-        body.chat_id,
-        body.target_uid,
-        None,
-        body.expires_at,
-    )
-    .await?;
-
-    Ok((
-        StatusCode::CREATED,
-        Json(ExternalCreateInviteResponse {
-            status: ExternalInviteStatus::Created,
-            invite: Some(invite_service::invite_to_response(invite)),
-            chat: chat_to_response(chat),
-            membership: None,
-        }),
-    ))
+        ))
+    })
+    .await
 }
 
 pub fn router() -> OpenApiRouter<crate::AppState> {

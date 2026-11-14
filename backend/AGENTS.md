@@ -26,6 +26,8 @@ Auth uses JWTs (`src/utils/auth.rs`), with authorization policy in `src/services
 
 - Minimize HTTP request amplification: consider how a single user action or server event can trigger follow-up requests across connected clients, conversations, or list items. Avoid unnecessary per-item fetches and repeated refreshes; batch, deduplicate, or coalesce requests where practical.
 - When implementation complexity is comparable and the user experience is equivalent, prefer the existing WebSocket connection for real-time updates over HTTP polling or follow-up fetches. Include enough state in WebSocket events to apply updates directly when practical, rather than making every recipient fetch the same state again.
+- Never run synchronous Diesel queries or blocking pool checkout on Tokio async executor threads, including in authentication extractors and WebSocket setup. HTTP handlers use `DbConn::run`; acquire and use the connection inside that blocking operation, not before it.
+- Keep multipart/body streaming on the async side and release any preflight database connection before reading it. Preserve transactions and post-commit work within the same operation when moving execution boundaries.
 
 ## API Serialization
 - All API should use camel case for field naming
