@@ -1,3 +1,16 @@
+//! Main-chat unread counts share the latest `MAX_UNREAD_COUNT` eligible live IDs
+//! per chat, membership-message visibility variant, and database revision.
+//! Descending-order binary search gives exact counts below the cap and saturated
+//! counts for older cursors, without retaining message history per user.
+//!
+//! Every request validates revisions in a batch. A missing window loads its IDs
+//! and revision in one SQL snapshot; changed revisions reload the entire bounded
+//! window, including after deletion or delayed publication. Notifications are not
+//! required for cache correctness. The cache has a 64 MiB weighted eviction budget
+//! for ID storage plus estimated entry overhead; in-flight loads are separate.
+//! Transactions and unversioned scopes bypass shared windows. Thread, mention,
+//! and reaction counts use their own query paths.
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -58,15 +71,21 @@ struct ChatUnreadCountRow {
     last_read_message_id: i64,
     #[diesel(sql_type = diesel::sql_types::BigInt)]
     unread_count: i64,
+}
+
+#[derive(diesel::QueryableByName)]
+struct ChatUnreadWindowRow {
+    #[diesel(sql_type = diesel::sql_types::Array<diesel::sql_types::BigInt>)]
+    ids: Vec<i64>,
     #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::BigInt>)]
     revision: Option<i64>,
 }
 
 pub struct UnreadService {
-    // The revision is part of the key so a late reader cannot replace a newer
-    // value. Old cursor/revision entries are bounded by Moka's eviction.
-    counts: Cache<(ChatUnreadCursor, i64), i64>,
-    single_flight: Cache<ChatUnreadCursor, Arc<Mutex<()>>>,
+    // Immutable descending live-ID windows shared across every user's cursor.
+    // Revision keys prevent a late load from replacing a newer snapshot.
+    windows: Cache<(i64, bool, i64), Arc<[i64]>>,
+    single_flight: Cache<(i64, bool), Arc<Mutex<()>>>,
 }
 
 impl Default for UnreadService {
@@ -184,7 +203,12 @@ fn mention_summary(
 impl UnreadService {
     pub fn new() -> Self {
         Self {
-            counts: Cache::new(100_000),
+            windows: Cache::builder()
+                .max_capacity(64 * 1024 * 1024)
+                .weigher(|_: &(i64, bool, i64), ids: &Arc<[i64]>| {
+                    (std::mem::size_of_val(ids.as_ref()) + 64) as u32
+                })
+                .build(),
             single_flight: Cache::new(10_000),
         }
     }
@@ -725,8 +749,8 @@ impl UnreadService {
         Ok(totals)
     }
 
-    /// Deduplicates `(chat_id, cursor, visibility)` and batches each visibility
-    /// into a fixed-predicate statement. Each range probe stops at the unread cap.
+    /// Validate revisions in one batch, then share bounded live-ID windows across
+    /// users. Transactions and unversioned scopes retain authoritative SQL counts.
     pub(super) fn count_chat_unread_cursors(
         &self,
         conn: &mut PgConnection,
@@ -748,19 +772,6 @@ impl UnreadService {
         // uncommitted counts into the process-wide cache.
         let in_transaction = <AnsiTransactionManager as TransactionManager<PgConnection>>::transaction_manager_status_mut(conn)
             .transaction_depth()?.is_some();
-        // Single-chat requests are common on the write/push path. Coalesce
-        // those misses per cursor without serializing unrelated batches.
-        let flight = if !in_transaction && cursors.len() == 1 {
-            Some(
-                self.single_flight
-                    .get_with(cursors[0], || Arc::new(Mutex::new(()))),
-            )
-        } else {
-            None
-        };
-        let _flight_guard = flight
-            .as_ref()
-            .map(|lock| lock.lock().unwrap_or_else(|error| error.into_inner()));
         let revisions: HashMap<_, _> = if in_transaction {
             HashMap::new()
         } else {
@@ -781,33 +792,78 @@ impl UnreadService {
         };
         let mut counts = HashMap::with_capacity(cursors.len());
         let mut misses = Vec::new();
+        let mut windows = HashMap::new();
         for cursor in cursors {
-            match revisions
-                .get(&cursor.chat_id)
-                .and_then(|revision| self.counts.get(&(cursor, *revision)))
-            {
-                Some(count) => {
-                    counts.insert(cursor, count);
+            let Some(&revision) = revisions.get(&cursor.chat_id) else {
+                misses.push(cursor);
+                continue;
+            };
+            let scope = (cursor.chat_id, cursor.hide_membership_messages);
+            let ids = match windows.entry(scope) {
+                std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(self.chat_unread_window(conn, scope, revision)?)
                 }
-                None => misses.push(cursor),
-            }
+            };
+            counts.insert(
+                cursor,
+                ids.partition_point(|id| *id > cursor.last_read_message_id) as i64,
+            );
         }
         let (hidden, shown): (Vec<_>, Vec<_>) = misses
             .into_iter()
             .partition(|cursor| cursor.hide_membership_messages);
-        counts.extend(self.count_chat_unread_cursors_with_filter(
-            conn,
-            hidden,
-            true,
-            !in_transaction,
-        )?);
-        counts.extend(self.count_chat_unread_cursors_with_filter(
-            conn,
-            shown,
-            false,
-            !in_transaction,
-        )?);
+        counts.extend(self.count_chat_unread_cursors_with_filter(conn, hidden, true)?);
+        counts.extend(self.count_chat_unread_cursors_with_filter(conn, shown, false)?);
         Ok(counts)
+    }
+
+    fn chat_unread_window(
+        &self,
+        conn: &mut PgConnection,
+        scope: (i64, bool),
+        revision: i64,
+    ) -> Result<Arc<[i64]>, DieselError> {
+        let key = (scope.0, scope.1, revision);
+        if let Some(ids) = self.windows.get(&key) {
+            return Ok(ids);
+        }
+        let flight = self
+            .single_flight
+            .get_with(scope, || Arc::new(Mutex::new(())));
+        let _guard = flight.lock().unwrap_or_else(|error| error.into_inner());
+        if let Some(ids) = self.windows.get(&key) {
+            return Ok(ids);
+        }
+        let predicate = if scope.1 {
+            crate::services::system_messages::NON_MEMBERSHIP_PREDICATE
+        } else {
+            "TRUE"
+        };
+        // IDs and revision must come from the same statement snapshot. A commit
+        // after the revision probe may mean this load observes a newer revision.
+        // ARRAY preserves ordering and returns an empty array for an empty chat.
+        let row = sql_query(format!(
+            "SELECT ARRAY(
+                 SELECT id FROM messages
+                 WHERE chat_id = $1 AND deleted_at IS NULL AND is_published = TRUE
+                   AND reply_root_id IS NULL AND {predicate}
+                 ORDER BY id DESC LIMIT $2
+             ) AS ids,
+             (SELECT revision FROM chat_unread_revisions WHERE chat_id = $1
+                AND to_regclass('pg_temp.messages') IS NULL
+                AND to_regclass('pg_temp.groups') IS NULL
+                AND pg_current_xact_id_if_assigned() IS NULL) AS revision"
+        ))
+        .bind::<diesel::sql_types::BigInt, _>(scope.0)
+        .bind::<diesel::sql_types::BigInt, _>(MAX_UNREAD_COUNT)
+        .get_result::<ChatUnreadWindowRow>(conn)?;
+        let ids: Arc<[i64]> = row.ids.into();
+        if let Some(revision) = row.revision {
+            self.windows
+                .insert((scope.0, scope.1, revision), ids.clone());
+        }
+        Ok(ids)
     }
 
     fn count_chat_unread_cursors_with_filter(
@@ -815,7 +871,6 @@ impl UnreadService {
         conn: &mut PgConnection,
         mut cursors: Vec<ChatUnreadCursor>,
         hide_membership_messages: bool,
-        publish: bool,
     ) -> Result<HashMap<ChatUnreadCursor, i64>, DieselError> {
         cursors.sort_unstable_by_key(|cursor| (cursor.chat_id, cursor.last_read_message_id));
         cursors.dedup();
@@ -837,13 +892,9 @@ impl UnreadService {
             "TRUE"
         };
         let rows = sql_query(format!(
-            "SELECT requested.chat_id, requested.last_read_message_id, counts.unread_count, revisions.revision
+            "SELECT requested.chat_id, requested.last_read_message_id, counts.unread_count
              FROM UNNEST($1::BIGINT[], $2::BIGINT[])
                  AS requested(chat_id, last_read_message_id)
-             LEFT JOIN chat_unread_revisions revisions ON revisions.chat_id = requested.chat_id
-               AND to_regclass('pg_temp.messages') IS NULL
-               AND to_regclass('pg_temp.groups') IS NULL
-               AND pg_current_xact_id_if_assigned() IS NULL
              CROSS JOIN LATERAL (
                  SELECT COUNT(*)::BIGINT AS unread_count
                  FROM (
@@ -855,7 +906,7 @@ impl UnreadService {
                        AND reply_root_id IS NULL
                        AND (deleted_at IS NULL OR has_thread = true)
                        AND {predicate}
-                     LIMIT $3
+                     ORDER BY id DESC LIMIT $3
                  ) unread
              ) counts",
         ))
@@ -871,11 +922,6 @@ impl UnreadService {
                 chat_id: row.chat_id,
                 last_read_message_id: row.last_read_message_id,
             };
-            if publish {
-                if let Some(revision) = row.revision {
-                    self.counts.insert((cursor, revision), row.unread_count);
-                }
-            }
             counts.insert(cursor, row.unread_count);
         }
         Ok(counts)
@@ -2190,7 +2236,7 @@ mod tests {
     #[test]
     fn revision_cache_uses_configured_schema() {
         use diesel::connection::SimpleConnection;
-        use diesel::{Connection, PgConnection};
+        use diesel::{Connection, PgConnection, RunQueryDsl};
 
         let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
             return;
@@ -2253,6 +2299,92 @@ mod tests {
             service.count_chat_unread_cursors(conn, [cursor]).unwrap()[&cursor],
             0
         );
+
+        // More than one window, with gaps: cursor arithmetic cannot substitute
+        // for counting live IDs. Both visibility variants must stay independent.
+        writer
+            .batch_execute(&format!(
+                "INSERT INTO messages (id, chat_id, is_published, system_kind)
+             SELECT n * 2, 1, TRUE, CASE WHEN n % 3 = 0 THEN 'member_joined' END
+             FROM generate_series(1, {}) n;
+             INSERT INTO messages (id, chat_id, is_published) VALUES (1, 1, FALSE);",
+                MAX_UNREAD_COUNT * 2
+            ))
+            .unwrap();
+        let verify = |conn: &mut PgConnection| {
+            let cursors: Vec<_> = [false, true]
+                .into_iter()
+                .flat_map(|hidden| {
+                    [
+                        0,
+                        1,
+                        2,
+                        MAX_UNREAD_COUNT,
+                        MAX_UNREAD_COUNT * 3,
+                        MAX_UNREAD_COUNT * 4 - 1,
+                        MAX_UNREAD_COUNT * 4,
+                        i64::MAX,
+                    ]
+                    .into_iter()
+                    .map(move |id| ChatUnreadCursor {
+                        last_read_message_id: id,
+                        hide_membership_messages: hidden,
+                        ..cursor
+                    })
+                })
+                .collect();
+            let counts = service
+                .count_chat_unread_cursors(conn, cursors.iter().copied())
+                .unwrap();
+            for cursor in cursors {
+                let predicate = if cursor.hide_membership_messages {
+                    crate::services::system_messages::NON_MEMBERSHIP_PREDICATE
+                } else {
+                    "TRUE"
+                };
+                let expected = diesel::sql_query(format!(
+                    "SELECT 1::BIGINT AS chat_id, {}::BIGINT AS last_read_message_id,
+                            COUNT(*)::BIGINT AS unread_count
+                     FROM (SELECT id FROM messages
+                           WHERE chat_id = 1 AND id > {}
+                             AND deleted_at IS NULL AND is_published
+                             AND reply_root_id IS NULL AND {predicate}
+                           ORDER BY id DESC LIMIT {}) live",
+                    cursor.last_read_message_id, cursor.last_read_message_id, MAX_UNREAD_COUNT
+                ))
+                .get_result::<super::ChatUnreadCountRow>(conn)
+                .unwrap();
+                assert_eq!(counts[&cursor], expected.unread_count, "{cursor:?}");
+            }
+        };
+        verify(conn);
+        // Delete within the window: older IDs must refill it. A deleted read
+        // cursor remains a valid boundary.
+        writer
+            .batch_execute(&format!(
+                "DELETE FROM messages WHERE id = {};
+             UPDATE messages SET deleted_at = NOW() WHERE id = {}",
+                MAX_UNREAD_COUNT * 4,
+                MAX_UNREAD_COUNT * 3
+            ))
+            .unwrap();
+        verify(conn);
+        // Delayed publication inserts an old ID, not necessarily the newest ID.
+        writer
+            .batch_execute(
+                "UPDATE messages SET is_published = TRUE WHERE id = 1;
+             UPDATE messages SET system_kind = NULL WHERE system_kind IS NOT NULL",
+            )
+            .unwrap();
+        verify(conn);
+        // Crossing below the cap must not retain the old saturated total.
+        writer
+            .batch_execute(&format!(
+                "DELETE FROM messages WHERE id > {}",
+                MAX_UNREAD_COUNT
+            ))
+            .unwrap();
+        verify(conn);
     }
 
     #[test]
