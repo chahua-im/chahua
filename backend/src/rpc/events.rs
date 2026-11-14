@@ -158,6 +158,24 @@ mod tests {
     }
 
     #[test]
+    fn chat_settings_event_carries_both_absolute_preferences() {
+        let settings = crate::dto::users::ChatSettings {
+            show_membership_messages: false,
+            show_unread_message_count: true,
+        };
+        let event = ServerWsMessage::ChatSettingsChanged(settings);
+        let params = json!({"showMembershipMessages": false, "showUnreadMessageCount": true});
+        assert_eq!(
+            serde_json::to_value(&event).unwrap(),
+            json!({"type": "chatSettingsChanged", "payload": params})
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&encode_event(&event).unwrap()).unwrap(),
+            json!({"jsonrpc": "2.0", "method": "events.chatSettingsChanged", "params": params})
+        );
+    }
+
+    #[test]
     fn encodes_safe_session_lifecycle_reasons() {
         let invalidated = encode_session_notification(&SessionNotification::Invalidated {
             reason: SessionInvalidatedReason::Revoked,

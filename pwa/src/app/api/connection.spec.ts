@@ -127,6 +127,40 @@ describe('Connection', () => {
     });
   });
 
+  it('decodes coherent main unread chat IDs and account settings events', () => {
+    const events = vi.fn();
+    connection.events$.subscribe(events);
+    peer.authenticate();
+    peer.notify('events.conversationUnread', {
+      requestId: 1,
+      full: true,
+      summaries: [],
+      appBadgeCount: 1000,
+      mainUnread: {
+        showUnreadMessageCount: true,
+        chats: [{ chatId: wireChat.id, unreadCount: 1000 }],
+      },
+    });
+    expect(events).toHaveBeenLastCalledWith({
+      type: ServerWsMessageType.conversationUnread,
+      payload: {
+        requestId: 1,
+        full: true,
+        summaries: [],
+        appBadgeCount: 1000,
+        mainUnread: {
+          showUnreadMessageCount: true,
+          chats: [{ chatId: testChat.id, unreadCount: 1000 }],
+        },
+      },
+    });
+    peer.notify('events.chatSettingsChanged', { showMembershipMessages: false, showUnreadMessageCount: true });
+    expect(events).toHaveBeenLastCalledWith({
+      type: ServerWsMessageType.chatSettingsChanged,
+      payload: { showMembershipMessages: false, showUnreadMessageCount: true },
+    });
+  });
+
   it('deduplicates accepted message confirmations but preserves distinct message changes', () => {
     const messages = vi.fn();
     const changes = vi.fn();

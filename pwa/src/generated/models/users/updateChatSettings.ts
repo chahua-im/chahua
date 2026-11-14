@@ -7,5 +7,6 @@
  */
 
 export interface UpdateChatSettings {
-  showMembershipMessages: boolean;
+  showMembershipMessages?: boolean;
+  showUnreadMessageCount?: boolean;
 }

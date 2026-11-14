@@ -2,7 +2,14 @@ import { DestroyRef, inject, isDevMode, Service, signal } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { filter, firstValueFrom, from, timeout, type Observable } from 'rxjs';
 import { RpcApi } from '../../generated/rpc-api';
-import type { ChatSettings, MeResponse, StickerPackOrderItem, User } from '../../generated/models';
+import {
+  ServerWsMessageType,
+  type ChatSettings,
+  type MeResponse,
+  type StickerPackOrderItem,
+  type UpdateChatSettings,
+  type User,
+} from '../../generated/models';
 import { Connection } from '../api/connection';
 import { RpcError, RpcErrorCode } from '../api/rpc-error';
 import { RpcConnectionState, RpcTransport } from '../api/rpc-transport';
@@ -48,9 +55,13 @@ export class SessionStore {
         takeUntilDestroyed(this.destroy),
       )
       .subscribe(({ result }) => this.updateProfile(result));
-    this.connection.events$
-      .pipe(takeUntilDestroyed(this.destroy))
-      .subscribe((event) => this.updateProfile(event.payload));
+    this.connection.events$.pipe(takeUntilDestroyed(this.destroy)).subscribe((event) => {
+      if (event.type === ServerWsMessageType.chatSettingsChanged) {
+        ++this.chatSettingsWrite;
+        this.acceptChatSettings(event.payload, this.user()?.uid);
+      }
+      this.updateProfile(event.payload);
+    });
   }
 
   restoreToken() {
@@ -173,22 +184,37 @@ export class SessionStore {
     this.diagnostics.setAccount(undefined);
   }
 
-  async setShowMembershipMessages(showMembershipMessages: boolean) {
+  setShowMembershipMessages(showMembershipMessages: boolean) {
+    return this.updateChatSettings({ showMembershipMessages });
+  }
+
+  setShowUnreadMessageCount(showUnreadMessageCount: boolean) {
+    return this.updateChatSettings({ showUnreadMessageCount });
+  }
+
+  private async updateChatSettings(patch: UpdateChatSettings) {
     const uid = this.user()?.uid;
     if (uid == null) return;
     const write = ++this.chatSettingsWrite;
-    const settings = await firstValueFrom(this.api.users.updateChatSettings({ showMembershipMessages }));
+    const settings = await firstValueFrom(this.api.users.updateChatSettings(patch));
     if (write !== this.chatSettingsWrite || this.user()?.uid !== uid) return;
     this.acceptChatSettings(settings, uid);
   }
 
-  /** Adopt the server value on normal reads; other devices converge on their next refresh. */
+  /** Adopt confirmed account settings from reads, writes and cross-device events. */
   acceptChatSettings(settings: ChatSettings, uid: number | undefined) {
     const user = this.user();
-    if (!user || user.uid !== uid || settings.showMembershipMessages === user.showMembershipMessages) return;
+    if (
+      !user ||
+      user.uid !== uid ||
+      (settings.showMembershipMessages === user.showMembershipMessages &&
+        settings.showUnreadMessageCount === user.showUnreadMessageCount)
+    )
+      return;
     this.user.set({
       ...user,
       showMembershipMessages: settings.showMembershipMessages,
+      showUnreadMessageCount: settings.showUnreadMessageCount,
     });
   }
 
@@ -199,7 +225,12 @@ export class SessionStore {
       if (filtersMembershipMessages) throw new ChatSettingsChanged();
       return;
     }
-    this.acceptChatSettings(settings, requestedUser?.uid);
+    this.acceptChatSettings(
+      requestedUser && requestedUser.showUnreadMessageCount !== this.user()?.showUnreadMessageCount
+        ? { ...settings, showUnreadMessageCount: this.user()!.showUnreadMessageCount }
+        : settings,
+      requestedUser?.uid,
+    );
     const show = this.user()?.showMembershipMessages ?? true;
     if (
       filtersMembershipMessages &&

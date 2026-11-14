@@ -102,6 +102,7 @@ macro_rules! server_ws_messages {
             ChatArchiveStateChanged(crate::dto::ws::ChatArchiveStateChangedPayload) => "chatArchiveStateChanged",
             NotificationExceptionsCleared(crate::dto::groups::NotificationExceptionsCleared) => "notificationExceptionsCleared",
             NotificationSettingsChanged(crate::dto::users::NotificationSettingsResponse) => "notificationSettingsChanged",
+            ChatSettingsChanged(crate::dto::users::ChatSettings) => "chatSettingsChanged",
             ChatNotificationSettingChanged(crate::dto::groups::ChatNotificationSettingResponse) => "chatNotificationSettingChanged",
             GroupSpeakingModeChanged(crate::dto::speaking::GroupSpeakingModeResponse) => "groupSpeakingModeChanged",
             MemberSpeakingModeChanged(crate::dto::speaking::MemberSpeakingModeResponse) => "memberSpeakingModeChanged",

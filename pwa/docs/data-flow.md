@@ -356,9 +356,9 @@ NotificationPrompt 在登录后的应用壳内读取本机通知选择；支持�
 
 Worker 串行处理页面与 Push，在独立的 `chahua-notifications` IndexedDB 中按账号保存已处理消息 ID、聊天/话题已读边界。通知成功展示、前台阅读时抑制或撤回后登记具体 ID；仅确认已读才推进范围边界，乱序消息不会因更大的 ID 已提醒而被忽略。记录保存 30 天，覆盖后端 web-push 默认 28 天有效期，按过期索引清理；Worker 重启和通知被划掉均不丢失有效记录。通知中心补回仍显示的通知，账号变化清理旧通知，退出后停止处理 Push。页面通过 CHAHUA_SESSION 同步账号，控制器切换后重新同步。通知点击使用 `#msg=ID`；新通知由 Angular onActionClick 唤起，缺少该字段的旧通知由兼容监听器唤起并发送导航事件，已有页面不整页刷新。
 
-ChatListStore.viewUnread 使用连接级 `conversations.watchUnread` 订阅内置 tab 的普通、归档及“消息是否包含话题”两种集合，并请求账号级 `appBadgeCount`。tab badge、归档入口、后台标题和系统角标共享同一订阅；ChatListStore.unread 只适配系统角标的读取接口。切 tab 和健康连接恢复前台不重订阅，消息/已读等事件不再触发汇总读取。普通及归档列表下拉刷新通过新的 requestId 请求完整推送快照。ChatList 只在 active 时发布当前 selection，进入会话或设置后保留最近选择；隐藏的 Ionic 缓存页不能覆盖当前选择。ChatListStore.tabBadges 汇总四个 tab 的未静音未读会话数和 mention，ChatList 与后台标题共用；标题在会话页读取该会话的共享读状态，隐藏时为当前会话注册读状态订阅（会话页自身只在可见时订阅），回到前台恢复普通标题。系统角标和通知不受 selection 影响。
+ChatListStore.viewUnread 使用连接级 `conversations.watchUnread` 订阅内置 tab 的普通、归档及“消息是否包含话题”两种集合，并请求账号级 `appBadgeCount`。tab badge、归档入口、后台标题和系统角标共享同一订阅；ChatListStore.unread 只适配服务端 `appBadgeCount` 的读取接口。切 tab、切账号角标计数单位和健康连接恢复前台不重订阅，消息/已读等事件不再触发汇总读取。普通及归档列表下拉刷新通过新的 requestId 请求完整推送快照。ChatList 只在 active 时发布当前 selection，进入会话或设置后保留最近选择；隐藏的 Ionic 缓存页不能覆盖当前选择。ChatListStore.tabBadges 始终使用四个 tab 的未静音未读会话数，mention 保持优先；ChatList 与后台标题共用。标题在会话页读取该会话的共享读状态，隐藏时为当前会话注册读状态订阅，回到前台恢复普通标题。系统角标和通知不受 selection 影响。
 
-`conversationUnread` 首次返回 `full: true`，之后仅发送变化集合的六个绝对计数，归零也发送；未出现的 key 保持原值。appBadgeCount 未出现时保持原值，0 表示清除角标。requestId 隔离订阅，旧回包和首次完整快照前的局部更新被丢弃。重连重新订阅并获取全量；断线及刷新期间保留同账号已有数字，账号变化立即隐藏旧值。`conversationUnreadError` 保留已有数字，后端退避重试并用完整快照恢复，不回退 HTTP 轮询。最后一个消费者退出后取消订阅。协议见[后端 RPC 协议](../../backend/README.md#json-rpc-sessions)。
+`conversationUnread` 首次返回 `full: true`，之后仅发送变化集合的六个绝对计数，归零也发送；未出现的 key 保持原值。`appBadgeCount` 在部分推送中省略时保持原值，0 表示清除角标；全量省略时变为未知。PWA 系统角标使用服务端总数，不消费供 Apple 客户端使用的 `mainUnread` 快照，也不从列表重算；生成的 API 模型保留完整协议。范围、封顶和平台差异见[角标策略](../../docs/badges.md)。requestId 隔离订阅，旧回包和首次完整快照前的局部更新被丢弃。重连重新订阅并获取全量；断线及刷新期间保留同账号已有数字，账号变化立即隐藏旧值。`conversationUnreadError` 保留已有数字，后端退避重试并用完整快照恢复，不回退 HTTP 轮询。最后一个消费者退出后取消订阅。协议见[后端 RPC 协议](../../backend/README.md#json-rpc-sessions)。
 
 ChatStore 使用 SessionStore 当前账号的两个默认值，集中按「有效临时静音 > 会话 muteOverride > 群聊／私聊默认值」计算静音。列表图标、行内提醒和在线通知共用该规则；服务端 isMuted 是响应时刻的快照，不作为长期缓存。有限静音复用最近到期计时器，到期恢复例外或默认值，不修改已读状态。
 
@@ -374,7 +374,7 @@ NotificationCategory 分别调用 `users.listNotificationExceptions({kind})`，k
 
 媒体查看通过 `/media` 路由打开，完整相册和选中位置保存在浏览器 history.state，支持返回、前进和刷新，不把签名附件 URL 放入地址。直接复制该地址不携带相册；对外分享继续使用消息链接。导航成功后关闭局部 modal、popover、alert 和 action-sheet；路由面板由面板状态管理，不参与全局关闭，Toast 保留自己的生命周期。
 
-会话集合由 conversation-views 定义，列表筛选和汇总请求共用 categories、include、exclude、archived 的语义；主聊天与 thread 分开选择，显式加入不绕过成员、订阅或归档条件。集合消息数包含静音；协议同时提供 `unreadUnmutedMessageCount` 和 `unreadUnmutedConversationCount` 区分未静音消息数与会话数，tab 数字和列表标题都使用 `unreadUnmutedConversationCount`，会话内标题使用该会话读状态的未读数。`unreadAttentionCount` 包含群聊及群聊话题的全部未读提及/回复；tab badge 与列表标题的 mention 使用 `unreadUnmutedAttentionCount`，排除静音主聊天和已归档话题，会话内标题使用该会话读状态的 `unreadMentions`。话题列表通过响应的 `chatKind` 区分群聊和私聊，不等待父聊天详情。行内 `@` 仍使用单会话 `unreadMentions`，通过主聊天有效静音或话题 archived 决定灰色。重叠集合各自计数，不能相加充当全局总数。完整汇总独立于列表分页；后端在消息、编辑、撤回、已读、订阅、归档、静音与成员关系变化后合并更新，并按最近静音到期时间调度刷新，不依赖前端已加载的聊天。当前尚未提供自定义 tab 编辑界面，汇总协议支持显式混合会话集合。
+会话集合由 conversation-views 定义，列表筛选和汇总请求共用 categories、include、exclude、archived 的语义；主聊天与 thread 分开选择，显式加入不绕过成员、订阅或归档条件。集合消息数包含静音；协议同时提供 `unreadUnmutedMessageCount` 和 `unreadUnmutedConversationCount`，PWA tab 数字和列表标题固定使用后者，会话内标题始终使用该会话读状态的未读消息数。归档入口取 `unreadMessageCount`，不取会话数、未静音数或 attention。`unreadAttentionCount` 包含群聊及群聊话题的全部未读提及/回复；tab badge 与列表标题的 mention 使用 `unreadUnmutedAttentionCount`，排除静音主聊天和已归档话题，会话内标题使用该会话读状态的 `unreadMentions`。话题列表通过响应的 `chatKind` 区分群聊和私聊，不等待父聊天详情。行内 `@` 仍使用单会话 `unreadMentions`，通过主聊天有效静音或话题 archived 决定灰色。重叠集合各自计数，不能相加充当全局总数。完整汇总独立于列表分页；后端在消息、编辑、撤回、已读、订阅、归档、静音与成员关系变化后合并更新，并按最近静音到期时间调度刷新，不依赖前端已加载的聊天。自定义文件夹属于未来范围，不改变当前 tab 集合。
 
 Push 注册按当前账号、设备标识及浏览器订阅内容复用会话内成功结果；相同同步请求共享进行中的操作，失败可重试，关闭通知清除成功记录。订阅不变时最多每 24 小时在正常同步入口修复一次服务端注册，重新加载应用仍会注册。
 
@@ -394,7 +394,7 @@ Push 注册按当前账号、设备标识及浏览器订阅内容复用会话内
 
 当前会话响应 Router 的 `NavigationSkipped`（`IgnoredSameUrlNavigation`），将当前 `#msg=` 或兼容的 `?message=` 目标重新交给已有消息定位流程；普通聊天链接、非当前会话和其他跳过原因不触发定位。`/m/` 解析后落到相同目标 URL 时采用同一路径，不改变 URL 或重建页面。
 
-群成员进出群消息的账号偏好保存在 `user_extra.show_membership_messages`，默认 true。`users.getMe` 在登录初始化时返回 `showMembershipMessages`，SessionStore 保存当前账号的选择；Preferences 只派生该值并转交保存，不读写旧本机键。`users.updateChatSettings` 从认证上下文取得 UID，只更新这个字段，支持首次创建用户附加记录。账号偏好和群级策略均按数据库最后成功写入的值生效，不保存版本号，不拒绝并发覆盖。保存成功后 SessionStore 合并返回值并保留其他资料，保存失败保留旧值，退出或切换账号后的迟到响应不能更新新会话。列表和消息响应的 `chatSettings` 携带本次查询实际使用的偏好；其他设备的改动在下一次正常读取时发现，不增加设置推送或轮询。请求期间本机偏好已经变化时，旧响应不能覆盖当前选择；跨设备交错请求可能短暂显示旧值，后续读取再校准。
+账号聊天偏好由 `users.getMe` 在登录初始化时返回：`showMembershipMessages` 默认 true，`showUnreadMessageCount` 默认 false。SessionStore 保存当前账号的选择，Preferences 只派生值并转交保存，不读写本机键。`users.updateChatSettings` 只提交被修改的字段，省略字段保持原值；返回的 `ChatSettings` 与 `chatSettingsChanged` 都携带两项完整值。账号偏好按数据库最后成功写入的值生效，不保存版本号。保存成功后 SessionStore 合并返回值并保留其他资料，失败保留旧值，退出或切换账号后的迟到响应不能更新新会话；较新的实时设置事件优先于在途保存响应。列表和消息响应的 `chatSettings` 携带本次查询实际使用的偏好，正常读取继续校准；请求期间已变化的计数单位不能被旧页覆盖，只有成员消息过滤规则变化才重建分页。共享计数偏好影响服务端 `appBadgeCount`，不改变 PWA tab、归档入口或后台标题的计数方式。不增加设置轮询。
 
 群级成员消息策略保存在 `groups.membership_message_visibility`，枚举为 `members`、`admins`、`nobody`，默认 `members`。`groups.update` 的 `membershipMessageVisibility` 由本群管理员修改。群详情、聊天列表项和消息分页返回 `membershipMessagePolicy: { visibility, canView }`，账号 `chatSettings` 保持独立。后端按群策略、当前角色和账号偏好计算可见消息，再分页或计算摘要、未读及已读推进；批量查询复用成员与群的现有连接，不逐成员查询。群策略拒绝时，单条消息、定位请求及伪造的话题查询均不得返回成员消息；WebSocket 消息与删除事件按群权限选择接收人。系统消息不产生内容推送。成员消息不允许引用、置顶或表态，旧引用及置顶入口不展示成员消息内容。
 

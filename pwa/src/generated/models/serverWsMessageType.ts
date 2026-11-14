@@ -25,6 +25,7 @@ export enum ServerWsMessageType {
   chatArchiveStateChanged = 'chatArchiveStateChanged',
   notificationExceptionsCleared = 'notificationExceptionsCleared',
   notificationSettingsChanged = 'notificationSettingsChanged',
+  chatSettingsChanged = 'chatSettingsChanged',
   chatNotificationSettingChanged = 'chatNotificationSettingChanged',
   groupSpeakingModeChanged = 'groupSpeakingModeChanged',
   memberSpeakingModeChanged = 'memberSpeakingModeChanged',

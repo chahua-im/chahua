@@ -61,6 +61,26 @@ pub struct ConversationUnreadSummary {
     pub unread_unmuted_attention_count: i64,
 }
 
+/// Coherent Main badge snapshot, independent of selected views and navigation path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MainUnread {
+    /// The snapshot's own account unit; false counts chats, true counts messages.
+    pub show_unread_message_count: bool,
+    /// Sorted by chatId; positive unread counts in nonarchived, unmuted main group/DM
+    /// chats only. Thread replies never contribute. Each count is capped at 1000.
+    pub chats: Vec<MainUnreadChat>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MainUnreadChat {
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub chat_id: i64,
+    pub unread_count: i64,
+}
+
 /// Connection-scoped absolute counters. Partial publications replace only their listed keys.
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -68,18 +88,14 @@ pub struct ConversationUnreadPayload {
     pub request_id: u32,
     pub full: bool,
     pub summaries: Vec<ConversationUnreadSummary>,
+    /// Server-owned Main app badge: chat count by default, capped message total when enabled.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub app_badge_count: Option<i64>,
-    /// Sorted IDs of all nonarchived, unmuted main group/DM chats with unread messages,
-    /// independent of views. Requested by appBadge; threads never contribute.
-    /// When present, replaces the whole set (including []); omitted partials retain it,
-    /// while omission from a full publication means unknown.
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        serialize_with = "crate::serde_i64_string::opt_vec::serialize"
-    )]
-    #[schema(value_type = Option<Vec<String>>)]
-    pub unread_chat_ids: Option<Vec<i64>>,
+    /// Requested by appBadge. Replaces the whole snapshot, including empty chats.
+    /// Omitted partials retain it; omission from a full publication means unknown.
+    /// Exclude the current parent chat before summing/capping for a Main back badge.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub main_unread: Option<MainUnread>,
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]

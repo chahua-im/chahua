@@ -149,6 +149,7 @@
       "fontPreviewOutgoing": "Choose a size that feels comfortable to read.",
       "fontDefault": "System default",
       "showMembershipMessages": "Show group join and leave messages",
+      "showUnreadMessageCount": "Show unread message count",
       "saveFailed": "Could not save. Please try again."
     },
     "language": {

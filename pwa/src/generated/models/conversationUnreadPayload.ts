@@ -6,13 +6,21 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ConversationUnreadSummary } from './conversationUnreadSummary';
+import type { MainUnread } from './mainUnread';
 
 /**
  * Connection-scoped absolute counters. Partial publications replace only their listed keys.
  */
 export interface ConversationUnreadPayload {
+  /** Server-owned Main app badge: chat count by default, capped message total when enabled. */
   appBadgeCount?: number;
   full: boolean;
+  /**
+   * Requested by appBadge. Replaces the whole snapshot, including empty chats.
+   * Omitted partials retain it; omission from a full publication means unknown.
+   * Exclude the current parent chat before summing/capping for a Main back badge.
+   */
+  mainUnread?: MainUnread;
   /** @minimum 0 */
   requestId: number;
   summaries: ConversationUnreadSummary[];

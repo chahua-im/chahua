@@ -149,6 +149,7 @@
       "fontPreviewOutgoing": "選擇一個閱讀起來舒服的大小。",
       "fontDefault": "系統預設",
       "showMembershipMessages": "顯示群成員進出群訊息",
+      "showUnreadMessageCount": "顯示未讀訊息數量",
       "saveFailed": "儲存失敗，請重試。"
     },
     "language": {

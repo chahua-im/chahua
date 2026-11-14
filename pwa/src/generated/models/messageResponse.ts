@@ -43,5 +43,6 @@ export interface MessageResponse {
   sticker?: MessageStickerResponse;
   systemKind?: SystemMessageKind;
   systemLinks?: SystemMessageLinks;
+  /** Present only while at least one published, non-deleted, non-system reply exists. */
   threadInfo?: ThreadInfo;
 }

@@ -140,7 +140,7 @@ mod tests {
                     let rows = super::super::chat_list::load_chat_page(conn, uid, false, Some(chat_id), None, 10, false)?;
                     assert_eq!(rows[0].last_message.as_ref().unwrap().id, if allowed {chat_id+2} else {chat_id+1});
                     assert_eq!(unread.count_chat_unread(conn, uid, chat_id, None)?, if allowed {2} else {1});
-                    assert_eq!(unread.count_users_unread_totals(conn, &[uid])?[&uid], if allowed {2} else {1});
+                    assert_eq!(unread.count_users_app_badges(conn, &[uid])?[&uid], 1);
                 }
                 broadcast_policy(conn, &registry, chat_id)?;
                 for rx in [&mut admin_rx, &mut member_rx] {
@@ -156,12 +156,12 @@ mod tests {
             }
             // A personal preference can hide an allowed message, never grant access.
             diesel::update(groups::table.find(chat_id)).set(groups::membership_message_visibility.eq(Visibility::Members)).execute(conn)?;
-            super::super::user::save_chat_settings(conn, member, crate::dto::users::UpdateChatSettings { show_membership_messages: false })?;
+            super::super::user::save_chat_settings(conn, member, crate::dto::users::UpdateChatSettings { show_membership_messages: Some(false), ..Default::default() })?;
             assert!(load_membership_message_filter(conn, member, chat_id)?);
             // Reading the last visible message advances over the hidden tail; restoring policy never rewinds it.
             super::super::chat::mark_chat_as_read(conn, chat_id, member, chat_id + 1)?;
             assert_eq!(super::super::chat::get_chat_last_read_message_id(conn, chat_id, member)?, Some(chat_id+2));
-            super::super::user::save_chat_settings(conn, member, crate::dto::users::UpdateChatSettings { show_membership_messages: true })?;
+            super::super::user::save_chat_settings(conn, member, crate::dto::users::UpdateChatSettings { show_membership_messages: Some(true), ..Default::default() })?;
             assert_eq!(unread.count_chat_unread(conn, member, chat_id, Some(chat_id+2))?, 0);
             // Demotion immediately changes the same query predicate used by WS recipient selection.
             diesel::update(groups::table.find(chat_id)).set(groups::membership_message_visibility.eq(Visibility::Admins)).execute(conn)?;
@@ -217,7 +217,8 @@ mod tests {
                 conn,
                 uid,
                 crate::dto::users::UpdateChatSettings {
-                    show_membership_messages: false,
+                    show_membership_messages: Some(false),
+                    ..Default::default()
                 },
             )?;
             let (settings, _, _) =

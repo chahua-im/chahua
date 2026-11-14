@@ -217,7 +217,7 @@ fn account_badges_and_collection_summaries_share_defaults_overrides_and_expiry()
         assert_eq!(account.unread_count, expected);
         assert_eq!(account.archived_unread_count, 1);
         assert_eq!(
-            unread.count_users_unread_totals(conn, &[7, 8]).unwrap()[&7],
+            unread.count_users_app_badges(conn, &[7, 8]).unwrap()[&7],
             expected
         );
         let collection = unread.conversation_summaries(conn, 7, &views).unwrap();

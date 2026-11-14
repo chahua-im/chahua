@@ -11,6 +11,7 @@ use crate::{
     constants::MAX_UNREAD_COUNT,
     dto::conversations::{
         ConversationCategory, ConversationRef, ConversationUnreadSummary, ConversationView,
+        MainUnread, MainUnreadChat,
     },
     errors::AppError,
 };
@@ -116,7 +117,7 @@ struct Count {
 pub(super) type ConversationUnreadSnapshot = (
     Vec<ConversationUnreadSummary>,
     Option<i64>,
-    Option<Vec<i64>>,
+    Option<MainUnread>,
 );
 
 impl UnreadService {
@@ -286,21 +287,35 @@ impl UnreadService {
             attention.extend(rows.into_iter().map(|r| ((is_thread, r.id), r.count)));
         }
         // Reuse the same main counts for both badge forms, regardless of selected views.
-        let (badge, unread_chat_ids) = if app_badge {
-            let mut badge = 0_i64;
-            let mut ids = Vec::new();
+        let (badge, main_unread) = if app_badge {
+            let mut message_count = 0_i64;
+            let mut chats = Vec::new();
             for scope in scopes
                 .iter()
                 .filter(|scope| scope.thread_id.is_none() && !scope.archived && !scope.muted)
             {
                 let count = main_counts.get(&scope.chat_id).copied().unwrap_or(0);
-                badge = badge.saturating_add(count).min(MAX_UNREAD_COUNT);
+                message_count = message_count.saturating_add(count).min(MAX_UNREAD_COUNT);
                 if count > 0 {
-                    ids.push(scope.chat_id);
+                    chats.push(MainUnreadChat {
+                        chat_id: scope.chat_id,
+                        unread_count: count,
+                    });
                 }
             }
-            ids.sort_unstable();
-            (Some(badge), Some(ids))
+            chats.sort_unstable_by_key(|chat| chat.chat_id);
+            let badge = if settings.show_unread_message_count {
+                message_count
+            } else {
+                chats.len() as i64
+            };
+            (
+                Some(badge),
+                Some(MainUnread {
+                    show_unread_message_count: settings.show_unread_message_count,
+                    chats,
+                }),
+            )
         } else {
             (None, None)
         };
@@ -313,7 +328,7 @@ impl UnreadService {
                 &attention,
             ),
             badge,
-            unread_chat_ids,
+            main_unread,
         ))
     }
 }
@@ -556,7 +571,7 @@ mod tests {
         };
         let mut conn = PgConnection::establish(&url).unwrap();
         conn.batch_execute("
-            CREATE TEMP TABLE user_extra (uid INTEGER PRIMARY KEY, mute_group_chats_by_default BOOLEAN, mute_direct_chats_by_default BOOLEAN, show_membership_messages BOOLEAN NOT NULL DEFAULT true);
+            CREATE TEMP TABLE user_extra (uid INTEGER PRIMARY KEY, mute_group_chats_by_default BOOLEAN, mute_direct_chats_by_default BOOLEAN, show_membership_messages BOOLEAN NOT NULL DEFAULT true, show_unread_message_count BOOLEAN NOT NULL DEFAULT false);
             INSERT INTO user_extra (uid, mute_group_chats_by_default, mute_direct_chats_by_default) VALUES (1, FALSE, FALSE);
             CREATE TEMP TABLE groups (id BIGINT PRIMARY KEY, kind TEXT NOT NULL);
             CREATE TEMP TABLE group_membership (chat_id BIGINT, uid INTEGER, archived BOOLEAN, last_read_message_id BIGINT, muted_until TIMESTAMPTZ, PRIMARY KEY(chat_id, uid));
@@ -629,38 +644,51 @@ mod tests {
         let result = service
             .conversation_summaries(&mut conn, 1, &views)
             .unwrap();
-        let (combined, badge, unread_chat_ids) = service
+        let (combined, badge, main_unread) = service
             .conversation_summaries_and_badge(&mut conn, 1, &views, true)
             .unwrap();
         // The all-view also includes threads and muted conversations; neither
         // may be summed into the main-only, unmuted application badge.
         assert_eq!(badge, Some(1));
-        assert_eq!(unread_chat_ids, Some(vec![2]));
+        let expected_main = Some(MainUnread {
+            show_unread_message_count: false,
+            chats: vec![MainUnreadChat {
+                chat_id: 2,
+                unread_count: 1,
+            }],
+        });
+        assert_eq!(main_unread, expected_main);
         // Even an empty view list must return the complete eligible main-chat set.
-        let (empty_views, badge, ids) = service
+        let (empty_views, badge, main_unread) = service
             .conversation_summaries_and_badge(&mut conn, 1, &[], true)
             .unwrap();
         assert!(empty_views.is_empty());
         assert_eq!(badge, Some(1));
-        assert_eq!(ids, Some(vec![2]));
-        let (_, badge, ids) = service
+        assert_eq!(main_unread, expected_main);
+        let (_, badge, main_unread) = service
             .conversation_summaries_and_badge(&mut conn, 1, &views, false)
             .unwrap();
         assert_eq!(badge, None);
-        assert_eq!(ids, None);
+        assert_eq!(main_unread, None);
         conn.batch_execute("UPDATE user_extra SET mute_direct_chats_by_default=TRUE WHERE uid=1")
             .unwrap();
-        let (_, badge, ids) = service
+        let (_, badge, main_unread) = service
             .conversation_summaries_and_badge(&mut conn, 1, &[], true)
             .unwrap();
         assert_eq!(badge, Some(0));
-        assert_eq!(ids, Some(vec![]));
+        assert_eq!(
+            main_unread,
+            Some(MainUnread {
+                show_unread_message_count: false,
+                chats: vec![]
+            })
+        );
         conn.batch_execute("UPDATE group_membership SET mute_override=FALSE WHERE chat_id=2")
             .unwrap();
-        let (_, _, ids) = service
+        let (_, _, main_unread) = service
             .conversation_summaries_and_badge(&mut conn, 1, &[], true)
             .unwrap();
-        assert_eq!(ids, Some(vec![2]));
+        assert_eq!(main_unread, expected_main);
         conn.batch_execute("UPDATE user_extra SET mute_direct_chats_by_default=FALSE WHERE uid=1; UPDATE group_membership SET mute_override=NULL WHERE chat_id=2")
             .unwrap();
         assert_eq!(
@@ -719,11 +747,26 @@ mod tests {
             assert_eq!(refreshed[0].unread_message_count, 5);
             assert_eq!(refreshed[0].unread_unmuted_message_count, 5);
             assert_eq!(refreshed[0].unread_unmuted_conversation_count, 4);
-            let (_, badge, ids) = service
+            let (_, badge, main_unread) = service
                 .conversation_summaries_and_badge(&mut conn, 1, &[], true)
                 .unwrap();
             assert_eq!(badge, Some(2));
-            assert_eq!(ids, Some(vec![1, 2]));
+            assert_eq!(
+                main_unread,
+                Some(MainUnread {
+                    show_unread_message_count: false,
+                    chats: vec![
+                        MainUnreadChat {
+                            chat_id: 1,
+                            unread_count: 1
+                        },
+                        MainUnreadChat {
+                            chat_id: 2,
+                            unread_count: 1
+                        },
+                    ],
+                })
+            );
         }
         // Archived threads keep raw attention, but never add unmuted attention.
         conn.batch_execute("UPDATE group_membership SET muted_until='9999-01-01' WHERE chat_id=1; UPDATE thread_user_states SET archived=TRUE WHERE thread_root_id=10").unwrap();
@@ -799,10 +842,52 @@ mod tests {
         );
         assert_eq!(result[0].unread_unmuted_message_count, 0);
         assert_eq!(result[0].unread_unmuted_conversation_count, 0);
-        let (_, badge, ids) = service
+        let (_, badge, main_unread) = service
             .conversation_summaries_and_badge(&mut conn, 1, &[], true)
             .unwrap();
         assert_eq!(badge, Some(0));
-        assert_eq!(ids, Some(vec![]));
+        assert_eq!(
+            main_unread,
+            Some(MainUnread {
+                show_unread_message_count: false,
+                chats: vec![]
+            })
+        );
+        // Preserve per-chat counts before capping the app badge: a back badge can
+        // exclude a saturated parent without losing the other chat's unread state.
+        conn.batch_execute("
+            UPDATE user_extra SET show_unread_message_count=TRUE WHERE uid=1;
+            UPDATE group_membership SET muted_until=NULL, last_read_message_id=13 WHERE chat_id=1;
+            INSERT INTO group_membership(chat_id,uid,archived,last_read_message_id,muted_until) VALUES (2,1,FALSE,20,NULL);
+            INSERT INTO messages(id,chat_id) SELECT 10000+n,1 FROM generate_series(1,1200) n;
+            INSERT INTO messages(id,chat_id) VALUES (20000,2);
+        ").unwrap();
+        let (_, badge, main_unread) = service
+            .conversation_summaries_and_badge(&mut conn, 1, &[], true)
+            .unwrap();
+        assert_eq!(badge, Some(1000));
+        assert_eq!(
+            main_unread,
+            Some(MainUnread {
+                show_unread_message_count: true,
+                chats: vec![
+                    MainUnreadChat {
+                        chat_id: 1,
+                        unread_count: 1000
+                    },
+                    MainUnreadChat {
+                        chat_id: 2,
+                        unread_count: 2
+                    },
+                ],
+            })
+        );
+        conn.batch_execute("UPDATE user_extra SET show_unread_message_count=FALSE WHERE uid=1")
+            .unwrap();
+        let (_, badge, main_unread) = service
+            .conversation_summaries_and_badge(&mut conn, 1, &[], true)
+            .unwrap();
+        assert_eq!(badge, Some(2));
+        assert!(!main_unread.unwrap().show_unread_message_count);
     }
 }

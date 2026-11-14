@@ -73,6 +73,9 @@ pub fn get_me(
     let show_membership_messages = extra
         .as_ref()
         .is_none_or(|extra| extra.show_membership_messages);
+    let show_unread_message_count = extra
+        .as_ref()
+        .is_some_and(|extra| extra.show_unread_message_count);
     let sticker_pack_order = extra
         .and_then(|extra| {
             serde_json::from_value::<Vec<StickerPackOrderItem>>(extra.sticker_pack_order).ok()
@@ -91,6 +94,7 @@ pub fn get_me(
         mute_group_chats_by_default: notification_defaults.group_chats_muted,
         mute_direct_chats_by_default: notification_defaults.direct_chats_muted,
         show_membership_messages,
+        show_unread_message_count,
     })
 }
 
@@ -100,8 +104,21 @@ pub fn put_chat_settings(
     conn: &mut PgConnection,
     ws_registry: &ConnectionRegistry,
 ) -> Result<ChatSettings, AppError> {
+    let previous_membership = if settings.show_membership_messages.is_some() {
+        Some(crate::services::user::load_chat_settings(conn, uid)?.show_membership_messages)
+    } else {
+        None
+    };
     let settings = crate::services::user::save_chat_settings(conn, uid, settings)?;
-    ws_registry.invalidate_unread(&[uid]);
+    if previous_membership.is_some_and(|previous| previous != settings.show_membership_messages) {
+        ws_registry.invalidate_unread(&[uid]);
+    } else {
+        ws_registry.invalidate_unread_counts(&[uid]);
+    }
+    ws_registry.broadcast_to_uids(
+        &[uid],
+        Arc::new(ServerWsMessage::ChatSettingsChanged(settings)),
+    );
     Ok(settings)
 }
 
@@ -263,6 +280,50 @@ mod tests {
             gender: 0,
             user_group: None,
         }
+    }
+
+    #[tokio::test]
+    async fn chat_settings_broadcast_both_preferences_without_count_only_visibility_work() {
+        use crate::dto::{users::UpdateChatSettings, ws::ServerWsMessage};
+        use diesel::{Connection, PgConnection};
+        use futures::FutureExt;
+        use std::sync::Arc;
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            return;
+        };
+        let mut conn = PgConnection::establish(&url).unwrap();
+        let registry = crate::services::ws_registry::ConnectionRegistry::new(Arc::new(
+            crate::services::ws_registry::WsMetrics::new(&prometheus::Registry::new()),
+        ));
+        let uid = 987_675_100;
+        let (first, mut first_rx) = registry.register(uid, "settings-first".into());
+        let (second, mut second_rx) = registry.register(uid, "settings-second".into());
+        let (_, mut other_rx) = registry.register(uid + 1, "settings-other".into());
+        while first_rx.try_recv().is_ok() {}
+        while second_rx.try_recv().is_ok() {}
+        while other_rx.try_recv().is_ok() {}
+        conn.test_transaction::<_, crate::errors::AppError, _>(|conn| {
+            for (patch, expected_membership, expected_count, visibility_changed) in [
+                (UpdateChatSettings { show_unread_message_count: Some(true), ..Default::default() }, true, true, false),
+                (UpdateChatSettings { show_membership_messages: Some(false), ..Default::default() }, false, true, true),
+                (UpdateChatSettings { show_membership_messages: Some(false), ..Default::default() }, false, true, false),
+                (UpdateChatSettings { show_unread_message_count: Some(false), ..Default::default() }, false, false, false),
+            ] {
+                let saved = super::put_chat_settings(uid, patch, conn, &registry)?;
+                assert_eq!(saved.show_membership_messages, expected_membership);
+                assert_eq!(saved.show_unread_message_count, expected_count);
+                for rx in [&mut first_rx, &mut second_rx] {
+                    let event = rx.try_recv().unwrap();
+                    assert!(matches!(&*event, ServerWsMessage::ChatSettingsChanged(settings) if *settings == saved));
+                }
+                assert!(other_rx.try_recv().is_err());
+                for entry in [&first, &second] {
+                    assert!(entry.unread_changed.notified().now_or_never().is_some());
+                    assert_eq!(entry.states_changed.notified().now_or_never().is_some(), visibility_changed);
+                }
+            }
+            Ok(())
+        });
     }
 
     #[test]

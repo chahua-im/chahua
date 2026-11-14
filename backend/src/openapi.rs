@@ -98,6 +98,7 @@ const SNOWFLAKE_COMPONENT_FIELDS: &[(&str, &[&str])] = &[
     ("UnreadMentionIdsResponse", &["messageIds"]),
     ("UnreadReactionIdsResponse", &["messageIds"]),
     ("ConversationRef", &["chatId", "threadId"]),
+    ("MainUnreadChat", &["chatId"]),
     ("GroupPresenceResponse", &["chatId"]),
     ("ConversationState", &["lastReadMessageId"]),
     ("AcknowledgeReactionsBody", &["threadId"]),
@@ -448,10 +449,15 @@ mod tests {
                 ["type"],
             "boolean"
         );
-        assert_eq!(
-            document["components"]["schemas"]["UpdateChatSettings"]["required"],
-            serde_json::json!(["showMembershipMessages"])
-        );
+        assert!(document["components"]["schemas"]["UpdateChatSettings"]["required"].is_null());
+        for name in ["MeResponse", "ChatSettings", "UpdateChatSettings"] {
+            assert!(document["components"]["schemas"][name]["properties"]
+                ["showUnreadMessageCount"]
+                .is_object());
+        }
+        let payload = &document["components"]["schemas"]["ConversationUnreadPayload"]["properties"];
+        assert!(payload["unreadChatIds"].is_null());
+        assert!(payload["mainUnread"].is_object());
     }
 
     #[test]

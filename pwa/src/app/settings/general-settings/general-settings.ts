@@ -23,6 +23,7 @@ import {
 import { TranslocoPipe } from '@jsverse/transloco';
 import {
   chatbubblesOutline,
+  mailUnreadOutline,
   chevronBackOutline,
   contrastOutline,
   happyOutline,
@@ -73,6 +74,9 @@ export class GeneralSettings {
   protected readonly saving = signal(false);
   protected readonly saveError = signal(false);
   protected readonly membershipIcon = peopleOutline;
+  protected readonly unreadIcon = mailUnreadOutline;
+  protected readonly savingUnread = signal(false);
+  protected readonly unreadSaveError = signal(false);
   protected readonly preferences = inject(Preferences);
   protected readonly panels = inject(PanelNavigation);
   protected readonly ColorMode = ColorMode;
@@ -108,6 +112,23 @@ export class GeneralSettings {
       if (!this.destroyRef.destroyed) {
         event.target.checked = this.preferences.showMembershipMessages();
         this.saving.set(false);
+      }
+    }
+  }
+
+  protected async saveUnreadMessageCount(event: ToggleCustomEvent) {
+    if (this.savingUnread() || !this.session.user()) return;
+    const uid = this.session.user()!.uid;
+    this.savingUnread.set(true);
+    this.unreadSaveError.set(false);
+    try {
+      await this.preferences.setShowUnreadMessageCount(event.detail.checked);
+    } catch {
+      if (!this.destroyRef.destroyed && this.session.user()?.uid === uid) this.unreadSaveError.set(true);
+    } finally {
+      if (!this.destroyRef.destroyed) {
+        event.target.checked = this.preferences.showUnreadMessageCount();
+        this.savingUnread.set(false);
       }
     }
   }

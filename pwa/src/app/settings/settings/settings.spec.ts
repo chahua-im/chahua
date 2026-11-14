@@ -270,8 +270,10 @@ describe('Settings', () => {
     expect(preview.style.getPropertyValue('--preview-line-height')).toBe('');
     const toggles = Array.from(page.querySelectorAll('ion-toggle'));
     expect(toggles[2].checked).toBe(true);
-    expect(toggles).toHaveLength(4);
+    expect(toggles).toHaveLength(5);
     expect(toggles[3].textContent).toContain('显示群成员进出群消息');
+    expect(toggles[4].textContent).toContain('显示未读消息数量');
+    expect(toggles[4].checked).toBe(false);
     toggles[0].dispatchEvent(new CustomEvent('ionChange', { detail: { checked: false } }));
     toggles[1].dispatchEvent(new CustomEvent('ionChange', { detail: { checked: true } }));
     toggles[2].dispatchEvent(new CustomEvent('ionChange', { detail: { checked: false } }));
@@ -300,7 +302,7 @@ describe('Settings', () => {
     TestBed.inject(SessionStore).user.update((user) => user && { ...user, showMembershipMessages: false });
     await openPage('聊天设置');
     expect(page.querySelector('ion-title')!.textContent).toBe('聊天设置');
-    expect(page.querySelectorAll('ion-toggle')).toHaveLength(4);
+    expect(page.querySelectorAll('ion-toggle')).toHaveLength(5);
     const membership = page.querySelectorAll('ion-toggle')[3];
     expect(membership.textContent).toContain('显示群成员进出群消息');
     expect(membership.checked).toBe(false);
@@ -308,7 +310,10 @@ describe('Settings', () => {
     await fixture.whenStable();
     expect(membership.disabled).toBe(true);
     expect(TestBed.inject(Preferences).showMembershipMessages()).toBe(false);
-    peer.expect('users.updateChatSettings', { showMembershipMessages: true }).flush({ showMembershipMessages: true });
+    peer.expect('users.updateChatSettings', { showMembershipMessages: true }).flush({
+      showMembershipMessages: true,
+      showUnreadMessageCount: false,
+    });
     await fixture.whenStable();
     expect(TestBed.inject(Preferences).showMembershipMessages()).toBe(true);
     expect(localStorage.getItem('chahua.preferences.showMembershipMessages')).toBeNull();
@@ -333,11 +338,46 @@ describe('Settings', () => {
     expect(TestBed.inject(Preferences).showMembershipMessages()).toBe(true);
     expect(page.textContent).toContain('保存失败，请重试。');
     toggle.dispatchEvent(new CustomEvent('ionChange', { detail: { checked: false } }));
-    peer.expect('users.updateChatSettings', { showMembershipMessages: false }).flush({ showMembershipMessages: false });
+    peer.expect('users.updateChatSettings', { showMembershipMessages: false }).flush({
+      showMembershipMessages: false,
+      showUnreadMessageCount: false,
+    });
     await fixture.whenStable();
     expect(toggle.checked).toBe(false);
     expect(TestBed.inject(Preferences).showMembershipMessages()).toBe(false);
     expect(page.textContent).not.toContain('保存失败，请重试。');
+  });
+
+  it('saves the account badge unit, rolls back failures and follows remote settings', async () => {
+    await openPage('聊天设置');
+    const toggle = page.querySelectorAll('ion-toggle')[4];
+    expect(toggle.checked).toBe(false);
+    toggle.checked = true;
+    toggle.dispatchEvent(new CustomEvent('ionChange', { detail: { checked: true } }));
+    await fixture.whenStable();
+    expect(toggle.disabled).toBe(true);
+    expect(page.querySelector('ion-spinner')).not.toBeNull();
+    peer.expect('users.updateChatSettings', { showUnreadMessageCount: true }).error(1503);
+    await vi.waitFor(() => expect(toggle.checked).toBe(false));
+    await fixture.whenStable();
+    expect(toggle.disabled).toBe(false);
+    expect(page.textContent).toContain('保存失败，请重试。');
+    toggle.dispatchEvent(new CustomEvent('ionChange', { detail: { checked: true } }));
+    peer.expect('users.updateChatSettings', { showUnreadMessageCount: true }).flush({
+      showMembershipMessages: true,
+      showUnreadMessageCount: true,
+    });
+    await fixture.whenStable();
+    expect(toggle.checked).toBe(true);
+    expect(page.textContent).not.toContain('保存失败，请重试。');
+    expect(localStorage.getItem('chahua.preferences.showUnreadMessageCount')).toBeNull();
+    await back();
+    await openPage('聊天设置');
+    expect(page.querySelectorAll('ion-toggle')[4].checked).toBe(true);
+    peer.notify('events.chatSettingsChanged', { showMembershipMessages: false, showUnreadMessageCount: false });
+    await fixture.whenStable();
+    expect(page.querySelectorAll('ion-toggle')[3].checked).toBe(false);
+    expect(page.querySelectorAll('ion-toggle')[4].checked).toBe(false);
   });
 
   it('switches and persists the color mode from general settings', async () => {

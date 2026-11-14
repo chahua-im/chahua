@@ -149,6 +149,7 @@
       "fontPreviewOutgoing": "选择一个阅读起来舒服的大小。",
       "fontDefault": "系统默认",
       "showMembershipMessages": "显示群成员进出群消息",
+      "showUnreadMessageCount": "显示未读消息数量",
       "saveFailed": "保存失败，请重试。"
     },
     "language": {

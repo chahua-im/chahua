@@ -7,8 +7,10 @@
  */
 
 /**
- * Account-level display preference; the last committed write wins.
+ * Account-level display preferences; omitted patches retain their stored values.
  */
 export interface ChatSettings {
   showMembershipMessages: boolean;
+  /** False (default) counts chats; true counts messages for tabs and app badges. */
+  showUnreadMessageCount: boolean;
 }

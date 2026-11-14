@@ -67,19 +67,24 @@ pub struct MeResponse {
     pub mute_group_chats_by_default: bool,
     pub mute_direct_chats_by_default: bool,
     pub show_membership_messages: bool,
+    pub show_unread_message_count: bool,
 }
 
-/// Account-level display preference; the last committed write wins.
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, ToSchema)]
+/// Account-level display preferences; omitted patches retain their stored values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatSettings {
     pub show_membership_messages: bool,
+    /// False (default) counts chats; true counts messages for tabs and app badges.
+    pub show_unread_message_count: bool,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, ToSchema, diesel::AsChangeset)]
 #[serde(rename_all = "camelCase")]
+#[diesel(table_name = crate::schema::user_extra)]
 pub struct UpdateChatSettings {
-    pub show_membership_messages: bool,
+    pub show_membership_messages: Option<bool>,
+    pub show_unread_message_count: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, ToSchema)]
@@ -120,6 +125,17 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn chat_settings_patch_preserves_omitted_fields() {
+        let empty: super::UpdateChatSettings = serde_json::from_value(json!({})).unwrap();
+        assert_eq!(empty.show_membership_messages, None);
+        assert_eq!(empty.show_unread_message_count, None);
+        let count: super::UpdateChatSettings =
+            serde_json::from_value(json!({"showUnreadMessageCount": false})).unwrap();
+        assert_eq!(count.show_membership_messages, None);
+        assert_eq!(count.show_unread_message_count, Some(false));
+    }
+
+    #[test]
     fn me_response_serializes_sender_metadata() {
         let response = MeResponse {
             uid: 1,
@@ -137,10 +153,12 @@ mod tests {
             mute_group_chats_by_default: true,
             mute_direct_chats_by_default: false,
             show_membership_messages: false,
+            show_unread_message_count: false,
         };
 
         let value = serde_json::to_value(response).unwrap();
         assert_eq!(value["showMembershipMessages"], json!(false));
+        assert_eq!(value["showUnreadMessageCount"], json!(false));
         assert_eq!(value["gender"], json!(2));
         assert_eq!(value["userGroup"]["groupId"], json!(3));
         assert_eq!(value["userGroup"]["name"], json!("Moderator"));

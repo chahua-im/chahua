@@ -7,5 +7,6 @@
  */
 
 export interface ThreadInfo {
+  /** Published, non-deleted replies, excluding system messages. */
   replyCount: number;
 }
