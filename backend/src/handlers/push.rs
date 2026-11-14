@@ -43,19 +43,22 @@ async fn post_subscribe(
     CurrentUid(uid): CurrentUid,
     ClientId(client_id): ClientId,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<SubscribeBody>,
 ) -> Result<impl IntoResponse, AppError> {
-    push::post_subscribe(
-        uid,
-        client_id,
-        body,
-        &mut conn,
-        state.push_service.as_ref(),
-        state.id_gen.as_ref(),
-    )
-    .await?;
-    Ok(StatusCode::CREATED)
+    conn.run(move |mut conn| async move {
+        push::post_subscribe(
+            uid,
+            client_id,
+            body,
+            &mut conn,
+            state.push_service.as_ref(),
+            state.id_gen.as_ref(),
+        )
+        .await?;
+        Ok(StatusCode::CREATED)
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -71,11 +74,14 @@ async fn post_subscribe(
 async fn post_unsubscribe(
     CurrentUid(uid): CurrentUid,
     ClientId(client_id): ClientId,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<UnsubscribeBody>,
 ) -> Result<impl IntoResponse, AppError> {
-    push::post_unsubscribe(uid, client_id, body, &mut conn)?;
-    Ok(StatusCode::OK)
+    conn.run(move |mut conn| async move {
+        push::post_unsubscribe(uid, client_id, body, &mut conn)?;
+        Ok(StatusCode::OK)
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -91,12 +97,15 @@ async fn post_unsubscribe(
 async fn get_subscription_status(
     CurrentUid(uid): CurrentUid,
     ClientId(client_id): ClientId,
-    mut conn: DbConn,
+    conn: DbConn,
     Query(query): Query<SubscriptionStatusQuery>,
 ) -> Result<Json<SubscriptionStatusResponse>, AppError> {
-    Ok(Json(push::get_subscription_status(
-        uid, client_id, query, &mut conn,
-    )?))
+    conn.run(move |mut conn| async move {
+        Ok(Json(push::get_subscription_status(
+            uid, client_id, query, &mut conn,
+        )?))
+    })
+    .await
 }
 
 pub fn router() -> OpenApiRouter<crate::AppState> {

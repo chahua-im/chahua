@@ -28,19 +28,22 @@ use crate::AppState;
 async fn post_upload_url(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(payload): Json<UploadUrlRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let response = attachments::post_upload_url(
-        uid,
-        payload,
-        &mut conn,
-        state.id_gen.as_ref(),
-        &state.media,
-        state.config.media.max_attachment_file_size_bytes,
-    )
-    .await?;
-    Ok((StatusCode::CREATED, Json(response)))
+    conn.run(move |mut conn| async move {
+        let response = attachments::post_upload_url(
+            uid,
+            payload,
+            &mut conn,
+            state.id_gen.as_ref(),
+            &state.media,
+            state.config.media.max_attachment_file_size_bytes,
+        )
+        .await?;
+        Ok((StatusCode::CREATED, Json(response)))
+    })
+    .await
 }
 
 #[utoipa::path(

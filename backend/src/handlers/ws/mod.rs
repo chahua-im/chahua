@@ -180,15 +180,21 @@ async fn handle_auth_and_socket(mut socket: WebSocket, state: AppState, headers:
     else {
         return;
     };
-    let session = match verify_session(
-        &ticket,
-        &state.auth_token_service,
-        &state.token_generation,
-        &state.db,
-    ) {
-        Ok(session) => session,
-        Err(error) => {
+    let auth_token_service = state.auth_token_service.clone();
+    let token_generation = state.token_generation.clone();
+    let db = state.db.clone();
+    let session = match tokio::task::spawn_blocking(move || {
+        verify_session(&ticket, &auth_token_service, &token_generation, &db)
+    })
+    .await
+    {
+        Ok(Ok(session)) => session,
+        Ok(Err(error)) => {
             debug!(?error, "ws auth rejected (invalid ticket)");
+            return;
+        }
+        Err(error) => {
+            warn!(?error, "ws auth worker failed");
             return;
         }
     };

@@ -35,12 +35,15 @@ pub(super) struct ChatIdPath {
 async fn post_group(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<CreateChatBody>,
 ) -> Result<impl IntoResponse, AppError> {
-    let response =
-        groups::post_group(uid, body, &mut conn, &state.authz_service, &state.id_gen).await?;
-    Ok((StatusCode::CREATED, Json(response)))
+    conn.run(move |mut conn| async move {
+        let response =
+            groups::post_group(uid, body, &mut conn, &state.authz_service, &state.id_gen).await?;
+        Ok((StatusCode::CREATED, Json(response)))
+    })
+    .await
 }
 
 /// GET /group — List groups for selector/search.
@@ -63,12 +66,15 @@ async fn post_group(
 async fn get_groups(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Query(query): Query<ListGroupsQuery>,
 ) -> Result<Json<ListGroupsResponse>, AppError> {
-    Ok(Json(
-        groups::get_groups(uid, query, &mut conn, &state.media).await?,
-    ))
+    conn.run(move |mut conn| async move {
+        Ok(Json(
+            groups::get_groups(uid, query, &mut conn, &state.media).await?,
+        ))
+    })
+    .await
 }
 
 /// GET /group/:chat_id — Get chat details.
@@ -88,18 +94,21 @@ async fn get_group(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<GroupInfoResponse>, AppError> {
-    Ok(Json(
-        groups::get_group(
-            uid,
-            chat_id,
-            &mut conn,
-            &state.media,
-            state.avatars.as_ref(),
-        )
-        .await?,
-    ))
+    conn.run(move |mut conn| async move {
+        Ok(Json(
+            groups::get_group(
+                uid,
+                chat_id,
+                &mut conn,
+                &state.media,
+                state.avatars.as_ref(),
+            )
+            .await?,
+        ))
+    })
+    .await
 }
 
 /// POST /group/:chat_id/avatar/upload-url — Create a group avatar upload URL.
@@ -120,19 +129,22 @@ async fn post_avatar_upload_url(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(payload): Json<AvatarUploadUrlRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let response = groups::post_avatar_upload_url(
-        uid,
-        chat_id,
-        payload,
-        &mut conn,
-        &state.id_gen,
-        &state.media,
-    )
-    .await?;
-    Ok((StatusCode::CREATED, Json(response)))
+    conn.run(move |mut conn| async move {
+        let response = groups::post_avatar_upload_url(
+            uid,
+            chat_id,
+            payload,
+            &mut conn,
+            &state.id_gen,
+            &state.media,
+        )
+        .await?;
+        Ok((StatusCode::CREATED, Json(response)))
+    })
+    .await
 }
 
 /// PATCH /group/:chat_id — Update chat metadata (admin only).
@@ -153,21 +165,24 @@ async fn patch_group(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<UpdateChatBody>,
 ) -> Result<Json<GroupInfoResponse>, AppError> {
-    Ok(Json(
-        groups::patch_group(
-            uid,
-            chat_id,
-            body,
-            &mut conn,
-            &state.media,
-            state.avatars.as_ref(),
-            state.ws_registry.as_ref(),
-        )
-        .await?,
-    ))
+    conn.run(move |mut conn| async move {
+        Ok(Json(
+            groups::patch_group(
+                uid,
+                chat_id,
+                body,
+                &mut conn,
+                &state.media,
+                state.avatars.as_ref(),
+                state.ws_registry.as_ref(),
+            )
+            .await?,
+        ))
+    })
+    .await
 }
 
 /// PUT /group/:chat_id/mute — Mute notifications for a chat.
@@ -188,12 +203,15 @@ async fn put_mute(
     State(state): State<AppState>,
     CurrentUid(uid): CurrentUid,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<MuteBody>,
 ) -> Result<Json<MuteResponse>, AppError> {
-    Ok(Json(
-        groups::put_mute(uid, chat_id, body, &mut conn, state.ws_registry.as_ref()).await?,
-    ))
+    conn.run(move |mut conn| async move {
+        Ok(Json(
+            groups::put_mute(uid, chat_id, body, &mut conn, state.ws_registry.as_ref()).await?,
+        ))
+    })
+    .await
 }
 
 /// DELETE /group/:chat_id/mute — Unmute notifications for a chat.
@@ -213,10 +231,13 @@ async fn delete_mute(
     State(state): State<AppState>,
     CurrentUid(uid): CurrentUid,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<StatusCode, AppError> {
-    groups::delete_mute(uid, chat_id, &mut conn, state.ws_registry.as_ref()).await?;
-    Ok(StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        groups::delete_mute(uid, chat_id, &mut conn, state.ws_registry.as_ref()).await?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 #[utoipa::path(put, path = "/{chat_id}/notification-setting", tag = "groups",
@@ -227,13 +248,22 @@ async fn put_notification_setting(
     State(state): State<AppState>,
     CurrentUid(uid): CurrentUid,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<crate::dto::groups::UpdateNotificationSettingRequest>,
 ) -> Result<Json<crate::dto::groups::ChatNotificationSettingResponse>, AppError> {
-    Ok(Json(
-        groups::put_notification_setting(uid, chat_id, body, &mut conn, state.ws_registry.as_ref())
+    conn.run(move |mut conn| async move {
+        Ok(Json(
+            groups::put_notification_setting(
+                uid,
+                chat_id,
+                body,
+                &mut conn,
+                state.ws_registry.as_ref(),
+            )
             .await?,
-    ))
+        ))
+    })
+    .await
 }
 
 #[utoipa::path(
@@ -253,13 +283,16 @@ async fn put_speaking_mode(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<crate::dto::speaking::UpdateSpeakingModeRequest>,
 ) -> Result<Json<crate::dto::speaking::GroupSpeakingModeResponse>, AppError> {
-    Ok(Json(
-        groups::put_speaking_mode(uid, chat_id, body, &mut conn, state.ws_registry.as_ref())
-            .await?,
-    ))
+    conn.run(move |mut conn| async move {
+        Ok(Json(
+            groups::put_speaking_mode(uid, chat_id, body, &mut conn, state.ws_registry.as_ref())
+                .await?,
+        ))
+    })
+    .await
 }
 
 pub fn router() -> OpenApiRouter<crate::AppState> {

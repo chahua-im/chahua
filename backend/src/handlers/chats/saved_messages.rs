@@ -34,18 +34,21 @@ struct ChatIdPath {
 async fn list_chat_saved_messages(
     State(state): State<AppState>,
     CurrentUid(uid): CurrentUid,
-    mut conn: DbConn,
+    conn: DbConn,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
     Query(query): Query<ListSavedMessagesQuery>,
 ) -> Result<Json<ListSavedMessagesResponse>, AppError> {
-    crate::services::api::chats::saved_messages::list_chat_saved_messages(
-        uid,
-        chat_id,
-        query,
-        &mut conn,
-        &state.media,
-    )
-    .map(Json)
+    conn.run(move |mut conn| async move {
+        crate::services::api::chats::saved_messages::list_chat_saved_messages(
+            uid,
+            chat_id,
+            query,
+            &mut conn,
+            &state.media,
+        )
+        .map(Json)
+    })
+    .await
 }
 
 pub fn router() -> OpenApiRouter<AppState> {

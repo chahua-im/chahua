@@ -30,55 +30,58 @@ use crate::AppState;
 async fn post_relationships(
     principal: Principal,
     State(state): State<AppState>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<RelationshipQueryRequest>,
 ) -> Result<Json<RelationshipQueryResponse>, AppError> {
-    let conn = &mut *conn;
-    principal.require_service_action(
-        conn,
-        &state.authz_service,
-        AuthzAction::OnBehalfOfSocialRead,
-    )?;
-    let peers = validate_relationship_request(&body)?;
-    let relationships = social_service::peer_relationships(conn, body.uid, &peers)?;
+    conn.run(move |mut conn| async move {
+        let conn = &mut *conn;
+        principal.require_service_action(
+            conn,
+            &state.authz_service,
+            AuthzAction::OnBehalfOfSocialRead,
+        )?;
+        let peers = validate_relationship_request(&body)?;
+        let relationships = social_service::peer_relationships(conn, body.uid, &peers)?;
 
-    Ok(Json(RelationshipQueryResponse {
-        uid: body.uid,
-        relationships: peers
-            .into_iter()
-            .map(|peer_uid| {
-                let facts = relationships
-                    .get(&peer_uid)
-                    .expect("peer_relationships includes every requested peer");
-                let is_friend = facts.friends_since.is_some();
-                let pending_request =
-                    facts
-                        .pending_request
-                        .map(
-                            |(id, uid_is_sender, created_at)| RelationshipPendingRequest {
-                                id,
-                                direction: if uid_is_sender {
-                                    RelationshipRequestDirection::Outgoing
-                                } else {
-                                    RelationshipRequestDirection::Incoming
+        Ok(Json(RelationshipQueryResponse {
+            uid: body.uid,
+            relationships: peers
+                .into_iter()
+                .map(|peer_uid| {
+                    let facts = relationships
+                        .get(&peer_uid)
+                        .expect("peer_relationships includes every requested peer");
+                    let is_friend = facts.friends_since.is_some();
+                    let pending_request =
+                        facts
+                            .pending_request
+                            .map(
+                                |(id, uid_is_sender, created_at)| RelationshipPendingRequest {
+                                    id,
+                                    direction: if uid_is_sender {
+                                        RelationshipRequestDirection::Outgoing
+                                    } else {
+                                        RelationshipRequestDirection::Incoming
+                                    },
+                                    created_at,
                                 },
-                                created_at,
-                            },
-                        );
+                            );
 
-                RelationshipStatus {
-                    peer_uid,
-                    is_friend,
-                    friends_since: facts.friends_since,
-                    dm_chat_id: facts.dm_chat_id,
-                    blocking: facts.blocking,
-                    blocked_by: facts.blocked_by,
-                    can_dm: derive_can_dm(is_friend, facts.blocking, facts.blocked_by),
-                    pending_request,
-                }
-            })
-            .collect(),
-    }))
+                    RelationshipStatus {
+                        peer_uid,
+                        is_friend,
+                        friends_since: facts.friends_since,
+                        dm_chat_id: facts.dm_chat_id,
+                        blocking: facts.blocking,
+                        blocked_by: facts.blocked_by,
+                        can_dm: derive_can_dm(is_friend, facts.blocking, facts.blocked_by),
+                        pending_request,
+                    }
+                })
+                .collect(),
+        }))
+    })
+    .await
 }
 
 pub fn router() -> OpenApiRouter<crate::AppState> {

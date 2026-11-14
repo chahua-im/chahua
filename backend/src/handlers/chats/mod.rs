@@ -156,9 +156,12 @@ async fn get_chat_read_receipt(
     CurrentUid(uid): CurrentUid,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
     Query(query): Query<ReadReceiptQuery>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<Json<ReadReceiptResponse>, AppError> {
-    crate::services::api::chats::get_chat_read_receipt(uid, chat_id, query, &mut conn).map(Json)
+    conn.run(move |mut conn| async move {
+        crate::services::api::chats::get_chat_read_receipt(uid, chat_id, query, &mut conn).map(Json)
+    })
+    .await
 }
 
 /// POST /chats/:chat_id/unread — Mark a chat as unread by rewinding the read pointer.
@@ -261,17 +264,20 @@ async fn get_chat_mentions(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Query(query): Query<UnreadMentionsQuery>,
 ) -> Result<Json<UnreadMentionIdsResponse>, AppError> {
-    crate::services::api::chats::get_chat_mentions(
-        uid,
-        chat_id,
-        query,
-        &mut conn,
-        state.unread_service.as_ref(),
-    )
-    .map(Json)
+    conn.run(move |mut conn| async move {
+        crate::services::api::chats::get_chat_mentions(
+            uid,
+            chat_id,
+            query,
+            &mut conn,
+            state.unread_service.as_ref(),
+        )
+        .map(Json)
+    })
+    .await
 }
 
 /// GET /chats/{chat_id}/reactions - Message ids with unread reactions for the current user.
@@ -302,17 +308,20 @@ async fn get_chat_reactions(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Query(query): Query<UnreadReactionsQuery>,
 ) -> Result<Json<UnreadReactionIdsResponse>, AppError> {
-    crate::services::api::chats::get_chat_reactions(
-        uid,
-        chat_id,
-        query,
-        &mut conn,
-        state.unread_service.as_ref(),
-    )
-    .map(Json)
+    conn.run(move |mut conn| async move {
+        crate::services::api::chats::get_chat_reactions(
+            uid,
+            chat_id,
+            query,
+            &mut conn,
+            state.unread_service.as_ref(),
+        )
+        .map(Json)
+    })
+    .await
 }
 
 /// POST /chats/{chat_id}/reactions/read — Mark the conversation scope's reactions read.
@@ -339,18 +348,21 @@ async fn acknowledge_chat_reactions(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
     Json(body): Json<AcknowledgeReactionsBody>,
 ) -> Result<Json<UnreadReactionsAckResponse>, AppError> {
-    crate::services::api::chats::acknowledge_chat_reactions(
-        uid,
-        chat_id,
-        body,
-        &mut conn,
-        state.unread_service.as_ref(),
-        state.ws_registry.as_ref(),
-    )
-    .map(Json)
+    conn.run(move |mut conn| async move {
+        crate::services::api::chats::acknowledge_chat_reactions(
+            uid,
+            chat_id,
+            body,
+            &mut conn,
+            state.unread_service.as_ref(),
+            state.ws_registry.as_ref(),
+        )
+        .map(Json)
+    })
+    .await
 }
 
 /// GET /chats/unread — Get total unread message and chat counts for the current user.
@@ -403,10 +415,18 @@ async fn archive_chat(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<axum::http::StatusCode, AppError> {
-    crate::services::api::chats::archive_chat(uid, chat_id, &mut conn, state.ws_registry.as_ref())?;
-    Ok(axum::http::StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        crate::services::api::chats::archive_chat(
+            uid,
+            chat_id,
+            &mut conn,
+            state.ws_registry.as_ref(),
+        )?;
+        Ok(axum::http::StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 /// DELETE /chats/:chat_id/archive — Unarchive a chat while preserving its notification preference.
@@ -426,15 +446,18 @@ async fn unarchive_chat(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
-    mut conn: DbConn,
+    conn: DbConn,
 ) -> Result<axum::http::StatusCode, AppError> {
-    crate::services::api::chats::unarchive_chat(
-        uid,
-        chat_id,
-        &mut conn,
-        state.ws_registry.as_ref(),
-    )?;
-    Ok(axum::http::StatusCode::NO_CONTENT)
+    conn.run(move |mut conn| async move {
+        crate::services::api::chats::unarchive_chat(
+            uid,
+            chat_id,
+            &mut conn,
+            state.ws_registry.as_ref(),
+        )?;
+        Ok(axum::http::StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 // ---------------------------------------------------------------------------
