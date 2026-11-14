@@ -470,6 +470,7 @@
       "relevance": "相关度",
       "newest": "最新",
       "failed": "搜索结果加载失败",
+      "tooShort": "请输入至少 2 个字符",
       "noResults": "没有找到消息"
     },
     "threads": {
