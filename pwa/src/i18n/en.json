@@ -470,6 +470,7 @@
       "relevance": "Relevance",
       "newest": "Newest",
       "failed": "Could not load search results",
+      "tooShort": "Enter at least 2 characters",
       "noResults": "No messages found"
     },
     "threads": {

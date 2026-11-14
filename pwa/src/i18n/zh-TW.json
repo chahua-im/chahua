@@ -470,6 +470,7 @@
       "relevance": "相關度",
       "newest": "最新",
       "failed": "搜尋結果載入失敗",
+      "tooShort": "請輸入至少 2 個字元",
       "noResults": "找不到訊息"
     },
     "threads": {

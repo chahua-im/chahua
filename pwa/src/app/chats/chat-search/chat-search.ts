@@ -1,4 +1,4 @@
-import { Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
+import { Component, computed, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   IonButton,
@@ -54,6 +54,7 @@ export class ChatSearch {
   readonly chatId = input.required<SnowflakeID>();
   protected readonly panels = inject(PanelNavigation);
   protected readonly query = signal('');
+  protected readonly queryLength = computed(() => Array.from(this.query().trim()).length);
   protected readonly sort = signal(MessageSearchSort.relevance);
   protected readonly Sort = MessageSearchSort;
   protected readonly messages = signal<MessageResponse[]>([]);
@@ -89,8 +90,9 @@ export class ChatSearch {
       this.cursor.set(undefined);
     }
     this.error.set(false);
-    this.loading.set(!!q);
-    if (!q) return;
+    const canSearch = this.queryLength() >= 2;
+    this.loading.set(canSearch);
+    if (!canSearch) return;
     try {
       const page = await firstValueFrom(
         this.api.messages

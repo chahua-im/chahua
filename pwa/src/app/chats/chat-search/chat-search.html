@@ -29,7 +29,9 @@
       <ion-infinite-scroll-content />
     </ion-infinite-scroll>
   }
-  @if (loading() && cursor() == null) {
+  @if (queryLength() === 1) {
+    <p class="ion-padding ion-text-center">{{ 'chats.search.tooShort' | transloco }}</p>
+  } @else if (loading() && cursor() == null) {
     <div class="page-loading"><ion-spinner /></div>
   } @else if (error()) {
     <app-load-error [compact]="!!messages().length" [message]="'chats.search.failed' | transloco" (retry)="load()" />
