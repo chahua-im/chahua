@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -22,6 +23,7 @@ from urllib.request import Request, urlopen
 
 
 DEFAULT_API_URL = "http://127.0.0.1:13000"
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 STATE_VERSION = 1
 USER_COUNT = 100
 FIXTURE_PREFIX = "Seed Fixture"
@@ -70,6 +72,13 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--api-url", default=DEFAULT_API_URL, help=f"Local backend URL (default: {DEFAULT_API_URL})")
     parser.add_argument("--state-file", type=Path, required=True, help="Shared fixture progress file")
+    parser.add_argument(
+        "--database-url",
+        help=(
+            "Loopback PostgreSQL URL for the fixture bootstrap, read with a local psql client. "
+            "Defaults to SEED_DATABASE_URL; without one the shared Docker Compose container is used."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -79,11 +88,42 @@ def validate_api_url(raw_url: str) -> str:
         raise SeedError("--api-url must be an absolute HTTP(S) URL")
     if parsed.username or parsed.password:
         raise SeedError("--api-url must not include credentials")
-    if parsed.hostname.lower() not in {"127.0.0.1", "localhost", "::1"}:
+    if parsed.hostname.lower() not in LOOPBACK_HOSTS:
         raise SeedError("--api-url must target a loopback host")
     if parsed.query or parsed.fragment:
         raise SeedError("--api-url must not include a query string or fragment")
     return raw_url.rstrip("/")
+
+
+def validate_database_url(raw_url: str) -> str:
+    parsed = urlsplit(raw_url)
+    if parsed.scheme not in {"postgres", "postgresql"} or not parsed.hostname:
+        raise SeedError("--database-url must be an absolute PostgreSQL URL")
+    if parsed.hostname.lower() not in LOOPBACK_HOSTS:
+        raise SeedError("--database-url must target a loopback host")
+    return raw_url
+
+
+def resolve_database_url(args: argparse.Namespace) -> str | None:
+    """Return the loopback URL for a local psql client, or None to use the Compose container.
+
+    An explicit URL wins: it names the cluster the backend itself reads. Otherwise the shared
+    Compose stack is preferred, since that is the supported Linux/macOS setup. Only when Docker
+    is unavailable is the launcher's DATABASE_URL used, which is how a host PostgreSQL (for
+    example the Windows installer) gets seeded.
+    """
+    explicit = args.database_url or os.environ.get("SEED_DATABASE_URL")
+    if explicit:
+        return validate_database_url(explicit)
+    if shutil.which("docker") is not None:
+        return None
+    fallback = os.environ.get("DATABASE_URL")
+    if not fallback:
+        raise SeedError(
+            "no fixture database: set --database-url or SEED_DATABASE_URL, or install docker "
+            "for the shared Compose stack"
+        )
+    return validate_database_url(fallback)
 
 
 def sql_literal(value: str) -> str:
@@ -189,26 +229,78 @@ def bootstrap_sql() -> str:
     return "\n".join(statements) + "\n"
 
 
-def compose_psql(sql: str) -> str:
+def registered_psql_paths() -> list[Path]:
+    """Read the PostgreSQL installer's registry entries; Windows does not add psql to PATH."""
+    if os.name != "nt":
+        return []
+    try:
+        import winreg
+    except ImportError:
+        return []
+    found: list[Path] = []
+    for hive, key in (
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\PostgreSQL\Installations"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\PostgreSQL\Installations"),
+    ):
+        try:
+            with winreg.OpenKey(hive, key) as installations:
+                for index in range(winreg.QueryInfoKey(installations)[0]):
+                    try:
+                        with winreg.OpenKey(installations, winreg.EnumKey(installations, index)) as entry:
+                            base, _ = winreg.QueryValueEx(entry, "Base Directory")
+                    except OSError:
+                        continue
+                    found.append(Path(base) / "bin" / "psql.exe")
+        except OSError:
+            continue
+    return found
+
+
+def find_psql() -> str | None:
+    if (found := shutil.which("psql")) is not None:
+        return found
+    for candidate in registered_psql_paths():
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def psql_command(database_url: str | None) -> list[str]:
+    """Build the fixture bootstrap invocation: a local client for an explicit URL, else Compose."""
+    if database_url is None:
+        repository = Path(__file__).resolve().parent.parent
+        compose_file = repository / "runspace" / "docker-compose.yml"
+        return [
+            "docker", "compose", "--env-file", os.environ["RUNSPACE_SHARED_ENV"], "-f", str(compose_file),
+            "exec", "-T", "postgres", "psql", "-v", "ON_ERROR_STOP=1", "-U", "wetty_chat", "-d", "wetty_chat", "-Atq",
+        ]
+    psql = find_psql()
+    if psql is None:
+        raise SeedError(
+            "a local psql client is required to bootstrap fixtures over --database-url; "
+            "install PostgreSQL client tools or remove the override to use Docker Compose"
+        )
+    return [psql, database_url, "-v", "ON_ERROR_STOP=1", "-Atq"]
+
+
+def compose_psql(sql: str, database_url: str | None) -> str:
     repository = Path(__file__).resolve().parent.parent
-    runspace = repository / "runspace"
-    compose_file = runspace / "docker-compose.yml"
-    command = [
-        "docker", "compose", "--env-file", os.environ["RUNSPACE_SHARED_ENV"], "-f", str(compose_file),
-        "exec", "-T", "postgres", "psql", "-v", "ON_ERROR_STOP=1", "-U", "wetty_chat", "-d", "wetty_chat", "-Atq",
-    ]
+    command = psql_command(database_url)
     try:
         result = subprocess.run(command, cwd=repository, input=sql, text=True, capture_output=True, check=False)
     except FileNotFoundError as exc:
-        raise SeedError("docker is required to bootstrap local fixture users") from exc
+        raise SeedError("psql or docker is required to bootstrap local fixture users") from exc
     if result.returncode:
         detail = result.stderr.strip() or result.stdout.strip() or "psql exited without an error message"
         raise SeedError(f"Postgres bootstrap failed: {detail}")
     return result.stdout.strip()
 
 
-def database_identity() -> str:
-    result = compose_psql("SELECT current_database() || ':' || (SELECT system_identifier::text FROM pg_control_system());\n")
+def database_identity(database_url: str | None) -> str:
+    result = compose_psql(
+        "SELECT current_database() || ':' || (SELECT system_identifier::text FROM pg_control_system());\n",
+        database_url,
+    )
     if not result:
         raise SeedError("could not determine the local Postgres identity")
     return result.splitlines()[-1]
@@ -534,9 +626,10 @@ def main() -> int:
     args = parse_args()
     try:
         api_url = validate_api_url(args.api_url)
-        compose_psql(bootstrap_sql())
+        database_url = resolve_database_url(args)
+        compose_psql(bootstrap_sql(), database_url)
         state_path = args.state_file
-        state = load_state(state_path, database_identity())
+        state = load_state(state_path, database_identity(database_url))
         client = ApiClient(api_url)
         ensure_groups(client, state, state_path)
         ensure_memberships(client, state, state_path)

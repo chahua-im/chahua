@@ -79,9 +79,22 @@ try {
   }
 
   function seed() {
+    // SEED_DATABASE_URL lets a worktree bootstrap fixtures against a host PostgreSQL while the
+    // shared DATABASE_URL still describes the Compose stack. Without it, seed.py falls back to
+    // DATABASE_URL and then to psql inside the shared postgres container.
+    const databaseUrl = config.SEED_DATABASE_URL;
+    const { program, prefix } = pythonCommand();
     return processes.run(
-      'python3',
-      [resolve(directory, 'seed.py'), '--api-url', api, '--state-file', resolve(shared, 'seed-state.json')],
+      program,
+      [
+        ...prefix,
+        resolve(directory, 'seed.py'),
+        '--api-url',
+        api,
+        '--state-file',
+        resolve(shared, 'seed-state.json'),
+        ...(databaseUrl ? ['--database-url', databaseUrl] : []),
+      ],
       {
         ...options,
         env: { ...environment, RUNSPACE_SHARED_ENV: sharedEnv },
@@ -95,6 +108,23 @@ try {
     } catch {
       throw new Error('Install the backend watcher first: cargo install --locked bacon');
     }
+  }
+
+  // Windows installs expose the interpreter as `python` or through the `py` launcher.
+  function pythonCommand() {
+    for (const [program, prefix] of [
+      ['python3', []],
+      ['python', []],
+      ['py', ['-3']],
+    ]) {
+      try {
+        execFileSync(program, [...prefix, '-c', 'import sys'], { stdio: 'ignore' });
+        return { program, prefix };
+      } catch {
+        /* Try the next interpreter name. */
+      }
+    }
+    throw new Error('Install Python 3.10+ and make python3, python, or the py launcher available on PATH.');
   }
 
   function backend() {
