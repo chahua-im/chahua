@@ -178,6 +178,7 @@ export class MessageMenu {
     const uid = this.chat()?.peer?.uid;
     return this.dm() && !!uid && this.chatInfo.relationship(uid).value()?.canDm === false;
   });
+  private readonly canManagePins = computed(() => !this.readOnly() && (this.admin() || this.dm()));
   protected readonly pinned = computed(() => {
     const message = this.serverMessage();
     return !this.queued() && !!message && !!this.pins().get(message.id);
@@ -338,8 +339,7 @@ export class MessageMenu {
     if (
       message &&
       !this.queued() &&
-      writable &&
-      (this.admin() || this.dm()) &&
+      this.canManagePins() &&
       message.messageType !== MessageType.sticker &&
       (this.pinned() || !message.isDeleted)
     )
@@ -626,7 +626,7 @@ export class MessageMenu {
       return;
     }
     const message = this.serverMessage();
-    if (!message || (action === MessageAction.Pin && !this.admin())) return;
+    if (!message || (action === MessageAction.Pin && !this.canManagePins())) return;
     if (action === MessageAction.Link) {
       const text = new URL(messageLink(this.chatId(), message.id), this.document.baseURI).href;
       void this.close();
@@ -704,7 +704,7 @@ export class MessageMenu {
     if (event.detail.role !== 'confirm' || !pending) return;
     if (pending.action === MessageAction.Recall && this.canRecallMessage(pending.message)) {
       await this.perform(() => this.messageActions.recall(pending.message), MessageNotice.Recalled, pending.message.id);
-    } else if (pending.action === MessageAction.Pin && this.admin()) {
+    } else if (pending.action === MessageAction.Pin && this.canManagePins()) {
       await this.perform(
         () => this.pins().set(pending.message, !pending.pinned),
         pending.pinned ? MessageNotice.Unpinned : MessageNotice.Pinned,

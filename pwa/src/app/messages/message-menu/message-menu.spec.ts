@@ -191,7 +191,7 @@ describe('MessageMenu', () => {
         {
           provide: ChatStore,
           useValue: {
-            pins: () => conversation,
+            pins: vi.fn(() => conversation),
             canSpeak: (_id: SnowflakeID, action: SpeakingAction) =>
               kind() === GroupKind.dm || admin() || allowsSpeaking(mode(), action),
             get: () => ({
@@ -613,6 +613,47 @@ describe('MessageMenu', () => {
     fixture.detectChanges();
     expect(labels()).toEqual(['回复', '话题', '复制', '转发', '收藏', '置顶']);
     expect(menu['admin']()).toBe(false);
+  });
+
+  describe.each([undefined, encodeId('700')])('DM pins in scope %s', (threadId) => {
+    beforeEach(() => {
+      kind.set(GroupKind.dm);
+      fixture.componentRef.setInput('threadId', threadId);
+      fixture.detectChanges();
+    });
+
+    it.each([false, true])('confirms the pin change when initially pinned=%s', async (initiallyPinned) => {
+      pinned.set(initiallyPinned);
+      const pins = TestBed.inject(ChatStore).pins;
+      await menu['choose'](MessageAction.Pin);
+      expect(menu['confirmation']()).toMatchObject({ action: MessageAction.Pin, pinned: initiallyPinned });
+      expect(conversation.set).not.toHaveBeenCalled();
+      await menu['confirm'](new CustomEvent('didDismiss', { detail: { role: 'confirm' } }));
+      expect(pins).toHaveBeenCalledWith(testChat.id, threadId);
+      expect(conversation.set).toHaveBeenCalledWith(testMessage, !initiallyPinned);
+      expect(menu['notice']()).toBe(initiallyPinned ? MessageNotice.Unpinned : MessageNotice.Pinned);
+    });
+
+    it('does not apply a cancelled pin action', async () => {
+      await menu['choose'](MessageAction.Pin);
+      await menu['confirm'](new CustomEvent('didDismiss', { detail: { role: 'cancel' } }));
+      expect(conversation.set).not.toHaveBeenCalled();
+    });
+
+    it('rejects pinning after the DM becomes read-only during confirmation', async () => {
+      await menu['choose'](MessageAction.Pin);
+      expect(menu['confirmation']()).toBeDefined();
+      canDm.set(false);
+      await menu['confirm'](new CustomEvent('didDismiss', { detail: { role: 'confirm' } }));
+      expect(conversation.set).not.toHaveBeenCalled();
+    });
+
+    it('does not open pin confirmation for a read-only DM', async () => {
+      canDm.set(false);
+      await menu['choose'](MessageAction.Pin);
+      expect(menu['confirmation']()).toBeUndefined();
+      expect(conversation.set).not.toHaveBeenCalled();
+    });
   });
 
   it('reduces a DM whose friendship ended to read-only actions', () => {
