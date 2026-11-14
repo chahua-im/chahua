@@ -90,6 +90,15 @@
     -webkit-user-select: text;
     user-select: text;
   }
+
+  // Reuse the bubble gutter on the block; inline padding with negative margins rewraps text in Firefox.
+  .message-body:has(> .message-text > app-message-text:not(.blocks)) {
+    margin-inline: calc(-1 * var(--message-padding-inline));
+    padding-inline: var(--message-padding-inline);
+    -webkit-user-select: text;
+    user-select: text;
+    cursor: text;
+  }
 }
 
 .preview :is(.message-text, .message-text :is(app-message-text, app-message-preview)) {
