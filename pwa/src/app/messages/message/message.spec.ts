@@ -106,7 +106,7 @@ describe('Message', () => {
     expect(fixture.nativeElement.querySelector('app-message-link-previews')).toBeNull();
   });
 
-  it('renders a lone URL as one standalone card with its timestamp and delivery status', async () => {
+  it('renders a lone URL as original text and an inline preview with timestamp and delivery status', async () => {
     const fixture = await render();
     fixture.componentRef.setInput('own', true);
     fixture.componentRef.setInput('message', {
@@ -125,22 +125,23 @@ describe('Message', () => {
     });
     fixture.detectChanges();
     const element: HTMLElement = fixture.nativeElement;
-    expect(element.querySelector('.bubble.card-bubble')).not.toBeNull();
+    expect(element.querySelector('.bubble.card-bubble')).toBeNull();
     expect(element.querySelectorAll('app-message-link-previews')).toHaveLength(1);
-    expect(element.querySelector('app-message-text, .sender')).toBeNull();
-    expect(element.querySelector('.standalone-card a')?.getAttribute('href')).toBe('https://example.com/');
+    expect(element.querySelector('app-message-text')?.textContent).toContain('https://example.com');
+    expect(element.querySelector('.sender')).not.toBeNull();
+    expect(element.querySelector('app-message-link-previews a')?.getAttribute('href')).toBe('https://example.com/');
     expect(element.querySelector('.description')?.textContent).toBe('A page description');
     expect(element.querySelectorAll('time')).toHaveLength(1);
-    expect(element.querySelector('.link-card-content .timestamp app-message-status')).not.toBeNull();
+    expect(element.querySelector('.message-body .timestamp app-message-status')).not.toBeNull();
     fixture.componentRef.setInput('preview', true);
     fixture.detectChanges();
-    expect(element.querySelector('.link-card-content')).not.toBeNull();
-    expect(element.querySelector('.standalone-card a')).toBeNull();
+    expect(element.querySelector('app-message-text')).not.toBeNull();
+    expect(element.querySelector('app-message-link-previews a')).toBeNull();
     fixture.componentRef.setInput('preview', false);
     fixture.componentRef.setInput('selecting', true);
     fixture.detectChanges();
     expect(element.querySelector('.chat-row')?.hasAttribute('inert')).toBe(true);
-    expect(element.querySelector('.standalone-card a')).toBeNull();
+    expect(element.querySelector('app-message-link-previews a')).toBeNull();
   });
 
   it.each([
@@ -165,7 +166,7 @@ describe('Message', () => {
     expect(fixture.nativeElement.querySelector('app-message-link-previews')).not.toBeNull();
   });
 
-  it('preserves the URL until a preview is ready and restores it if the preview becomes unavailable', async () => {
+  it('preserves the URL across all link preview states', async () => {
     const fixture = await render();
     const message = { ...testMessage, message: 'https://example.com/' };
     for (const status of [
@@ -191,14 +192,14 @@ describe('Message', () => {
           : undefined,
       });
       fixture.detectChanges();
-      expect(!!fixture.nativeElement.querySelector('.link-card-content')).toBe(status === LinkPreviewStatus.ready);
-      if (status !== LinkPreviewStatus.ready) {
-        expect(fixture.nativeElement.querySelector('app-message-text').textContent).toContain(message.message);
-      }
+      expect(fixture.nativeElement.querySelector('app-message-text').textContent).toContain(message.message);
+      expect(!!fixture.nativeElement.querySelector('app-message-link-previews .card')).toBe(
+        status === LinkPreviewStatus.ready || status === LinkPreviewStatus.pending,
+      );
     }
   });
 
-  it('keeps media captions inline, and preserves quotes and read-only record links on standalone cards', async () => {
+  it('keeps media captions inline, and preserves quotes and read-only record links', async () => {
     const fixture = await render();
     const message = {
       ...testMessage,
@@ -219,7 +220,7 @@ describe('Message', () => {
     fixture.componentRef.setInput('record', true);
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.reply-preview').textContent).toContain('Quoted message');
-    expect(fixture.nativeElement.querySelector('.standalone-card a')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('app-message-link-previews a')).not.toBeNull();
     fixture.componentRef.setInput('message', { ...message, message: undefined, isDeleted: true });
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.link-card-content')).toBeNull();

@@ -51,11 +51,15 @@ describe('DraftLinkPreviews', () => {
     fixture.componentRef.setInput('open', true);
     fixture.detectChanges();
     expect(requests.map((r) => r.url)).toEqual(urls.slice(0, 3));
+    expect(fixture.nativeElement.querySelectorAll('.entry .skeleton')).toHaveLength(3);
+    expect(fixture.nativeElement.querySelector('.muted .skeleton')).toBeNull();
     finish(0, LinkPreviewStatus.unavailable);
     finish(1);
     finish(2);
     await fixture.whenStable();
     expect(fetch).toHaveBeenCalledTimes(3);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.skeleton')).toBeNull();
     fixture.nativeElement.querySelector('.preview-choice').click();
     fixture.detectChanges();
     expect(requests[3].url).toBe(urls[3]);
@@ -114,6 +118,7 @@ describe('DraftLinkPreviews', () => {
     fixture.componentRef.setInput('automatic', true);
     fixture.detectChanges();
     expect(requests.map((request) => request.url)).toEqual([urls[0]]);
+    expect(fixture.componentInstance.loading()).toBe(true);
     finish(0, LinkPreviewStatus.unavailable);
     await fixture.whenStable();
     fixture.detectChanges();
@@ -123,6 +128,7 @@ describe('DraftLinkPreviews', () => {
     await fixture.whenStable();
     fixture.detectChanges();
     expect(fixture.componentInstance.firstReady()?.url).toBe(urls[1]);
+    expect(fixture.componentInstance.loading()).toBe(false);
     expect(fixture.componentInstance.fallbackUrl()).toBeUndefined();
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(fixture.componentInstance.open()).toBe(false);

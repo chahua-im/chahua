@@ -1,4 +1,3 @@
-import { messageLinkCard } from '../link-card';
 import { NgTemplateOutlet } from '@angular/common';
 import { Router } from '@angular/router';
 import { Component, computed, DestroyRef, ElementRef, inject, input, output, signal } from '@angular/core';
@@ -258,7 +257,6 @@ export class Message<T extends MessageContent = MessageResponse> {
     const message = this.message();
     return !message.isDeleted && (message.attachments.length > 0 || !!message.sticker);
   });
-  protected readonly linkCard = computed(() => messageLinkCard(this.message()));
   protected readonly isSticker = computed(
     () => !this.message().isDeleted && this.message().messageType === MessageType.sticker,
   );

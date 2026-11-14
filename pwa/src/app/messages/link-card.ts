@@ -1,6 +1,6 @@
 import { LinkPreviewStatus, MessageType, type MessageMetadataResponse } from '../../generated/models';
 
-/** Shared eligibility for standalone cards and compact message summaries. */
+/** Detect a lone URL with a ready preview for compact sharing summaries. */
 export function messageLinkCard(message: {
   messageType: MessageType;
   message?: string;
