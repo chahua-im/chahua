@@ -2391,12 +2391,15 @@ describe('ConversationPage', () => {
     expect(button.querySelector('.link-badge')).not.toBeNull();
     await vi.waitFor(() => expect(component['linkPreviewPanel']()).toBeDefined());
     const request = await vi.waitFor(() => peer.expect('messages.previewLinks', { chatId: wireChat.id, urls: [url] }));
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.draft-preview .skeleton')).not.toBeNull();
     request.flush([{ url, status: 'ready', title: 'Draft title' }]);
     await fixture.whenStable();
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.reply-context app-message-link-previews').textContent).toContain(
       'Draft title',
     );
+    expect(fixture.nativeElement.querySelector('.draft-preview .skeleton')).toBeNull();
     expect(component['linkPreviewOpen']()).toBe(false);
     button.click();
     fixture.detectChanges();
@@ -2424,6 +2427,7 @@ describe('ConversationPage', () => {
     const fallback = fixture.nativeElement.querySelector('.draft-link-fallback') as HTMLAnchorElement;
     expect(fallback.textContent?.trim()).toBe(url);
     expect(fallback.href).toBe(url);
+    expect(fixture.nativeElement.querySelector('.draft-preview .skeleton')).toBeNull();
     component['setLinkChoices']([{ url, status: LinkPreviewInputStatus.disabled }]);
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.draft-link-fallback')).toBeNull();

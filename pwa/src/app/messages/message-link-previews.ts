@@ -7,12 +7,18 @@ import { internalHref } from './message-text/message-text';
 @Component({
   selector: 'app-message-link-previews',
   template: `
+    <ng-template #skeleton>
+      <div class="card skeleton">
+        <span class="thumbnail placeholder"></span>
+        <span class="text"><span class="title placeholder"></span><span class="domain placeholder"></span></span>
+      </div>
+    </ng-template>
+    @if (loading()) {
+      <ng-container [ngTemplateOutlet]="skeleton" />
+    }
     @for (preview of visible(); track preview.url) {
       @if (preview.status === status.pending) {
-        <div class="card skeleton">
-          <span class="thumbnail placeholder"></span>
-          <span class="text"><span class="title placeholder"></span><span class="domain placeholder"></span></span>
-        </div>
+        <ng-container [ngTemplateOutlet]="skeleton" />
       } @else {
         @let host = hostname(preview.url);
         @if (interactive()) {
@@ -58,16 +64,15 @@ import { internalHref } from './message-text/message-text';
     :host {
       display: block;
       min-width: 0;
+      font-size: var(--app-chat-font-size, var(--app-font-body));
+      line-height: var(--app-chat-line-height, var(--app-line-body));
     }
     :host(:empty) {
       display: none;
     }
     .card {
       box-sizing: border-box;
-      display: grid;
-      grid-template-columns: var(--thumbnail-width, clamp(56px, 26%, 88px)) minmax(0, 1fr);
-      align-items: center;
-      gap: 8px;
+      display: flow-root;
       min-height: 48px;
       padding: 6px 8px;
       border-inline-start: 3px solid var(--stripe);
@@ -81,21 +86,16 @@ import { internalHref } from './message-text/message-text';
       margin-top: 4px;
     }
     :host {
-      --preview-color: var(--ion-color-primary);
-      --stripe: var(--preview-color);
-      --background: color-mix(in srgb, var(--preview-color) 12%, transparent);
-      --tile: color-mix(in srgb, var(--preview-color) 20%, transparent);
-    }
-    :host(:not(.standalone-card)) {
       --stripe: var(--message-accent-stripe);
       --background: var(--message-accent-background);
       --tile: var(--message-accent-tile);
     }
     .thumbnail {
       position: relative;
-      min-width: 0;
-      /* Two title lines, three description lines with margins, and one domain line. */
-      height: var(--thumbnail-height, 106px);
+      float: left;
+      width: 36px;
+      height: 36px;
+      margin: 0 8px 4px 0;
       border-radius: 4px;
       overflow: hidden;
     }
@@ -113,13 +113,10 @@ import { internalHref } from './message-text/message-text';
       font-weight: 600;
     }
     .text {
-      display: flex;
-      flex-direction: column;
-      min-width: 0;
-      justify-content: center;
-      line-height: 16px;
+      display: block;
     }
     .domain {
+      display: block;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -130,25 +127,24 @@ import { internalHref } from './message-text/message-text';
       -webkit-line-clamp: 2;
       overflow: hidden;
       overflow-wrap: anywhere;
-      font-size: 14px;
       font-weight: 600;
-    }
-    :host(:not(.standalone-card)) .title {
       color: var(--message-accent);
     }
     .description {
-      display: -webkit-box;
-      -webkit-box-orient: vertical;
-      -webkit-line-clamp: 3;
-      overflow: hidden;
+      display: block;
+      max-height: 3lh;
+      /* Clip without creating a formatting context, so lines wrap below the thumbnail. */
+      overflow: clip;
       overflow-wrap: anywhere;
       margin: 2px 0;
-      font-size: 13px;
-      line-height: 18px;
+      font-size: 0.75em;
+      line-height: 1.333333;
     }
     .domain {
       font-size: 12px;
-      opacity: 0.75;
+      line-height: 16px;
+      text-align: left;
+      opacity: 0.5;
     }
     .placeholder {
       display: block;
@@ -158,6 +154,9 @@ import { internalHref } from './message-text/message-text';
       border-radius: 4px;
       height: 10px;
     }
+    .skeleton .text {
+      margin-left: 44px;
+    }
     .skeleton .text .title {
       width: 75%;
       margin-bottom: 5px;
@@ -165,28 +164,13 @@ import { internalHref } from './message-text/message-text';
     .skeleton .text .domain {
       width: 45%;
     }
-    :host(.standalone-card) .card {
-      --thumbnail-width: clamp(64px, 30%, 112px);
-      --thumbnail-height: 114px;
-      gap: 12px;
-      min-height: 88px;
-      padding: 14px 14px 36px;
-      border: 1px solid var(--ion-color-light-shade);
-      border-radius: 14px;
-      background: var(--ion-background-color-step-50, var(--ion-background-color, var(--ion-color-light)));
-      color: var(--ion-text-color, var(--ion-color-dark));
-    }
-    :host(.standalone-card) .title {
-      line-height: 20px;
-    }
   `,
   imports: [NgTemplateOutlet],
-  host: { '[class.standalone-card]': 'standaloneCard()' },
 })
 export class MessageLinkPreviews {
   readonly previews = input.required<readonly LinkPreviewResponse[]>();
   readonly interactive = input(true);
-  readonly standaloneCard = input(false);
+  readonly loading = input(false);
   protected readonly status = LinkPreviewStatus;
   protected readonly failedImages = signal<ReadonlySet<string>>(new Set());
   private readonly expired = signal<ReadonlySet<string>>(new Set());

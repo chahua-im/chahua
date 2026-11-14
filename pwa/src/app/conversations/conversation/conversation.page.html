@@ -418,11 +418,13 @@
       }
     </ng-template>
     <ng-template #firstLinkPreview>
-      @if (linkPreviewPanel()?.firstReady(); as preview) {
+      @let preview = linkPreviewPanel()?.firstReady();
+      @if (preview || (linkPreviewPanel()?.loading() && !linkPreviewPanel()?.fallbackUrl())) {
         <app-message-link-previews
           class="draft-preview"
           [style.--message-accent]="'light-dark(' + draftPreviewColors().light + ', ' + draftPreviewColors().dark + ')'"
-          [previews]="[preview]"
+          [previews]="preview ? [preview] : []"
+          [loading]="!preview"
           [interactive]="false" />
       } @else if (linkPreviewPanel()?.fallbackUrl(); as url) {
         <a class="draft-link-fallback" [href]="url" [title]="url" target="_blank" rel="noopener noreferrer">

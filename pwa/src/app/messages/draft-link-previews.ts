@@ -1,5 +1,5 @@
 import { Component, computed, DestroyRef, effect, inject, input, linkedSignal, model, untracked } from '@angular/core';
-import { IonButton, IonIcon, IonModal, IonSpinner } from '@ionic/angular';
+import { IonButton, IonIcon, IonModal } from '@ionic/angular';
 import { closeOutline, linkOutline } from 'ionicons/icons';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { firstValueFrom } from 'rxjs';
@@ -17,7 +17,7 @@ import { draftLinkUrls } from './draft-link-urls';
 
 @Component({
   selector: 'app-draft-link-previews',
-  imports: [IonButton, IonIcon, IonModal, IonSpinner, TranslocoPipe, MessageLinkPreviews],
+  imports: [IonButton, IonIcon, IonModal, TranslocoPipe, MessageLinkPreviews],
   template: `
     <ion-modal
       class="draft-link-preview-modal"
@@ -48,16 +48,16 @@ import { draftLinkUrls } from './draft-link-urls';
               <div class="entry" [class.muted]="!active">
                 <div class="content">
                   <a class="destination" [href]="url" [title]="url" target="_blank" rel="noopener noreferrer">
-                    @if (preview?.status === Status.ready) {
-                      <app-message-link-previews [previews]="[preview!]" [interactive]="false" />
+                    @if (preview?.status === Status.ready || (active && !preview)) {
+                      <app-message-link-previews
+                        [previews]="preview ? [preview] : []"
+                        [loading]="!preview"
+                        [interactive]="false"
+                      />
                     } @else {
                       <div class="link-summary">
                         <span class="link-symbol">
-                          @if (active && !preview) {
-                            <ion-spinner name="circular" />
-                          } @else {
-                            <ion-icon [icon]="linkIcon" />
-                          }
+                          <ion-icon [icon]="linkIcon" />
                         </span>
                         <div class="link-text">
                           <strong>{{ hostname(url) }}</strong>
@@ -179,8 +179,7 @@ import { draftLinkUrls } from './draft-link-urls';
       background: var(--ion-background-color-step-100);
       color: var(--ion-color-medium);
     }
-    .link-symbol ion-icon,
-    ion-spinner {
+    .link-symbol ion-icon {
       width: 20px;
       height: 20px;
     }
@@ -309,6 +308,8 @@ export class DraftLinkPreviews {
     }
     return undefined;
   });
+
+  readonly loading = computed(() => (this.automatic() || this.open()) && !!this.automaticUrl());
 
   constructor() {
     let previousText = '';
