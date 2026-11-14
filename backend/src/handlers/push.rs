@@ -22,11 +22,14 @@ use crate::AppState;
     path = "/vapid-public-key",
     tag = "push",
     responses(
-        (status = 200, description = "VAPID public key", body = VapidPublicKeyResponse)
+        (status = 200, description = "VAPID public key", body = VapidPublicKeyResponse),
+        (status = 503, description = "Web Push is not configured")
     )
 )]
-async fn get_vapid_public_key(State(state): State<AppState>) -> Json<VapidPublicKeyResponse> {
-    Json(push::get_vapid_public_key(state.push_service.as_ref()))
+async fn get_vapid_public_key(
+    State(state): State<AppState>,
+) -> Result<Json<VapidPublicKeyResponse>, AppError> {
+    push::get_vapid_public_key(state.push_service.as_ref()).map(Json)
 }
 
 #[utoipa::path(

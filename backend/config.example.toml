@@ -49,6 +49,8 @@
 # [list_sync]
 # retention_days = 30
 
+# Web Push, APNs and FCM can be enabled independently; the server requires at least one.
+# Web Push requires all three VAPID values, or none to disable it.
 # [push]
 # vapid_subject = "mailto:admin@example.com"
 # vapid_public_key = "..." # Public metadata; VAPID_PRIVATE_KEY stays in env.
