@@ -21,6 +21,8 @@ pub enum ApiPushProvider {
     #[default]
     WebPush,
     Apns,
+    /// Google Firebase Cloud Messaging (Android).
+    Fcm,
 }
 
 impl From<ApiPushProvider> for crate::models::PushProvider {
@@ -28,6 +30,7 @@ impl From<ApiPushProvider> for crate::models::PushProvider {
         match value {
             ApiPushProvider::WebPush => Self::WebPush,
             ApiPushProvider::Apns => Self::Apns,
+            ApiPushProvider::Fcm => Self::Fcm,
         }
     }
 }

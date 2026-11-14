@@ -17,8 +17,8 @@ use crate::services::ws_registry::ConnectionRegistry;
 
 use super::delivery::{DeliveryFailure, DeliveryFailureAction};
 use super::payload::{
-    build_apns_notification, build_push_payload, format_push_body, format_reply_push_body,
-    payload_type_for, PushPayloadType,
+    build_apns_notification, build_fcm_notification, build_push_payload, format_push_body,
+    format_reply_push_body, payload_type_for, PushPayloadType,
 };
 use super::policy::{
     should_send_push, should_send_web_push, PushDecision, PushRecipientContext, PushSkipReason,
@@ -297,19 +297,20 @@ async fn process_push_job(
                     format_push_body(&job.sender_username, job.body_preview.as_deref())
                 }
             };
-            let mut web_payload = build_push_payload(&job, unread, &body_text, sub.user_id);
+            let mut push_payload = build_push_payload(&job, unread, &body_text, sub.user_id);
             if is_dm {
-                web_payload.ordinary_message_body = Some(format_push_body(
+                push_payload.ordinary_message_body = Some(format_push_body(
                     &job.sender_username,
                     job.body_preview.as_deref(),
                 ));
             }
-            let web_payload = serde_json::to_vec(&web_payload).unwrap_or_default();
+            let fcm_notification = build_fcm_notification(&push_payload);
+            let web_payload = serde_json::to_vec(&push_payload).unwrap_or_default();
             let apns_notification = build_apns_notification(&job, unread, sub.user_id);
 
             async move {
                 match service
-                    .send_to_subscription(&sub, &web_payload, &apns_notification)
+                    .send_to_subscription(&sub, &web_payload, &apns_notification, &fcm_notification)
                     .await
                 {
                     Ok(()) => DeliveryAttemptResult::Success {

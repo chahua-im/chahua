@@ -467,12 +467,12 @@ the process-local presence boundary, see the [backend architecture overview](../
 
 | Family | Type / labels | Meaning and recording boundary | Buckets / cardinality |
 | --- | --- | --- | --- |
-| `push_notifications_total` | Counter; `provider`, `result` | Push delivery attempts, classified success or failure. | Provider/result are low-cardinality classifications; never use subscription or user IDs. |
+| `push_notifications_total` | Counter; `provider`, `result` | Push delivery attempts, classified success or failure. | `provider` is one of `web_push`, `apns`, `fcm`; never use subscription or user IDs. |
 | `push_notification_jobs_total` | Counter; `result` | Push worker jobs processed, including database connection failures. | Fixed success/failure result labels. |
 | `push_notification_job_duration_seconds` | Histogram; `result` | Push worker job runtime, in seconds. | `H5`; fixed success/failure result labels. |
 | `push_notifications_suppressed_total` | Counter | Recipient notifications skipped because active WebSocket presence suppresses push. | No labels. |
-| `push_delivery_failures_total` | Counter; `provider`, `class` | Classified failed delivery attempts. | Classification labels are deliberately bounded; never use an error message as a label. |
-| `push_subscription_prunes_total` | Counter; `provider`, `reason` | Subscriptions pruned after delivery failure. | Classification labels are deliberately bounded; never use subscription/user IDs. |
+| `push_delivery_failures_total` | Counter; `provider`, `class` | Classified failed delivery attempts. | `provider` is one of `web_push`, `apns`, `fcm`; classification labels are deliberately bounded; never use an error message as a label. |
+| `push_subscription_prunes_total` | Counter; `provider`, `reason` | Subscriptions pruned after delivery failure. | `provider` is one of `web_push`, `apns`, `fcm`; classification labels are deliberately bounded; never use subscription/user IDs. |
 
 ## Avatar lookup
 

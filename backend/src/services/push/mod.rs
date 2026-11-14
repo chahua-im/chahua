@@ -19,7 +19,7 @@ pub use payload::{PushMessagePreview, PushMessagePreviewSticker};
 use crate::models::PushProvider;
 use crate::services::unread::UnreadService;
 use crate::services::ws_registry::ConnectionRegistry;
-use delivery::ApnsSender;
+use delivery::{ApnsSender, FcmSender};
 use worker::supervise_push_worker;
 
 const CHANNEL_BUFFER: usize = 1024;
@@ -41,6 +41,7 @@ pub struct PushService {
     pub client: HyperWebPushClient,
     pub config: Arc<crate::config::PushConfig>,
     apns_sender: Option<ApnsSender>,
+    fcm_sender: Option<FcmSender>,
     metrics: Arc<PushMetrics>,
     unread_service: Arc<UnreadService>,
     job_tx: mpsc::Sender<PushJob>,
@@ -69,12 +70,20 @@ impl PushService {
             .transpose()
             .expect("invalid APNS configuration");
 
+        let fcm_sender = config
+            .fcm
+            .as_ref()
+            .map(FcmSender::from_config)
+            .transpose()
+            .expect("invalid FCM configuration");
+
         let (tx, rx) = mpsc::channel(CHANNEL_BUFFER);
 
         let service = Arc::new(Self {
             client: HyperWebPushClient::new(),
             config,
             apns_sender,
+            fcm_sender,
             metrics,
             unread_service,
             job_tx: tx,
@@ -93,6 +102,7 @@ impl PushService {
         match provider {
             PushProvider::WebPush => true,
             PushProvider::Apns => self.apns_sender.is_some(),
+            PushProvider::Fcm => self.fcm_sender.is_some(),
         }
     }
 
@@ -141,15 +151,15 @@ where
 #[cfg(test)]
 mod tests {
     use super::delivery::{
-        classify_apns_send_error, classify_web_push_error, is_stale_apns_error_reason,
-        DeliveryFailureAction,
+        build_fcm_message, classify_apns_send_error, classify_fcm_error, classify_web_push_error,
+        is_stale_apns_error_reason, DeliveryFailureAction, DeliveryFailureClass,
     };
     use super::payload::{
-        build_apns_notification, build_push_payload, format_push_body, format_reply_push_body,
-        truncate_preview, PushPayloadType, APNS_BODY_LOC_KEY_AUDIO, APNS_BODY_LOC_KEY_INVITE,
-        APNS_BODY_LOC_KEY_MENTION, APNS_BODY_LOC_KEY_NO_PREVIEW, APNS_BODY_LOC_KEY_REPLY,
-        APNS_BODY_LOC_KEY_STICKER_EMOJI, APNS_BODY_LOC_KEY_WITH_PREVIEW, APNS_TITLE_LOC_KEY,
-        MESSAGE_PREVIEW_MAX,
+        build_apns_notification, build_fcm_notification, build_push_payload, format_push_body,
+        format_reply_push_body, truncate_preview, PushPayloadType, APNS_BODY_LOC_KEY_AUDIO,
+        APNS_BODY_LOC_KEY_INVITE, APNS_BODY_LOC_KEY_MENTION, APNS_BODY_LOC_KEY_NO_PREVIEW,
+        APNS_BODY_LOC_KEY_REPLY, APNS_BODY_LOC_KEY_STICKER_EMOJI, APNS_BODY_LOC_KEY_WITH_PREVIEW,
+        APNS_TITLE_LOC_KEY, MESSAGE_PREVIEW_MAX,
     };
     use super::*;
     use crate::dto::messages::MessagePreviewAttachment;
@@ -791,6 +801,158 @@ mod tests {
         assert_eq!(failure.reason, "server_error");
     }
 
+    fn fcm_job() -> PushJob {
+        PushJob {
+            chat_id: 10,
+            sender_uid: 42,
+            sender_username: "alice".to_string(),
+            chat_name: "General".to_string(),
+            message_preview: PushMessagePreview {
+                message: Some("a".repeat(MESSAGE_PREVIEW_MAX + 5)),
+                message_type: MessageType::Text,
+                sticker: None,
+                attachments: Vec::new(),
+                is_deleted: false,
+            },
+            body_preview: Some("hello there".to_string()),
+            message_id: 99,
+            thread_root_id: Some(55),
+            mentioned_uids: Vec::new(),
+            reply_target_uid: Some(42),
+        }
+    }
+
+    #[test]
+    fn build_fcm_notification_carries_chat_context_and_truncated_preview() {
+        let job = fcm_job();
+        let payload = build_push_payload(&job, 3, "alice replied to your message: hello", 42);
+
+        let notification = build_fcm_notification(&payload);
+
+        assert_eq!(notification.collapse_key, "chat_10_thread_55");
+        assert_eq!(notification.data.type_, PushPayloadType::Reply);
+        assert_eq!(notification.data.chat_id, "10");
+        assert_eq!(notification.data.message_id, "99");
+        assert_eq!(notification.data.thread_root_id.as_deref(), Some("55"));
+        assert_eq!(notification.data.sender_name, "alice");
+        assert_eq!(notification.data.chat_name, "General");
+        assert_eq!(notification.data.unread_count, 3);
+        assert_eq!(
+            notification.data.message_preview.message,
+            Some(format!("{}…", "a".repeat(MESSAGE_PREVIEW_MAX)))
+        );
+    }
+
+    #[test]
+    fn fcm_message_body_is_data_only_with_string_values() {
+        let job = fcm_job();
+        let payload = build_push_payload(&job, 3, "alice: hello", 99);
+        let notification = build_fcm_notification(&payload);
+
+        let body: serde_json::Value =
+            serde_json::from_str(&build_fcm_message("device-token", &notification).unwrap())
+                .expect("parse FCM request body");
+        let message = &body["message"];
+
+        assert_eq!(message["token"], "device-token");
+        assert_eq!(message["android"]["priority"], "high");
+        assert_eq!(message["android"]["collapse_key"], "chat_10_thread_55");
+        // The Android client renders notifications from data, so the system
+        // must not display one itself.
+        assert!(message.get("notification").is_none());
+        let data = message["data"].as_object().expect("FCM data object");
+        assert!(data.values().all(serde_json::Value::is_string));
+        assert_eq!(data["type"], "newMessage");
+        assert_eq!(data["chatId"], "10");
+        assert_eq!(data["threadRootId"], "55");
+        assert_eq!(data["unreadCount"], "3");
+        assert_eq!(data["senderName"], "alice");
+        assert_eq!(data["body"], "alice: hello");
+        let preview: serde_json::Value =
+            serde_json::from_str(data["messagePreview"].as_str().unwrap()).expect("preview JSON");
+        assert_eq!(preview["messageType"], "text");
+    }
+
+    #[test]
+    fn fcm_message_body_omits_absent_optional_fields() {
+        let job = PushJob {
+            thread_root_id: None,
+            mentioned_uids: Vec::new(),
+            reply_target_uid: None,
+            ..fcm_job()
+        };
+        let payload = build_push_payload(&job, 0, "alice: hello", 42);
+        let notification = build_fcm_notification(&payload);
+        assert_eq!(notification.collapse_key, "chat_10");
+
+        let body: serde_json::Value =
+            serde_json::from_str(&build_fcm_message("device-token", &notification).unwrap())
+                .expect("parse FCM request body");
+        let data = body["message"]["data"]
+            .as_object()
+            .expect("FCM data object");
+        assert!(!data.contains_key("threadRootId"));
+        assert!(!data.contains_key("mentionedUid"));
+    }
+
+    #[test]
+    fn fcm_unregistered_error_prunes_subscription() {
+        let body = r#"{"error":{"code":404,"message":"Requested entity was not found.","status":"NOT_FOUND","details":[{"@type":"type.googleapis.com/google.firebase.fcm.v1.FcmError","errorCode":"UNREGISTERED"}]}}"#;
+
+        let failure = classify_fcm_error(404, body);
+
+        assert_eq!(failure.action, DeliveryFailureAction::PruneImmediate);
+        assert_eq!(failure.class, DeliveryFailureClass::ProviderRejected);
+        assert_eq!(failure.reason, "UNREGISTERED");
+    }
+
+    #[test]
+    fn fcm_sender_id_mismatch_prunes_subscription() {
+        let body = r#"{"error":{"code":403,"status":"PERMISSION_DENIED","details":[{"@type":"type.googleapis.com/google.firebase.fcm.v1.FcmError","errorCode":"SENDER_ID_MISMATCH"}]}}"#;
+
+        let failure = classify_fcm_error(403, body);
+
+        assert_eq!(failure.action, DeliveryFailureAction::PruneImmediate);
+        assert_eq!(failure.reason, "SENDER_ID_MISMATCH");
+    }
+
+    #[test]
+    fn fcm_invalid_argument_never_prunes_a_valid_token() {
+        let body = r#"{"error":{"code":400,"status":"INVALID_ARGUMENT","message":"Invalid payload","details":[{"@type":"type.googleapis.com/google.firebase.fcm.v1.FcmError","errorCode":"INVALID_ARGUMENT"}]}}"#;
+
+        let failure = classify_fcm_error(400, body);
+
+        assert_eq!(failure.action, DeliveryFailureAction::None);
+        assert_eq!(failure.reason, "INVALID_ARGUMENT");
+    }
+
+    #[test]
+    fn fcm_unavailable_error_is_retryable() {
+        let body = r#"{"error":{"code":503,"status":"UNAVAILABLE","details":[{"@type":"type.googleapis.com/google.firebase.fcm.v1.FcmError","errorCode":"UNAVAILABLE"}]}}"#;
+
+        let failure = classify_fcm_error(503, body);
+
+        assert_eq!(failure.action, DeliveryFailureAction::None);
+        assert_eq!(failure.class, DeliveryFailureClass::ProviderTransient);
+    }
+
+    #[test]
+    fn fcm_error_without_body_falls_back_to_http_status() {
+        let failure = classify_fcm_error(500, "");
+
+        assert_eq!(failure.action, DeliveryFailureAction::None);
+        assert_eq!(failure.reason, "http_500");
+    }
+
+    #[test]
+    fn fcm_provider_uses_its_metrics_label() {
+        assert_eq!(PushProvider::Fcm.as_metrics_label(), "fcm");
+        assert_eq!(
+            serde_json::to_value(PushProvider::Fcm).unwrap(),
+            serde_json::json!("fcm")
+        );
+    }
+
     #[test]
     fn apns_support_requires_sender_configuration() {
         let service = PushService {
@@ -800,8 +962,10 @@ mod tests {
                 vapid_private_key: "private".to_string(),
                 vapid_subject: "mailto:test@example.com".to_string(),
                 apns: None,
+                fcm: None,
             }),
             apns_sender: None,
+            fcm_sender: None,
             metrics: Arc::new(PushMetrics::new(&prometheus::Registry::new())),
             unread_service: Arc::new(UnreadService::new()),
             job_tx: mpsc::channel(1).0,
@@ -809,6 +973,7 @@ mod tests {
 
         assert!(service.supports_provider(&PushProvider::WebPush));
         assert!(!service.supports_provider(&PushProvider::Apns));
+        assert!(!service.supports_provider(&PushProvider::Fcm));
     }
 
     #[tokio::test]

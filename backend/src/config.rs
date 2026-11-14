@@ -68,6 +68,7 @@ pub struct PushConfig {
     pub vapid_private_key: String,
     pub vapid_subject: String,
     pub apns: Option<ApnsConfig>,
+    pub fcm: Option<FcmConfig>,
 }
 
 pub struct ApnsConfig {
@@ -75,6 +76,13 @@ pub struct ApnsConfig {
     pub team_id: String,
     pub private_key_path: String,
     pub topic: String,
+}
+
+/// Firebase Cloud Messaging credentials. The service-account JSON is a secret
+/// and stays in a file referenced by `FCM_SERVICE_ACCOUNT_PATH`.
+pub struct FcmConfig {
+    pub project_id: String,
+    pub service_account_path: String,
 }
 
 pub struct AppConfig {
@@ -182,6 +190,7 @@ struct PushSettings {
     vapid_public_key: Option<String>,
     vapid_subject: Option<String>,
     apns: ApnsSettings,
+    fcm: FcmSettings,
 }
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -189,6 +198,11 @@ struct ApnsSettings {
     key_id: Option<String>,
     team_id: Option<String>,
     topic: Option<String>,
+}
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct FcmSettings {
+    project_id: Option<String>,
 }
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -411,6 +425,16 @@ impl AppConfig {
             (Some(key_id), Some(team_id), Some(private_key_path), Some(topic)) => Some(ApnsConfig { key_id, team_id, private_key_path, topic }),
             _ => panic!("APNS configuration requires APNS_KEY_ID, APNS_TEAM_ID, APNS_PRIVATE_KEY_PATH and APNS_TOPIC"),
         };
+        let fcm_project_id = nonempty(env("FCM_PROJECT_ID").or(push.fcm.project_id));
+        let fcm_service_account_path = nonempty(env("FCM_SERVICE_ACCOUNT_PATH"));
+        let fcm = match (fcm_project_id, fcm_service_account_path) {
+            (None, None) => None,
+            (Some(project_id), Some(service_account_path)) => Some(FcmConfig {
+                project_id,
+                service_account_path,
+            }),
+            _ => panic!("FCM configuration requires FCM_PROJECT_ID and FCM_SERVICE_ACCOUNT_PATH"),
+        };
         let node_id = match env("NODE_ID") {
             Some(value) => value.parse::<u64>().ok(),
             None => Some(ids.node_id.unwrap_or(0)),
@@ -494,6 +518,7 @@ impl AppConfig {
                     && private_key.is_none()
                     && subject.is_none()
                     && apns.is_none()
+                    && fcm.is_none()
                 {
                     None
                 } else {
@@ -502,6 +527,7 @@ impl AppConfig {
                         vapid_private_key: required(private_key, "VAPID_PRIVATE_KEY"),
                         vapid_subject: required(subject, "VAPID_SUBJECT"),
                         apns,
+                        fcm,
                     }))
                 }
             },
@@ -784,6 +810,7 @@ mod tests {
             vec![("ENABLE_DEBUG_AUTH", "TRUE")],
             vec![("MESSAGE_SEARCH_ENABLED", "yes")],
             vec![("APNS_KEY_ID", "partial")],
+            vec![("FCM_PROJECT_ID", "partial")],
             vec![("ATTACHMENT_MAX_FILE_SIZE_BYTES", "0")],
             vec![("CORS_ALLOWED_ORIGINS", ",,")],
         ] {
@@ -796,6 +823,46 @@ mod tests {
             ))
             .is_err());
         }
+    }
+
+    #[test]
+    fn fcm_settings_resolve_from_file_and_environment() {
+        let file = parse("[push]\n[push.fcm]\nproject_id = 'chahua-4eb01'\n");
+        let mut values = base();
+        values.push(("FCM_SERVICE_ACCOUNT_PATH", "/secrets/fcm-sa.json"));
+        let config = AppConfig::resolve(file, env(&values), false);
+        let fcm = config
+            .push
+            .as_ref()
+            .unwrap()
+            .fcm
+            .as_ref()
+            .expect("FCM configuration");
+        assert_eq!(fcm.project_id, "chahua-4eb01");
+        assert_eq!(fcm.service_account_path, "/secrets/fcm-sa.json");
+
+        // The environment wins over the file for the project id.
+        let mut values = base();
+        values.extend([
+            ("FCM_PROJECT_ID", "env-project"),
+            ("FCM_SERVICE_ACCOUNT_PATH", "/env/fcm-sa.json"),
+        ]);
+        let config = AppConfig::resolve(
+            parse("[push]\n[push.fcm]\nproject_id = 'file-project'\n"),
+            env(&values),
+            false,
+        );
+        let fcm = config.push.as_ref().unwrap().fcm.as_ref().unwrap();
+        assert_eq!(fcm.project_id, "env-project");
+        assert_eq!(fcm.service_account_path, "/env/fcm-sa.json");
+    }
+
+    #[test]
+    fn fcm_service_account_path_cannot_come_from_the_config_file() {
+        assert!(toml::from_str::<ConfigFile>(
+            "[push.fcm]\nproject_id = 'project'\nservice_account_path = 'secret'"
+        )
+        .is_err());
     }
 
     #[test]
