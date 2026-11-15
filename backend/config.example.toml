@@ -34,7 +34,9 @@ index_uid = "messages_v1"
 # MEILI_MASTER_KEY remains an environment variable.
 
 [push]
-vapid_subject = "mailto:admin@example.com"
+# Web Push, APNs and FCM can be enabled independently; the server requires at least one.
+# Web Push requires all three VAPID values, or none to disable it.
+# vapid_subject = "mailto:admin@example.com"
 # vapid_public_key = "..." # Public metadata; VAPID_PRIVATE_KEY stays in env.
 
 # [push.apns]
@@ -42,6 +44,11 @@ vapid_subject = "mailto:admin@example.com"
 # team_id = "..."
 # topic = "app.example.chahua"
 # APNS_PRIVATE_KEY_PATH stays in env and points to the existing private-key file.
+
+# [push.fcm]
+# project_id = "Your FCM project ID"
+# FCM_SERVICE_ACCOUNT_PATH stays in env and points to the Firebase
+# service-account JSON ("Firebase Admin SDK" private key).
 
 # [avatars]
 # public_url = "https://avatars.example.com"

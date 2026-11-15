@@ -42,11 +42,16 @@ pub struct AuthConfig {
     pub service_token_hash_key: Vec<u8>,
 }
 
-pub struct PushConfig {
+pub struct WebPushConfig {
     pub vapid_public_key: String,
     pub vapid_private_key: String,
     pub vapid_subject: String,
+}
+
+pub struct PushConfig {
+    pub web_push: Option<WebPushConfig>,
     pub apns: Option<ApnsConfig>,
+    pub fcm: Option<FcmConfig>,
 }
 
 pub struct ApnsConfig {
@@ -54,6 +59,13 @@ pub struct ApnsConfig {
     pub team_id: String,
     pub private_key_path: String,
     pub topic: String,
+}
+
+/// Firebase Cloud Messaging credentials. The service-account JSON is a secret
+/// and stays in a file referenced by `FCM_SERVICE_ACCOUNT_PATH`.
+pub struct FcmConfig {
+    pub project_id: String,
+    pub service_account_path: String,
 }
 
 pub struct AppConfig {
@@ -128,6 +140,7 @@ struct PushSettings {
     vapid_public_key: Option<String>,
     vapid_subject: Option<String>,
     apns: ApnsSettings,
+    fcm: FcmSettings,
 }
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -135,6 +148,11 @@ struct ApnsSettings {
     key_id: Option<String>,
     team_id: Option<String>,
     topic: Option<String>,
+}
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct FcmSettings {
+    project_id: Option<String>,
 }
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -333,6 +351,21 @@ impl AppConfig {
             }
             _ => None,
         };
+        let web_push = match (
+            nonempty(env("VAPID_PUBLIC_KEY").or(push.vapid_public_key)),
+            nonempty(env("VAPID_PRIVATE_KEY")),
+            nonempty(env("VAPID_SUBJECT").or(push.vapid_subject)),
+        ) {
+            (None, None, None) => None,
+            (Some(vapid_public_key), Some(vapid_private_key), Some(vapid_subject)) => {
+                Some(WebPushConfig {
+                    vapid_public_key,
+                    vapid_private_key,
+                    vapid_subject,
+                })
+            }
+            _ => panic!("Web Push configuration requires VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT"),
+        };
         let apns_key_id = nonempty(env("APNS_KEY_ID").or(push.apns.key_id));
         let apns_team_id = nonempty(env("APNS_TEAM_ID").or(push.apns.team_id));
         let apns_topic = nonempty(env("APNS_TOPIC").or(push.apns.topic));
@@ -341,6 +374,21 @@ impl AppConfig {
             (None, None, None, None) => None,
             (Some(key_id), Some(team_id), Some(private_key_path), Some(topic)) => Some(ApnsConfig { key_id, team_id, private_key_path, topic }),
             _ => panic!("APNS configuration requires APNS_KEY_ID, APNS_TEAM_ID, APNS_PRIVATE_KEY_PATH and APNS_TOPIC"),
+        };
+        let fcm_project_id = nonempty(env("FCM_PROJECT_ID").or(push.fcm.project_id));
+        let fcm_service_account_path = nonempty(env("FCM_SERVICE_ACCOUNT_PATH"));
+        let fcm = match (fcm_project_id, fcm_service_account_path) {
+            (None, None) => None,
+            (Some(project_id), Some(service_account_path)) => Some(FcmConfig {
+                project_id,
+                service_account_path,
+            }),
+            (Some(_), None) => panic!(
+                "FCM_PROJECT_ID is set but FCM_SERVICE_ACCOUNT_PATH is missing; unset FCM_PROJECT_ID to disable FCM"
+            ),
+            (None, Some(_)) => panic!(
+                "FCM_SERVICE_ACCOUNT_PATH is set but FCM_PROJECT_ID is missing; unset FCM_SERVICE_ACCOUNT_PATH to disable FCM"
+            ),
         };
         let node_id = match env("NODE_ID") {
             Some(value) => value.parse::<u64>().ok(),
@@ -390,22 +438,14 @@ impl AppConfig {
             message_search_enabled: enabled,
             message_search: search,
             push: {
-                let public_key = env("VAPID_PUBLIC_KEY").or(push.vapid_public_key);
-                let private_key = env("VAPID_PRIVATE_KEY");
-                let subject = env("VAPID_SUBJECT").or(push.vapid_subject);
                 // Offline search reindexing does not require push credentials.
-                if public_key.is_none()
-                    && private_key.is_none()
-                    && subject.is_none()
-                    && apns.is_none()
-                {
+                if web_push.is_none() && apns.is_none() && fcm.is_none() {
                     None
                 } else {
                     Some(Arc::new(PushConfig {
-                        vapid_public_key: required(public_key, "VAPID_PUBLIC_KEY"),
-                        vapid_private_key: required(private_key, "VAPID_PRIVATE_KEY"),
-                        vapid_subject: required(subject, "VAPID_SUBJECT"),
+                        web_push,
                         apns,
+                        fcm,
                     }))
                 }
             },
@@ -570,7 +610,14 @@ mod tests {
             "https://example.com"
         );
         assert_eq!(
-            config.push.as_ref().unwrap().vapid_public_key,
+            config
+                .push
+                .as_ref()
+                .unwrap()
+                .web_push
+                .as_ref()
+                .unwrap()
+                .vapid_public_key,
             "file-public"
         );
         assert_eq!(
@@ -587,12 +634,134 @@ mod tests {
     }
 
     #[test]
+    fn push_providers_resolve_independently() {
+        let apns = [
+            ("APNS_KEY_ID", "key"),
+            ("APNS_TEAM_ID", "team"),
+            ("APNS_PRIVATE_KEY_PATH", "/apns/key"),
+            ("APNS_TOPIC", "topic"),
+        ];
+        let fcm = [
+            ("FCM_PROJECT_ID", "project"),
+            ("FCM_SERVICE_ACCOUNT_PATH", "/fcm/key"),
+        ];
+        for (web_enabled, apns_enabled, fcm_enabled) in [
+            (true, false, false),
+            (false, true, false),
+            (false, false, true),
+            (false, true, true),
+            (false, false, false),
+            (true, true, true),
+        ] {
+            let mut values = base();
+            if !web_enabled {
+                values.retain(|(key, _)| !key.starts_with("VAPID_"));
+            }
+            if apns_enabled {
+                values.extend(apns);
+            }
+            if fcm_enabled {
+                values.extend(fcm);
+            }
+            let config = AppConfig::resolve(ConfigFile::default(), env(&values), false);
+            if !web_enabled && !apns_enabled && !fcm_enabled {
+                assert!(config.push.is_none());
+                continue;
+            }
+            let push = config.push.unwrap();
+            assert_eq!(push.web_push.is_some(), web_enabled);
+            assert_eq!(push.apns.is_some(), apns_enabled);
+            assert_eq!(push.fcm.is_some(), fcm_enabled);
+            if let Some(web) = &push.web_push {
+                assert_eq!(web.vapid_public_key, "public");
+                assert_eq!(web.vapid_private_key, "private");
+                assert_eq!(web.vapid_subject, "mailto:test@example.com");
+            }
+        }
+    }
+
+    #[test]
+    fn every_partial_push_provider_group_is_rejected() {
+        let groups: &[(&[(&str, &str)], &str, &str)] = &[
+            (
+                &[("VAPID_PUBLIC_KEY", "public"), ("VAPID_PRIVATE_KEY", "private"), ("VAPID_SUBJECT", "subject")],
+                "Web Push configuration requires VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT",
+                "Web Push configuration requires VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT",
+            ),
+            (
+                &[("APNS_KEY_ID", "key"), ("APNS_TEAM_ID", "team"), ("APNS_PRIVATE_KEY_PATH", "/key"), ("APNS_TOPIC", "topic")],
+                "APNS configuration requires APNS_KEY_ID, APNS_TEAM_ID, APNS_PRIVATE_KEY_PATH and APNS_TOPIC",
+                "APNS configuration requires APNS_KEY_ID, APNS_TEAM_ID, APNS_PRIVATE_KEY_PATH and APNS_TOPIC",
+            ),
+            (
+                &[("FCM_PROJECT_ID", "project"), ("FCM_SERVICE_ACCOUNT_PATH", "/key")],
+                "FCM_PROJECT_ID is set but FCM_SERVICE_ACCOUNT_PATH is missing; unset FCM_PROJECT_ID to disable FCM",
+                "FCM_SERVICE_ACCOUNT_PATH is set but FCM_PROJECT_ID is missing; unset FCM_SERVICE_ACCOUNT_PATH to disable FCM",
+            ),
+        ];
+        for &(group, first_error, second_error) in groups {
+            for mask in 1..(1 << group.len()) - 1 {
+                let mut values = base();
+                values.retain(|(key, _)| !key.starts_with("VAPID_"));
+                values.extend(
+                    group
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(index, value)| (mask & (1 << index) != 0).then_some(*value)),
+                );
+                let error = std::panic::catch_unwind(|| {
+                    AppConfig::resolve(ConfigFile::default(), env(&values), false)
+                })
+                .err()
+                .expect("partial provider group must fail");
+                let message = error
+                    .downcast_ref::<String>()
+                    .map(String::as_str)
+                    .or_else(|| error.downcast_ref::<&str>().copied())
+                    .unwrap();
+                let expected = if group.len() == 2 && mask == 2 {
+                    second_error
+                } else {
+                    first_error
+                };
+                assert_eq!(message, expected, "partial provider mask {mask}");
+            }
+        }
+    }
+
+    #[test]
+    fn blank_vapid_environment_overrides_clear_file_values() {
+        let file = "[push]\nvapid_public_key='file-public'\nvapid_subject='file-subject'\n";
+        let mut values = base();
+        values.retain(|(key, _)| !key.starts_with("VAPID_"));
+        values.extend([("VAPID_PUBLIC_KEY", "  "), ("VAPID_SUBJECT", "")]);
+        let config = AppConfig::resolve(parse(file), env(&values), false);
+        assert!(config.push.is_none());
+
+        values.push(("VAPID_PRIVATE_KEY", "private"));
+        let error =
+            std::panic::catch_unwind(|| AppConfig::resolve(parse(file), env(&values), false))
+                .err()
+                .expect("remaining private key is a partial group");
+        let message = error
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| error.downcast_ref::<&str>().copied())
+            .unwrap();
+        assert_eq!(
+            message,
+            "Web Push configuration requires VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT"
+        );
+    }
+
+    #[test]
     fn invalid_configuration_is_rejected() {
         for overrides in [
             vec![("NODE_ID", "16")],
             vec![("ENABLE_DEBUG_AUTH", "TRUE")],
             vec![("MESSAGE_SEARCH_ENABLED", "yes")],
             vec![("APNS_KEY_ID", "partial")],
+            vec![("FCM_PROJECT_ID", "partial")],
             vec![("ATTACHMENT_MAX_FILE_SIZE_BYTES", "0")],
             vec![("CORS_ALLOWED_ORIGINS", ",,")],
         ] {
@@ -605,6 +774,46 @@ mod tests {
             ))
             .is_err());
         }
+    }
+
+    #[test]
+    fn fcm_settings_resolve_from_file_and_environment() {
+        let file = parse("[push]\n[push.fcm]\nproject_id = 'chahua-4eb01'\n");
+        let mut values = base();
+        values.push(("FCM_SERVICE_ACCOUNT_PATH", "/secrets/fcm-sa.json"));
+        let config = AppConfig::resolve(file, env(&values), false);
+        let fcm = config
+            .push
+            .as_ref()
+            .unwrap()
+            .fcm
+            .as_ref()
+            .expect("FCM configuration");
+        assert_eq!(fcm.project_id, "chahua-4eb01");
+        assert_eq!(fcm.service_account_path, "/secrets/fcm-sa.json");
+
+        // The environment wins over the file for the project id.
+        let mut values = base();
+        values.extend([
+            ("FCM_PROJECT_ID", "env-project"),
+            ("FCM_SERVICE_ACCOUNT_PATH", "/env/fcm-sa.json"),
+        ]);
+        let config = AppConfig::resolve(
+            parse("[push]\n[push.fcm]\nproject_id = 'file-project'\n"),
+            env(&values),
+            false,
+        );
+        let fcm = config.push.as_ref().unwrap().fcm.as_ref().unwrap();
+        assert_eq!(fcm.project_id, "env-project");
+        assert_eq!(fcm.service_account_path, "/env/fcm-sa.json");
+    }
+
+    #[test]
+    fn fcm_service_account_path_cannot_come_from_the_config_file() {
+        assert!(toml::from_str::<ConfigFile>(
+            "[push.fcm]\nproject_id = 'project'\nservice_account_path = 'secret'"
+        )
+        .is_err());
     }
 
     #[test]

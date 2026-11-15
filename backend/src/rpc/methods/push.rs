@@ -12,7 +12,7 @@ pub async fn get_vapid_public_key(
     services: &RpcServices,
     _params: PushGetVapidPublicKeyParams,
 ) -> Result<VapidPublicKeyResponse, AppError> {
-    Ok(push::get_vapid_public_key(services.push_service.as_ref()))
+    push::get_vapid_public_key(services.push_service.as_ref())
 }
 
 pub async fn get_subscription_status(
