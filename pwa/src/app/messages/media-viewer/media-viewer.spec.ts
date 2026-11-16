@@ -79,6 +79,89 @@ describe('MediaViewer', () => {
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.counter')?.textContent).toBe('2 / 3');
   });
+  it('pans zoomed images without dismissing on release and still allows a later background click', () => {
+    const fixture = open([album[0]]);
+    fixture.componentInstance['toggleZoom']();
+    fixture.detectChanges();
+    const element: HTMLElement = fixture.nativeElement;
+    const viewport = element.querySelector<HTMLElement>('.viewport')!;
+    const canvas = element.querySelector<HTMLElement>('.canvas')!;
+    const image = element.querySelector<HTMLImageElement>('.canvas img')!;
+    const capture = vi.fn();
+    image.setPointerCapture = capture;
+    canvas.setPointerCapture = vi.fn();
+    const pointer = (target: HTMLElement, type: string, x: number, y: number) => {
+      const event = new MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0 });
+      Object.assign(event, { pointerType: 'mouse', pointerId: 1 });
+      target.dispatchEvent(event);
+    };
+    viewport.scrollLeft = 100;
+    viewport.scrollTop = 80;
+    pointer(image, 'pointerdown', 200, 200);
+    expect(capture).toHaveBeenCalledWith(1);
+    pointer(image, 'pointermove', 150, 170);
+    expect(viewport.scrollLeft).toBe(150);
+    expect(viewport.scrollTop).toBe(110);
+    pointer(image, 'pointerup', 150, 170);
+    canvas.click();
+    expect(dismiss).not.toHaveBeenCalled();
+    pointer(viewport, 'pointermove', 100, 100);
+    expect(viewport.scrollLeft).toBe(150);
+    expect(viewport.scrollTop).toBe(110);
+
+    pointer(canvas, 'pointerdown', 200, 200);
+    pointer(canvas, 'pointermove', 250, 230);
+    pointer(canvas, 'pointermove', 200, 200);
+    pointer(canvas, 'pointerup', 200, 200);
+    canvas.click();
+    expect(dismiss).not.toHaveBeenCalled();
+
+    pointer(canvas, 'pointerdown', 200, 200);
+    canvas.dispatchEvent(new Event('lostpointercapture', { bubbles: true }));
+    pointer(canvas, 'pointermove', 150, 150);
+    expect(viewport.scrollLeft).toBe(150);
+    expect(viewport.scrollTop).toBe(110);
+    pointer(canvas, 'pointerup', 200, 200);
+    canvas.click();
+    expect(dismiss).toHaveBeenCalledOnce();
+  });
+  it('keeps the viewer open after touch panning and pinching back to the original scale', () => {
+    const fixture = open([album[0]]);
+    const component = fixture.componentInstance;
+    component['toggleZoom']();
+    fixture.detectChanges();
+    const viewport = fixture.nativeElement.querySelector('.viewport') as HTMLElement;
+    const canvas = fixture.nativeElement.querySelector('.canvas') as HTMLElement;
+    const gesture = (type: string, touches: { clientX: number; clientY: number }[], changedTouches = touches) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.assign(event, { touches, changedTouches });
+      canvas.dispatchEvent(event);
+    };
+    gesture('touchstart', [{ clientX: 200, clientY: 200 }]);
+    gesture('touchmove', [{ clientX: 150, clientY: 170 }]);
+    expect(viewport.scrollLeft).toBe(50);
+    expect(viewport.scrollTop).toBe(30);
+    gesture('touchend', []);
+    canvas.click();
+    expect(dismiss).not.toHaveBeenCalled();
+
+    gesture('touchstart', [
+      { clientX: 100, clientY: 100 },
+      { clientX: 200, clientY: 100 },
+    ]);
+    gesture('touchmove', [
+      { clientX: 100, clientY: 100 },
+      { clientX: 150, clientY: 100 },
+    ]);
+    expect(component['scale']()).toBe(1);
+    gesture('touchend', []);
+    canvas.click();
+    expect(dismiss).not.toHaveBeenCalled();
+    gesture('touchstart', [{ clientX: 100, clientY: 100 }]);
+    gesture('touchend', [], [{ clientX: 100, clientY: 100 }]);
+    canvas.click();
+    expect(dismiss).toHaveBeenCalledOnce();
+  });
   it('clears zoom and errors when selecting another medium', () => {
     const fixture = open();
     const component = fixture.componentInstance;

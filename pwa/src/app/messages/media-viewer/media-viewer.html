@@ -29,6 +29,7 @@
       (pointermove)="dragging($event)"
       (pointerup)="stopDrag()"
       (pointercancel)="stopDrag()"
+    (lostpointercapture)="stopDrag()"
       (touchmove)="touchMove($event)"
       (touchstart)="start($event)"
       (touchend)="end($event)"
