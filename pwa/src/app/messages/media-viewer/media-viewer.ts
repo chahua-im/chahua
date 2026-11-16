@@ -98,7 +98,7 @@ export class MediaViewer {
     this.resize(this.zoom() ? 1 : 2);
   }
   protected background(event: MouseEvent) {
-    if (event.target === event.currentTarget) void this.panels.back();
+    if (!this.dragged && event.target === event.currentTarget) void this.panels.back();
   }
   protected async fullscreen() {
     if (document.fullscreenElement) await document.exitFullscreen();
@@ -135,10 +135,13 @@ export class MediaViewer {
   }
   private pinch?: { distance: number; scale: number };
   private pan?: { x: number; y: number; left: number; top: number };
+  private dragged = false;
   protected drag(event: PointerEvent) {
+    this.dragged = false;
     if (event.pointerType !== 'mouse' || !this.zoom() || event.button !== 0) return;
     const viewport = this.viewport()!.nativeElement;
-    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    // Keep the release click on the pressed element instead of retargeting it to the background.
+    (event.target as HTMLElement).setPointerCapture(event.pointerId);
     this.pan = { x: event.clientX, y: event.clientY, left: viewport.scrollLeft, top: viewport.scrollTop };
   }
   protected dragging(event: PointerEvent) {
@@ -151,6 +154,7 @@ export class MediaViewer {
   private panTo(x: number, y: number) {
     const viewport = this.viewport()?.nativeElement;
     if (viewport && this.pan) {
+      if (Math.hypot(x - this.pan.x, y - this.pan.y) > 4) this.dragged = true;
       viewport.scrollLeft = this.pan.left + this.pan.x - x;
       viewport.scrollTop = this.pan.top + this.pan.y - y;
     }
@@ -158,6 +162,12 @@ export class MediaViewer {
   protected touchMove(event: TouchEvent) {
     if (this.current().kind !== MediaKind.Image) return;
     event.preventDefault();
+    if (
+      this.touch &&
+      Math.hypot(event.touches[0].clientX - this.touch.x, event.touches[0].clientY - this.touch.y) > 4
+    ) {
+      this.dragged = true;
+    }
     if (event.touches.length === 2 && this.pinch) {
       const [a, b] = Array.from(event.touches);
       this.resize(
@@ -168,6 +178,7 @@ export class MediaViewer {
     } else if (event.touches.length === 1 && this.pan) this.panTo(event.touches[0].clientX, event.touches[0].clientY);
   }
   protected start(event: TouchEvent) {
+    this.dragged = event.touches.length > 1;
     if (event.touches.length === 2) {
       const [a, b] = Array.from(event.touches);
       this.pinch = { distance: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), scale: this.scale() };
