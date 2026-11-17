@@ -314,7 +314,7 @@ export class ForwardedRecords {
       bubble &&
       bubble.top < viewport.bottom &&
       (!avatar || avatar.bottom > viewport.bottom);
-    this.stickySender.set(sticky ? row.message.sender : undefined);
+    if (sticky) this.stickySender.set(row.message.sender);
     this.stickyRow.set(sticky ? low : undefined);
     this.stickyOffset.set(sticky && row.first ? Math.max(0, bubble.top + 34 - viewport.bottom) : 0);
 

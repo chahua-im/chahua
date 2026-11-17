@@ -21,8 +21,11 @@
   (ionScrollStart)="scrolling.scrollStart()"
   (ionScrollEnd)="scrolling.scrollEnd()">
   <div slot="fixed" class="sticky-avatar-container" [class.sent]="stickySender()?.uid === session.user()?.uid">
-    @if (!preferences.showAllAvatars() && stickySender(); as sender) {
-      <div class="sticky-avatar" [style.transform]="'translateY(' + stickyOffset() + 'px)'">
+    @if (stickySender(); as sender) {
+      <div
+        class="sticky-avatar"
+        [style.visibility]="preferences.showAllAvatars() || stickyRow() == null ? 'hidden' : null"
+        [style.transform]="'translateY(' + stickyOffset() + 'px)'">
         <app-chat-avatar
           [size]="34"
           [textLength]="2"

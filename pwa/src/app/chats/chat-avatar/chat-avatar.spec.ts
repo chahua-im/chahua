@@ -2,6 +2,37 @@ import { TestBed } from '@angular/core/testing';
 import { ChatAvatar } from './chat-avatar';
 
 describe('ChatAvatar', () => {
+  it('shows cached avatars and badges without waiting for another load event', async () => {
+    const cached = new Set(['/avatar.png', '/badge.png']);
+    const complete = vi.spyOn(HTMLImageElement.prototype, 'complete', 'get').mockReturnValue(true);
+    const width = vi.spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get').mockImplementation(function (
+      this: HTMLImageElement,
+    ) {
+      return cached.has(this.getAttribute('src') ?? '') ? 48 : 0;
+    });
+    try {
+      const fixture = TestBed.createComponent(ChatAvatar);
+      const entry = { avatarName: 'Alice', avatar: '/avatar.png', badgeName: 'Bob', badgeAvatar: '/badge.png' };
+      fixture.componentRef.setInput('entry', entry);
+      await fixture.whenStable();
+      expect(fixture.nativeElement.querySelectorAll('img.loaded')).toHaveLength(2);
+      expect(fixture.nativeElement.querySelectorAll('ion-avatar.placeholder')).toHaveLength(0);
+
+      // A broken image is also complete, but must keep its placeholder.
+      fixture.componentRef.setInput('entry', { ...entry, avatar: '/broken.png' });
+      await fixture.whenStable();
+      expect(fixture.nativeElement.querySelector('ion-avatar').classList.contains('placeholder')).toBe(true);
+      expect(fixture.nativeElement.querySelector('.avatar-badge img').classList.contains('loaded')).toBe(true);
+
+      fixture.componentRef.setInput('entry', entry);
+      await fixture.whenStable();
+      expect(fixture.nativeElement.querySelectorAll('img.loaded')).toHaveLength(2);
+    } finally {
+      complete.mockRestore();
+      width.mockRestore();
+    }
+  });
+
   it('shows text and color until each image loads, then removes both without changing size', () => {
     const fixture = TestBed.createComponent(ChatAvatar);
     fixture.componentRef.setInput('size', 34);
