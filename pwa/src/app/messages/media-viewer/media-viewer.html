@@ -29,7 +29,7 @@
       (pointermove)="dragging($event)"
       (pointerup)="stopDrag()"
       (pointercancel)="stopDrag()"
-    (lostpointercapture)="stopDrag()"
+      (lostpointercapture)="stopDrag()"
       (touchmove)="touchMove($event)"
       (touchstart)="start($event)"
       (touchend)="end($event)"
@@ -57,10 +57,11 @@
             (error)="failed.set(true)"></video>
         } @else {
           <img
+            #image
             [src]="item.url"
             draggable="false"
-            (dblclick)="toggleZoom()"
-            (load)="loading.set(false)"
+            (dblclick)="toggleZoom($event)"
+            (load)="imageLoaded()"
             (error)="failed.set(true)" />
         }
       }
