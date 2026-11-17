@@ -23,11 +23,26 @@ const album = [
 ];
 describe('MediaViewer', () => {
   const dismiss = vi.fn().mockResolvedValue(true);
+  let resizeViewport: () => void;
+  const disconnect = vi.fn();
   beforeEach(() => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: () => void) {
+          resizeViewport = callback;
+        }
+        observe() {}
+        disconnect = disconnect;
+      },
+    );
     TestBed.configureTestingModule({ providers: [{ provide: PanelNavigation, useValue: { back: dismiss } }] });
-    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, 'pause')
+      .mockImplementation(() => {})
+      .mockClear();
     dismiss.mockClear();
   });
+  afterEach(() => vi.unstubAllGlobals());
   function open(media = album, initial = 0) {
     const fixture = TestBed.createComponent(MediaViewer);
     fixture.componentRef.setInput('media', media);
@@ -35,6 +50,111 @@ describe('MediaViewer', () => {
     fixture.detectChanges();
     return fixture;
   }
+  function loadImage(width: number, height: number, viewportWidth = 390, viewportHeight = 700) {
+    const fixture = open([album[0]]);
+    const element: HTMLElement = fixture.nativeElement;
+    const viewport = element.querySelector<HTMLElement>('.viewport')!;
+    const image = element.querySelector<HTMLImageElement>('.canvas img')!;
+    Object.defineProperties(viewport, {
+      clientWidth: { configurable: true, value: viewportWidth },
+      clientHeight: { configurable: true, value: viewportHeight },
+    });
+    vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, viewportWidth, viewportHeight));
+    Object.defineProperties(image, { naturalWidth: { value: width }, naturalHeight: { value: height } });
+    const factor = Math.min(1, viewportWidth / width, viewportHeight / height);
+    vi.spyOn(image, 'getBoundingClientRect').mockReturnValue(
+      new DOMRect(
+        (viewportWidth - width * factor) / 2,
+        (viewportHeight - height * factor) / 2,
+        width * factor,
+        height * factor,
+      ),
+    );
+    image.dispatchEvent(new Event('load'));
+    fixture.detectChanges();
+    return { fixture, viewport, image };
+  }
+  it.each([
+    [1080, 20000, 390, (20000 * 390) / 1080],
+    [20000, 1080, (20000 * 700) / 1080, 700],
+  ])(
+    'expands a %i × %i image to a readable viewport dimension beyond five times the overview',
+    (width, height, expectedWidth, expectedHeight) => {
+      const { fixture, viewport } = loadImage(width, height);
+      fixture.componentInstance['toggleZoom']();
+      expect(parseFloat(viewport.style.getPropertyValue('--media-width'))).toBeCloseTo(expectedWidth);
+      expect(parseFloat(viewport.style.getPropertyValue('--media-height'))).toBeCloseTo(expectedHeight);
+      expect(fixture.componentInstance['scale']()).toBeGreaterThan(5);
+      fixture.componentInstance['toggleZoom']();
+      expect(fixture.componentInstance['scale']()).toBe(1);
+      expect(viewport.scrollLeft).toBe(0);
+      expect(viewport.scrollTop).toBeCloseTo(0);
+    },
+  );
+  it('lets the wheel reach native image dimensions beyond the old maximum', () => {
+    const { fixture, viewport } = loadImage(1080, 20000);
+    fixture.componentInstance['wheel'](new WheelEvent('wheel', { deltaY: -10000, clientX: 195, clientY: 350 }));
+    expect(parseFloat(viewport.style.getPropertyValue('--media-width'))).toBeCloseTo(1080);
+    expect(parseFloat(viewport.style.getPropertyValue('--media-height'))).toBeCloseTo(20000);
+    expect(fixture.componentInstance['scale']()).toBeCloseTo(20000 / 700);
+  });
+  it('lets a pinch reach native dimensions and clears image dimensions when switching media', () => {
+    const { fixture, viewport, image } = loadImage(1080, 20000);
+    const canvas = image.parentElement!;
+    const gesture = (type: string, distance: number) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.assign(event, {
+        touches: [
+          { clientX: 195 - distance / 2, clientY: 350 },
+          { clientX: 195 + distance / 2, clientY: 350 },
+        ],
+      });
+      canvas.dispatchEvent(event);
+    };
+    gesture('touchstart', 10);
+    gesture('touchmove', 300);
+    expect(parseFloat(viewport.style.getPropertyValue('--media-width'))).toBeCloseTo(1080);
+    expect(parseFloat(viewport.style.getPropertyValue('--media-height'))).toBeCloseTo(20000);
+    fixture.componentRef.setInput('media', album);
+    fixture.componentInstance['select'](1);
+    fixture.detectChanges();
+    expect(fixture.componentInstance['scale']()).toBe(1);
+    expect(viewport.style.getPropertyValue('--media-width')).toBe('');
+    expect(viewport.style.getPropertyValue('--media-height')).toBe('');
+    expect(fixture.nativeElement.querySelector('.canvas video')).not.toBeNull();
+  });
+  it('uses native dimensions for a large ordinary photo and keeps small images unscaled initially', () => {
+    const large = loadImage(4000, 3000);
+    large.fixture.componentInstance['toggleZoom']();
+    expect(parseFloat(large.viewport.style.getPropertyValue('--media-width'))).toBeCloseTo(4000);
+    const small = loadImage(100, 100);
+    expect(small.viewport.style.getPropertyValue('--media-width')).toBe('100px');
+    expect(small.viewport.style.getPropertyValue('--media-height')).toBe('100px');
+  });
+  it('keeps the point under the wheel fixed while removing centered image margins', () => {
+    const { fixture, viewport } = loadImage(1080, 20000);
+    fixture.componentInstance['wheel'](
+      new WheelEvent('wheel', {
+        deltaY: -Math.log(20) / 0.002,
+        clientX: 200,
+        clientY: 200,
+      }),
+    );
+    // The cursor starts 23.9px from the left image edge, then lies 478px from it at 20×.
+    expect(viewport.scrollLeft).toBeCloseTo(278);
+    expect(viewport.scrollTop).toBeCloseTo(3800);
+  });
+  it('recalculates fitted image dimensions on viewport resize and disconnects on destruction', () => {
+    const { fixture, viewport, image } = loadImage(1080, 20000);
+    Object.defineProperty(viewport, 'clientHeight', { value: 1000 });
+    vi.mocked(viewport.getBoundingClientRect).mockReturnValue(new DOMRect(0, 0, 390, 1000));
+    vi.mocked(image.getBoundingClientRect).mockReturnValue(new DOMRect(176.1, 150, 37.8, 700));
+    resizeViewport();
+    expect(parseFloat(viewport.style.getPropertyValue('--media-width'))).toBeCloseTo(54);
+    expect(viewport.style.getPropertyValue('--media-height')).toBe('1000px');
+    fixture.destroy();
+    expect(disconnect).toHaveBeenCalled();
+  });
   it('opens the clicked video and switches through the same mixed album using thumbnails', () => {
     const fixture = open(album, 1);
     const element: HTMLElement = fixture.nativeElement;

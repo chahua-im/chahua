@@ -71,10 +71,18 @@ export class MediaViewer {
   protected readonly panels = inject(PanelNavigation);
   private readonly viewport = viewChild<ElementRef<HTMLElement>>('viewport');
   private readonly gallery = viewChild<ElementRef<HTMLElement>>('gallery');
+  private readonly image = viewChild<ElementRef<HTMLImageElement>>('image');
   private readonly video = viewChild<ElementRef<HTMLVideoElement>>('video');
   protected touch?: { x: number; y: number };
 
   constructor() {
+    afterRenderEffect((onCleanup) => {
+      const viewport = this.viewport()?.nativeElement;
+      if (!viewport) return;
+      const observer = new ResizeObserver(() => this.resize(this.scale()));
+      observer.observe(viewport);
+      onCleanup(() => observer.disconnect());
+    });
     afterRenderEffect(() => {
       const thumbnail = this.gallery()?.nativeElement.children[this.index()];
       thumbnail?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -87,15 +95,20 @@ export class MediaViewer {
     this.video()?.nativeElement.pause();
     this.index.set(next);
     this.resize(1);
+    const viewport = this.viewport()?.nativeElement;
+    viewport?.style.removeProperty('--media-width');
+    viewport?.style.removeProperty('--media-height');
     this.touch = undefined;
     this.viewport()?.nativeElement.scrollTo(0, 0);
   }
   protected move(delta: number) {
     this.select(this.index() + delta);
   }
-  protected toggleZoom() {
+  protected toggleZoom(event?: MouseEvent) {
     if (this.current().kind !== MediaKind.Image) return;
-    this.resize(this.zoom() ? 1 : 2);
+    const fit = this.fitImage();
+    const target = fit?.reading ?? 2;
+    this.resize(this.zoom() ? 1 : target, event?.clientX, event?.clientY);
   }
   protected background(event: MouseEvent) {
     if (!this.dragged && event.target === event.currentTarget) void this.panels.back();
@@ -110,9 +123,31 @@ export class MediaViewer {
       this.move(event.key === 'ArrowRight' ? 1 : -1);
     }
   }
+  protected imageLoaded() {
+    this.loading.set(false);
+    this.resize(this.scale());
+  }
+  private fitImage() {
+    const image = this.image()?.nativeElement;
+    const viewport = this.viewport()?.nativeElement;
+    // Images have no intrinsic size while loading, and hidden viewports have no usable bounds.
+    if (!image?.naturalWidth || !viewport?.clientWidth || !viewport.clientHeight) return;
+    const factor = Math.min(1, viewport.clientWidth / image.naturalWidth, viewport.clientHeight / image.naturalHeight);
+    const width = image.naturalWidth * factor;
+    const height = image.naturalHeight * factor;
+    const reading =
+      image.naturalHeight >= image.naturalWidth * 3
+        ? viewport.clientWidth / width
+        : image.naturalWidth >= image.naturalHeight * 3
+          ? viewport.clientHeight / height
+          : Math.max(2, 1 / factor);
+    return { image, width, height, factor, reading };
+  }
   private resize(value: number, x?: number, y?: number) {
     const viewport = this.viewport()?.nativeElement;
-    const scale = Math.max(1, Math.min(5, value));
+    const fit = this.fitImage();
+    const maximum = fit ? Math.max(5, 1 / fit.factor, fit.reading) : 5;
+    const scale = Math.max(1, Math.min(maximum, value));
     if (!viewport) {
       this.scale.set(scale);
       return;
@@ -121,9 +156,22 @@ export class MediaViewer {
     const px = (x ?? rect.left + rect.width / 2) - rect.left;
     const py = (y ?? rect.top + rect.height / 2) - rect.top;
     const ratio = scale / this.scale();
-    const left = (viewport.scrollLeft + px) * ratio - px;
-    const top = (viewport.scrollTop + py) * ratio - py;
-    viewport.style.setProperty('--media-scale', String(scale));
+    let left = (viewport.scrollLeft + px) * ratio - px;
+    let top = (viewport.scrollTop + py) * ratio - py;
+    if (fit) {
+      const bounds = fit.image.getBoundingClientRect();
+      const width = fit.width * scale;
+      const height = fit.height * scale;
+      if (bounds.width && bounds.height) {
+        // Account for centered letterboxing when keeping the image point under the gesture.
+        left = (px - (bounds.left - rect.left)) * (width / bounds.width) + Math.max(0, (rect.width - width) / 2) - px;
+        top = (py - (bounds.top - rect.top)) * (height / bounds.height) + Math.max(0, (rect.height - height) / 2) - py;
+      }
+      viewport.style.setProperty('--media-width', `${width}px`);
+      viewport.style.setProperty('--media-height', `${height}px`);
+      left = Math.max(0, Math.min(Math.max(0, width - viewport.clientWidth), left));
+      top = Math.max(0, Math.min(Math.max(0, height - viewport.clientHeight), top));
+    }
     this.scale.set(scale);
     viewport.scrollLeft = left;
     viewport.scrollTop = top;
