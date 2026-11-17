@@ -120,9 +120,10 @@
   (touchend)="scrolling.touchEnd()"
   (touchcancel)="scrolling.touchEnd()">
   <div slot="fixed" class="sticky-avatar-container" [class.sent]="stickySender()?.uid === session.user()?.uid">
-    @if (stickyAvatarsEnabled() && stickySender(); as sender) {
+    @if (stickySender(); as sender) {
       <button
         class="sticky-avatar"
+        [hidden]="!stickyAvatarsEnabled() || stickyRow() == null"
         [avatarMention]="!selecting() && !speakingRestriction()"
         (mentionRequested)="composer()?.insertMention(sender)"
         [style.transform]="'translateY(' + stickyOffset() + 'px)'"

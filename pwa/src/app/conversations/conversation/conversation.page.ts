@@ -2239,7 +2239,8 @@ export class ConversationPage {
       bubble &&
       bubble.top < viewport.bottom &&
       (!avatar || avatar.bottom > viewport.bottom);
-    this.stickySender.set(sticky ? bottomRow.message.sender : undefined);
+    // Retain the hidden avatar so reappearing within the same group reuses its loaded image.
+    if (sticky) this.stickySender.set(bottomRow.message.sender);
     this.stickyRow.set(sticky ? bottomLow : undefined);
     this.stickyOffset.set(sticky && bottomRow.first ? Math.max(0, bubble.top + 34 - viewport.bottom) : 0);
     let first = 0,

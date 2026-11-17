@@ -1,4 +1,4 @@
-import { Component, computed, input, linkedSignal } from '@angular/core';
+import { afterRenderEffect, Component, computed, ElementRef, input, linkedSignal, viewChild } from '@angular/core';
 import { IonAvatar, IonIcon } from '@ionic/angular';
 import { chatbubbles } from 'ionicons/icons';
 import { GroupKind, type MessagePreview } from '../../../generated/models';
@@ -32,6 +32,20 @@ export class ChatAvatar {
   private readonly badgeUrl = computed(() => this.entry().badgeAvatar);
   protected readonly avatarLoaded = linkedSignal({ source: this.avatarUrl, computation: () => false });
   protected readonly badgeLoaded = linkedSignal({ source: this.badgeUrl, computation: () => false });
+  private readonly avatarImage = viewChild<ElementRef<HTMLImageElement>>('avatarImage');
+  private readonly badgeImage = viewChild<ElementRef<HTMLImageElement>>('badgeImage');
+
+  constructor() {
+    afterRenderEffect({
+      read: () => {
+        // Cached images can be ready before their load event is delivered.
+        const avatar = this.avatarImage()?.nativeElement;
+        const badge = this.badgeImage()?.nativeElement;
+        if (avatar?.complete && avatar.naturalWidth > 0) this.avatarLoaded.set(true);
+        if (badge?.complete && badge.naturalWidth > 0) this.badgeLoaded.set(true);
+      },
+    });
+  }
 
   protected imageLoaded(src: string, badge = false) {
     if (src === (badge ? this.entry().badgeAvatar : this.entry().avatar))

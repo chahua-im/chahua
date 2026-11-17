@@ -1,7 +1,7 @@
 import { Location } from '@angular/common';
 import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
-import { IonRouterOutlet, NavController } from '@ionic/angular';
+import { IonContent, IonRouterOutlet, NavController } from '@ionic/angular';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
@@ -125,6 +125,7 @@ describe('ForwardedRecords', () => {
       .flush({ total: 1, messages: [record] });
     await fixture.whenStable();
     fixture.componentInstance['stickySender'].set({ ...testMessage.sender, name: '小茶', avatarUrl: '/record.png' });
+    fixture.componentInstance['stickyRow'].set(0);
     fixture.detectChanges();
     const avatar = fixture.nativeElement.querySelector('.sticky-avatar ion-avatar') as HTMLElement;
     expect(avatar.textContent?.trim()).toBe('小茶');
@@ -135,6 +136,40 @@ describe('ForwardedRecords', () => {
     avatar.querySelector('img')!.dispatchEvent(new Event('load'));
     fixture.detectChanges();
     expect(avatar.classList.contains('placeholder')).toBe(false);
+  });
+
+  it('reuses its loaded sticky avatar when scrolling out of and back into a group', async () => {
+    const scroll = document.createElement('div');
+    vi.spyOn(IonContent.prototype, 'getScrollElement').mockResolvedValue(scroll);
+    vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 200));
+    const { fixture, peer } = create({ id: wireChat.id, messageId: wireMessage.id });
+    peer
+      .expect('messages.listForwardedMessages', { chatId: wireChat.id, messageId: wireMessage.id })
+      .flush({ total: 1, messages: [{ ...record, sender: { ...record.sender, avatarUrl: '/record.png' } }] });
+    await fixture.whenStable();
+    const message = fixture.nativeElement.querySelector('app-message') as HTMLElement;
+    let top = 100;
+    vi.spyOn(message, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, top, 300, 150));
+    vi.spyOn(message.querySelector('.bubble')!, 'getBoundingClientRect').mockImplementation(
+      () => new DOMRect(44, top, 200, 146),
+    );
+    vi.spyOn(message.querySelector('.avatar')!, 'getBoundingClientRect').mockImplementation(
+      () => new DOMRect(7, top + 112, 34, 34),
+    );
+    await fixture.componentInstance['trackScroll']();
+    fixture.detectChanges();
+    const avatar = fixture.nativeElement.querySelector('.sticky-avatar') as HTMLElement;
+    const image = avatar.querySelector('img')!;
+    image.dispatchEvent(new Event('load'));
+    fixture.detectChanges();
+    for (const next of [210, 100]) {
+      top = next;
+      await fixture.componentInstance['trackScroll']();
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('.sticky-avatar img')).toBe(image);
+      expect(image.classList.contains('loaded')).toBe(true);
+      expect(getComputedStyle(avatar).visibility).toBe(next === 210 ? 'hidden' : 'visible');
+    }
   });
 
   it('uses browser history and an authorized fallback', async () => {

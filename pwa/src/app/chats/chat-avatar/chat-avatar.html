@@ -9,12 +9,13 @@
     @for (src of [entry().avatar]; track src) {
       @if (src) {
         <img
+          #avatarImage
           [src]="src"
           [class.loaded]="avatarLoaded()"
           (load)="imageLoaded(src)"
           width="48"
           height="48"
-          decoding="async" />
+          decoding="sync" />
       }
     }
   }
@@ -32,12 +33,13 @@
       @for (src of [entry().badgeAvatar]; track src) {
         @if (src) {
           <img
+            #badgeImage
             [src]="src"
             [class.loaded]="badgeLoaded()"
             (load)="imageLoaded(src, true)"
             width="26"
             height="26"
-            decoding="async" />
+            decoding="sync" />
         }
       }
     }

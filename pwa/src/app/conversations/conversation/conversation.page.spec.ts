@@ -5852,7 +5852,7 @@ describe('ConversationPage', () => {
         ...wireMessage,
         id: String(id),
         clientGeneratedId: String(id),
-        sender: otherSender,
+        sender: { ...otherSender, avatarUrl: '/first.png' },
       })),
     });
     await opening;
@@ -5883,6 +5883,7 @@ describe('ConversationPage', () => {
         () => new DOMRect(44, tops[index] - offset, 200, 96),
       );
     });
+    let stickyImage: HTMLImageElement | undefined;
     for (const [position, row, displacement] of [
       [0, 1, 24],
       [40, 1, 0],
@@ -5893,6 +5894,17 @@ describe('ConversationPage', () => {
       await component['trackScroll']();
       expect(component['stickyRow']()).toBe(row);
       expect(component['stickyOffset']()).toBe(displacement);
+      fixture.detectChanges();
+      const button = fixture.nativeElement.querySelector('.sticky-avatar') as HTMLButtonElement;
+      const image = button.querySelector('img')!;
+      if (!stickyImage) {
+        stickyImage = image;
+        image.dispatchEvent(new Event('load'));
+        fixture.detectChanges();
+      }
+      expect(image).toBe(stickyImage);
+      expect(image.classList.contains('loaded')).toBe(true);
+      expect(button.hidden).toBe(row == null);
     }
     component['entryReadId'].set(undefined);
     fixture.detectChanges();
@@ -5939,11 +5951,12 @@ describe('ConversationPage', () => {
     fixture.detectChanges();
     expect(message.showAllAvatars()).toBe(true);
     expect(message.stickyAvatar()).toBe(false);
-    expect(fixture.nativeElement.querySelector('.sticky-avatar')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.sticky-avatar').hidden).toBe(true);
     avatars.set(false);
     fixture.detectChanges();
     expect(message.stickyAvatar()).toBe(true);
     expect(fixture.nativeElement.querySelector('.sticky-avatar')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.sticky-avatar').hidden).toBe(false);
   });
 
   it('resolves an ID-only menu selection against the latest message', async () => {
