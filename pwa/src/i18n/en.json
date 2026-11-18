@@ -671,6 +671,8 @@
       "replies": "{{ count }} replies"
     },
     "selection": {
+      "extend": "Select to here +{{count}}",
+      "remaining": "Can select {{count}} more",
       "recallConfirm": "Recall the {{count}} selected messages? Other members will no longer be able to view them.",
       "recallConfirmDm": "Recall the {{count}} selected messages? The other person will no longer be able to view them.",
       "recalled": "Recalled {{count}} messages",

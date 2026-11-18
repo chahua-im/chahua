@@ -1,0 +1,42 @@
+@use '../../messages/message/message-layout' as message;
+
+:host {
+  @include message.metrics;
+  display: block;
+  padding-block: 8px;
+}
+
+.message-skeleton-item {
+  container-type: inline-size;
+}
+
+.message-skeleton-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+}
+
+.message-skeleton-bubble {
+  position: relative;
+  width: 24ch;
+  max-width: 100%;
+
+  .skeleton-line {
+    display: block;
+
+    &::after {
+      background: var(--ion-background-color-step-200, var(--ion-color-light-shade));
+    }
+  }
+}
+
+.short .message-skeleton-bubble {
+  width: 14ch;
+}
+
+.message-skeleton-author {
+  width: 60%;
+  margin-bottom: 2px;
+  font-size: var(--app-font-compact);
+  line-height: var(--app-line-compact);
+}

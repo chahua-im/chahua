@@ -1,0 +1,31 @@
+:host {
+  display: flex;
+  left: max(8px, var(--ion-safe-area-left, 0px));
+  z-index: 2;
+}
+
+:host(.selection-range-top) {
+  top: 8px;
+}
+
+:host(.selection-range-bottom) {
+  bottom: 8px;
+}
+
+ion-button {
+  margin: 0;
+  --background: var(--ion-background-color-step-100, #f0f0f0);
+  --background-hover: var(--ion-background-color-step-150, var(--ion-color-light-shade));
+  --background-focused: var(--background-hover);
+  --background-activated: var(--ion-background-color-step-200, var(--ion-color-light-shade));
+  --color: var(--ion-text-color, var(--ion-color-dark));
+  --border-color: var(--ion-background-color-step-450, var(--ion-color-medium));
+  --border-radius: 16px;
+  --border-style: solid;
+  --border-width: 1px;
+
+  &[disabled] {
+    opacity: 1;
+    --color: var(--ion-text-color-step-400, var(--ion-color-medium));
+  }
+}

@@ -671,6 +671,8 @@
       "replies": "{{ count }} 則回覆"
     },
     "selection": {
+      "extend": "選擇到這裡 +{{count}}",
+      "remaining": "還可選 {{count}} 則",
       "recallConfirm": "確定撤回選取的 {{count}} 則訊息？撤回後，其他成員將無法查看這些訊息。",
       "recallConfirmDm": "確定撤回選取的 {{count}} 則訊息？撤回後，對方將無法查看這些訊息。",
       "recalled": "已撤回 {{count}} 則訊息",
