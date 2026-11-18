@@ -196,6 +196,14 @@ impl From<AppError> for RpcError {
             AppError::Forbidden(message) => Self::with_message(RpcErrorCode::Forbidden, message),
             AppError::NotFound(message) => Self::with_message(RpcErrorCode::NotFound, message),
             AppError::Conflict(message) => Self::with_message(RpcErrorCode::Conflict, message),
+            AppError::MessageIdConflict(existing) => Self {
+                code: RpcErrorCode::Conflict,
+                message: "clientGeneratedId already exists with different payload",
+                data: Some(json!(crate::dto::messages::MessageIdConflictResponse::new(
+                    existing
+                ))),
+                lifecycle: None,
+            },
             AppError::Gone(message) => Self::with_message(RpcErrorCode::Gone, message),
             AppError::PayloadTooLarge(message) => {
                 Self::with_message(RpcErrorCode::PayloadTooLarge, message)

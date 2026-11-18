@@ -22,6 +22,8 @@ pub enum AppError {
     NotFound(&'static str),
     /// 409 Conflict with a static message.
     Conflict(&'static str),
+    /// 409 with a recipient-scoped copy of the already accepted message.
+    MessageIdConflict(Box<crate::dto::messages::MessageResponse>),
     /// 410 Gone with a static message.
     Gone(&'static str),
     /// 503 Service Unavailable with a static message.

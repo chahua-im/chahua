@@ -13,13 +13,12 @@ use crate::{
     services::messages::{
         build_forwarded_preview_items, build_forwarded_preview_payload,
         capture_forwarded_bundle_items, deserialize_forwarded_bundle_payload,
-        load_forwarded_bundle, PreparedMessageSend,
+        load_forwarded_bundle, PreparedMessageSend, MESSAGE_ID_CONFLICT,
     },
     utils::ids::{self, IdGen},
 };
 
 const MAX_FORWARD_MESSAGES: usize = 100;
-const FORWARD_REQUEST_CONFLICT: &str = "clientGeneratedId already exists with different payload";
 const SYSTEM_MESSAGE_FORWARD_FORBIDDEN: &str = "System messages cannot be forwarded";
 const INVITE_MESSAGE_FORWARD_FORBIDDEN: &str = "Invite messages cannot be forwarded";
 
@@ -228,19 +227,19 @@ pub async fn prepare_forward_message(
             || existing.reply_root_id != body.thread_id
             || !matches!(existing.message_type, MessageType::Forwarded)
         {
-            return Err(AppError::Conflict(FORWARD_REQUEST_CONFLICT));
+            return Err(AppError::Conflict(MESSAGE_ID_CONFLICT));
         }
 
         let bundle_id = existing
             .forwarded_bundle_id
-            .ok_or(AppError::Conflict(FORWARD_REQUEST_CONFLICT))?;
+            .ok_or(AppError::Conflict(MESSAGE_ID_CONFLICT))?;
         let bundle = load_forwarded_bundle(conn, bundle_id)
-            .map_err(|_| AppError::Conflict(FORWARD_REQUEST_CONFLICT))?;
+            .map_err(|_| AppError::Conflict(MESSAGE_ID_CONFLICT))?;
         let contains_forwarded_messages = !bundle.child_bundle_ids.is_empty();
         let (message_count, items) = deserialize_forwarded_bundle_payload(bundle)?;
         if !forwarded_payload_matches_selection(&items, body.source_chat_id, &canonical_message_ids)
         {
-            return Err(AppError::Conflict(FORWARD_REQUEST_CONFLICT));
+            return Err(AppError::Conflict(MESSAGE_ID_CONFLICT));
         }
 
         return Ok(prepared_forward_message(
