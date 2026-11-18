@@ -242,6 +242,59 @@ describe('MessagePreview', () => {
     ).toBe(url);
   });
 
+  it.each([
+    ['[](https://example.com/article)', 'https://example.com/article'],
+    [' \n [](https://example.com/a(b)) \n ', 'https://example.com/a(b)'],
+    [String.raw`[](https://example.com/a\(b\))`, 'https://example.com/a(b)'],
+    ['[](<https://example.com/a> "Link title")', 'https://example.com/a'],
+  ])('renders a standalone empty-label link as a share summary: %s', (message, url) => {
+    const source = {
+      message,
+      metadata: { linkPreviews: [{ url, status: LinkPreviewStatus.ready, title: '<b>标题</b>' }] },
+    };
+    expect(render(source)).toBe('[分享]<b>标题</b>');
+    expect(fixture.nativeElement.querySelector('b, a')).toBeNull();
+    expect(render({ ...source, metadata: { linkPreviews: [{ url, status: LinkPreviewStatus.ready }] } })).toBe(
+      '[分享]example.com',
+    );
+  });
+
+  it('keeps the URL visible while an empty-label link preview changes state', () => {
+    const url = 'https://example.com/article';
+    const message = `[](${url})`;
+    expect(render({ message, metadata: undefined })).toBe(url);
+    for (const status of [
+      LinkPreviewStatus.pending,
+      LinkPreviewStatus.ready,
+      LinkPreviewStatus.unavailable,
+      LinkPreviewStatus.disabled,
+    ]) {
+      expect(render({ message, metadata: { linkPreviews: [{ url, status, title: '标题' }] } })).toBe(
+        status === LinkPreviewStatus.ready ? '[分享]标题' : url,
+      );
+    }
+    const preview = { url, status: LinkPreviewStatus.ready, title: '标题' };
+    expect(render({ message, metadata: { linkPreviews: [preview, preview] } })).toBe(url);
+    expect(render({ message, metadata: { linkPreviews: [{ ...preview, url: 'https://other.example/' }] } })).toBe(url);
+    expect(render({ message, metadata: { linkPreviews: [{ ...preview, url: 'not a URL' }] } })).toBe(url);
+  });
+
+  it('preserves labels, surrounding text and Markdown structure instead of making them share summaries', () => {
+    const url = 'https://example.com/article';
+    const metadata = { linkPreviews: [{ url, status: LinkPreviewStatus.ready, title: '标题' }] };
+    for (const [message, expected] of [
+      [`[说明](${url})`, '说明'],
+      [`前文 [](${url}) 后文`, '前文 后文'],
+      [`[](${url}) [另一个](https://other.example/)`, '另一个'],
+      [`[](${url}) [](${url})`, ''],
+      [`\`[](${url})\``, `[](${url})`],
+      [`**[](${url})**`, ''],
+      ['[](javascript:alert(1))', '[](javascript:alert(1))'],
+    ]) {
+      expect(render({ message, metadata })).toBe(expected);
+    }
+  });
+
   it('keeps ordinary text and unmatched links out of share summaries', () => {
     const url = 'https://example.com/article';
     const metadata = { linkPreviews: [{ url, status: LinkPreviewStatus.ready, title: '标题' }] };
