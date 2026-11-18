@@ -70,6 +70,31 @@ pub fn finalize_metadata(
     })
 }
 
+/// Queue the hydrated preview while a concurrent edit or recall is blocked.
+/// Hydration must finish before taking this lock.
+pub(super) fn with_current_preview(
+    conn: &mut PgConnection,
+    snapshot: &Message,
+    publish: impl FnOnce(),
+) -> QueryResult<()> {
+    conn.transaction(|conn| {
+        let current = dsl::messages
+            .find(snapshot.id)
+            .filter(dsl::deleted_at.is_null())
+            .filter(dsl::is_published)
+            .filter(dsl::updated_at.is_not_distinct_from(snapshot.updated_at))
+            .filter(dsl::metadata.is_not_distinct_from(snapshot.metadata.as_ref()))
+            .for_share()
+            .select(dsl::id)
+            .first::<i64>(conn)
+            .optional()?;
+        if current.is_some() {
+            publish();
+        }
+        Ok(())
+    })
+}
+
 // Image-only work completes the preview without replacing its already acquired text.
 fn merge_completed(preview: &mut StoredLinkPreview, result: &StoredLinkPreview) {
     if preview.status == LinkPreviewStatus::Ready
@@ -376,6 +401,7 @@ mod tests {
         let enriched = finalize_metadata(&mut conn, 1, 2, None, &ready())
             .unwrap()
             .unwrap();
+        with_current_preview(&mut conn, &enriched, || panic!("unpublished preview sent")).unwrap();
         // Audio publication updates unrelated columns and cannot overwrite cards.
         diesel::update(dsl::messages.find(1))
             .set(dsl::is_published.eq(true))
@@ -387,6 +413,19 @@ mod tests {
             .first(&mut conn)
             .unwrap();
         assert_eq!(published.metadata, enriched.metadata);
+        let mut writer = PgConnection::establish(&url).unwrap();
+        writer
+            .batch_execute(&format!("SET search_path TO {schema}, wetty_chat, public"))
+            .unwrap();
+        let lock_message = || dsl::messages.find(1).for_update().no_wait().select(dsl::id);
+        let mut sent = false;
+        with_current_preview(&mut conn, &published, || {
+            assert!(lock_message().first::<i64>(&mut writer).is_err());
+            sent = true;
+        })
+        .unwrap();
+        assert!(sent);
+        assert_eq!(lock_message().first::<i64>(&mut writer).unwrap(), 1);
         diesel::update(dsl::messages.find(1))
             .set((
                 dsl::message.eq("later edit"),
@@ -400,15 +439,17 @@ mod tests {
             .first(&mut conn)
             .unwrap();
         assert_eq!(live.message.as_deref(), Some("later edit"));
+        with_current_preview(&mut conn, &published, || panic!("superseded preview sent")).unwrap();
         diesel::update(dsl::messages.find(1))
             .set(dsl::deleted_at.eq(Some(Utc::now())))
             .execute(&mut conn)
             .unwrap();
-        let live: Message = dsl::messages
+        let deleted: Message = dsl::messages
             .find(1)
             .select(Message::as_select())
             .first(&mut conn)
             .unwrap();
-        assert!(live.deleted_at.is_some());
+        assert!(deleted.deleted_at.is_some());
+        with_current_preview(&mut conn, &live, || panic!("recalled preview sent")).unwrap();
     }
 }
