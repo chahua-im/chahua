@@ -1,0 +1,4 @@
+@mixin tones($accent) {
+  --message-accent-stripe: color-mix(in srgb, #{$accent} var(--message-stripe-opacity, 100%), transparent);
+  --message-accent-background: color-mix(in srgb, #{$accent} var(--message-background-opacity, 10%), transparent);
+}

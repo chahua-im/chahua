@@ -18,8 +18,11 @@ import { MessagePreview } from '../message-preview/message-preview';
     </span>
   `,
   styles: `
+    @use '../message-accent' as accent;
+
     :host {
       --message-accent-source: light-dark(var(--reply-light), var(--reply-dark));
+      @include accent.tones(var(--message-accent));
       display: grid;
       grid-template-columns: minmax(0, 1fr);
       position: relative;

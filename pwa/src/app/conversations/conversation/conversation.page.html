@@ -423,7 +423,7 @@
       @if (preview || (linkPreviewPanel()?.loading() && !linkPreviewPanel()?.fallbackUrl())) {
         <app-message-link-previews
           class="draft-preview"
-          [style.--message-accent]="'light-dark(' + draftPreviewColors().light + ', ' + draftPreviewColors().dark + ')'"
+          [colors]="draftPreviewColors()"
           [previews]="preview ? [preview] : []"
           [loading]="!preview"
           [interactive]="false" />

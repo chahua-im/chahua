@@ -11,20 +11,13 @@
 // Resolve on each child host so replies can supply their own author's color.
 :is(.sender, .reply-preview, app-message-link-previews) {
   --message-accent: var(--message-contrast, var(--message-accent-source, var(--sender-color)));
-  --message-accent-stripe: color-mix(in srgb, var(--message-accent) var(--message-stripe-opacity, 100%), transparent);
-  --message-accent-background: color-mix(
-    in srgb,
-    var(--message-accent) var(--message-background-opacity, 10%),
-    transparent
-  );
-  --message-accent-tile: color-mix(in srgb, var(--message-accent) 20%, transparent);
 }
 
 .sent .bubble:not(.card-bubble) {
   --message-contrast: var(--ion-color-primary-contrast);
   --message-stripe-opacity: 50%;
   --message-background-opacity: 12%;
-  --message-group-background: color-mix(in srgb, var(--ion-color-primary-contrast) 25%, transparent);
+  --message-group-background: color-mix(in srgb, var(--message-contrast) 25%, transparent);
   --forward-muted: currentColor;
   --forward-opacity: 0.75;
 }
