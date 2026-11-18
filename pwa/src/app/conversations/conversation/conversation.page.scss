@@ -337,13 +337,6 @@ app-message-composer[hidden] {
   }
 }
 
-.draft-preview {
-  min-width: 0;
-  --message-accent-stripe: var(--message-accent);
-  --message-accent-background: color-mix(in srgb, var(--message-accent) 10%, transparent);
-  --message-accent-tile: color-mix(in srgb, var(--message-accent) 20%, transparent);
-}
-
 .draft-link-fallback {
   display: block;
   min-width: 0;

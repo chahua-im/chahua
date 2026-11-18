@@ -23,8 +23,6 @@ import { draftLinkUrls } from './draft-link-urls';
       class="draft-link-preview-modal"
       [isOpen]="open()"
       [keepContentsMounted]="true"
-      [style.--preview-light]="colors()?.light"
-      [style.--preview-dark]="colors()?.dark"
       (willDismiss)="open.set(false)"
     >
       <ng-template>
@@ -50,6 +48,7 @@ import { draftLinkUrls } from './draft-link-urls';
                   <a class="destination" [href]="url" [title]="url" target="_blank" rel="noopener noreferrer">
                     @if (preview?.status === Status.ready || (active && !preview)) {
                       <app-message-link-previews
+                        [colors]="colors()"
                         [previews]="preview ? [preview] : []"
                         [loading]="!preview"
                         [interactive]="false"
@@ -96,13 +95,6 @@ import { draftLinkUrls } from './draft-link-urls';
       --width: min(560px, calc(100vw - 32px));
       --height: auto;
       --border-radius: 16px;
-      --message-accent: light-dark(
-        var(--preview-light, var(--ion-color-primary)),
-        var(--preview-dark, var(--ion-color-primary))
-      );
-      --message-accent-stripe: var(--message-accent);
-      --message-accent-background: color-mix(in srgb, var(--message-accent) 10%, transparent);
-      --message-accent-tile: color-mix(in srgb, var(--message-accent) 20%, transparent);
     }
     .dialog {
       display: flex;

@@ -22,7 +22,7 @@
       var(--group-dark, var(--group-light, rgba(var(--ion-text-color-rgb), 0.25)))
     )
   );
-  color: var(--ion-color-primary-contrast);
+  color: var(--message-contrast, white);
   padding: 0 5px;
   border-radius: 2px;
   font-size: 10px;

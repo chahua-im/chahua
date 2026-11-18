@@ -61,7 +61,15 @@ import { internalHref } from './message-text/message-text';
     }
   `,
   styles: `
+    @use './message-accent' as accent;
+
     :host {
+      --link-preview-accent: var(
+        --message-accent,
+        light-dark(var(--preview-light, var(--ion-color-primary)), var(--preview-dark, var(--ion-color-primary)))
+      );
+      @include accent.tones(var(--link-preview-accent));
+      --message-accent-tile: color-mix(in srgb, var(--link-preview-accent) 20%, transparent);
       display: block;
       min-width: 0;
       font-size: var(--app-chat-font-size, var(--app-font-body));
@@ -75,20 +83,15 @@ import { internalHref } from './message-text/message-text';
       display: flow-root;
       min-height: 48px;
       padding: 6px 8px;
-      border-inline-start: 3px solid var(--stripe);
+      border-inline-start: 3px solid var(--message-accent-stripe);
       border-radius: 4px;
-      background: var(--background);
+      background: var(--message-accent-background);
       color: inherit;
       text-decoration: none;
       min-width: 0;
     }
     .card + .card {
       margin-top: 4px;
-    }
-    :host {
-      --stripe: var(--message-accent-stripe);
-      --background: var(--message-accent-background);
-      --tile: var(--message-accent-tile);
     }
     .thumbnail {
       position: relative;
@@ -109,7 +112,7 @@ import { internalHref } from './message-text/message-text';
     .letter {
       display: grid;
       place-items: center;
-      background: var(--tile);
+      background: var(--message-accent-tile);
       font-weight: 600;
     }
     .text {
@@ -128,7 +131,7 @@ import { internalHref } from './message-text/message-text';
       overflow: hidden;
       overflow-wrap: anywhere;
       font-weight: 600;
-      color: var(--message-accent);
+      color: var(--link-preview-accent);
     }
     .description {
       display: block;
@@ -148,7 +151,7 @@ import { internalHref } from './message-text/message-text';
     }
     .placeholder {
       display: block;
-      background: var(--tile);
+      background: var(--message-accent-tile);
     }
     .text .placeholder {
       border-radius: 4px;
@@ -165,12 +168,17 @@ import { internalHref } from './message-text/message-text';
       width: 45%;
     }
   `,
+  host: {
+    '[style.--preview-light]': 'colors()?.light',
+    '[style.--preview-dark]': 'colors()?.dark',
+  },
   imports: [NgTemplateOutlet],
 })
 export class MessageLinkPreviews {
   readonly previews = input.required<readonly LinkPreviewResponse[]>();
   readonly interactive = input(true);
   readonly loading = input(false);
+  readonly colors = input<{ light: string; dark: string }>();
   protected readonly status = LinkPreviewStatus;
   protected readonly failedImages = signal<ReadonlySet<string>>(new Set());
   private readonly expired = signal<ReadonlySet<string>>(new Set());
