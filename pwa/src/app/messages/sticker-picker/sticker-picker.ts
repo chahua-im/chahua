@@ -232,6 +232,22 @@ export class StickerPicker {
     },
     approach: (id) => void this.loadGroup(id),
   });
+
+  protected scrollPacks(event: WheelEvent) {
+    const mode = event.deltaMode;
+    if (event.defaultPrevented || event.ctrlKey || event.shiftKey || event.deltaX || !event.deltaY) return;
+    const viewport = event.currentTarget as HTMLElement;
+    if (viewport.scrollWidth <= viewport.clientWidth) return;
+    const unit =
+      mode === WheelEvent.DOM_DELTA_LINE
+        ? parseFloat(getComputedStyle(viewport).fontSize)
+        : mode === WheelEvent.DOM_DELTA_PAGE
+          ? viewport.clientWidth
+          : 1;
+    viewport.scrollLeft += event.deltaY * unit;
+    event.preventDefault();
+  }
+
   constructor() {
     afterRenderEffect({
       read: (onCleanup) => {

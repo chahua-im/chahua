@@ -818,6 +818,61 @@ describe('StickerPicker selection during requests', () => {
     expect(fixture.componentInstance['packs']().find((item) => item.id === newPack.id)?.stickerCount).toBe(1);
   });
 
+  it('scrolls the pack strip horizontally with vertical wheels in pixel, line and page units', async () => {
+    const { fixture } = await render();
+    const strip = fixture.nativeElement.querySelector('.pack-tabs') as HTMLElement;
+    vi.spyOn(strip, 'clientWidth', 'get').mockReturnValue(250);
+    vi.spyOn(strip, 'scrollWidth', 'get').mockReturnValue(1000);
+    strip.style.fontSize = '16px';
+    const active = fixture.componentInstance['activeId']();
+    for (const [mode, deltaY, distance] of [
+      [WheelEvent.DOM_DELTA_PIXEL, 60, 60],
+      [WheelEvent.DOM_DELTA_PIXEL, -30, -30],
+      [WheelEvent.DOM_DELTA_LINE, 3, 48],
+      [WheelEvent.DOM_DELTA_PAGE, 1, 250],
+    ]) {
+      strip.scrollLeft = 100;
+      const event = new WheelEvent('wheel', { deltaMode: mode, deltaY, bubbles: true, cancelable: true });
+      strip.querySelector('button')!.dispatchEvent(event);
+      expect(strip.scrollLeft).toBe(100 + distance);
+      expect(event.defaultPrevented).toBe(true);
+      expect(fixture.componentInstance['activeId']()).toBe(active);
+    }
+    const gridEvent = new WheelEvent('wheel', { deltaY: 60, bubbles: true, cancelable: true });
+    fixture.nativeElement.querySelector('.sticker-library').dispatchEvent(gridEvent);
+    expect(gridEvent.defaultPrevented).toBe(false);
+    expect(strip.scrollLeft).toBe(350);
+  });
+
+  it('preserves native horizontal input, zoom gestures and scrolling without pack overflow', async () => {
+    const { fixture } = await render();
+    const strip = fixture.nativeElement.querySelector('.pack-tabs') as HTMLElement;
+    vi.spyOn(strip, 'clientWidth', 'get').mockReturnValue(250);
+    const width = vi.spyOn(strip, 'scrollWidth', 'get').mockReturnValue(1000);
+    strip.scrollLeft = 100;
+    for (const options of [
+      { deltaX: 60 },
+      { deltaX: 40, deltaY: 10 },
+      { deltaY: 60, ctrlKey: true },
+      { deltaY: 60, shiftKey: true },
+      { deltaY: 0 },
+    ]) {
+      const event = new WheelEvent('wheel', { ...options, bubbles: true, cancelable: true });
+      strip.dispatchEvent(event);
+      expect(strip.scrollLeft).toBe(100);
+      expect(event.defaultPrevented).toBe(false);
+    }
+    const consumed = new WheelEvent('wheel', { deltaY: 60, bubbles: true, cancelable: true });
+    consumed.preventDefault();
+    strip.dispatchEvent(consumed);
+    expect(strip.scrollLeft).toBe(100);
+    width.mockReturnValue(250);
+    const fits = new WheelEvent('wheel', { deltaY: 60, bubbles: true, cancelable: true });
+    strip.dispatchEvent(fits);
+    expect(strip.scrollLeft).toBe(100);
+    expect(fits.defaultPrevented).toBe(false);
+  });
+
   it('reveals half a cover on overflow and preserves scrolling when the strip resizes', async () => {
     let width = 250;
     const callbacks = new Map<Element, () => void>();
