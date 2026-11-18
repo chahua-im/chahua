@@ -589,6 +589,221 @@ describe('ConversationPage', () => {
     expect(fixture.nativeElement.querySelector('app-message')).toBe(node);
   });
 
+  function selectionMessages(first: number, last: number) {
+    return Array.from({ length: last - first + 1 }, (_, index) => {
+      const id = String(first + index);
+      return { ...wireMessage, id, clientGeneratedId: `selection-${id}` };
+    });
+  }
+
+  async function openSelectionMessages(
+    messages: (typeof wireMessage)[],
+    { newerCursor, height = 170 }: { newerCursor?: string; height?: number } = {},
+  ) {
+    const loading = component['conversation'].open(encodeId(messages[0].id));
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: messages[0].id }).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages,
+      newerCursor,
+    });
+    await loading;
+    await fixture.whenStable();
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    component['entered'] = true;
+    component['position'].set(undefined);
+    Object.defineProperties(scroll, {
+      clientHeight: { value: height },
+      scrollHeight: { value: 1200, configurable: true },
+    });
+    vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, height));
+    measureSelectionMessages();
+  }
+
+  function measureSelectionMessages() {
+    fixture.detectChanges();
+    for (const row of (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLElement>(
+      'app-message[data-message-id]',
+    )) {
+      const top = (Number(row.dataset['messageId']) - 100) * 100;
+      vi.spyOn(row, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, top - scroll.scrollTop, 300, 100));
+    }
+  }
+
+  it('extends selection in both directions through offscreen and paginated messages', async () => {
+    const messages = selectionMessages(100, 109);
+    messages[8].messageType = MessageType.system;
+    await openSelectionMessages(messages, { newerCursor: '109' });
+    const items = component['conversation'].items();
+    component['beginSelection'](items[6]);
+    component['toggleSelection'](items[4]);
+    scroll.scrollTop = 450;
+    await component['trackScroll']();
+    fixture.detectChanges();
+    const control: HTMLElement = fixture.nativeElement.querySelector('app-selection-range-button');
+    const button = control.querySelector<HTMLElement>('ion-button')!;
+    expect(control.classList.contains('ion-display-none')).toBe(true);
+
+    scroll.scrollTop = 750;
+    fixture.nativeElement.querySelector('ion-content').dispatchEvent(new CustomEvent('ionScroll'));
+    await fixture.whenStable();
+    component['scrolling'].scrollEnd();
+    fixture.detectChanges();
+    expect(control.classList.contains('ion-display-none')).toBe(false);
+    expect(control.classList.contains('selection-range-bottom')).toBe(true);
+    expect(button.querySelector('ion-icon[slot="start"]')).not.toBeNull();
+    expect(button.textContent?.trim()).toBe('选择到这里 +2');
+
+    const pagination = vi.spyOn(component['conversation'], 'load');
+    scroll.scrollTop = 790;
+    await component['onScroll']();
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, after: '109' }).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: selectionMessages(110, 115),
+    });
+    await pagination.mock.results[0].value;
+    Object.defineProperty(scroll, 'scrollHeight', { value: 1600 });
+    measureSelectionMessages();
+
+    // The latest row has just entered the viewport, before the next scroll event.
+    scroll.scrollTop = 965;
+    button.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const selectedIds = () =>
+      [...component['selectedMessages']().values()].map((source) => decodeId(forwardSourceMessage(source)!.id)).sort();
+    expect(selectedIds()).toEqual(['104', '106', '107', '109', '110', '111']);
+    expect(control.classList.contains('ion-display-none')).toBe(true);
+
+    scroll.scrollTop = 135;
+    await component['onScroll']();
+    fixture.detectChanges();
+    expect(control.classList.contains('selection-range-top')).toBe(true);
+    expect(button.textContent?.trim()).toBe('选择到这里 +3');
+    button.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(selectedIds()).toEqual(['101', '102', '103', '104', '106', '107', '109', '110', '111']);
+    expect(control.classList.contains('ion-display-none')).toBe(true);
+  });
+
+  it('keeps the current range button on a small reversal and moves it when a farther opposite endpoint appears', async () => {
+    await openSelectionMessages(selectionMessages(100, 109), { height: 240 });
+    component['beginSelection'](component['conversation'].items()[4]);
+    scroll.scrollTop = 250;
+    await component['trackScroll']();
+    const button: HTMLElement = fixture.nativeElement.querySelector('app-selection-range-button');
+
+    scroll.scrollTop = 360;
+    await component['onScroll']();
+    fixture.detectChanges();
+    expect(button.classList.contains('selection-range-bottom')).toBe(true);
+    expect(button.textContent?.trim()).toBe('选择到这里 +1');
+
+    scroll.scrollTop = 340;
+    await component['onScroll']();
+    fixture.detectChanges();
+    expect(button.classList.contains('selection-range-bottom')).toBe(true);
+    expect(button.textContent?.trim()).toBe('选择到这里 +1');
+
+    scroll.scrollTop = 295;
+    await component['onScroll']();
+    fixture.detectChanges();
+    expect(button.classList.contains('selection-range-top')).toBe(true);
+    expect(button.classList.contains('selection-range-bottom')).toBe(false);
+    expect(button.textContent?.trim()).toBe('选择到这里 +2');
+    expect(fixture.nativeElement.querySelectorAll('app-selection-range-button')).toHaveLength(1);
+  });
+
+  it('offers the newer range on reaching the bottom with an already-visible latest message', async () => {
+    await openSelectionMessages(selectionMessages(100, 109), { height: 360 });
+    Object.defineProperty(scroll, 'scrollHeight', { value: 1000 });
+    component['beginSelection'](component['conversation'].items()[8]);
+    scroll.scrollTop = 640;
+    await component['trackScroll']();
+    const button: HTMLElement = fixture.nativeElement.querySelector('app-selection-range-button');
+
+    scroll.scrollTop = 570;
+    await component['onScroll']();
+    fixture.detectChanges();
+    expect(button.classList.contains('selection-range-top')).toBe(true);
+
+    scroll.scrollTop = 600;
+    await component['onScroll']();
+    fixture.detectChanges();
+    expect(button.classList.contains('selection-range-top')).toBe(true);
+
+    scroll.scrollTop = 640;
+    await component['onScroll']();
+    fixture.detectChanges();
+    expect(button.classList.contains('selection-range-bottom')).toBe(true);
+    expect(button.textContent?.trim()).toBe('选择到这里 +1');
+  });
+
+  it('shows the newer range when a layout read precedes the scroll event', async () => {
+    await openSelectionMessages(selectionMessages(100, 109));
+    component['beginSelection'](component['conversation'].items()[3]);
+    scroll.scrollTop = 275;
+    await component['trackScroll']();
+    const content: HTMLElement = fixture.nativeElement.querySelector('ion-content');
+    const button: HTMLElement = fixture.nativeElement.querySelector('app-selection-range-button');
+
+    scroll.scrollTop = 440;
+    content.dispatchEvent(new CustomEvent('ionScrollStart'));
+    await component['trackScroll']();
+    expect(button.classList.contains('ion-display-none')).toBe(true);
+
+    content.dispatchEvent(new CustomEvent('ionScroll'));
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(button.classList.contains('selection-range-bottom')).toBe(true);
+    expect(button.textContent?.trim()).toBe('选择到这里 +3');
+  });
+
+  it('shows remaining slots and only allows selecting a complete range within the limit', async () => {
+    await openSelectionMessages(selectionMessages(100, 109));
+    component['beginSelection'](component['conversation'].items()[0]);
+    for (let id = 1; id <= 98; id++) component['toggleSelection']({ ...testMessage, id: encodeId(String(id)) });
+    const selected = component['selectedMessages']();
+    expect(selected.size).toBe(99);
+    scroll.scrollTop = 0;
+    await component['trackScroll']();
+    scroll.scrollTop = 240;
+    await component['onScroll']();
+    fixture.detectChanges();
+    const control = fixture.debugElement.query(By.css('app-selection-range-button'));
+    const button = control.query(By.css('ion-button'));
+    expect(button.componentInstance.disabled).toBe(true);
+    expect(button.nativeElement.textContent.trim()).toBe('还可选 1 条');
+    button.nativeElement.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(component['selectedMessages']()).toBe(selected);
+
+    scroll.scrollTop = 20;
+    await component['onScroll']();
+    fixture.detectChanges();
+    expect(button.componentInstance.disabled).toBe(false);
+    expect(button.nativeElement.textContent.trim()).toBe('选择到这里 +1');
+
+    // The viewport can change between the rendered count and the click.
+    scroll.scrollTop = 120;
+    button.nativeElement.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(component['selectedMessages']()).toBe(selected);
+    expect(button.componentInstance.disabled).toBe(true);
+
+    scroll.scrollTop = 20;
+    await component['onScroll']();
+    fixture.detectChanges();
+    button.nativeElement.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(component['selectedMessages']().size).toBe(100);
+    expect(component['isSelected'](encodeId('101'), 'selection-101')).toBe(true);
+    expect(control.nativeElement.classList.contains('ion-display-none')).toBe(true);
+  });
+
   it('shows a removable forward preview in the destination without sending or replacing its text', () => {
     const send = vi.spyOn(component['outbox'], 'enqueueForward');
     component['draft'].set('existing draft');
@@ -1020,13 +1235,15 @@ describe('ConversationPage', () => {
     fixture.detectChanges();
     peer.expect('chats.getReadReceipt', { chatId: wireChat.id }).flush({});
     const request = peer.expect('messages.list', { chatId: wireChat.id, max: 50 });
-    expect(fixture.nativeElement.querySelector('.message-skeleton')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('app-message-list-skeleton')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('.message-skeleton-avatar')).toBeNull();
-    expect(fixture.nativeElement.querySelectorAll('.message-skeleton .chat-row.no-details')).toHaveLength(6);
+    expect(fixture.nativeElement.querySelectorAll('app-message-list-skeleton .chat-row.no-details')).toHaveLength(6);
     dmDetails.set(true);
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('.message-skeleton .sent .message-skeleton-avatar')).not.toBeNull();
-    expect(fixture.nativeElement.querySelector('.message-skeleton .chat-row.no-details')).toBeNull();
+    expect(
+      fixture.nativeElement.querySelector('app-message-list-skeleton .sent .message-skeleton-avatar'),
+    ).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('app-message-list-skeleton .chat-row.no-details')).toBeNull();
     avatars.set(true);
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelectorAll('.message-skeleton-avatar')).toHaveLength(6);
@@ -1039,7 +1256,7 @@ describe('ConversationPage', () => {
     });
     await fixture.whenStable();
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('.message-skeleton')).toBeNull();
+    expect(fixture.nativeElement.querySelector('app-message-list-skeleton')).toBeNull();
     expect(fixture.nativeElement.querySelector('app-message .chat-row.no-details')).not.toBeNull();
     dmDetails.set(true);
     fixture.detectChanges();
@@ -2351,7 +2568,7 @@ describe('ConversationPage', () => {
     expect(fixture.nativeElement.querySelector('app-message')).toBe(row);
     expect(row.querySelector('ion-avatar')).toBe(avatar);
     expect(component['draft']()).toBe('群里的草稿');
-    expect(fixture.nativeElement.querySelector('.message-skeleton')).toBeNull();
+    expect(fixture.nativeElement.querySelector('app-message-list-skeleton')).toBeNull();
     peer.expect('messages.list', { chatId: wireChat.id, max: 50, after: wireMessage.id }).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [

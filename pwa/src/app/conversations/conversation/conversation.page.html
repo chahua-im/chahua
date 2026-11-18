@@ -114,8 +114,8 @@
   appScrollbars
   [scrollEvents]="true"
   (ionScroll)="onScroll()"
-  (ionScrollStart)="scrolling.scrollStart()"
-  (ionScrollEnd)="scrolling.scrollEnd()"
+  (ionScrollStart)="onScrollStart()"
+  (ionScrollEnd)="onScrollEnd()"
   (touchstart)="scrolling.touchStart()"
   (touchend)="scrolling.touchEnd()"
   (touchcancel)="scrolling.touchEnd()">
@@ -143,6 +143,7 @@
     [class.colliding]="dateColliding() || !visibleDate()">
     {{ visibleDate() | messageDate }}
   </span>
+  <app-selection-range-button slot="fixed" [range]="selectionRange()" (extend)="selectToHere($event)" />
   <!-- Keep the default slot stable when pagination adds loading indicators or changes paging controls. -->
   <div #messageContent [class.load-error-page]="!!conversation.error() && !conversation.page() && !rows().length">
     @if (threadError()) {
@@ -180,38 +181,7 @@
       </div>
     }
     @if (!conversation.page() && conversation.loading()) {
-      <div class="message-skeleton">
-        @for (row of [0, 1, 2, 3, 4, 5]; track row) {
-          <div class="message-skeleton-item">
-            <div
-              class="chat-row message-skeleton-row"
-              [class.sent]="row % 3 === 2"
-              [class.short]="row % 2 === 0"
-              [class.group-start]="row % 3 !== 1"
-              [class.last]="row % 3 !== 0 || preferences.showAllAvatars()"
-              [class.no-details]="!showMessageDetails()">
-              @if (showMessageDetails()) {
-                <span class="avatar-slot">
-                  @if (row % 3 !== 0 || preferences.showAllAvatars()) {
-                    <span class="avatar skeleton-block message-skeleton-avatar"></span>
-                  }
-                </span>
-              }
-              <div class="bubble message-skeleton-bubble">
-                <div class="bubble-surface">
-                  @if (row % 3 !== 1 && showMessageDetails()) {
-                    <span class="skeleton-line message-skeleton-author"></span>
-                  }
-                  <span class="skeleton-line"></span>
-                  @if (row % 3 === 0) {
-                    <span class="skeleton-line"></span>
-                  }
-                </div>
-              </div>
-            </div>
-          </div>
-        }
-      </div>
+      <app-message-list-skeleton [showDetails]="showMessageDetails()" [showAllAvatars]="preferences.showAllAvatars()" />
     }
     <div class="message-list">
       @for (row of rows(); track row.key; let index = $index) {

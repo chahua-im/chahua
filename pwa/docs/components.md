@@ -109,6 +109,9 @@ ChatDetails 的可选 friendRequest 输入承载请求快照，在资料首页�
 | SavedMessageList   | saved、nextCursor、loading/failed、取消收藏状态                                                                                      | 全局收藏接口；快照映射给非交互 Message                                                                                                                                                                    |
 
 ConversationPage.rows 合并已确认区间与队尾，按 clientGeneratedId 保持行身份，在原位置覆盖待保存的编辑，过滤撤回意图不可见的消息（撤回的普通消息整行移除，话题根保留为墓碑行）。日期与连续作者分组从最终可见行派生；未读分界线断开连续作者分组，分界线两侧各自显示组尾头像并独立处理悬浮头像。
+
+MessageListSkeleton 复用消息行的布局样式，根据 showDetails 和 showAllAvatars 渲染首次加载的占位行。ConversationPage 决定占位何时显示。
+
 DraftLinkPreviews 接收 chatId、scope、text、initial、automatic、colors 及双向 choices/open；派生去重 URL 与前三个未关闭链接，持有当前草稿的抓取结果和请求身份，通过 firstReady 提供首个可显示预览，fallbackUrl 在没有就绪预览时提供首个未关闭的失败链接；automatic 在管理区关闭时按顺序获取首个可显示结果，管理列表置于保留内容的独立 IonModal，复用 MessageLinkPreviews 展示内嵌预览。ConversationPage 持有发送／编辑的开关选择，仅将普通发送草稿交给 DraftStore；编辑选择随页面离开清理。Composition 携带请求 metadata 与乐观展示 previewMetadata，MessageOutbox 将 metadata 保留到发送、编辑和重试，不把客户端展示结果作为可信抓取结果提交。
 
 MessagePreview 通过 messageLinkSummary 统一识别单个裸链接和空文字 Markdown 链接，后者复用 Markdown 解析器提取 URL；分享标题与 URL 回退规则见[需求](requirements.md#会话阅读与滚动)。精简消息与转发摘要携带 URL、状态和标题，不携带缩略图或描述，也不发起额外请求。
@@ -123,7 +126,7 @@ ConversationPage 持有当前群聊或群聊话题的 mention 跳转 ID、请求
 
 时间线普通头像通过 Message 的 canMention 输入与 mention 输出交给 ConversationPage，浮动头像由页面直接交给 MessageComposer.insertMention。两种头像复用 AvatarMention 指令处理右键、长按、移动取消及后续点击抑制；Composer 复用候选选择的提及编码与用户展示快照，在原生输入选区插入。
 
-scrollActivity.moving 控制浮动日期，idle 同时要求没有触摸与惯性，用于分页合并和置顶栏显隐；visibleDate 来自已有视口测量。Ionic 缓存页面通常在离开时释放区间和组件资源；群聊被其话题覆盖时保留消息节点和位置，返回时补取消息，离开这组群聊/话题后释放。DraftStore 与 MessageOutbox 的生命周期独立于页面。
+scrollActivity.moving 控制浮动日期，idle 同时要求没有触摸与惯性，用于分页合并和置顶栏显隐；visibleDate 来自已有视口测量。ConversationPage 测量多选的可见首尾、滚动方向与边界，`selection-range.ts` 根据这些数据及已加载区间决定可扩选范围和按钮方向。Ionic 缓存页面通常在离开时释放区间和组件资源；群聊被其话题覆盖时保留消息节点和位置，返回时补取消息，离开这组群聊/话题后释放。DraftStore 与 MessageOutbox 的生命周期独立于页面。
 
 ## 消息展示与操作
 
@@ -164,6 +167,8 @@ MessageActions 由菜单和会话页各自提供，复用逐条撤回及表态�
 | ForwardedRecords | 路由 id／messageId 或 savedId，以及可选 bundleId；独立只读会话页面，复用 conversation-header、messageRows、Message 和 scrollActivity，视口测量同时派生浮动头像与日期；内部引用定位，子记录路由导航；持有详情失效与后台校验状态，订阅根消息删除和共享聊天权限事件                                                                                                                                                                        |
 
 ConversationPage 的选择项保存已确认消息或 OutgoingMessage 引用，分别用服务端 ID 或 clientGeneratedId 标识；仅已获得服务端 ID 的队列消息可选；发布后沿用选择，选择目标时读取其最新确认数据并脱离队列对象。多选期间停用浮动头像，显示消息行原位头像，点击统一用于选择。页面持有多选撤回确认快照、处理状态与结果提示；权限沿用单条撤回规则，失败项保留选中。
+
+SelectionRangeButton 在消息区的固定槽内显示范围操作，根据页面传入的方向、数量和剩余名额渲染，点击后将扩选方向交回 ConversationPage。
 
 ConversationPage 消费 DraftStore 中当前聊天／话题的待转发来源，草稿只保存服务器消息数据；转发预览通过 MessageComposer 的投影区域显示；forwardPreview 提供单条内容，forwardParticipants 从按消息 ID 排序的所选消息中按作者 UID 去重。MessageComposer 的 forwarding 输入控制空文本发送、媒体入口与发送按钮，forwardSubmitted 输出提及展示快照；普通附件与编辑上传不移交给转发任务。
 

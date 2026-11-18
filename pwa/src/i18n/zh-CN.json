@@ -671,6 +671,8 @@
       "replies": "{{ count }} 条回复"
     },
     "selection": {
+      "extend": "选择到这里 +{{count}}",
+      "remaining": "还可选 {{count}} 条",
       "recallConfirm": "确定撤回选中的 {{count}} 条消息？撤回后，其他成员将无法查看这些消息。",
       "recallConfirmDm": "确定撤回选中的 {{count}} 条消息？撤回后，对方将无法查看这些消息。",
       "recalled": "已撤回 {{count}} 条消息",

@@ -145,6 +145,9 @@ import { ConversationViewportHeader } from '../conversation-viewport-header';
 import { ReactionVisibility } from '../reaction-visibility';
 import { DraftStore } from '../draft-store';
 import { messageRows } from '../message-rows';
+import { MessageListSkeleton } from './message-list-skeleton';
+import { SelectionRangeButton } from './selection-range-button';
+import { findSelectionInterval, selectionDirectionAfterScroll, type SelectionEdges } from './selection-range';
 
 function parseMessageId(id: string | null | undefined) {
   return id && /^[1-9]\d{0,18}$/.test(id) && BigInt(id) <= 9223372036854775807n ? encodeId(id) : undefined;
@@ -211,10 +214,12 @@ interface ConversationEntry {
     RouterLink,
     Message,
     MessageMenu,
+    MessageListSkeleton,
     MessageComposer,
     DraftLinkPreviews,
     MessageLinkPreviews,
     MessagePreview,
+    SelectionRangeButton,
     VoiceBar,
     LoadError,
     DiagnosticsCopy,
@@ -523,6 +528,56 @@ export class ConversationPage {
   );
   protected readonly selecting = signal(false);
   protected readonly selectedMessages = signal<ReadonlyMap<SnowflakeID | string, SelectedMessage>>(new Map());
+  private readonly selectionDirection = signal<PageDirection | undefined>(undefined);
+  private selectionScroll?: { top: number; edges: SelectionEdges };
+  private readonly selectionEdges = signal<SelectionEdges>(
+    {},
+    {
+      equal: (a, b) =>
+        a[PageDirection.Older] === b[PageDirection.Older] && a[PageDirection.Newer] === b[PageDirection.Newer],
+    },
+  );
+  private readonly selectionAnchors = computed(() => {
+    let oldest: SnowflakeID | undefined;
+    let newest: SnowflakeID | undefined;
+    for (const source of this.selectedMessages().values()) {
+      const message = forwardSourceMessage(source);
+      if (!message || !canSelect(message)) continue;
+      if (oldest == null || message.id < oldest) oldest = message.id;
+      if (newest == null || message.id > newest) newest = message.id;
+    }
+    return { [PageDirection.Older]: oldest, [PageDirection.Newer]: newest };
+  });
+  private readonly selectionCandidates = computed(() => {
+    const byId = new Map<SnowflakeID, SelectedMessage>();
+    for (const row of this.rows()) {
+      const source = row.outgoing ?? row.confirmed!;
+      const message = forwardSourceMessage(source);
+      if (message && canSelect(message)) byId.set(message.id, source);
+    }
+    // An acknowledged outbox row can appear out of server ID order.
+    const ids = [...byId.keys()].sort((a, b) => a - b);
+    return { sources: ids.map((id) => byId.get(id)!), indices: new Map(ids.map((id, index) => [id, index])) };
+  });
+  protected readonly selectionRange = computed(() => {
+    if (!this.selecting() || this.recalling() || this.pendingNavigation() || this.conversation.loading()) return;
+    const direction = this.selectionDirection();
+    if (direction == null) return;
+    const interval = this.selectionInterval(direction, this.selectionEdges()[direction]);
+    if (!interval) return;
+    const count = interval.end - interval.start;
+    const remaining = this.selectionLimit - this.selectedMessages().size;
+    return { ...interval, direction, count, remaining, overLimit: count > remaining };
+  });
+  private selectionInterval(direction: PageDirection, edge: SnowflakeID | undefined) {
+    return findSelectionInterval(
+      direction,
+      this.selectionAnchors()[direction],
+      edge,
+      this.conversation.page(),
+      () => this.selectionCandidates().indices,
+    );
+  }
   protected readonly forwardSources = signal<readonly SelectedMessage[]>([]);
   protected readonly topicForwardOpen = signal(false);
   protected readonly forwardMove = linkedSignal({
@@ -547,6 +602,8 @@ export class ConversationPage {
     if (!this.canSelect(message)) return;
     this.selectionVersion++;
     this.recallResult.set(undefined);
+    this.selectionScroll = undefined;
+    this.selectionDirection.set(undefined);
     this.selecting.set(true);
     this.forwardError.set(undefined);
     const key = 'delivery' in message ? message.clientGeneratedId : message.id;
@@ -563,12 +620,35 @@ export class ConversationPage {
       return next;
     });
   }
+  protected async selectToHere(direction: PageDirection) {
+    const version = this.selectionVersion;
+    const navigation = this.navigationVersion;
+    const bounds = await this.trackScroll();
+    if (
+      !bounds?.measured ||
+      version !== this.selectionVersion ||
+      navigation !== this.navigationVersion ||
+      !this.isCurrent()
+    )
+      return;
+    const range = this.selectionRange();
+    if (range?.direction !== direction || range.overLimit) return;
+
+    const next = new Map(this.selectedMessages());
+    for (const source of this.selectionCandidates().sources.slice(range.start, range.end))
+      next.set(this.selectionKey(source), source);
+    this.forwardError.set(undefined);
+    this.selectionDirection.set(undefined);
+    this.selectedMessages.set(next);
+  }
   protected cancelSelection() {
     this.selectionVersion++;
     this.recalling.set(false);
     this.pendingRecall.set(undefined);
     this.recallResult.set(undefined);
     this.selecting.set(false);
+    this.selectionScroll = undefined;
+    this.selectionDirection.set(undefined);
     this.forwardError.set(undefined);
     this.selectedMessages.set(new Map());
   }
@@ -1040,6 +1120,7 @@ export class ConversationPage {
     entry: ConversationEntry;
     height: number;
     scrollTop: number;
+    clampedScrollTop: number;
     anchor: HTMLElement;
     anchorHeight: number;
     bottom: number;
@@ -1644,6 +1725,7 @@ export class ConversationPage {
     const entry = this.entryKey();
     const version = ++this.navigationVersion;
     this.reactionVisibility?.watch(new Map());
+    this.selectionDirection.set(undefined);
     this.pendingNavigation.set(target);
     try {
       this.retryAction = () => void this.goTo(target, replying, fromId);
@@ -1773,6 +1855,7 @@ export class ConversationPage {
     if (!element || !scroll || !this.isCurrent(entry)) return false;
     // Unread already on screen counts as reached; the press would not move at all otherwise.
     if (element.getBoundingClientRect().top <= scroll.getBoundingClientRect().bottom) return false;
+    this.selectionDirection.set(undefined);
     this.position.set({ type: PositionKind.Unread, messageId: unread });
     return true;
   }
@@ -2114,12 +2197,14 @@ export class ConversationPage {
       entry = this.entryKey();
       top = nextTop;
       if (this.position()) return;
+      const scrollTop = scroll.scrollTop;
       if (this.atBottom() && this.conversation.atLatest()) {
         scroll.scrollTop = scroll.scrollHeight;
       } else if (offset) {
         // A changing header moves the viewport; keep messages at their screen positions.
         scroll.scrollTop += offset;
       }
+      if (this.selectionScroll) this.selectionScroll.top += scroll.scrollTop - scrollTop;
       void this.trackScroll();
     });
     resize.observe(scroll);
@@ -2170,30 +2255,35 @@ export class ConversationPage {
       }
       this.position.set(undefined);
       this.contentGeometry = undefined;
+      this.selectionScroll = undefined;
     }
     await this.trackScroll();
     if (position && this.isCurrent(entry) && version === this.navigationVersion) this.positioned.set(true);
   }
 
-  private async trackScroll() {
+  private async trackScroll(fromScrollEvent = false) {
     const entry = this.entryKey();
     const version = this.navigationVersion;
     const scroll = await this.content()?.getScrollElement();
     if (!scroll || !this.isCurrent(entry) || version !== this.navigationVersion) return;
     const previous = this.contentGeometry;
+    const height = scroll.clientHeight;
+    const scrollHeight = scroll.scrollHeight;
+    const maxTop = Math.max(0, scrollHeight - height);
+    const incomingTop = Math.min(maxTop, Math.max(0, scroll.scrollTop));
     if (
       previous?.entry === entry &&
       previous.anchorHeight > 0 &&
-      previous.height !== scroll.scrollHeight &&
+      previous.height !== scrollHeight &&
       !this.position()
     ) {
-      const below = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight;
+      const below = scrollHeight - scroll.scrollTop - height;
       if (
         previous.followingBottom &&
         this.conversation.atLatest() &&
         (scroll.scrollTop === previous.scrollTop || below < 1)
       ) {
-        scroll.scrollTop = scroll.scrollHeight;
+        scroll.scrollTop = scrollHeight;
       } else if (previous.anchor.isConnected) {
         // Preserve the visible message's bottom when asynchronous content above
         // it changes height, while retaining any intervening user scroll.
@@ -2201,12 +2291,12 @@ export class ConversationPage {
         scroll.scrollTop += bottom - previous.bottom + scroll.scrollTop - previous.scrollTop;
       }
     }
-    const height = scroll.clientHeight;
     const top = scroll.scrollTop;
     const bounds = {
       height,
       above: Math.max(0, top),
-      below: Math.max(0, scroll.scrollHeight - top - height),
+      below: Math.max(0, scrollHeight - top - height),
+      measured: false,
     };
     this.atBottom.set(bounds.below < 40);
     if (
@@ -2218,10 +2308,10 @@ export class ConversationPage {
     )
       return bounds;
     const rows = this.rows();
-    const elements = this.confirmedElements();
     const viewport = scroll.getBoundingClientRect();
     const allElements = this.messageElements();
     if (rows.length !== allElements.length) return bounds;
+    bounds.measured = true;
     let bottomLow = 0,
       bottomHigh = allElements.length;
     while (bottomLow < bottomHigh) {
@@ -2229,20 +2319,7 @@ export class ConversationPage {
       if (allElements[middle].nativeElement.getBoundingClientRect().bottom < viewport.bottom) bottomLow = middle + 1;
       else bottomHigh = middle;
     }
-    const bottomRow = rows[bottomLow];
-    const bottomElement = allElements[bottomLow]?.nativeElement;
-    const bubble = bottomElement?.querySelector('.bubble, .sticker-content')?.getBoundingClientRect();
-    const avatar = bottomElement?.querySelector('.avatar')?.getBoundingClientRect();
-    const sticky =
-      this.stickyAvatarsEnabled() &&
-      bottomRow &&
-      bubble &&
-      bubble.top < viewport.bottom &&
-      (!avatar || avatar.bottom > viewport.bottom);
-    // Retain the hidden avatar so reappearing within the same group reuses its loaded image.
-    if (sticky) this.stickySender.set(bottomRow.message.sender);
-    this.stickyRow.set(sticky ? bottomLow : undefined);
-    this.stickyOffset.set(sticky && bottomRow.first ? Math.max(0, bubble.top + 34 - viewport.bottom) : 0);
+    this.updateStickyAvatar(bottomLow, viewport.bottom);
     let first = 0,
       last = allElements.length - 1;
     while (first < last) {
@@ -2252,19 +2329,54 @@ export class ConversationPage {
     }
     const geometryAnchor = allElements[first]?.nativeElement;
     const anchorRect = geometryAnchor?.getBoundingClientRect();
+    const currentTop = Math.min(maxTop, bounds.above);
     this.contentGeometry =
       geometryAnchor && anchorRect
         ? {
             entry,
-            height: scroll.scrollHeight,
-            scrollTop: scroll.scrollTop,
+            height: scrollHeight,
+            scrollTop: top,
+            clampedScrollTop: currentTop,
             anchor: geometryAnchor,
             anchorHeight: anchorRect.height,
             bottom: anchorRect.bottom - viewport.top,
             followingBottom: this.atBottom() && this.conversation.atLatest(),
           }
         : undefined;
+    if (this.selecting()) {
+      this.trackSelectionScroll(first, Math.min(bottomLow, rows.length - 1), viewport, fromScrollEvent, {
+        previous: previous?.entry === entry ? previous.clampedScrollTop : undefined,
+        incoming: incomingTop,
+        current: currentTop,
+        max: maxTop,
+      });
+    }
     this.visibleDate.set(rows[first]?.message.createdAt);
+    this.rememberMembershipScrollPosition(first, viewport.top);
+    this.updateFloatingDate(first, viewport.top);
+    this.markVisibleMessagesRead(viewport);
+    return bounds;
+  }
+
+  private updateStickyAvatar(index: number, viewportBottom: number) {
+    const row = this.rows()[index];
+    const element = this.messageElements()[index]?.nativeElement;
+    const bubble = element?.querySelector('.bubble, .sticker-content')?.getBoundingClientRect();
+    const avatar = element?.querySelector('.avatar')?.getBoundingClientRect();
+    const sticky =
+      this.stickyAvatarsEnabled() &&
+      row &&
+      bubble &&
+      bubble.top < viewportBottom &&
+      (!avatar || avatar.bottom > viewportBottom);
+    // Retain the hidden avatar so reappearing within the same group reuses its loaded image.
+    if (sticky) this.stickySender.set(row.message.sender);
+    this.stickyRow.set(sticky ? index : undefined);
+    this.stickyOffset.set(sticky && row.first ? Math.max(0, bubble.top + 34 - viewportBottom) : 0);
+  }
+
+  private rememberMembershipScrollPosition(first: number, viewportTop: number) {
+    const rows = this.rows();
     // Settings can change this filter while the cached conversation is covered.
     // Retain a non-membership row so it survives toggling in either direction.
     let anchor = first;
@@ -2283,11 +2395,14 @@ export class ConversationPage {
           ? {
               type: PositionKind.Anchor,
               messageId: anchorMessage.id,
-              offset: allElements[anchor].nativeElement.getBoundingClientRect().bottom - viewport.top,
+              offset: this.messageElements()[anchor].nativeElement.getBoundingClientRect().bottom - viewportTop,
             }
           : undefined;
+  }
+
+  private updateFloatingDate(first: number, viewportTop: number) {
     const floating = this.floatingDate().nativeElement;
-    const floatingTop = viewport.top + floating.offsetTop;
+    const floatingTop = viewportTop + floating.offsetTop;
     const floatingBottom = floatingTop + floating.offsetHeight;
     const overlapMargin = 1;
     const dates = this.dateSeparators();
@@ -2300,9 +2415,14 @@ export class ConversationPage {
     }
     const nextDate = dates[dateLow]?.nativeElement.getBoundingClientRect();
     this.dateColliding.set(!!nextDate && nextDate.top <= floatingBottom + overlapMargin);
+    const rows = this.rows();
     let dateRow = first;
     while (dateRow > 0 && !rows[dateRow]?.dateBreak) dateRow--;
     this.hiddenDateKey.set(rows[dateRow]?.key);
+  }
+
+  private markVisibleMessagesRead(viewport: DOMRect) {
+    const elements = this.confirmedElements();
     // Message bottoms are ordered, so finding the last visible bottom needs only log(n) layout reads.
     let low = 0;
     let high = elements.length - 1;
@@ -2328,13 +2448,77 @@ export class ConversationPage {
           : this.chatInfo.markRead(this.id(), confirmedId)
       ).catch(() => {});
     }
-    return bounds;
+  }
+
+  private trackSelectionScroll(
+    first: number,
+    last: number,
+    viewport: DOMRect,
+    fromScrollEvent: boolean,
+    top: { previous?: number; incoming: number; current: number; max: number },
+  ) {
+    if (this.selectionScroll && !fromScrollEvent) this.selectionScroll.top += top.current - top.incoming;
+    // Ionic emits scroll after a layout read, which can already have measured the new position.
+    const previousTop = this.selectionScroll?.top ?? top.previous;
+    const scrollDirection =
+      fromScrollEvent && !this.pendingNavigation() && previousTop != null && top.incoming !== previousTop
+        ? top.incoming > previousTop
+          ? PageDirection.Newer
+          : PageDirection.Older
+        : undefined;
+    const reachedEdge = scrollDirection === PageDirection.Newer ? top.max - top.incoming < 1 : top.incoming < 1;
+    const edges = this.visibleSelectionEdges(first, last, viewport);
+    const direction = this.selectionDirection();
+    if (scrollDirection != null && direction !== scrollDirection) {
+      this.selectionDirection.set(
+        selectionDirectionAfterScroll(
+          direction,
+          scrollDirection,
+          edges,
+          this.selectionScroll?.edges ?? this.selectionEdges(),
+          reachedEdge,
+          (side, edge) => !!this.selectionInterval(side, edge),
+        ),
+      );
+    }
+    this.selectionEdges.set(edges);
+    if (fromScrollEvent && this.scrolling.moving())
+      this.selectionScroll = { top: top.current, edges: this.selectionEdges() };
+  }
+
+  private visibleSelectionEdges(first: number, last: number, viewport: DOMRect): SelectionEdges {
+    const rows = this.rows();
+    const elements = this.messageElements();
+    let oldest: SnowflakeID | undefined;
+    let newest: SnowflakeID | undefined;
+    for (let index = first; index <= last; index++) {
+      const row = rows[index];
+      const message = forwardSourceMessage(row.outgoing ?? row.confirmed!);
+      if (!message || !canSelect(message)) continue;
+      const rect = elements[index].nativeElement.getBoundingClientRect();
+      if (rect.height <= 0 || rect.bottom <= viewport.top || rect.top >= viewport.bottom) continue;
+      if (oldest == null || message.id < oldest) oldest = message.id;
+      if (newest == null || message.id > newest) newest = message.id;
+    }
+    return { [PageDirection.Older]: oldest, [PageDirection.Newer]: newest };
+  }
+
+  protected onScrollStart() {
+    this.scrolling.scrollStart();
+    const geometry = this.contentGeometry;
+    if (this.selecting() && geometry?.entry === this.entryKey())
+      this.selectionScroll = { top: geometry.clampedScrollTop, edges: this.selectionEdges() };
+  }
+
+  protected onScrollEnd() {
+    this.selectionScroll = undefined;
+    this.scrolling.scrollEnd();
   }
 
   protected async onScroll() {
     const entry = this.entryKey();
     const version = this.navigationVersion;
-    const bounds = await this.trackScroll();
+    const bounds = await this.trackScroll(true);
     if (!bounds || !this.isCurrent(entry) || version !== this.navigationVersion || !this.entered || this.position())
       return;
     const { height, above, below } = bounds;
