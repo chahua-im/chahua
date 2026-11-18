@@ -147,7 +147,12 @@
   </div>
   @if (selectable() || packs().length > 1) {
     <div class="pack-bar">
-      <div #packTabViewport appScrollbars class="pack-tabs" [style.--pack-tab-width.px]="packTabWidth()">
+      <div
+        #packTabViewport
+        appScrollbars
+        class="pack-tabs"
+        [style.--pack-tab-width.px]="packTabWidth()"
+        (wheel)="scrollPacks($event)">
         @if (selectable()) {
           <button
             #packTab
