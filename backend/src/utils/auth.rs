@@ -38,6 +38,7 @@ fn auth_error_rejection(error: AppError) -> (StatusCode, &'static str) {
         AppError::SpeakingRestricted(_) => (StatusCode::FORBIDDEN, "Speaking is restricted"),
         AppError::NotFound(message) => (StatusCode::NOT_FOUND, message),
         AppError::Conflict(message) => (StatusCode::CONFLICT, message),
+        AppError::MessageIdConflict(_) => (StatusCode::CONFLICT, "Conflict"),
         AppError::Gone(message) => (StatusCode::GONE, message),
         AppError::ServiceUnavailable(message) => (StatusCode::SERVICE_UNAVAILABLE, message),
         AppError::DbPool(_) | AppError::DbQuery(_) => {

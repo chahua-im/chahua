@@ -1865,6 +1865,24 @@ pub async fn send_prepared_message(
     deps: SendPreparedMessageDeps<'_>,
     prepared: PreparedMessageSend,
 ) -> Result<SendMessageOutcome, AppError> {
+    send_prepared_message_inner(conn, deps, prepared, false).await
+}
+
+/// Only call after the user has been authorized to send to this destination.
+pub(crate) async fn send_client_message(
+    conn: &mut PgConnection,
+    deps: SendPreparedMessageDeps<'_>,
+    prepared: PreparedMessageSend,
+) -> Result<SendMessageOutcome, AppError> {
+    send_prepared_message_inner(conn, deps, prepared, true).await
+}
+
+async fn send_prepared_message_inner(
+    conn: &mut PgConnection,
+    deps: SendPreparedMessageDeps<'_>,
+    prepared: PreparedMessageSend,
+    return_conflict_copy: bool,
+) -> Result<SendMessageOutcome, AppError> {
     if prepared.message_type == MessageType::Placeholder
         && (!prepared.attachment_ids.is_empty() || prepared.forwarded_bundle_id.is_some())
     {
@@ -1950,12 +1968,26 @@ pub async fn send_prepared_message(
             .optional()?
             .ok_or(AppError::Conflict("Duplicate client generated id"))?;
         let existing_attachment_ids = load_message_attachment_ids(conn, existing.id)?;
-        validate_idempotent_message_payload(
+        if let Err(conflict) = validate_idempotent_message_payload(
             &existing,
             &prepared,
             stored_message.as_deref(),
             &existing_attachment_ids,
-        )?;
+        ) {
+            return Err(if return_conflict_copy {
+                project_message_id_conflict(
+                    conn,
+                    (deps.media, deps.avatars),
+                    existing,
+                    prepared.sender_uid,
+                    prepared.chat_id,
+                    prepared.reply_root_id,
+                )
+                .await
+            } else {
+                conflict
+            });
+        }
         let mut response = attach_metadata(
             conn,
             vec![existing],
@@ -2119,6 +2151,62 @@ fn apply_forwarded_preview_override(
     ));
 }
 
+pub(crate) const MESSAGE_ID_CONFLICT: &str =
+    "clientGeneratedId already exists with different payload";
+
+/// The caller selected `existing` by the requested client ID and authorized
+/// the destination. Never extend that authorization to another conversation
+/// or to an unpublished message. Forwarded bundles are immutable destination
+/// snapshots; single-forward attribution also hydrates a live source reply.
+pub(crate) async fn project_message_id_conflict(
+    conn: &mut PgConnection,
+    (media, avatars): (&MediaStore, &AvatarService),
+    existing: Message,
+    uid: i32,
+    chat_id: i64,
+    thread_id: Option<i64>,
+) -> AppError {
+    let conflict = AppError::Conflict(MESSAGE_ID_CONFLICT);
+    if !has_conflict_scope(&existing, uid, chat_id, thread_id) {
+        return conflict;
+    }
+    if let Some(origin_id) = existing
+        .forwarded_from_message_id
+        .filter(|_| existing.deleted_at.is_none())
+    {
+        let origin_chat = messages_schema::table
+            .find(origin_id)
+            .filter(messages_schema::is_published.eq(true))
+            .select(messages_schema::chat_id)
+            .first::<i64>(conn);
+        if !origin_chat.is_ok_and(|origin_chat| {
+            crate::services::forwarding::check_source_membership(conn, origin_chat, uid).is_ok()
+        }) {
+            return conflict;
+        }
+    }
+    attach_metadata(conn, vec![existing], media, avatars, uid)
+        .await
+        .pop()
+        .filter(|response| {
+            response.is_deleted
+                || response.message_type != MessageType::Forwarded
+                || response.forwarded_preview.is_some()
+        })
+        .map_or(conflict, |response| {
+            AppError::MessageIdConflict(Box::new(response))
+        })
+}
+
+fn has_conflict_scope(existing: &Message, uid: i32, chat_id: i64, thread_id: Option<i64>) -> bool {
+    existing.is_published
+        && existing.system_kind.is_none()
+        && !matches!(existing.message_type, MessageType::System)
+        && existing.sender_uid == uid
+        && existing.chat_id == chat_id
+        && existing.reply_root_id == thread_id
+}
+
 fn load_message_attachment_ids(conn: &mut PgConnection, message_id: i64) -> QueryResult<Vec<i64>> {
     use crate::schema::attachments::dsl as a_dsl;
     attachments::table
@@ -2153,9 +2241,7 @@ fn validate_idempotent_message_payload(
         return Ok(());
     }
 
-    Err(AppError::Conflict(
-        "clientGeneratedId already exists with different payload",
-    ))
+    Err(AppError::Conflict(MESSAGE_ID_CONFLICT))
 }
 
 struct ReactionDetails {
@@ -3478,6 +3564,20 @@ mod tests {
             super::validate_idempotent_message_payload(&existing, &prepared, Some(""), &[55])
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn outbox_conflict_scope_excludes_other_senders_and_private_records() {
+        let mut existing = test_message();
+        assert!(super::has_conflict_scope(&existing, 7, 42, None));
+        assert!(!super::has_conflict_scope(&existing, 8, 42, None));
+        assert!(!super::has_conflict_scope(&existing, 7, 43, None));
+        assert!(!super::has_conflict_scope(&existing, 7, 42, Some(1)));
+        existing.is_published = false;
+        assert!(!super::has_conflict_scope(&existing, 7, 42, None));
+        existing.is_published = true;
+        existing.message_type = MessageType::System;
+        assert!(!super::has_conflict_scope(&existing, 7, 42, None));
     }
 
     fn test_message() -> Message {

@@ -28,8 +28,9 @@ use crate::services::message_search::{
 };
 use crate::services::messages::{
     attach_metadata, attachment_position, authorize_message_send, load_username_by_uid,
-    parse_attachment_ids, send_prepared_message, sync_edited_message_mentions, validate_message,
-    PreparedMessageSend, SendMessageOutcome, SendPreparedMessageDeps,
+    parse_attachment_ids, project_message_id_conflict, send_client_message,
+    sync_edited_message_mentions, validate_message, PreparedMessageSend, SendMessageOutcome,
+    SendPreparedMessageDeps, MESSAGE_ID_CONFLICT,
 };
 use crate::services::push::PushService;
 use crate::services::single_forwarding::{prepare_single_forward, PreparedSingleForward};
@@ -609,7 +610,7 @@ pub async fn post_message(
         let conn = transaction.connection();
         let result = async {
             let target = authorize_message_send(conn, chat_id, None, uid)?;
-            let send_result = send_prepared_message(
+            let send_result = send_client_message(
                 conn,
                 SendPreparedMessageDeps {
                     id_gen: deps.id_gen,
@@ -711,7 +712,7 @@ pub async fn forward_messages(
         let conn = transaction.connection();
         let result = async {
             let target = authorize_message_send(conn, dest_chat_id, body.thread_id, uid)?;
-            let prepared = prepare_forward_message(
+            let prepared = match prepare_forward_message(
                 conn,
                 deps.id_gen.as_ref(),
                 uid,
@@ -719,8 +720,22 @@ pub async fn forward_messages(
                 target.kind,
                 &body,
             )
-            .await?;
-            let send_result = send_prepared_message(
+            .await
+            {
+                Err(AppError::Conflict(MESSAGE_ID_CONFLICT)) => {
+                    return Err(forward_conflict(
+                        conn,
+                        (deps.media, deps.avatars),
+                        &body.client_generated_id,
+                        uid,
+                        dest_chat_id,
+                        body.thread_id,
+                    )
+                    .await);
+                }
+                other => other?,
+            };
+            let send_result = send_client_message(
                 conn,
                 SendPreparedMessageDeps {
                     id_gen: deps.id_gen,
@@ -827,7 +842,7 @@ pub async fn forward_message(
         let conn = transaction.connection();
         let result = async {
             let target = authorize_message_send(conn, chat_id, body.thread_id, uid)?;
-            let prepared = prepare_single_forward(
+            let prepared = match prepare_single_forward(
                 conn,
                 deps.id_gen.as_ref(),
                 uid,
@@ -836,7 +851,21 @@ pub async fn forward_message(
                 message_id,
                 &body,
             )
-            .await?;
+            .await
+            {
+                Err(AppError::Conflict(MESSAGE_ID_CONFLICT)) => {
+                    return Err(forward_conflict(
+                        conn,
+                        (deps.media, deps.avatars),
+                        &body.client_generated_id,
+                        uid,
+                        chat_id,
+                        body.thread_id,
+                    )
+                    .await);
+                }
+                other => other?,
+            };
             let send_result = match prepared {
                 PreparedSingleForward::Existing(existing) => {
                     let response =
@@ -852,7 +881,7 @@ pub async fn forward_message(
                     ));
                 }
                 PreparedSingleForward::New(prepared) => {
-                    send_prepared_message(
+                    send_client_message(
                         conn,
                         SendPreparedMessageDeps {
                             id_gen: deps.id_gen,
@@ -945,6 +974,30 @@ pub async fn forward_message(
     Ok(created.response)
 }
 
+async fn forward_conflict(
+    conn: &mut PgConnection,
+    projection: (&MediaStore, &AvatarService),
+    client_id: &str,
+    uid: i32,
+    chat_id: i64,
+    thread_id: Option<i64>,
+) -> AppError {
+    let existing = messages::table
+        .filter(dsl::client_generated_id.eq(client_id))
+        .filter(dsl::sender_uid.eq(uid))
+        .filter(dsl::chat_id.eq(chat_id))
+        .filter(dsl::reply_root_id.is_not_distinct_from(thread_id))
+        .select(Message::as_select())
+        .first(conn)
+        .optional();
+    match existing {
+        Ok(Some(existing)) => {
+            project_message_id_conflict(conn, projection, existing, uid, chat_id, thread_id).await
+        }
+        _ => AppError::Conflict(MESSAGE_ID_CONFLICT),
+    }
+}
+
 pub async fn post_thread_message(
     uid: i32,
     chat_id: i64,
@@ -975,7 +1028,7 @@ pub async fn post_thread_message(
             let root_msg = target.thread_root.ok_or(AppError::Internal(
                 "Thread authorization did not return a thread root",
             ))?;
-            let send_result = send_prepared_message(
+            let send_result = send_client_message(
                 conn,
                 SendPreparedMessageDeps {
                     id_gen: deps.id_gen,

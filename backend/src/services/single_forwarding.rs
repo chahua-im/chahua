@@ -14,7 +14,7 @@ use crate::{
         forwarding::{acquire_forward_retry_lock, check_source_membership, source_placeholder},
         messages::{
             attachment_previews, build_message_preview, build_sender, extract_mention_uids,
-            MessagePreviewInput, PreparedMessageSend,
+            MessagePreviewInput, PreparedMessageSend, MESSAGE_ID_CONFLICT,
         },
         user::UserProfile,
     },
@@ -42,9 +42,7 @@ fn validate_retry(
     {
         return Ok(());
     }
-    Err(AppError::Conflict(
-        "clientGeneratedId already exists with different payload",
-    ))
+    Err(AppError::Conflict(MESSAGE_ID_CONFLICT))
 }
 
 /// Must run inside the caller's send transaction, after destination authorization.

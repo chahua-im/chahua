@@ -165,6 +165,22 @@ pub struct MessageResponse {
     pub forwarded_preview: Option<ForwardedMessagesPreviewResponse>,
 }
 
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageIdConflictResponse {
+    pub code: &'static str,
+    pub existing_message: Box<MessageResponse>,
+}
+
+impl MessageIdConflictResponse {
+    pub(crate) fn new(existing_message: Box<MessageResponse>) -> Self {
+        Self {
+            code: "clientGeneratedIdConflict",
+            existing_message,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ForwardMessagesBody {

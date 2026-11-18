@@ -10,8 +10,9 @@ use crate::{
     dto::{
         messages::{
             BulkDeleteMessagesBody, CreateMessageBody, ForwardMessageBody, ForwardMessagesBody,
-            ForwardedMessagesResponse, ListMessagesQuery, ListMessagesResponse, MessageResponse,
-            SearchMessagesQuery, SearchMessagesResponse, UpdateMessageBody,
+            ForwardedMessagesResponse, ListMessagesQuery, ListMessagesResponse,
+            MessageIdConflictResponse, MessageResponse, SearchMessagesQuery,
+            SearchMessagesResponse, UpdateMessageBody,
         },
         ws::BulkDeletedPayload,
     },
@@ -173,7 +174,10 @@ async fn get_message(
         ("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth"),
     ),
     request_body = CreateMessageBody,
-    responses((status = 201, description = "Message created", body = MessageResponse)),
+    responses(
+        (status = 201, description = "Message created", body = MessageResponse),
+        (status = 409, description = "Client ID conflict; a server copy is returned only when visible", body = MessageIdConflictResponse),
+    ),
     security(("bearer_jwt" = []), ("service_token_bearer" = [])),
 )]
 async fn post_message(
@@ -218,6 +222,7 @@ async fn post_message(
     request_body = ForwardMessagesBody,
     responses(
         (status = CREATED, body = MessageResponse),
+        (status = 409, description = "Client ID conflict; a server copy is returned only when visible", body = MessageIdConflictResponse),
     ),
     security(("bearer_jwt" = [])),
 )]
@@ -261,7 +266,10 @@ async fn forward_messages(
         ("message_id" = String, Path, description = "Source Message ID"),
     ),
     request_body = ForwardMessageBody,
-    responses((status = CREATED, body = MessageResponse)),
+    responses(
+        (status = CREATED, body = MessageResponse),
+        (status = 409, description = "Client ID conflict; a server copy is returned only when visible", body = MessageIdConflictResponse),
+    ),
     security(("bearer_jwt" = [])),
 )]
 async fn forward_message(
@@ -386,6 +394,7 @@ async fn get_forwarded_bundle_messages(
     request_body = CreateMessageBody,
     responses(
         (status = 201, description = "Thread message created", body = MessageResponse),
+        (status = 409, description = "Client ID conflict; a server copy is returned only when visible", body = MessageIdConflictResponse),
     ),
     security(("bearer_jwt" = [])),
 )]
