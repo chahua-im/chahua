@@ -1,4 +1,4 @@
-import { messageLinkCard } from '../link-card';
+import { messageLinkSummary } from '../link-summary';
 import { Component, computed, input } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { RouterLink } from '@angular/router';
@@ -38,10 +38,7 @@ type PreviewSource = Pick<MessageResponse, 'message' | 'messageType'> &
 export class MessagePreview {
   readonly message = input.required<PreviewSource>();
   readonly interactive = input(false);
-  protected readonly sharedTitle = computed(() => {
-    const card = messageLinkCard(this.message());
-    return card ? card.title || new URL(card.url).hostname : undefined;
-  });
+  protected readonly linkSummary = computed(() => messageLinkSummary(this.message()));
   protected readonly MessageType = MessageType;
   protected readonly placeholderLabel = placeholderLabel;
   protected readonly systemMessage = computed(() => systemMessagePresentation(this.message()));
