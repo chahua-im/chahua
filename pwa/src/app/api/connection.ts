@@ -39,6 +39,7 @@ export class Connection {
   readonly changes$ = this.events$.pipe(filter(isMessageChange));
   readonly resync$ = this.resync.asObservable();
   private readonly acceptedIds = new Set<SnowflakeID>();
+  private readonly recalledIds = new Set<SnowflakeID>();
   private readonly watches = new Map<WatchMethod, WatchRequest>();
 
   /** RPC confirmations and their notification echoes share one delivery path. */
@@ -54,6 +55,19 @@ export class Connection {
   }
 
   acceptChange(event: MessageChange) {
+    switch (event.type) {
+      case ServerWsMessageType.messageUpdated:
+        // An edit RPC or a hydrated preview may arrive after the recall notification.
+        if (event.payload.isDeleted) this.recalledIds.add(event.payload.id);
+        else if (this.recalledIds.has(event.payload.id)) return;
+        break;
+      case ServerWsMessageType.messageDeleted:
+        this.recalledIds.add(event.payload.id);
+        break;
+      case ServerWsMessageType.messagesBulkDeleted:
+        for (const id of event.payload.messageIds) this.recalledIds.add(id);
+        break;
+    }
     this.events.next(event);
   }
 
@@ -87,6 +101,7 @@ export class Connection {
   /** Clears delivery state when SessionStore changes the authenticated account. */
   reset() {
     this.acceptedIds.clear();
+    this.recalledIds.clear();
     this.clearWatches();
   }
 
@@ -159,6 +174,7 @@ export class Connection {
       payload: encodeJsonIds(notification.params, codec, rpcSchemas),
     } as unknown as ServerWsMessage;
     if (event.type === ServerWsMessageType.message) this.accept(event.payload);
+    else if (isMessageChange(event)) this.acceptChange(event);
     else this.events.next(event);
   }
 }

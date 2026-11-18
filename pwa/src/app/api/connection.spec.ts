@@ -2,7 +2,7 @@ import { RpcErrorCode } from './rpc-error';
 import { TestBed } from '@angular/core/testing';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
-import { ServerWsMessageType } from '../../generated/models';
+import { LinkPreviewStatus, ServerWsMessageType } from '../../generated/models';
 import { RpcTestPeer, provideRpcTesting } from './rpc-testing';
 import { Connection, ResyncReason } from './connection';
 import { testChat, testMessage, wireChat, wireMessage } from './testing';
@@ -202,6 +202,52 @@ describe('Connection', () => {
       payload: { ...testMessage, isDeleted: true },
     });
   });
+
+  it.each(['events.messageDeleted', 'events.messagesBulkDeleted'] as const)(
+    'keeps %s ahead of late message snapshots across a reconnect',
+    (method) => {
+      vi.useFakeTimers();
+      vi.spyOn(Math, 'random').mockReturnValue(0.5);
+      const changes = vi.fn();
+      const events = vi.fn();
+      connection.changes$.subscribe(changes);
+      connection.events$.subscribe(events);
+      const metadata = {
+        linkPreviews: [{ url: 'https://example.test/', title: 'Late preview', status: LinkPreviewStatus.ready }],
+      };
+      const lateEdit = {
+        type: ServerWsMessageType.messageUpdated,
+        payload: { ...testMessage, metadata },
+      } as const;
+
+      peer.authenticate();
+      if (method === 'events.messageDeleted') peer.notify(method, { ...wireMessage, isDeleted: true });
+      else peer.notify(method, { chatId: wireChat.id, messageIds: [wireMessage.id], complete: true });
+      expect(changes).toHaveBeenCalledOnce();
+      expect(events).toHaveBeenCalledOnce();
+
+      peer.notify('events.messageUpdated', { ...wireMessage, metadata });
+      peer.disconnect();
+      vi.advanceTimersByTime(1_000);
+      peer.open();
+      peer.expect('session.open').flush({
+        protocolVersion: 1,
+        authenticated: true,
+        uid: 1,
+        clientId: 'fixture-client',
+      });
+      connection.acceptChange(lateEdit);
+      expect(changes).toHaveBeenCalledOnce();
+      expect(events).toHaveBeenCalledOnce();
+
+      const tombstone = { ...testMessage, isDeleted: true, message: undefined };
+      connection.acceptChange({ type: ServerWsMessageType.messageUpdated, payload: tombstone });
+      expect(changes).toHaveBeenLastCalledWith({ type: ServerWsMessageType.messageUpdated, payload: tombstone });
+      connection.reset();
+      connection.acceptChange(lateEdit);
+      expect(changes).toHaveBeenLastCalledWith(lateEdit);
+    },
+  );
 
   it('emits Foreground resync only while the transport is authenticated', () => {
     vi.useFakeTimers();

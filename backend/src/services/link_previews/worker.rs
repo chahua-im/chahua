@@ -11,7 +11,7 @@ use url::Url;
 
 use super::{
     fetch::{FetchedLinkPreview, PreviewFetchError, SecurePreviewFetcher},
-    finalize::finalize_metadata,
+    finalize::{finalize_metadata, with_current_preview},
     image, LinkPreviewWork,
 };
 use crate::{
@@ -346,11 +346,10 @@ async fn run_job<B: PreviewBackend>(context: &Context<B>, job: LinkPreviewJob) {
                 }
             };
             if message.is_published {
-                // The committed row, not the pre-fetch snapshot, is authoritative.
                 let uid = message.sender_uid;
                 let response = runtime.block_on(attach_metadata(
                     &mut conn,
-                    vec![message],
+                    vec![message.clone()],
                     &media,
                     &media_avatars,
                     uid,
@@ -361,10 +360,18 @@ async fn run_job<B: PreviewBackend>(context: &Context<B>, job: LinkPreviewJob) {
                     .load::<i32>(&mut conn);
                 if let (Some(response), Ok(recipients)) = (response.into_iter().next(), recipients)
                 {
-                    registry.broadcast_to_uids(
-                        &recipients,
-                        Arc::new(ServerWsMessage::MessageUpdated(response)),
-                    );
+                    if let Err(error) = with_current_preview(&mut conn, &message, || {
+                        registry.broadcast_to_uids(
+                            &recipients,
+                            Arc::new(ServerWsMessage::MessageUpdated(response)),
+                        );
+                    }) {
+                        tracing::warn!(
+                            message_id = job.message_id,
+                            ?error,
+                            "link preview broadcast check failed"
+                        );
+                    }
                 }
             }
             true
