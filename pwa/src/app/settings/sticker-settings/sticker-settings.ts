@@ -1,3 +1,4 @@
+import { ModalButton } from '../../ui/modal-button';
 import { Component, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import type { ItemReorderEventDetail } from '@ionic/angular';
@@ -22,7 +23,7 @@ import {
   IonToolbar,
 } from '@ionic/angular';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { addOutline, chevronBackOutline, closeCircleOutline, cubeOutline, happyOutline } from 'ionicons/icons';
+import { addOutline, closeCircleOutline, cubeOutline, happyOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { RpcApi } from '../../../generated/rpc-api';
 import type { StickerPackSummary, UpdateStickerPackOrderItem } from '../../../generated/models';
@@ -39,6 +40,7 @@ import { AUTO_SORT_LIMIT, sortStickerPacksByPreference, StickerPreferences } fro
   templateUrl: './sticker-settings.html',
   styleUrl: '../settings/settings.scss',
   imports: [
+    ModalButton,
     ContentScrollbars,
     EmojiPanel,
     LoadError,
@@ -124,7 +126,6 @@ export class StickerSettings {
   protected readonly preferences = inject(StickerPreferences);
   protected readonly reactions = inject(Preferences);
   protected readonly icons = { happyOutline, addOutline, cubeOutline, closeCircleOutline };
-  protected readonly backIcon = chevronBackOutline;
   protected readonly autoSortLimit = AUTO_SORT_LIMIT;
   protected readonly loading = signal(true);
   protected readonly loaded = signal(false);

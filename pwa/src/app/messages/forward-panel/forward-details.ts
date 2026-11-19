@@ -12,16 +12,7 @@ import {
   Injector,
   untracked,
 } from '@angular/core';
-import {
-  IonModal,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
-  IonButtons,
-  IonButton,
-  IonContent,
-  IonSpinner,
-} from '@ionic/angular';
+import { IonModal, IonHeader, IonToolbar, IonTitle, IonButtons, IonContent, IonSpinner } from '@ionic/angular';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { first, map, of, type Observable, type Subscription } from 'rxjs';
 import { RpcError, RpcErrorCode } from '../../api/rpc-error';
@@ -32,6 +23,7 @@ import { ChatStore } from '../../chats/chat-store';
 import { SessionStore } from '../../session/session-store';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { LoadError } from '../../ui/load-error/load-error';
+import { ModalButton } from '../../ui/modal-button';
 import { messageRows } from '../../conversations/message-rows';
 import { forwardedRecordContents } from '../forwarded-records/forwarded-record-content';
 import { Message, type MessageContent } from '../message/message';
@@ -59,7 +51,6 @@ interface Frame {
     IonToolbar,
     IonTitle,
     IonButtons,
-    IonButton,
     IonContent,
     IonSpinner,
     TranslocoPipe,
@@ -67,6 +58,7 @@ interface Frame {
     MessageDatePipe,
     ContentScrollbars,
     LoadError,
+    ModalButton,
   ],
   template: `
     <ion-modal
@@ -78,22 +70,22 @@ interface Frame {
       (didDismiss)="closed.emit()"
     >
       <ng-template>
-        <ion-header
-          ><ion-toolbar>
+        <ion-header>
+          <ion-toolbar>
             @if (canGoBack()) {
-              <ion-buttons slot="start"
-                ><ion-button (click)="back()">{{ 'common.back' | transloco }}</ion-button></ion-buttons
-              >
+              <ion-buttons slot="start">
+                <app-modal-button back (pressed)="back()" />
+              </ion-buttons>
             }
             <ion-title>{{
               (forwardPreview() || frames().length > 1 ? 'messages.forward.records' : 'messages.forward.recent')
                 | transloco
             }}</ion-title>
-            <ion-buttons slot="end"
-              ><ion-button (click)="close()">{{ 'common.close' | transloco }}</ion-button></ion-buttons
-            >
-          </ion-toolbar></ion-header
-        >
+            <ion-buttons slot="end">
+              <app-modal-button (pressed)="close()" />
+            </ion-buttons>
+          </ion-toolbar>
+        </ion-header>
         <ion-content appScrollbars>
           @if (loading()) {
             <div class="page-loading"><ion-spinner /></div>
@@ -185,7 +177,9 @@ export class ForwardDetails {
     () => this.frames().length > 1 || ((this.loading() || this.failed()) && this.frames().length > 0),
   );
   protected readonly canDismiss = (_data?: unknown, role?: string) => {
-    if (role !== 'close' && this.canGoBack()) {
+    if (role === 'close' || role === 'navigate' || role === 'parent-dismissed' || role === 'parent-removed')
+      return true;
+    if (this.canGoBack()) {
       this.back();
       return false;
     }

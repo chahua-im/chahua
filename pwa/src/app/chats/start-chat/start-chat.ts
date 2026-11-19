@@ -1,3 +1,4 @@
+import { ModalButton } from '../../ui/modal-button';
 import { Component, computed, DestroyRef, effect, inject, input, linkedSignal, signal } from '@angular/core';
 import { form, FormField } from '@angular/forms/signals';
 import {
@@ -50,6 +51,7 @@ enum StartChatAction {
   templateUrl: './start-chat.html',
   styleUrl: './start-chat.scss',
   imports: [
+    ModalButton,
     ChatAvatar,
     ContentScrollbars,
     FormField,

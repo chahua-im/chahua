@@ -1,8 +1,17 @@
 import { LoadError } from '../../ui/load-error/load-error';
-import { afterRenderEffect, Component, ElementRef, input, output, signal, viewChild } from '@angular/core';
-import { createAnimation, IonIcon, IonSpinner, isPlatform } from '@ionic/angular';
+import { ModalButton } from '../../ui/modal-button';
+import {
+  afterRenderEffect,
+  booleanAttribute,
+  Component,
+  ElementRef,
+  input,
+  output,
+  signal,
+  viewChild,
+} from '@angular/core';
+import { createAnimation, IonSpinner, isPlatform } from '@ionic/angular';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { chevronBackOutline } from 'ionicons/icons';
 import { EmojiPicker } from '../emoji-picker/emoji-picker';
 
 export interface EmojiPanelAnchor {
@@ -36,17 +45,17 @@ export function emojiPanelAnimation(element: HTMLElement, entering: boolean) {
   selector: 'app-emoji-panel',
   templateUrl: './emoji-panel.html',
   styleUrl: './emoji-panel.scss',
-  imports: [LoadError, EmojiPicker, IonIcon, IonSpinner, TranslocoPipe],
+  imports: [LoadError, ModalButton, EmojiPicker, IonSpinner, TranslocoPipe],
   host: { '(click)': 'dismissBackdrop($event)' },
 })
 export class EmojiPanel {
   readonly title = input.required<string>();
   readonly anchor = input<EmojiPanelAnchor>();
   readonly active = input(true);
+  readonly closeButton = input(false, { transform: booleanAttribute });
   readonly chosen = output<string>();
   readonly back = output<void>();
   readonly dismissed = output<void>();
-  protected readonly backIcon = chevronBackOutline;
   protected readonly contentReady = signal(false);
   private readonly panel = viewChild<ElementRef<HTMLElement>>('panel');
 

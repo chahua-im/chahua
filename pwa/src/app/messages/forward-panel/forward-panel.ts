@@ -15,8 +15,18 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { IonButton, IonIcon, IonSpinner, AlertController, ToastController } from '@ionic/angular';
-import { chatbubbleEllipsesOutline, chevronBackOutline, closeOutline } from 'ionicons/icons';
+import {
+  AlertController,
+  IonButton,
+  IonButtons,
+  IonHeader,
+  IonIcon,
+  IonSpinner,
+  IonTitle,
+  IonToolbar,
+  ToastController,
+} from '@ionic/angular';
+import { chatbubbleEllipsesOutline } from 'ionicons/icons';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { firstValueFrom } from 'rxjs';
 import { GroupKind, MessageType, type MentionInfo, type MessageResponse } from '../../../generated/models';
@@ -30,6 +40,7 @@ import type { ChatPickerTarget, ChooseChat } from '../../chats/chat-picker/chat-
 import { SessionStore } from '../../session/session-store';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { LoadError } from '../../ui/load-error/load-error';
+import { ModalButton } from '../../ui/modal-button';
 import { Message } from '../message/message';
 import { MessageComposer } from '../message-composer/message-composer';
 import { MessageOutbox } from '../message-outbox';
@@ -86,12 +97,17 @@ function forwardFailure(error: unknown): string {
   selector: 'app-forward-panel',
   imports: [
     IonButton,
+    IonButtons,
+    IonHeader,
     IonIcon,
     IonSpinner,
+    IonTitle,
+    IonToolbar,
     TranslocoPipe,
     ChatAvatar,
     ContentScrollbars,
     LoadError,
+    ModalButton,
     Message,
     MessageComposer,
     MessagePreview,
@@ -117,6 +133,7 @@ export class ForwardPanel {
   readonly changeTarget = output<void>();
   readonly sent = output<void>();
   private readonly composer = viewChild(MessageComposer);
+  private readonly heading = viewChild('heading', { read: ElementRef<HTMLIonToolbarElement> });
   private readonly dialog = viewChild<ElementRef<HTMLElement>>('dialog');
   private readonly preview = viewChild<ElementRef<HTMLElement>>('preview');
   private readonly api = inject(RpcApi);
@@ -129,8 +146,6 @@ export class ForwardPanel {
   private readonly toasts = inject(ToastController);
   private readonly destroyRef = inject(DestroyRef);
   protected readonly GroupKind = GroupKind;
-  protected readonly backIcon = chevronBackOutline;
-  protected readonly closeIcon = closeOutline;
   protected readonly recentMessagesIcon = chatbubbleEllipsesOutline;
   protected readonly sourceName = computed(() => {
     const chat = this.metadata.get(this.sourceChatId());
@@ -182,7 +197,7 @@ export class ForwardPanel {
   private readonly owner = this.session.user()?.uid;
   constructor() {
     afterRenderEffect({
-      read: () => {
+      read: (onCleanup) => {
         if (
           !this.visible() ||
           !this.open() ||
@@ -192,16 +207,24 @@ export class ForwardPanel {
         )
           return;
         const dialog = this.dialog()?.nativeElement;
+        const heading = this.heading()?.nativeElement;
         const preview = this.preview()?.nativeElement;
-        if (!dialog || !preview) return;
+        if (!dialog || !heading || !preview) return;
 
-        // Measure the rows without the auto margin that keeps the composer at the bottom.
-        const rows = [...dialog.querySelectorAll(':scope > header, :scope > section, :scope > footer')];
-        const { paddingTop, paddingBottom, rowGap } = getComputedStyle(dialog);
-        const height = rows.reduce((sum, row) => sum + row.getBoundingClientRect().height, 0);
-        const spacing = parseFloat(paddingTop) + parseFloat(paddingBottom) + parseFloat(rowGap) * (rows.length - 1);
-        const previewOverflow = Math.max(0, preview.scrollHeight - preview.clientHeight);
-        this.contentHeight.set(Math.ceil(height + spacing + previewOverflow));
+        // Let Ionic render the toolbar's contents before measuring its height.
+        const frame = requestAnimationFrame(() => {
+          if (!this.visible() || !this.open() || this.unavailable()) return;
+          // Sum the rows without the auto margin that keeps the composer at the bottom.
+          const rows = [...dialog.querySelectorAll(':scope > section, :scope > footer')];
+          const { paddingTop, paddingBottom, rowGap } = getComputedStyle(dialog);
+          const height = rows.reduce((sum, row) => sum + row.getBoundingClientRect().height, 0);
+          const spacing = parseFloat(paddingTop) + parseFloat(paddingBottom) + parseFloat(rowGap) * (rows.length - 1);
+          const previewOverflow = Math.max(0, preview.scrollHeight - preview.clientHeight);
+          this.contentHeight.set(
+            Math.ceil(heading.getBoundingClientRect().height + height + spacing + previewOverflow),
+          );
+        });
+        onCleanup(() => cancelAnimationFrame(frame));
       },
     });
     this.connection.messages$.pipe(takeUntilDestroyed()).subscribe((message) => {

@@ -21,22 +21,11 @@
   font-size: var(--app-font-body);
   font-weight: 600;
 }
-.picker-back {
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  color: var(--ion-color-primary-shade);
+.picker-header span {
+  grid-column: 2;
 }
-.picker-back ion-icon {
-  font-size: 22px;
-}
-button {
-  background: transparent;
-  border-radius: 10px;
-}
-button:hover {
-  background: var(--ion-color-light);
+.picker-close {
+  grid-column: 3;
 }
 .emoji-panel {
   position: absolute;

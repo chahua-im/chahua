@@ -228,7 +228,7 @@ describe('StickerSettings', () => {
     expect(pinnedReactions()).toEqual(['👍', '😂', '🍵', '🎉']);
   });
 
-  it('uses the shared panel to add pinned reactions and handles back and backdrop dismissal', () => {
+  it('uses the shared panel to add pinned reactions and handles close and backdrop dismissal', () => {
     vi.spyOn(IonModal.prototype, 'isOpen', 'set').mockImplementation(() => {});
     const fixture = TestBed.createComponent(StickerSettings);
     const component = fixture.componentInstance;
@@ -242,7 +242,7 @@ describe('StickerSettings', () => {
     panel.chosen.emit('🍵');
     expect(component['reactions'].pinnedReactions()).toEqual(['👍', '🍵']);
     expect(component['choosingPinned']()).toBe(true);
-    panel.back.emit();
+    fixture.nativeElement.querySelector('.picker-close button').click();
     expect(component['choosingPinned']()).toBe(false);
     component['choosingPinned'].set(true);
     panel.dismissed.emit();

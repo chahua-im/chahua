@@ -1,24 +1,21 @@
-<div #dialog class="dialog ion-content-scroll-host" appScrollbars>
-  <header class="heading">
-    <ion-button
-      fill="clear"
-      [title]="'common.back' | transloco"
-      [disabled]="targetChangeDisabled()"
-      (click)="backToPicker()">
-      <ion-icon slot="icon-only" [icon]="backIcon" />
-    </ion-button>
-    <h2>
+<ion-header>
+  <ion-toolbar #heading>
+    <ion-buttons slot="start">
+      <app-modal-button back [disabled]="targetChangeDisabled()" (pressed)="backToPicker()" />
+    </ion-buttons>
+    <ion-title>
       @if (sourceCount() === 1) {
         {{ 'messages.forward.singleTitle' | transloco }}
       } @else {
         {{ 'messages.forward.pendingCount' | transloco: { count: sourceCount() } }}
       }
-    </h2>
-    <ion-button fill="clear" [title]="'common.close' | transloco" [disabled]="sending()" (click)="close()">
-      <ion-icon slot="icon-only" [icon]="closeIcon" />
-    </ion-button>
-  </header>
-
+    </ion-title>
+    <ion-buttons slot="end">
+      <app-modal-button [disabled]="sending()" (pressed)="close()" />
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+<div #dialog class="dialog ion-content-scroll-host" appScrollbars>
   <section class="source">
     <h3 class="section-label">
       @if (sourceName(); as name) {

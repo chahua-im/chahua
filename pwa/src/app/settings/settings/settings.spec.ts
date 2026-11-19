@@ -95,7 +95,10 @@ describe('Settings', () => {
         SessionStore,
         Preferences,
         { provide: ModalController, useValue: { dismiss } },
-        { provide: PanelNavigation, useValue: { back: dismiss, close: dismiss, registerLeaveCheck: () => () => {} } },
+        {
+          provide: PanelNavigation,
+          useValue: { back: dismiss, close: dismiss, paths: () => [], registerLeaveCheck: () => () => {} },
+        },
         { provide: PushNotifications, useValue: notifications },
         { provide: AppUpdates, useValue: updates },
         { provide: Presence, useValue: presence },
@@ -189,7 +192,7 @@ describe('Settings', () => {
   }
 
   async function back() {
-    page.querySelector<HTMLElement>('ion-buttons[slot="start"] ion-button')!.click();
+    page.querySelector<HTMLButtonElement>('ion-buttons[slot="start"] app-modal-button[back] button')!.click();
     expect(dismiss).toHaveBeenCalledOnce();
     dismiss.mockClear();
     await nav.pop();
@@ -292,9 +295,7 @@ describe('Settings', () => {
     expect(restored[0].checked).toBe(false);
     expect(restored[1].checked).toBe(true);
     expect(restored[2].checked).toBe(false);
-    const done = Array.from(page.querySelectorAll('ion-button')).find(
-      (button) => button.querySelector('ion-icon') != null,
-    )!;
+    const done = page.querySelector<HTMLButtonElement>('ion-buttons[slot="end"] app-modal-button button')!;
     done.click();
     expect(dismiss).toHaveBeenCalledOnce();
     dismiss.mockClear();

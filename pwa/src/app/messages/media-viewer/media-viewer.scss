@@ -29,6 +29,12 @@
 .tools .icon-button {
   pointer-events: auto;
 }
+.tools .close {
+  --modal-button-color: currentColor;
+  --modal-button-highlight: currentColor;
+  --modal-button-background: rgb(0 0 0 / 45%);
+  pointer-events: auto;
+}
 .counter,
 .tools .icon-button {
   background: rgb(0 0 0 / 45%);

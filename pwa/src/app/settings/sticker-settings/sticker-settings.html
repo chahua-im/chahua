@@ -1,11 +1,12 @@
 <ion-header>
   <ion-toolbar>
     <ion-buttons slot="start">
-      <ion-button (click)="panels.back()">
-        <ion-icon slot="icon-only" [icon]="backIcon"></ion-icon>
-      </ion-button>
+      <app-modal-button back (pressed)="panels.back()" />
     </ion-buttons>
     <ion-title>{{ 'settings.stickers.title' | transloco }}</ion-title>
+    <ion-buttons slot="end">
+      <app-modal-button (pressed)="panels.close()" />
+    </ion-buttons>
   </ion-toolbar>
 </ion-header>
 <ion-content appScrollbars color="light">
@@ -121,10 +122,10 @@
   (didDismiss)="choosingPinned.set(false)">
   <ng-template>
     <app-emoji-panel
+      closeButton
       [active]="choosingPinned()"
       [title]="'settings.stickers.pinnedReactions' | transloco: { count: reactions.pinnedReactions().length }"
       (chosen)="addPinned($event)"
-      (back)="choosingPinned.set(false)"
       (dismissed)="choosingPinned.set(false)" />
   </ng-template>
 </ion-modal>

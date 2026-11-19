@@ -213,6 +213,7 @@
 
 @if (picker() != null && (picker() === Picker.Destination || editorReady())) {
   <app-chat-picker
+    [backButton]="picker() !== Picker.Destination"
     [scope]="
       picker() === Picker.User
         ? PickerScope.Users

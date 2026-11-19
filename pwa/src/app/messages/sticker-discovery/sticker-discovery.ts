@@ -1,3 +1,4 @@
+import { ModalButton } from '../../ui/modal-button';
 import {
   afterNextRender,
   Component,
@@ -17,7 +18,6 @@ import {
   IonButtons,
   IonContent,
   IonHeader,
-  IonIcon,
   IonInfiniteScroll,
   IonInfiniteScrollContent,
   IonLabel,
@@ -32,7 +32,6 @@ import {
   type InfiniteScrollCustomEvent,
 } from '@ionic/angular';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { chevronBackOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { RpcApi } from '../../../generated/rpc-api';
 import { StickerPackSort, type SnowflakeID, type StickerPackDiscoveryItem } from '../../../generated/models';
@@ -53,6 +52,7 @@ import { StickerUpdates } from '../sticker-updates';
   templateUrl: './sticker-discovery.html',
   styleUrl: './sticker-discovery.scss',
   imports: [
+    ModalButton,
     StickerEditor,
     RouterLink,
     ContentScrollbars,
@@ -63,7 +63,6 @@ import { StickerUpdates } from '../sticker-updates';
     IonButtons,
     IonContent,
     IonHeader,
-    IonIcon,
     IonInfiniteScroll,
     IonInfiniteScrollContent,
     IonLabel,
@@ -79,7 +78,6 @@ import { StickerUpdates } from '../sticker-updates';
 })
 export class StickerDiscovery {
   protected readonly panels = inject(PanelNavigation);
-  protected readonly backIcon = chevronBackOutline;
   protected readonly query = signal('');
   protected readonly sort = signal(StickerPackSort.trending);
   protected readonly Sort = StickerPackSort;

@@ -1,9 +1,12 @@
 <div #panel class="emoji-panel">
   <div class="picker-header">
-    <button type="button" class="picker-back" (click)="back.emit()">
-      <ion-icon [icon]="backIcon" />
-    </button>
+    @if (!closeButton()) {
+      <app-modal-button back (pressed)="back.emit()" />
+    }
     <span>{{ title() }}</span>
+    @if (closeButton()) {
+      <app-modal-button class="picker-close" (pressed)="dismissed.emit()" />
+    }
   </div>
   @defer (when contentReady(); prefetch on idle) {
     <app-emoji-picker [active]="active()" (chosen)="chosen.emit($event)" />

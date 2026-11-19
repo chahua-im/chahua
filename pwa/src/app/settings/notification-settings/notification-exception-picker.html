@@ -1,12 +1,10 @@
-<ion-modal [isOpen]="open()" (didDismiss)="open.set(false); closed.emit()">
+<ion-modal [isOpen]="open()" [canDismiss]="canDismiss" (didDismiss)="open.set(false); closed.emit()">
   <ng-template>
     <ion-header>
       <ion-toolbar>
         <ion-title>{{ 'notificationPreferences.addException' | transloco }}</ion-title>
         <ion-buttons slot="end">
-          <ion-button [disabled]="saving() != null" (click)="open.set(false)">
-            {{ 'common.cancel' | transloco }}
-          </ion-button>
+          <app-modal-button [disabled]="saving() != null" (pressed)="open.set(false)" />
         </ion-buttons>
       </ion-toolbar>
       <ion-searchbar

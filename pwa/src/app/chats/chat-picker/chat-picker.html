@@ -18,17 +18,19 @@
     }
     <ion-header [hidden]="showingSelection()">
       <ion-toolbar>
-        @if (returningToSelection()) {
+        @let showBack = returningToSelection() || backButton();
+        @if (showBack) {
           <ion-buttons slot="start">
-            <ion-button [disabled]="submitted()" (click)="backToSelection()">
-              {{ 'common.back' | transloco }}
-            </ion-button>
+            <app-modal-button
+              back
+              [disabled]="submitted()"
+              (pressed)="returningToSelection() ? backToSelection() : close()" />
           </ion-buttons>
         }
         <ion-title>{{ returningToSelection() ? (reselectionTitle() ?? title()) : title() }}</ion-title>
-        @if (!returningToSelection()) {
+        @if (!showBack) {
           <ion-buttons slot="end">
-            <ion-button [disabled]="submitted()" (click)="close()">{{ 'common.cancel' | transloco }}</ion-button>
+            <app-modal-button [disabled]="submitted()" (pressed)="close()" />
           </ion-buttons>
         }
       </ion-toolbar>

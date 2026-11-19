@@ -51,6 +51,7 @@ import { ChatStore } from '../chat-store';
 import { ChatAvatar, conversationAvatar, threadAvatar, type ChatAvatarData } from '../chat-avatar/chat-avatar';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { LoadError } from '../../ui/load-error/load-error';
+import { ModalButton } from '../../ui/modal-button';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
 
 export enum ChatPickerScope {
@@ -101,6 +102,7 @@ export type ChooseChat = (target: ChatPickerTarget, available: () => boolean) =>
     TranslocoPipe,
     ContentScrollbars,
     LoadError,
+    ModalButton,
     ChatAvatar,
     MessagePreview,
     NgTemplateOutlet,
@@ -123,6 +125,7 @@ export type ChooseChat = (target: ChatPickerTarget, available: () => boolean) =>
 export class ChatPicker {
   readonly scope = input.required<ChatPickerScope>();
   readonly title = input.required<string>();
+  readonly backButton = input(false);
   readonly reselectionTitle = input<string>();
   readonly excludedId = input<SnowflakeID>();
   readonly choose = input<ChooseChat>();
