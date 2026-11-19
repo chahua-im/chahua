@@ -64,7 +64,7 @@ describe('ConversationStore', () => {
       chatSettings: { showMembershipMessages: true },
       messages: [
         { ...wire('50'), metadata: pending },
-        { ...wire('60'), metadata: ready },
+        { ...wire('60'), metadata: ready, forwardedThreadReplyCount: 12 },
       ],
     });
     await loading;
@@ -72,6 +72,41 @@ describe('ConversationStore', () => {
     const deleted = timeline.items().find((item) => item.id === encodeId('60'));
     expect(deleted?.isDeleted).toBe(true);
     expect(deleted?.metadata).toBeUndefined();
+    expect(deleted?.forwardedThreadReplyCount).toBeUndefined();
+  });
+
+  it('disables a cached forwarded reply jump when its original is recalled', () => {
+    TestBed.inject(SessionStore).user.set(testUser);
+    TestBed.inject(ChatStore).remember([testChat]);
+    const recent = TestBed.inject(RecentConversationWindows);
+    const scope = { chatId: testChat.id };
+    const original = { ...message('100'), mentions: [] };
+    const forward = {
+      ...message('200'),
+      canJumpToOriginalReply: true,
+      forwardedFrom: {
+        originalMessageId: encodeId('150'),
+        originalChatId: scope.chatId,
+        originalReplyTo: original,
+        sender: original.sender,
+      },
+    };
+    recent.keep(scope, {
+      range: {
+        chatSettings: { showMembershipMessages: true, showUnreadMessageCount: true },
+        membershipMessagePolicy: testChat.membershipMessagePolicy,
+        messages: [forward],
+      },
+      atBottom: true,
+      hideMembershipMessages: false,
+    });
+    TestBed.inject(Connection).acceptChange({
+      type: ServerWsMessageType.messagesBulkDeleted,
+      payload: { chatId: scope.chatId, messageIds: [original.id] },
+    });
+    const cached = recent.take(scope, false)!.range.messages[0];
+    expect(cached.canJumpToOriginalReply).toBeUndefined();
+    expect(cached.forwardedFrom?.originalReplyTo?.message).toBe(original.message);
   });
 
   it.each([

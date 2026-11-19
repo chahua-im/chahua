@@ -186,15 +186,13 @@ export class ChatListContent {
       const preview = pendingPreview?.message ?? last;
       const activityAt = pendingPreview?.message.createdAt ?? last?.createdAt ?? chat.lastMessageAt;
       const draft = this.drafts.get(chat.id);
-      const forward = this.drafts.forward(chat.id);
-      const hasDraft = !!draft || !!forward?.length;
+      const hasDraft = !!draft;
       const muted = this.metadata.isMuted(chat.id);
       return {
         kind: ListRowKind.Chat as const,
         key: chat.id,
         chat,
         draft,
-        forward,
         preview,
         sortTime: Math.max(
           Date.parse(chat.lastMessageAt ?? '') || -Infinity,
@@ -258,8 +256,7 @@ export class ChatListContent {
         const chat = this.metadata.get(thread.chatId);
         const root = thread.threadRootMessage;
         const draft = this.drafts.get(thread.chatId, root.id);
-        const forward = this.drafts.forward(thread.chatId, root.id);
-        const hasDraft = !!draft || !!forward?.length;
+        const hasDraft = !!draft;
         const last = thread.lastReply;
         const pending = this.pendingPreviews().get(root.id);
         const pendingPreview = pending && pending.message.createdAt > thread.lastReplyAt ? pending : undefined;
@@ -272,7 +269,6 @@ export class ChatListContent {
           key: root.id,
           thread,
           draft,
-          forward,
           preview,
           sortTime: Math.max(
             Date.parse(thread.lastReplyAt),
@@ -510,7 +506,7 @@ export class ChatListContent {
       if (this.active() && !this.ready() && !this.loading()) this.ready.set(true);
     });
     effect(() => {
-      if (!this.loading()) {
+      if (this.refreshing() && !this.loading()) {
         void this.refresher()?.complete();
         this.refreshing.set(false);
       }

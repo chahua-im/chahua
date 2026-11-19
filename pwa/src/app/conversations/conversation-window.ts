@@ -24,7 +24,9 @@ export function redactDeletedMessage(message: MessageResponse): MessageResponse 
     ...message,
     isDeleted: true,
     forwardedFrom: undefined,
+    canJumpToOriginalReply: undefined,
     forwardedPreview: undefined,
+    forwardedThreadReplyCount: undefined,
     forwardedBundleId: undefined,
     message: undefined,
     metadata: undefined,
@@ -32,6 +34,15 @@ export function redactDeletedMessage(message: MessageResponse): MessageResponse 
     mentions: [],
     sticker: undefined,
   };
+}
+
+export function redactMessageCitations(message: MessageResponse, deleted: ReadonlySet<SnowflakeID>): MessageResponse {
+  const original = message.forwardedFrom?.originalReplyTo;
+  if (message.canJumpToOriginalReply && original && deleted.has(original.id)) {
+    message = { ...message, canJumpToOriginalReply: undefined };
+  }
+  const quote = message.replyToMessage;
+  return quote && deleted.has(quote.id) ? replaceMessageCitation(message, quote.id, null) : message;
 }
 
 export function replaceMessageCitation(

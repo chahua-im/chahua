@@ -72,29 +72,41 @@
           <app-forwarded-label class="forward-origin" [name]="origin.sender.name" />
           @if (origin.originalReplyTo; as originalReply) {
             @if (!originalReply.isDeleted) {
-              <div
-                appMessageReplyPreview
-                class="original-reply"
-                [message]="originalReply"
-                [name]="originalReply.sender.name ?? originalReply.sender.uid"></div>
+              @let name = originalReply.sender.name ?? originalReply.sender.uid;
+              @if (allowOriginalReplyJump() && message().canJumpToOriginalReply) {
+                <button
+                  appMessageReplyPreview
+                  type="button"
+                  class="original-reply"
+                  [message]="originalReply"
+                  [name]="name"
+                  [disabled]="jumpDisabled() || !canInteract()"
+                  (click)="jump.emit(originalReply.id)"></button>
+              } @else {
+                <div appMessageReplyPreview class="original-reply" [message]="originalReply" [name]="name"></div>
+              }
             }
           }
         }
         @if (quoted(); as quote) {
-          <button
-            appMessageReplyPreview
-            type="button"
-            [message]="quote"
-            [name]="quoteName()"
-            [attr.inert]="preview() ? '' : null"
-            [disabled]="jumpDisabled() || !canInteract()"
-            (click)="jump.emit(quote.id)"></button>
+          @if (preview() || (record() && jumpDisabled())) {
+            <div appMessageReplyPreview [message]="quote" [name]="quoteName()"></div>
+          } @else {
+            <button
+              appMessageReplyPreview
+              type="button"
+              [message]="quote"
+              [name]="quoteName()"
+              [disabled]="jumpDisabled() || !canInteract()"
+              (click)="jump.emit(quote.id)"></button>
+          }
         }
         @if (hasMedia()) {
           <div class="media-content" [attr.inert]="preview() ? '' : null" (click)="sticker($event)">
             <app-message-attachments
               [message]="message()"
               [dockEnabled]="!record()"
+              [staticPreview]="preview()"
               [overlayTime]="mediaOverlay()"
               [outgoing]="own()"
               [delivery]="status()"
@@ -106,6 +118,7 @@
         }
         @if (!mediaOverlay()) {
           @let showForwardedCard = !hasMedia() && message().messageType === Type.forwarded && !message().isDeleted;
+          @let forwardedReplies = forwardedReplyCount();
           <ng-template #timestamp>
             <time class="timestamp" [attr.datetime]="message().createdAt">
               @if (message().isEdited) {
@@ -121,13 +134,11 @@
                 @if (message().messageType === Type.placeholder) {
                   <app-message-preview [message]="message()" />
                 } @else if (showForwardedCard) {
-                  <button
-                    type="button"
-                    class="forwarded-card"
-                    [disabled]="preview() || selecting() || (!canInteract() && savedId() == null && !record())"
-                    (click)="openBundle()">
+                  <button type="button" class="forwarded-card" [disabled]="!canOpenBundle()" (click)="openBundle()">
                     <app-forwarded-card [preview]="message().forwardedPreview">
-                      <ng-container [ngTemplateOutlet]="timestamp" />
+                      @if (forwardedReplies == null) {
+                        <ng-container [ngTemplateOutlet]="timestamp" />
+                      }
                     </app-forwarded-card>
                   </button>
                 } @else if (message().messageType === Type.invite) {
@@ -168,7 +179,15 @@
                 [previews]="message().metadata!.linkPreviews"
                 [interactive]="!preview() && !selecting() && (canInteract() || savedId() != null || record())" />
             }
-            @if (!showForwardedCard && message().messageType !== Type.invite) {
+            @if (forwardedReplies != null) {
+              <div class="message-metadata">
+                <span class="forwarded-topic">
+                  <ion-icon [icon]="topicIcon" />
+                  {{ 'messages.thread.replies' | transloco: { count: forwardedReplies } }}
+                </span>
+                <ng-container [ngTemplateOutlet]="timestamp" />
+              </div>
+            } @else if (!showForwardedCard && message().messageType !== Type.invite) {
               <ng-container [ngTemplateOutlet]="timestamp" />
             }
           </div>

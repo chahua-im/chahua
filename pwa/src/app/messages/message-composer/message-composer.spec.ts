@@ -243,34 +243,32 @@ describe('Message composer upload ownership', () => {
     expect(element.textContent).not.toContain('文件为空');
   });
 
-  it('enables Send for a forward without text and leaves upload ownership untouched', () => {
-    const upload = queuedUpload();
-    composer['uploads'].set([upload]);
+  it('submits empty forward comments and includes mentions in a written comment', () => {
     const forward = vi.fn();
     composer.forwardSubmitted.subscribe(forward);
     fixture.componentRef.setInput('forwarding', true);
     fixture.detectChanges();
     expect(composer['canSend']()).toBe(true);
     expect(composer['useVoice']()).toBe(false);
-    expect(fixture.nativeElement.querySelector('.uploads')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.attach-button')).toBeNull();
+    const paste = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, 'clipboardData', {
+      value: {
+        types: ['text/plain', 'Files'],
+        getData: () => '附言',
+        files: [new File(['image'], 'image.png', { type: 'image/png' })],
+      },
+    });
+    fixture.nativeElement.querySelector('ion-textarea').dispatchEvent(paste);
+    expect(paste.defaultPrevented).toBe(false);
     composer['submit']();
-    expect(forward).toHaveBeenCalledOnce();
+    expect(forward).toHaveBeenCalledExactlyOnceWith([]);
+    const mention = { uid: 2, username: 'alice', gender: 0 };
+    composer['mentionInfos'].set(new Map([[2, mention]]));
+    composer.text.set('hello @[uid:2]');
+    composer['submit']();
+    expect(forward).toHaveBeenLastCalledWith([mention]);
     expect(submitted).not.toHaveBeenCalled();
-    expect(composer['uploads']()).toEqual([upload]);
-    fixture.componentRef.setInput('forwarding', false);
-    fixture.detectChanges();
-    expect(composer['uploads']()).toEqual([upload]);
-    expect(fixture.nativeElement.querySelector('.uploads')).not.toBeNull();
-  });
-
-  it('keeps an active recording mounted when a forward arrives', () => {
-    const recorder = fixture.nativeElement.querySelector('app-voice-recorder');
-    composer.voiceActive.set(true);
-    fixture.componentRef.setInput('forwarding', true);
-    fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('app-voice-recorder')).toBe(recorder);
-    expect(composer['canSend']()).toBe(false);
-    expect(fixture.nativeElement.querySelector('.compose-context').hidden).toBe(false);
   });
   function edit(message: MessageContent = testMessage, uploads: readonly AttachmentUpload[] = []) {
     fixture.componentRef.setInput('editing', message);
@@ -484,7 +482,11 @@ describe('Message composer upload ownership', () => {
     expect(upload).toBeInstanceOf(AttachmentUpload);
     expect(upload.file).toBe(file);
     expect(upload.purpose).toBe(AttachmentUploadPurpose.voice);
-    expect(composition).toEqual({ messageType: MessageType.audio, attachmentIds: [], uploads: [upload] });
+    expect(composition).toEqual({
+      messageType: MessageType.audio,
+      attachmentIds: [],
+      uploads: [upload],
+    });
     expect(upload.state().status).toBe(UploadStatus.Uploading);
     expect(reset).toHaveBeenCalledOnce();
     expect(composer.voiceActive()).toBe(false);

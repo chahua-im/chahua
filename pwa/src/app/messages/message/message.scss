@@ -19,7 +19,7 @@
   --message-background-opacity: 12%;
   --message-group-background: color-mix(in srgb, var(--message-contrast) 25%, transparent);
   --forward-muted: currentColor;
-  --forward-opacity: 0.75;
+  --message-meta-opacity: 95%;
 }
 
 .bubble,
@@ -100,20 +100,37 @@
   -webkit-touch-callout: default;
 }
 
-.timestamp {
+.timestamp,
+.forwarded-topic {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  margin-left: 8px;
   font-size: var(--app-font-micro);
   line-height: var(--app-line-micro);
-  color: color-mix(in srgb, currentColor 70%, transparent);
+  color: color-mix(in srgb, currentColor var(--message-meta-opacity, 70%), transparent);
   white-space: nowrap;
+}
+
+.timestamp {
+  margin-left: 8px;
 }
 
 .message-body > .timestamp {
   float: inline-end;
   margin-top: calc(var(--app-line-body) - var(--app-line-micro));
+}
+
+.message-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  margin-top: 4px;
+
+  .timestamp {
+    margin-left: 0;
+    margin-inline-start: auto;
+  }
 }
 
 .retry-button {

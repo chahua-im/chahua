@@ -26,6 +26,7 @@ import { Diagnostics } from '../pwa/diagnostics';
 import {
   acceptsConversationMessage,
   redactDeletedMessage,
+  redactMessageCitations,
   replaceEditedMessage,
   replaceMessageCitation,
   toMessagePreview,
@@ -348,6 +349,27 @@ export class ConversationStore {
       }
       if (windowRead.policyGeneration !== this.chatInfo.membershipPolicyRequestGeneration())
         throw new ChatSettingsChanged();
+      if (this.provisional()) {
+        // An unedited history row predates any confirmed edit in the retained window.
+        const edits = new Map(
+          this.items()
+            .filter((row) => row.isEdited && !row.isDeleted)
+            .map((row) => [row.id, row]),
+        );
+        page.messages = page.messages.map((row) => {
+          const edit = edits.get(row.id);
+          if (!edit || row.isEdited || row.isDeleted) return row;
+          return {
+            ...row,
+            isEdited: true,
+            message: edit.message,
+            metadata: edit.metadata,
+            mentions: edit.mentions,
+            hasAttachments: edit.hasAttachments,
+            attachments: edit.attachments,
+          };
+        });
+      }
       page = this.applyPendingUpdates(page, sync && !page.newerCursor);
       this.chatInfo.rememberMentions(page.messages, mentionVersion);
       // `around` also returns neighbours when the target has been deleted.
@@ -492,7 +514,7 @@ export class ConversationStore {
       this.atLatest() &&
       !this.needsWindow &&
       (!this.provisional() || (this.sync.active() && this.alignedGeneration != null));
-    const messages = mergeMessageArrivals(page.messages, [message], atTail);
+    const messages = mergeMessageArrivals(page.messages, [this.refreshCitation(message)], atTail);
     if (messages !== page.messages) this.currentPage.set({ ...page, messages });
   }
 
@@ -536,8 +558,10 @@ export class ConversationStore {
 
   update(message: MessageResponse) {
     if (!this.accepts(message)) return;
-    if (message.isDeleted) this.deletedIds.add(message.id);
-    else this.editedPreviews.set(message.id, toMessagePreview(message));
+    if (message.isDeleted) {
+      this.deletedIds.add(message.id);
+      message = redactDeletedMessage(message);
+    } else this.editedPreviews.set(message.id, toMessagePreview(message));
     const known = this.items().find((item) => item.id === message.id);
     this.patch(message.id, (current) => replaceEditedMessage(known ?? current, message));
   }
@@ -567,7 +591,7 @@ export class ConversationStore {
         page && {
           ...page,
           messages: page.messages.map((message) =>
-            message.id === messageId ? update(message) : this.refreshCitation(message),
+            this.refreshCitation(message.id === messageId ? update(message) : message),
           ),
         },
     );
@@ -591,9 +615,9 @@ export class ConversationStore {
 
   /** Quoting messages embed a server snapshot of the cited message; edits and recalls reach them through here. */
   private refreshCitation(message: MessageResponse): MessageResponse {
+    message = redactMessageCitations(message, this.deletedIds);
     const quote = message.replyToMessage;
-    if (!quote) return message;
-    if (this.deletedIds.has(quote.id)) return replaceMessageCitation(message, quote.id, null);
+    if (!quote || quote.isDeleted) return message;
     const fresh = this.editedPreviews.get(quote.id);
     return fresh ? replaceMessageCitation(message, quote.id, fresh) : message;
   }

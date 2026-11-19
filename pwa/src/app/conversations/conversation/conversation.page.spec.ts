@@ -41,10 +41,8 @@ import {
 import { Connection, ResyncReason } from '../../api/connection';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { mockRealtime, testChat, testMessage, testUser, wireChat, wireMessage } from '../../api/testing';
-import { ChatListStore } from '../../chats/chat-list-store';
 import { ChatChangeKind, ChatStore } from '../../chats/chat-store';
-import { ForwardPicker } from '../../messages/forward-picker/forward-picker';
-import { ForwardSelectionError, forwardSourceMessage } from '../../messages/forwarding';
+import { forwardSourceMessage } from '../../messages/forwarding';
 import { MessageDelivery } from '../../messages/message-delivery';
 import { MessageAction } from '../../messages/message-menu/message-menu';
 import { MessageNotice } from '../../messages/message-notice';
@@ -865,229 +863,6 @@ describe('ConversationPage', () => {
     expect(control.nativeElement.classList.contains('ion-display-none')).toBe(true);
   });
 
-  it('shows a removable forward preview in the destination without sending or replacing its text', () => {
-    const send = vi.spyOn(component['outbox'], 'enqueueForward');
-    component['draft'].set('existing draft');
-    component['startReply'](testMessage);
-    TestBed.inject(DraftStore).setForward(testChat.id, undefined, [testMessage]);
-    fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('.forward-context strong').textContent.trim()).toBe(
-      testMessage.sender.name,
-    );
-    expect(fixture.nativeElement.querySelector('.forward-context app-message-preview')).not.toBeNull();
-    expect(fixture.nativeElement.querySelector('.forward-context').textContent).not.toContain('转发 1 条消息');
-    expect(component['draft']()).toBe('existing draft');
-    expect(send).not.toHaveBeenCalled();
-    (fixture.nativeElement.querySelector('.forward-context .reply-close') as HTMLButtonElement).click();
-    fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('.forward-context')).toBeNull();
-    expect(component['draft']()).toBe('existing draft');
-    expect(component['replyTo']()).toBe(testMessage);
-  });
-
-  it('uses the original sender for a single forwarded message preview', () => {
-    const source = {
-      ...testMessage,
-      forwardedFrom: {
-        sender: { uid: 99, name: '源头作者', gender: 0 },
-        originalChatId: testChat.id,
-        originalMessageId: encodeId('99'),
-      },
-    };
-    TestBed.inject(DraftStore).setForward(testChat.id, undefined, [source]);
-    fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('.forward-context strong').textContent.trim()).toBe('源头作者');
-  });
-
-  it('opens the destination picker from the forward icon and keeps the draft when cancelled', () => {
-    const lists = TestBed.inject(ChatListStore);
-    vi.spyOn(lists.chats(false), 'activate').mockReturnValue(() => {});
-    vi.spyOn(lists.threads(false), 'activate').mockReturnValue(() => {});
-    const sources = [testMessage, { ...testMessage, id: encodeId('100') }];
-    const drafts = TestBed.inject(DraftStore);
-    drafts.setForward(testChat.id, undefined, sources);
-    component['draft'].set('existing text');
-    const send = vi.spyOn(component['outbox'], 'enqueueForward');
-    fixture.detectChanges();
-
-    const button: HTMLButtonElement = fixture.nativeElement.querySelector('.forward-target-button');
-    expect(button.title).toBe('更换转发目标');
-    expect(button.querySelectorAll('.forward-target-icon ion-icon')).toHaveLength(2);
-    button.click();
-    fixture.detectChanges();
-    const picker = fixture.debugElement.query(By.directive(ForwardPicker)).componentInstance as ForwardPicker;
-    expect(picker.messages()).toBe(sources);
-    expect(picker.moveFrom()).toMatchObject({ chatId: testChat.id, threadId: undefined });
-    picker.closed.emit();
-    fixture.detectChanges();
-    expect(fixture.debugElement.query(By.directive(ForwardPicker))).toBeNull();
-    expect(drafts.forward(testChat.id)).toBe(sources);
-    expect(component['draft']()).toBe('existing text');
-    expect(send).not.toHaveBeenCalled();
-  });
-
-  it('keeps the comment in the original input and saves it there after moving a forward', async () => {
-    const drafts = TestBed.inject(DraftStore);
-    const sources = [testMessage];
-    const target = encodeId('222');
-    drafts.setForward(testChat.id, undefined, sources);
-    component['draft'].set('comment to move');
-    component['changeForwardTarget']();
-    const origin = component['forwardMove']()!;
-    component['forwardMove'].set(undefined);
-    vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
-    await TestBed.inject(ConversationNavigation).prepareForward(target, undefined, sources, origin);
-    expect(component['draft']()).toBe('comment to move');
-    component['saveDraft']();
-    expect(drafts.get(testChat.id)?.text).toBe('comment to move');
-    expect(drafts.get(target)).toBeUndefined();
-  });
-
-  it('preserves the retained destination input when moving a forward from another chat', async () => {
-    const drafts = TestBed.inject(DraftStore);
-    component['draft'].set('unsaved destination text');
-    const origin = encodeId('222');
-    drafts.save(origin, undefined, 'comment');
-    expect(component['draft']()).toBe('unsaved destination text');
-    component['saveDraft']();
-    const sources = [testMessage];
-    drafts.setForward(origin, undefined, sources);
-    vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
-    await TestBed.inject(ConversationNavigation).prepareForward(testChat.id, undefined, sources, { chatId: origin });
-    fixture.detectChanges();
-    expect(component['draft']()).toBe('unsaved destination text');
-    expect(fixture.debugElement.query(By.directive(IonTextarea)).componentInstance.value).toBe(
-      'unsaved destination text',
-    );
-    component['saveDraft']();
-    expect(drafts.get(testChat.id)?.text).toBe('unsaved destination text');
-  });
-
-  it.each([
-    { uids: [1, 1], title: 'user1' },
-    { uids: [1, 2, 1], title: 'user1和user2' },
-    { uids: [1, 2, 3, 1], title: 'user1和其他2人' },
-    { uids: [1, 2, 3, 4], title: 'user1和其他3人' },
-  ])('summarizes merged participants in message order: $title', ({ uids, title }) => {
-    const sources = uids
-      .map((uid, index) => ({
-        ...testMessage,
-        id: encodeId(String(100 + index)),
-        sender: { uid, name: `user${uid}`, gender: 0 },
-      }))
-      .reverse();
-    TestBed.inject(DraftStore).setForward(testChat.id, undefined, sources);
-    fixture.detectChanges();
-    const preview = fixture.nativeElement.querySelector('.forward-context');
-    expect(preview.querySelector('strong').textContent.trim()).toBe(title);
-    expect(preview.querySelector('.reply-description > span').textContent.trim()).toBe(`转发 ${uids.length} 条消息`);
-    expect(preview.querySelector('app-message-preview')).toBeNull();
-  });
-
-  it('sends a forward and then the composer text only when Send is clicked', async () => {
-    component['draft'].set('附言');
-    TestBed.inject(DraftStore).setForward(testChat.id, undefined, [testMessage]);
-    fixture.detectChanges();
-    peer.expectNone('messages.send');
-    (fixture.nativeElement.querySelector('.send-button') as HTMLButtonElement).click();
-    const forward = peer.expect(
-      'messages.forwardOne',
-      (params) => params['chatId'] === wireChat.id && params['messageId'] === wireMessage.id,
-    );
-    peer.expectNone('messages.send');
-    expect(component['pendingForward']()).toBeUndefined();
-    expect(component['draft']()).toBe('');
-    component['draft'].set('next input');
-    forward.flush({
-      ...wireMessage,
-      id: '9007199254741800',
-      clientGeneratedId: forward.params?.['clientGeneratedId'],
-    });
-    await Promise.resolve();
-    await Promise.resolve();
-    const comment = peer.expect('messages.send', (params) => params['chatId'] === wireChat.id);
-    expect(comment.params?.['message']).toBe('附言');
-    comment.flush({
-      ...wireMessage,
-      id: '9007199254741801',
-      message: '附言',
-      clientGeneratedId: comment.params?.['clientGeneratedId'],
-    });
-    await fixture.whenStable();
-    expect(component['draft']()).toBe('next input');
-  });
-
-  it('allows sending a merged forward without text', () => {
-    const send = vi.spyOn(component['outbox'], 'enqueueForward').mockReturnValue({} as OutgoingMessage);
-    const sources = [testMessage, { ...testMessage, id: encodeId('100') }];
-    TestBed.inject(DraftStore).setForward(testChat.id, undefined, sources);
-    fixture.detectChanges();
-    const button = fixture.nativeElement.querySelector('.send-button') as HTMLButtonElement;
-    expect(button.disabled).toBe(false);
-    button.click();
-    expect(send).toHaveBeenCalledWith(testChat.id, undefined, sources, expect.objectContaining({ comment: '' }));
-    expect(component['pendingForward']()).toBeUndefined();
-  });
-
-  it('temporarily shows the forward composer without overwriting an unfinished edit', () => {
-    component['draft'].set('normal draft');
-    component['startEdit'](testMessage);
-    component['updateDraft']('unfinished edit');
-    fixture.detectChanges();
-    TestBed.inject(DraftStore).setForward(testChat.id, undefined, [testMessage]);
-    fixture.detectChanges();
-    expect(component['composer']()?.text()).toBe('normal draft');
-    component['updateDraft']('forward comment');
-    component['escapeComposer']();
-    fixture.detectChanges();
-    expect(component['composer']()?.text()).toBe('unfinished edit');
-    expect(component['draft']()).toBe('forward comment');
-  });
-
-  it('submits nested sources without deciding placeholder replacement from the draft', () => {
-    const send = vi.spyOn(component['outbox'], 'enqueueForward').mockReturnValue({} as OutgoingMessage);
-    const sources = [
-      {
-        ...testMessage,
-        messageType: MessageType.forwarded,
-        forwardedPreview: { total: 2, containsForwardedMessages: true, messages: [] },
-      },
-      { ...testMessage, id: encodeId('100') },
-    ];
-    TestBed.inject(DraftStore).setForward(testChat.id, undefined, sources);
-    component['draft'].set('附言');
-    fixture.detectChanges();
-    component['sendForward']();
-    expect(send).toHaveBeenCalledExactlyOnceWith(testChat.id, undefined, sources, {
-      comment: '附言',
-      commentMentions: [],
-    });
-    expect(component['pendingForward']()).toBeUndefined();
-  });
-
-  it('keeps the selected preview through source changes and withholds the comment on server rejection', async () => {
-    const sources = [testMessage];
-    TestBed.inject(DraftStore).setForward(testChat.id, undefined, sources);
-    component['draft'].set('附言');
-    events.next({ type: ServerWsMessageType.messageUpdated, payload: { ...testMessage, message: 'edited' } });
-    events.next({ type: ServerWsMessageType.messageDeleted, payload: { ...testMessage, isDeleted: true } });
-    fixture.detectChanges();
-    expect(component['forwardPreview']()).toBe(testMessage);
-    const button = fixture.nativeElement.querySelector('.send-button') as HTMLButtonElement;
-    expect(button.disabled).toBe(false);
-    button.click();
-    const item = TestBed.inject(MessageOutbox).items()[0];
-    const request = peer.expect(
-      'messages.forwardOne',
-      (params) => params['chatId'] === wireChat.id && params['messageId'] === wireMessage.id,
-    );
-    peer.expectNone('messages.get');
-    request.error(RpcErrorCode.NotFound);
-    await item.operation;
-    expect(item.delivery()).toBe(MessageDelivery.Failed);
-    peer.expectNone('messages.send');
-  });
-
   it('Escape leaves multi-selection without reaching the page-level navigation shortcut', async () => {
     component['beginSelection'](testMessage);
     const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
@@ -1127,6 +902,19 @@ describe('ConversationPage', () => {
     expect(component['forwardSources']()).toEqual([testMessage]);
     component['forwardSources'].set([]);
     component['cancelSelection']();
+  });
+
+  it('allows a selected invite to be forwarded only as part of a merge', () => {
+    const invite = { ...testMessage, id: encodeId('902'), messageType: MessageType.invite };
+    component['beginSelection'](invite);
+    component['forwardSelection']();
+    expect(component['forwardSources']()).toEqual([]);
+    expect(component['selectedMessages']().get(invite.id)).toBe(invite);
+
+    component['toggleSelection'](testMessage);
+    component['forwardSelection']();
+    expect(component['forwardSources']()).toEqual([invite, testMessage]);
+    expect(component['forwardError']()).toBeUndefined();
   });
 
   it('recalls multiple selected messages in one request and applies the response without a WebSocket echo', async () => {
@@ -1361,47 +1149,6 @@ describe('ConversationPage', () => {
     update(100);
     fixture.detectChanges();
     expect(forwardButton()).toBeUndefined();
-  });
-
-  it('reads every topic message at send time and explains an oversized topic', async () => {
-    await enterThread();
-    await settleMetadata();
-    const request = () => peer.expect('messages.list', { chatId: wireChat.id, threadId: '100', max: 100 });
-    const first = component['loadTopicSources']();
-    request().flush({
-      chatSettings: { showMembershipMessages: true },
-      messages: [
-        { ...wireMessage, id: '100', clientGeneratedId: 'root-100' },
-        { ...wireMessage, id: '101', clientGeneratedId: 'reply-101', replyRootId: '100' },
-        {
-          ...wireMessage,
-          id: '102',
-          clientGeneratedId: 'system-102',
-          replyRootId: '100',
-          messageType: MessageType.system,
-        },
-        {
-          ...wireMessage,
-          id: '103',
-          clientGeneratedId: 'deleted-103',
-          replyRootId: '100',
-          isDeleted: true,
-        },
-      ],
-    });
-    const loading = await first;
-    expect('sources' in loading && loading.sources.map((source) => forwardSourceMessage(source)?.id)).toEqual([
-      encodeId('100'),
-      encodeId('101'),
-    ]);
-
-    const oversized = component['loadTopicSources']();
-    request().flush({ chatSettings: { showMembershipMessages: true }, messages: [], olderCursor: '99' });
-    expect(await oversized).toEqual({ error: ForwardSelectionError.TooMany });
-
-    const failed = component['loadTopicSources']();
-    request().error(RpcErrorCode.Internal);
-    expect(await failed).toEqual({ error: ForwardSelectionError.LoadFailed });
   });
 
   it('goes back through real history from the mobile header', () => {
@@ -2301,20 +2048,30 @@ describe('ConversationPage', () => {
   it('returns through nested reply jumps before going to the latest loaded messages', async () => {
     Object.defineProperty(Element.prototype, 'animate', { value: vi.fn(), configurable: true });
     try {
+      const original = { ...wireMessage, id: '100', clientGeneratedId: 'original', mentions: [] };
+      const forward = {
+        ...wireMessage,
+        id: '200',
+        clientGeneratedId: 'forward',
+        canJumpToOriginalReply: true,
+        forwardedFrom: {
+          originalChatId: wireChat.id,
+          originalMessageId: '150',
+          originalReplyTo: original,
+          sender: wireMessage.sender,
+        },
+      };
       const opening = component['conversation'].open(encodeId('200'));
       peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '200' }).flush({
         chatSettings: { showMembershipMessages: true },
-        messages: [100, 200, 300].map((id) => ({
-          ...wireMessage,
-          id: String(id),
-          clientGeneratedId: `message-${id}`,
-        })),
+        messages: [original, forward, { ...wireMessage, id: '300', clientGeneratedId: 'reply' }],
       });
       await opening;
       await fixture.whenStable();
       fixture.debugElement.queryAll(By.directive(Message))[2].componentInstance.jump.emit(encodeId('200'));
       await fixture.whenStable();
-      fixture.debugElement.queryAll(By.directive(Message))[1].componentInstance.jump.emit(encodeId('100'));
+      const element: HTMLElement = fixture.nativeElement;
+      element.querySelector<HTMLButtonElement>('[data-message-id="200"] button.original-reply')!.click();
       await fixture.whenStable();
       expect(component['returnMessageIds']()).toEqual([encodeId('300'), encodeId('200')]);
       await component['navigateDown']();
@@ -2323,6 +2080,12 @@ describe('ConversationPage', () => {
       expect(component['returnMessageIds']()).toEqual([]);
       await component['navigateDown']();
       expect(component['navigatingDown']()).toBe(false);
+      events.next({
+        type: ServerWsMessageType.messageDeleted,
+        payload: { ...testMessage, id: encodeId('100'), isDeleted: true },
+      });
+      await fixture.whenStable();
+      expect(element.querySelector('[data-message-id="200"] .original-reply')?.tagName).toBe('DIV');
       peer.verify();
       component.ionViewDidLeave();
       expect(component['returnMessageIds']()).toEqual([]);
@@ -5769,7 +5532,7 @@ describe('ConversationPage', () => {
     expect(component['draft']()).toBe('另一个话题草稿');
     expect(item.delivery()).toBe(MessageDelivery.Sent);
     expect(item.published()).toBe(true);
-    expect(component['outbox'].items()).toContain(item);
+    expect(component['outbox'].items()).not.toContain(item);
     expect(TestBed.inject(DraftStore).get(testChat.id, encodeId('100'))).toBeUndefined();
     expect(component['conversation'].items().map((item) => item.id)).toEqual([
       encodeId('99'),
@@ -5950,7 +5713,7 @@ describe('ConversationPage', () => {
     peer.expectNone('messages.list');
   });
 
-  it('continues queued sends after page destruction and hands confirmations to the next page', async () => {
+  it('continues queued sends after page destruction and releases them before the next page opens', async () => {
     const outbox = TestBed.inject(MessageOutbox);
     component['draft'].set('销毁前第一条');
     const firstSending = component['sendMessage']();
@@ -5982,15 +5745,24 @@ describe('ConversationPage', () => {
     expect(first.published()).toBe(true);
     expect(second.published()).toBe(true);
     expect(oldConversation.items()).toEqual([]);
-    expect(outbox.items()).toEqual([first, second]);
+    expect(outbox.items()).toEqual([]);
 
     fixture = TestBed.createComponent(ConversationPage);
     component = fixture.componentInstance;
     fixture.componentRef.setInput('id', wireChat.id);
     fixture.detectChanges();
-    peer.expect('messages.list', { chatId: wireChat.id, max: 50 }).flush({
+    (await peer.expectAsync('messages.list', { chatId: wireChat.id, max: 50 })).flush({
       chatSettings: { showMembershipMessages: true },
-      messages: [structuredClone(wireMessage)],
+      messages: [
+        structuredClone(wireMessage),
+        { ...wireMessage, id: '9007199254741005', clientGeneratedId: first.clientGeneratedId, message: '销毁前第一条' },
+        {
+          ...wireMessage,
+          id: '9007199254741007',
+          clientGeneratedId: second.clientGeneratedId,
+          message: '销毁前第二条',
+        },
+      ],
     });
     await fixture.whenStable();
     fixture.detectChanges();
@@ -6121,13 +5893,13 @@ describe('ConversationPage', () => {
     fixture.componentRef.setInput('id', wireChat.id);
     fixture.componentRef.setInput('reply', id);
     fixture.detectChanges();
-    let request = peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: id });
+    let request = await peer.expectAsync('messages.list', { chatId: wireChat.id, max: 50, around: id });
     if (retrying) {
       request.error(RpcErrorCode.Unavailable, 'Unavailable');
       await vi.waitFor(() => expect(component['conversation'].error()).toBe(ConversationError.Open));
       expect(component['replyTo']()).toBeUndefined();
       component['retry']();
-      request = peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: id });
+      request = await peer.expectAsync('messages.list', { chatId: wireChat.id, max: 50, around: id });
     }
     request.flush({
       chatSettings: { showMembershipMessages: true },
@@ -6827,7 +6599,7 @@ describe('ConversationPage', () => {
   });
 
   it.each(['navigation', 'destroy'])(
-    'keeps an edit confirmation effective after %s and hands it to the returning page',
+    'keeps an edit confirmation effective after %s and releases it before the page returns',
     async (mode) => {
       const outbox = TestBed.inject(MessageOutbox);
       const acceptChange = vi.spyOn(TestBed.inject(Connection), 'acceptChange');
@@ -6884,9 +6656,10 @@ describe('ConversationPage', () => {
       expect(component['editing']()).toBe(otherMessage);
       expect(component['composer']()!.text()).toBe('另一个会话正在编辑');
 
+      expect(outbox.items()).toEqual([]);
       fixture.componentRef.setInput('id', wireChat.id);
       fixture.detectChanges();
-      // A stale initial GET must not erase a confirmation retained by the shared outbox.
+      // A stale initial GET must not erase a confirmation retained in the conversation window.
       (await peer.expectAsync('messages.list', { chatId: wireChat.id, max: 50 })).flush({
         chatSettings: { showMembershipMessages: true },
         messages: [structuredClone(wireMessage)],
@@ -6907,7 +6680,7 @@ describe('ConversationPage', () => {
       expect(returned.textContent).toContain('离开后完成的编辑');
       expect(component['draft']()).toBe('原会话未发送草稿');
       expect(component['editing']()).toBeUndefined();
-      expect(outbox.items()).toContain(item);
+      expect(outbox.items()).toEqual([]);
       events.next({
         type: ServerWsMessageType.messageUpdated,
         payload: { ...testMessage, message: '离开后完成的编辑', isEdited: true },

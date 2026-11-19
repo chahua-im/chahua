@@ -3,7 +3,7 @@ import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
-import { IonActionSheet, IonButton, IonItemOption, IonItemSliding, getPlatforms } from '@ionic/angular';
+import { IonActionSheet, IonButton, IonItemOption, IonItemSliding, IonRefresher, getPlatforms } from '@ionic/angular';
 import { chatbubbles } from 'ionicons/icons';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
@@ -208,6 +208,7 @@ describe('ChatListContent', () => {
   let originalPlatforms: ReturnType<typeof getPlatforms>;
   beforeEach(async () => {
     const platforms = getPlatforms();
+    vi.spyOn(IonRefresher.prototype, 'complete').mockResolvedValue(undefined);
     originalPlatforms = [...platforms];
     platforms.splice(0, platforms.length, 'ios');
     ListVisibilityObserver.instances = [];
@@ -610,6 +611,7 @@ describe('ChatListContent', () => {
     chats.loading.set(false);
     await fixture.whenStable();
     expect(fixture.componentInstance['refreshing']()).toBe(false);
+    expect(IonRefresher.prototype.complete).toHaveBeenCalledOnce();
     chats.loading.set(true);
     await fixture.whenStable();
     expect(fixture.nativeElement.querySelector('.chat-skeleton-row')).toBeNull();
@@ -787,47 +789,6 @@ describe('ChatListContent', () => {
     expect(fixture.nativeElement.querySelector('app-message-status')).toBeNull();
     TestBed.inject(DraftStore).clear(testChat.id, inThread ? thread.threadRootMessage.id : undefined);
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('app-message-status')).not.toBeNull();
-  });
-
-  it.each([false, true])('shows only forward counts until the forward draft is removed (thread: %s)', (inThread) => {
-    const own = { ...testMessage, sender: testUser, mentions: [], message: '已发送的消息' };
-    if (inThread) {
-      preferences.showThreadsInMessages.set(true);
-      chats.items.set([]);
-      threads.items.set([{ ...thread, lastReply: own }]);
-    } else {
-      chats.items.set([{ ...testChat, lastMessage: own }]);
-    }
-    const drafts = TestBed.inject(DraftStore);
-    const threadId = inThread ? thread.threadRootMessage.id : undefined;
-    const preview = () =>
-      fixture.nativeElement.querySelector('app-chat-list-item[data-row-key] ion-label p').textContent;
-    for (const count of [1, 2]) {
-      drafts.setForward(
-        testChat.id,
-        threadId,
-        Array.from({ length: count }, () => ({ ...testMessage, message: '**待转发内容**' })),
-      );
-      for (const comment of ['', '附言']) {
-        drafts.save(testChat.id, threadId, comment);
-        fixture.detectChanges();
-        expect(preview()).toContain('草稿：');
-        expect(preview()).toContain(`转发 ${count} 条消息`);
-        expect(preview()).not.toContain('待转发内容');
-        expect(preview()).not.toContain('附言');
-        expect(preview()).not.toContain('已发送的消息');
-        expect(fixture.nativeElement.querySelector('app-message-status')).toBeNull();
-      }
-    }
-    drafts.setForward(testChat.id, threadId);
-    fixture.detectChanges();
-    expect(preview()).toContain('附言');
-    expect(preview()).not.toContain('转发 2 条消息');
-    drafts.clear(testChat.id, threadId);
-    fixture.detectChanges();
-    expect(preview()).toContain('已发送的消息');
-    expect(preview()).not.toContain('草稿：');
     expect(fixture.nativeElement.querySelector('app-message-status')).not.toBeNull();
   });
 

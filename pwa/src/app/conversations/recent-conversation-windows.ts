@@ -13,6 +13,7 @@ import { SessionStore } from '../session/session-store';
 import {
   acceptsConversationMessage,
   redactDeletedMessage,
+  redactMessageCitations,
   replaceEditedMessage,
   replaceMessageCitation,
   toMessagePreview,
@@ -198,6 +199,7 @@ export class RecentConversationWindows {
       case ServerWsMessageType.messageDeleted: {
         const next = event.payload;
         const deleted = event.type === ServerWsMessageType.messageDeleted || next.isDeleted;
+        const deletedIds = deleted ? new Set([next.id]) : undefined;
         let replacement: MessageResponse | undefined;
         let preview: MessagePreview | undefined;
         this.patch(next.chatId, (message) => {
@@ -205,8 +207,9 @@ export class RecentConversationWindows {
             replacement ??= deleted ? redactDeletedMessage(next) : next;
             return replaceEditedMessage(message, replacement);
           }
+          if (deletedIds) return redactMessageCitations(message, deletedIds);
           if (message.replyToMessage?.id !== next.id) return message;
-          return replaceMessageCitation(message, next.id, deleted ? null : (preview ??= toMessagePreview(next)));
+          return replaceMessageCitation(message, next.id, (preview ??= toMessagePreview(next)));
         });
         break;
       }
@@ -215,8 +218,7 @@ export class RecentConversationWindows {
         const ids = new Set(messageIds);
         this.patch(chatId, (message) => {
           if (ids.has(message.id)) return redactDeletedMessage(message);
-          const quotedId = message.replyToMessage?.id;
-          return quotedId != null && ids.has(quotedId) ? replaceMessageCitation(message, quotedId, null) : message;
+          return redactMessageCitations(message, ids);
         });
         break;
       }

@@ -4,7 +4,7 @@
   // Keep the bar's vertical margins inside the background during page transitions.
   display: flow-root;
   position: relative;
-  padding-bottom: var(--ion-safe-area-bottom, 0px);
+  padding-bottom: var(--composer-safe-area-bottom, var(--ion-safe-area-bottom, 0px));
   background: var(--ion-background-color, #fff);
 }
 :host::after {
@@ -102,7 +102,7 @@
 }
 
 .bar {
-  margin: 8px 12px;
+  margin: var(--composer-bar-margin, 8px 12px);
   padding: 2px;
   border: 1px solid var(--ion-background-color-step-200, var(--ion-color-light-shade));
   border-radius: calc(var(--composer-control-size) / 2 + 3px);

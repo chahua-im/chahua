@@ -291,7 +291,6 @@ export class MessageMenu {
       !message.isDeleted &&
       message.messageType === MessageType.text &&
       !message.forwardedFrom &&
-      !this.queued()?.forwarding &&
       this.chatInfo.canSpeak(
         this.chatId(),
         message.replyRootId ? SpeakingAction.ThreadReply : SpeakingAction.ChatMessage,

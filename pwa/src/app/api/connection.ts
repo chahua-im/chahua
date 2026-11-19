@@ -46,7 +46,7 @@ export class Connection {
 
   /** RPC confirmations and their notification echoes share one delivery path. */
   accept(message: MessageResponse) {
-    if (this.acceptedIds.has(message.id)) return;
+    if (this.acceptedIds.has(message.id) || this.recalledIds.has(message.id)) return;
     this.acceptedIds.add(message.id);
     if (this.acceptedIds.size > 256) this.acceptedIds.delete(this.acceptedIds.values().next().value!);
     this.events.next({ type: ServerWsMessageType.message, payload: message });
