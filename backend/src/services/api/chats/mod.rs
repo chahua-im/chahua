@@ -133,8 +133,12 @@ pub(crate) fn build_chat_list_items(
         .iter_mut()
         .filter_map(|row| row.last_message.take())
         .collect();
-    let mut message_previews =
-        crate::services::chat_list::load_last_message_previews(conn, messages_to_process, avatars);
+    let mut message_previews = crate::services::message_previews::load_message_previews(
+        conn,
+        messages_to_process,
+        Some(avatars),
+        |message| message.chat_id,
+    );
     drop(phase);
     let phase = stages.start("dm_peers");
 

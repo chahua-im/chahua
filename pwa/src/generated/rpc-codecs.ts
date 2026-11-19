@@ -27,6 +27,8 @@ import type {
   CreateStickerFromMessageBody,
   EmptyResult,
   ExceptionsQuery,
+  ForwardPlaceholder,
+  ForwardTarget,
   FriendsAcceptRequestParams,
   FriendsArchiveRequestParams,
   FriendsCreateRequestParams,
@@ -91,6 +93,7 @@ import type {
   MessagesListParams,
   MessagesPreviewLinksParams,
   MessagesSearchParams,
+  MessagesSendForwardParams,
   MessagesSendInThreadParams,
   MessagesSendParams,
   PinsCreateForThreadParams,
@@ -125,6 +128,7 @@ import type {
   SavedMessagesSaveParams,
   SearchMessagesQuery,
   SearchUsersQuery,
+  SendForwardResponse,
   ServiceTokensCreateParams,
   ServiceTokensDeleteParams,
   ServiceTokensListParams,
@@ -161,6 +165,8 @@ import type {
   ThreadsGetSubscriptionStatusParams,
   ThreadsGetUnreadCountParams,
   ThreadsListForChatParams,
+  ThreadsListForwardSourcesParams,
+  ThreadsListForwardSourcesResponse,
   ThreadsListParams,
   ThreadsListParticipantsParams,
   ThreadsMarkAsReadParams,
@@ -366,6 +372,10 @@ export const rpcSchemas: Record<string, JsonCodec> = {
     sourceChatId: 1,
     threadId: 1,
   },
+  ForwardTarget: {
+    chatId: 1,
+    threadId: 1,
+  },
   ForwardedFromInfo: {
     originalChatId: 1,
     originalMessageId: 1,
@@ -402,6 +412,7 @@ export const rpcSchemas: Record<string, JsonCodec> = {
     messages: ['ForwardedMessageResponse'],
   },
   ForwardedReplyResponse: {
+    externalPreview: 'MessagePreview',
     originalMessageId: 1,
     preview: 'ForwardedMessagePreviewResponse',
   },
@@ -850,6 +861,12 @@ export const rpcSchemas: Record<string, JsonCodec> = {
     chatId: 1,
     sort: 'MessageSearchSort',
   },
+  MessagesSendForwardParams: {
+    chatId: 1,
+    messageIds: [1],
+    sourceChatId: 1,
+    threadId: 1,
+  },
   MessagesSendInThreadParams: {
     attachmentIds: [1],
     chatId: 1,
@@ -1090,6 +1107,10 @@ export const rpcSchemas: Record<string, JsonCodec> = {
     excluded: ['MemberSummary'],
     members: ['MemberSummary'],
   },
+  SendForwardResponse: {
+    message: 'MessageResponse',
+    messageId: 1,
+  },
   SendInviteMessageBody: {
     destinationChatId: 1,
     inviteId: 1,
@@ -1261,6 +1282,13 @@ export const rpcSchemas: Record<string, JsonCodec> = {
     chatId: 1,
     cursor: 1,
     order: 'ThreadOrder',
+  },
+  ThreadsListForwardSourcesParams: {
+    chatId: 1,
+    threadRootId: 1,
+  },
+  ThreadsListForwardSourcesResponse: {
+    messages: ['MessageResponse'],
   },
   ThreadsListParams: {
     rootId: 1,
@@ -1450,6 +1478,10 @@ export const rpcMethods: Record<string, RpcMethodCodec> = {
     params: 'MessagesForwardParams',
     result: 'MessageResponse',
   },
+  'messages.sendForward': {
+    params: 'MessagesSendForwardParams',
+    result: 'SendForwardResponse',
+  },
   'messages.forwardOne': {
     params: 'MessagesForwardOneParams',
     result: 'MessageResponse',
@@ -1569,6 +1601,10 @@ export const rpcMethods: Record<string, RpcMethodCodec> = {
   'threads.list': {
     params: 'ThreadsListParams',
     result: 'ListThreadsResponse',
+  },
+  'threads.listForwardSources': {
+    params: 'ThreadsListForwardSourcesParams',
+    result: 'ThreadsListForwardSourcesResponse',
   },
   'threads.getUnreadCount': {
     params: 'ThreadsGetUnreadCountParams',
@@ -1944,6 +1980,7 @@ export const rpcMethodClasses: Record<string, RpcMethodClass> = {
   'messages.delete': 'mutation',
   'messages.deleteMany': 'mutation',
   'messages.forward': 'mutation',
+  'messages.sendForward': 'mutation',
   'messages.forwardOne': 'mutation',
   'messages.listForwardedMessages': 'read',
   'messages.listForwardedBundleMessages': 'read',
@@ -1976,6 +2013,7 @@ export const rpcMethodClasses: Record<string, RpcMethodClass> = {
   'chats.listUnreadReactions': 'read',
   'chats.acknowledgeReactions': 'mutation',
   'threads.list': 'read',
+  'threads.listForwardSources': 'read',
   'threads.getUnreadCount': 'read',
   'threads.listForChat': 'read',
   'threads.listParticipants': 'read',

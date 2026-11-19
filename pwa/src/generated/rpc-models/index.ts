@@ -316,6 +316,8 @@ export type CreateStickerFromMessageBody = {
 };
 export type EmptyResult = {};
 export type ExceptionsQuery = { after?: Shared.SnowflakeID; kind: Shared.GroupKind; limit?: number };
+export type ForwardPlaceholder = 'pendingAudio' | 'nestedForward' | 'groupInvite';
+export type ForwardTarget = { chatId: Shared.SnowflakeID; clientGeneratedId: string; threadId?: Shared.SnowflakeID };
 export type FriendsAcceptRequestParams = { requestId: Shared.SnowflakeID };
 export type FriendsArchiveRequestParams = { requestId: Shared.SnowflakeID };
 export type FriendsCreateRequestParams = { message?: string; toUid: number };
@@ -497,10 +499,19 @@ export type MessagesSearchParams = {
   q: string;
   sort?: Shared.MessageSearchSort;
 };
+export type MessagesSendForwardParams = {
+  chatId: Shared.SnowflakeID;
+  clientGeneratedId: string;
+  confirmedPlaceholders?: { [key: string]: ForwardPlaceholder };
+  messageIds: Array<Shared.SnowflakeID>;
+  sourceChatId: Shared.SnowflakeID;
+  threadId?: Shared.SnowflakeID;
+};
 export type MessagesSendInThreadParams = {
   attachmentIds?: Array<Shared.SnowflakeID>;
   chatId: Shared.SnowflakeID;
   clientGeneratedId: string;
+  markRead?: boolean;
   message?: string;
   messageType: Shared.MessageType;
   metadata?: Shared.MessageMetadataInput;
@@ -512,6 +523,7 @@ export type MessagesSendParams = {
   attachmentIds?: Array<Shared.SnowflakeID>;
   chatId: Shared.SnowflakeID;
   clientGeneratedId: string;
+  markRead?: boolean;
   message?: string;
   messageType: Shared.MessageType;
   metadata?: Shared.MessageMetadataInput;
@@ -581,6 +593,7 @@ export type SavedMessagesListParams = { before?: Shared.SnowflakeID; limit?: num
 export type SavedMessagesSaveParams = { messageId: Shared.SnowflakeID };
 export type SearchMessagesQuery = { limit?: number; offset?: number; q: string; sort?: Shared.MessageSearchSort };
 export type SearchUsersQuery = { excludeMemberOf?: Shared.SnowflakeID; limit?: number; q?: string };
+export type SendForwardResponse = { message?: Shared.MessageResponse; messageId: Shared.SnowflakeID };
 export type ServiceTokensCreateParams = { name: string; policyIds?: Array<string> };
 export type ServiceTokensDeleteParams = { id: Shared.SnowflakeID };
 export type ServiceTokensListParams = {};
@@ -645,6 +658,8 @@ export type ThreadsListForChatParams = {
   limit?: number;
   order?: Shared.ThreadOrder;
 };
+export type ThreadsListForwardSourcesParams = { chatId: Shared.SnowflakeID; threadRootId: Shared.SnowflakeID };
+export type ThreadsListForwardSourcesResponse = { messages: Array<Shared.MessageResponse> };
 export type ThreadsListParams = { archived?: boolean; before?: string; limit?: number; rootId?: Shared.SnowflakeID };
 export type ThreadsListParticipantsParams = {
   chatId: Shared.SnowflakeID;

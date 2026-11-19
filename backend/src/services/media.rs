@@ -314,6 +314,26 @@ pub fn attachment_content_disposition(filename: &str) -> String {
         utf8_percent_encode(filename, CONTENT_DISPOSITION_ENCODE_SET)
     )
 }
+
+#[cfg(test)]
+pub(super) fn test_media_store(base_url: &str) -> MediaStore {
+    MediaStore::new(
+        aws_sdk_s3::Client::from_conf(
+            aws_sdk_s3::Config::builder()
+                .behavior_version_latest()
+                .build(),
+        ),
+        Arc::new(MediaConfig {
+            bucket: "media-bucket".to_string(),
+            attachment_prefix: "attachments".to_string(),
+            base_url: Some(base_url.to_string()),
+            endpoint_url: None,
+            upload_proxy_path: None,
+            max_attachment_file_size_bytes: 1,
+        }),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -22,12 +22,18 @@ import type { User } from './user';
 
 export interface MessageResponse {
   attachments: AttachmentResponse[];
+  /** Audio still awaiting a final transcode result. */
+  audioPending?: boolean;
+  /** The original reply target is available in this message's chat and thread scope. */
+  canJumpToOriginalReply?: boolean;
   chatId: SnowflakeID;
   clientGeneratedId: string;
   createdAt: string;
   forwardedBundleId?: SnowflakeID;
   forwardedFrom?: ForwardedFromInfo;
   forwardedPreview?: ForwardedMessagesPreviewResponse;
+  /** Display-only reply count captured from the forwarded source. */
+  forwardedThreadReplyCount?: number;
   hasAttachments: boolean;
   id: SnowflakeID;
   isDeleted: boolean;

@@ -29,6 +29,12 @@ pub(crate) struct ThreadSendState {
     pub subscription_changes: Vec<i32>,
 }
 
+pub(crate) struct ThreadSendOptions {
+    pub publish_immediately: bool,
+    pub subscribe_mentioned_users: bool,
+    pub mark_read: bool,
+}
+
 /// Persist thread state in the same transaction as a newly created message.
 /// Forwards share this path but their quoted mentions are display-only.
 pub(crate) fn record_thread_send(
@@ -36,8 +42,7 @@ pub(crate) fn record_thread_send(
     response: &crate::dto::messages::MessageResponse,
     member_uids: &[i32],
     root: &Message,
-    publish_immediately: bool,
-    notify_mentions: bool,
+    options: ThreadSendOptions,
 ) -> QueryResult<ThreadSendState> {
     let chat_id = response.chat_id;
     let thread_id = root.id;
@@ -46,21 +51,25 @@ pub(crate) fn record_thread_send(
     if ensure_thread_subscription(conn, chat_id, thread_id, uid)? {
         subscription_changes.push(uid);
     }
-    mark_thread_as_read(conn, chat_id, thread_id, uid, response.id)?;
-    let receipt_advanced = crate::services::read_receipts::advance_thread_read_receipt(
-        conn,
-        chat_id,
-        thread_id,
-        uid,
-        response.id,
-    )?;
+    let receipt_advanced = if options.mark_read {
+        mark_thread_as_read(conn, chat_id, thread_id, uid, response.id)?;
+        crate::services::read_receipts::advance_thread_read_receipt(
+            conn,
+            chat_id,
+            thread_id,
+            uid,
+            response.id,
+        )?
+    } else {
+        false
+    };
     if root.sender_uid != uid
         && member_uids.contains(&root.sender_uid)
         && ensure_thread_user_state(conn, chat_id, thread_id, root.sender_uid, true)?
     {
         subscription_changes.push(root.sender_uid);
     }
-    if notify_mentions {
+    if options.subscribe_mentioned_users {
         if let Some(text) = &response.message {
             for mentioned_uid in extract_mention_uids(text) {
                 if mentioned_uid != uid
@@ -72,11 +81,15 @@ pub(crate) fn record_thread_send(
             }
         }
     }
-    if publish_immediately {
+    if options.publish_immediately {
         increment_thread_meta(conn, chat_id, thread_id, response.created_at)?;
-        diesel::update(messages::table.filter(messages::id.eq(thread_id)))
-            .set(messages::has_thread.eq(true))
-            .execute(conn)?;
+        diesel::update(
+            messages::table
+                .find(thread_id)
+                .filter(messages::has_thread.eq(false)),
+        )
+        .set(messages::has_thread.eq(true))
+        .execute(conn)?;
     }
     Ok(ThreadSendState {
         receipt_advanced,
@@ -1011,10 +1024,8 @@ pub fn enrich_thread_list(
         .order((messages::reply_root_id.asc(), messages::id.desc()))
         .select(Message::as_select())
         .load::<Message>(conn)?;
-    let forward_origins = crate::services::single_forwarding::ForwardOrigins::load_attribution(
-        conn,
-        root_messages.iter().chain(latest_reply_rows.iter()),
-    )?;
+    let mut forward_origins = crate::services::single_forwarding::ForwardOrigins::default();
+    forward_origins.load_attribution(conn, root_messages.iter().chain(latest_reply_rows.iter()))?;
 
     // Collect preview and DM peer UIDs for one profile/avatar lookup.
     let mut all_uids: Vec<i32> = rows

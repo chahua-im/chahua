@@ -15,6 +15,7 @@ import type { User } from './user';
 
 export interface ForwardedMessagePreviewResponse {
   attachments: MessagePreviewAttachment[];
+  forwardedThreadReplyCount?: number;
   mentions?: MentionInfo[];
   message?: string;
   messageType: MessageType;
