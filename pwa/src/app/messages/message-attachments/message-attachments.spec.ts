@@ -68,6 +68,7 @@ describe('MessageAttachments', () => {
   let resizePill: (width: number) => void;
   const disconnect = vi.fn();
   beforeEach(() => {
+    vi.stubGlobal('localStorage', { getItem: () => null, setItem: vi.fn() });
     TestBed.configureTestingModule({ providers: [provideRouter([])] });
     disconnect.mockClear();
     vi.stubGlobal(
@@ -597,7 +598,7 @@ describe('MessageAttachments', () => {
     fixture.nativeElement.querySelector('.upload-failure').click();
     await vi.waitFor(() => expect(created).toHaveLength(1));
     const dialog = created[0];
-    expect(dialog.message).toContain('50 MiB');
+    expect(dialog.message).toBe('文件过大。');
     expect(click).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
     await dialog.dismiss(undefined, 'destructive');

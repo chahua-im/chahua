@@ -1,7 +1,10 @@
-import { Component, computed, DestroyRef, effect, inject, input, output } from '@angular/core';
-import { AlertController, IonIcon, type AlertButton } from '@ionic/angular';
+import { Component, computed, DestroyRef, effect, inject, input, output, signal } from '@angular/core';
+import { AlertController, IonIcon, ToastController, type AlertButton } from '@ionic/angular';
 import { alertCircleOutline } from 'ionicons/icons';
 import { translateSignal } from '@jsverse/transloco';
+import { AttachmentUploadPurpose } from '../../generated/models';
+import { Diagnostics } from '../pwa/diagnostics';
+import { Preferences } from '../settings/preferences';
 import { type AttachmentUpload, UploadStatus } from './upload';
 import { UploadErrorCode } from './upload-error';
 
@@ -11,6 +14,38 @@ enum FailureAction {
 }
 
 type UploadState = ReturnType<AttachmentUpload['state']>;
+
+const storageReasonKeys = new Map([
+  ['AccessDenied', 'forbidden'],
+  ['AccessControlListNotSupported', 'server'],
+  ['IncompleteBody', 'storageIncomplete'],
+  ['AuthorizationQueryParametersError', 'validationFailed'],
+  ['InvalidSignature', 'validationFailed'],
+  ['SignatureDoesNotMatch', 'validationFailed'],
+  ['ExpiredToken', 'validationFailed'],
+  ['RequestExpired', 'validationFailed'],
+  ['RequestTimeTooSkewed', 'server'],
+]);
+
+const reasonKeys = new Map([
+  [UploadErrorCode.StorageRejected, 'unknown'],
+  [UploadErrorCode.Rejected, 'unknown'],
+  [UploadErrorCode.Protocol, 'unknown'],
+  [UploadErrorCode.TransferStalled, 'timeout'],
+  [UploadErrorCode.StorageResponseTimeout, 'timeout'],
+]);
+
+const failuresWithDetails = [
+  UploadErrorCode.Timeout,
+  UploadErrorCode.TransferStalled,
+  UploadErrorCode.StorageResponseTimeout,
+  UploadErrorCode.Network,
+  UploadErrorCode.RateLimited,
+  UploadErrorCode.ProcessingTimeout,
+  UploadErrorCode.ProcessingFailed,
+  UploadErrorCode.Protocol,
+  UploadErrorCode.Unknown,
+];
 
 @Component({
   selector: 'app-upload-failure',
@@ -52,25 +87,45 @@ export class UploadFailure {
   protected readonly Status = UploadStatus;
   protected readonly icon = alertCircleOutline;
   private readonly alerts = inject(AlertController);
+  private readonly toasts = inject(ToastController);
+  private readonly diagnostics = inject(Diagnostics);
+  private readonly preferences = inject(Preferences);
   private readonly destroy = inject(DestroyRef);
   private readonly title = translateSignal('messages.upload.failedTitle');
   private readonly cancelLabel = translateSignal('common.cancel');
   private readonly retryLabel = translateSignal('common.retry');
   private readonly retryingLabel = translateSignal('messages.upload.retrying');
   private readonly deleteLabel = translateSignal('common.delete');
+  private readonly copyLabel = translateSignal('messages.upload.copyError');
+  private readonly copied = translateSignal('messages.upload.errorCopied');
+  private readonly copyFailed = translateSignal('messages.upload.copyErrorFailed');
+  private readonly copying = signal(false);
   private readonly reasonKey = computed(() => {
-    const error = this.upload().state().error;
+    const error = this.failure();
+    if (error?.code === UploadErrorCode.StorageRejected) {
+      const storage = error.storage;
+      const reason = storage?.expired ? 'validationFailed' : storageReasonKeys.get(storage?.code ?? '');
+      if (reason) return `messages.upload.${reason}`;
+    }
+    if (error?.code === UploadErrorCode.ProcessingTimeout || error?.code === UploadErrorCode.ProcessingFailed) {
+      return this.upload().purpose === AttachmentUploadPurpose.file
+        ? 'messages.upload.fileTypeFailed'
+        : 'messages.upload.processingFailed';
+    }
     const code = error?.code ?? UploadErrorCode.Unknown;
-    return `messages.upload.${code === UploadErrorCode.TooLarge && error?.maxSizeMiB == null ? 'tooLargeUnknown' : code}`;
+    return `messages.upload.${reasonKeys.get(code) ?? code}`;
   });
-  private readonly reasonParams = computed(() => ({ limit: this.upload().state().error?.maxSizeMiB }), {
-    equal: (a, b) => a.limit === b.limit,
-  });
-  private readonly reason = translateSignal(this.reasonKey, this.reasonParams);
+  private readonly reason = translateSignal(this.reasonKey);
   private readonly retryNote = translateSignal('messages.upload.autoRetry');
-  protected readonly message = computed(() =>
+  private readonly message = computed(() =>
     this.failure()?.autoRetry ? `${this.reason()} ${this.retryNote()}` : this.reason(),
   );
+  private readonly details = computed(() => {
+    if (!this.preferences.showDiagnosticsOnError()) return;
+    const error = this.failure();
+    if (!error || (!error.storage && error.rpcCode == null && !failuresWithDetails.includes(error.code))) return;
+    return this.upload().diagnosticDetails();
+  });
   private alert?: HTMLIonAlertElement;
   private alertContent = '';
   private opening = false;
@@ -115,6 +170,7 @@ export class UploadFailure {
       const state = this.upload().state();
       if (!state.error || state.status !== UploadStatus.Failed) return;
       const alert = await this.alerts.create({
+        cssClass: 'upload-failure-dialog',
         header: this.title(),
         subHeader: this.upload().file.name,
         message: this.message(),
@@ -139,20 +195,49 @@ export class UploadFailure {
     }
   }
 
+  private async copyErrorDetails() {
+    const details = this.details();
+    if (!details || this.destroyed || this.copying()) return;
+    this.copying.set(true);
+    let message: string;
+    try {
+      this.diagnostics.record('upload.report', details);
+      await this.diagnostics.copy();
+      message = this.copied();
+    } catch {
+      message = this.copyFailed();
+    } finally {
+      this.copying.set(false);
+    }
+    if (this.destroyed) return;
+    const toast = await this.toasts.create({ message, duration: 3000, position: 'bottom' });
+    await toast.present();
+  }
+
   private buttons(state: UploadState): AlertButton[] {
     const error = state.error;
     if (!error) return [];
-    return [
-      { text: this.cancelLabel(), role: 'cancel' },
-      {
-        text: error.canRetry
-          ? state.status === UploadStatus.Failed
-            ? this.retryLabel()
-            : this.retryingLabel()
-          : this.deleteLabel(),
-        role: error.canRetry ? FailureAction.Retry : FailureAction.Delete,
-        htmlAttributes: { disabled: state.status !== UploadStatus.Failed },
-      },
-    ];
+    const buttons: AlertButton[] = [{ text: this.cancelLabel(), role: 'cancel' }];
+    if (this.details()) {
+      buttons.push({
+        text: this.copyLabel(),
+        cssClass: 'upload-error-copy',
+        htmlAttributes: { disabled: this.copying() },
+        handler: () => {
+          void this.copyErrorDetails();
+          return false;
+        },
+      });
+    }
+    buttons.push({
+      text: error.canRetry
+        ? state.status === UploadStatus.Failed
+          ? this.retryLabel()
+          : this.retryingLabel()
+        : this.deleteLabel(),
+      role: error.canRetry ? FailureAction.Retry : FailureAction.Delete,
+      htmlAttributes: { disabled: state.status !== UploadStatus.Failed },
+    });
+    return buttons;
   }
 }

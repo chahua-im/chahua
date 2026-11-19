@@ -255,7 +255,7 @@
     },
     "advanced": {
       "title": "Advanced",
-      "showDiagnosticsOnError": "Show “Copy diagnostics” on load errors"
+      "showDiagnosticsOnError": "Show a diagnostics copy option on errors"
     }
   },
   "chats": {
@@ -727,26 +727,29 @@
       "unavailable": "[Unavailable message]"
     },
     "upload": {
-      "tooLarge": "This file exceeds the {{limit}} MiB limit. Compress it, or remove it and choose another file.",
-      "tooLargeUnknown": "This file exceeds the server size limit. Compress it, or remove it and choose another file.",
-      "empty": "This file is empty. Remove it and choose another file.",
-      "filename": "The filename must contain 1–255 characters. Shorten it and select the file again.",
-      "unsupportedMedia": "This file could not be identified as an image or video. Remove it and send it using Files.",
-      "invalidType": "This file type does not meet the upload requirements. Remove it and choose another file.",
-      "authentication": "Your login has expired. Sign in again, then retry.",
-      "forbidden": "The server does not allow this upload. Check whether your account has upload permission.",
-      "storageRejected": "The file storage service rejected this upload. Please retry.",
+      "tooLarge": "The file is too large.",
+      "empty": "The file is empty.",
+      "filenameMissing": "The file has no name.",
+      "filenameTooLong": "The filename exceeds 255 characters.",
+      "unsupportedMedia": "The file could not be identified as an image or video.",
+      "invalidType": "This file type is not supported.",
+      "authentication": "Your login has expired.",
+      "forbidden": "You don't have permission to upload.",
+      "storageIncomplete": "The file was only partly uploaded.",
+      "validationFailed": "Upload verification failed.",
+      "copyError": "Copy error details",
+      "errorCopied": "Error details copied",
+      "copyErrorFailed": "Couldn't copy the error details.",
       "rateLimited": "Too many upload requests.",
       "server": "The upload service is temporarily unavailable.",
-      "timeout": "The upload request timed out.",
-      "network": "Cannot connect to the upload service. Check your network connection.",
-      "processingTimeout": "Media processing stopped making progress. Retry, or remove it and send the original using Files.",
-      "processingFailed": "This media could not be processed. Retry, or remove it and send the original using Files.",
-      "rejected": "The server did not accept this file. Retry or choose another file.",
-      "unknown": "The upload did not complete. Please retry.",
+      "timeout": "The upload timed out.",
+      "network": "There is a network connection problem.",
+      "processingFailed": "The image or video could not be processed.",
+      "fileTypeFailed": "The file type could not be identified.",
+      "unknown": "The upload failed.",
       "autoRetry": "Will retry automatically.",
       "retrying": "Retrying upload…",
-      "unreadable": "Cannot read this local file. Remove it and choose it again.",
+      "unreadable": "The local file could not be read.",
       "failedTitle": "Upload failed",
       "attachmentsTitle": "Attachments"
     }
