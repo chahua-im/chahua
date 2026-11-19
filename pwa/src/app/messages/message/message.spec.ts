@@ -26,6 +26,7 @@ import { Message, type MessageContent } from './message';
 
 describe('Message', () => {
   beforeEach(() => {
+    vi.stubGlobal('localStorage', { getItem: () => null, setItem: vi.fn() });
     vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: false }));
     vi.stubGlobal(
       'IntersectionObserver',

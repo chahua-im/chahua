@@ -255,7 +255,7 @@
     },
     "advanced": {
       "title": "高级",
-      "showDiagnosticsOnError": "加载失败时显示「复制诊断信息」"
+      "showDiagnosticsOnError": "出错时显示诊断信息复制入口"
     }
   },
   "chats": {
@@ -727,26 +727,29 @@
       "unavailable": "[无法显示的消息]"
     },
     "upload": {
-      "tooLarge": "文件超过 {{limit}} MiB 上限，请压缩文件或移除后重新选择。",
-      "tooLargeUnknown": "文件超过服务器大小上限，请压缩文件或移除后重新选择。",
-      "empty": "文件为空，请移除后重新选择。",
-      "filename": "文件名不能为空或超过 255 个字符，请缩短文件名后重新选择。",
-      "unsupportedMedia": "无法识别为图片或视频，请移除后通过“文件”入口发送。",
-      "invalidType": "文件类型不符合上传要求，请移除后重新选择。",
-      "authentication": "登录状态已失效，请重新登录后重试。",
-      "forbidden": "服务器不允许此次上传，请确认账号是否有上传权限。",
-      "storageRejected": "文件存储服务拒绝了此次上传，请重试。",
+      "tooLarge": "文件过大。",
+      "empty": "文件为空。",
+      "filenameMissing": "文件名为空。",
+      "filenameTooLong": "文件名超过 255 个字符。",
+      "unsupportedMedia": "无法识别为图片或视频。",
+      "invalidType": "不支持此文件类型。",
+      "authentication": "登录状态已失效。",
+      "forbidden": "没有上传权限。",
+      "storageIncomplete": "文件未传完整。",
+      "validationFailed": "上传验证失败。",
+      "copyError": "复制错误信息",
+      "errorCopied": "错误信息已复制",
+      "copyErrorFailed": "复制失败。",
       "rateLimited": "上传请求过于频繁。",
       "server": "上传服务暂时不可用。",
-      "timeout": "上传请求超时。",
-      "network": "无法连接上传服务，请检查网络连接。",
-      "processingTimeout": "媒体处理长时间没有进展，请重试，或移除后通过“文件”入口发送原文件。",
-      "processingFailed": "无法处理此媒体，请重试，或移除后通过“文件”入口发送原文件。",
-      "rejected": "服务器未接受此文件，请重试或重新选择文件。",
-      "unknown": "上传未完成，请重试。",
+      "timeout": "上传超时。",
+      "network": "网络连接异常。",
+      "processingFailed": "图片或视频处理失败。",
+      "fileTypeFailed": "无法识别文件类型。",
+      "unknown": "上传失败。",
       "autoRetry": "将自动重试。",
       "retrying": "正在重试上传…",
-      "unreadable": "无法读取本地文件，请移除后重新选择。",
+      "unreadable": "无法读取本地文件。",
       "failedTitle": "上传失败",
       "attachmentsTitle": "附件"
     }
@@ -932,7 +935,11 @@
       "repliesOnly": "仅回复已有话题",
       "readOnly": "禁止发言"
     },
-    "placeholder": { "threadsOnly": "仅限话题内发言", "repliesOnly": "仅可回复已有话题", "readOnly": "当前禁止发言" },
+    "placeholder": {
+      "threadsOnly": "仅限话题内发言",
+      "repliesOnly": "仅可回复已有话题",
+      "readOnly": "当前禁止发言"
+    },
     "blocked": {
       "threadsOnly": "仅能在话题内发言，不能发送或编辑群主聊天消息。",
       "repliesOnly": "仅能回复已有话题，不能在群主聊天发言或创建话题。",

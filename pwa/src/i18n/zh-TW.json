@@ -255,7 +255,7 @@
     },
     "advanced": {
       "title": "進階",
-      "showDiagnosticsOnError": "載入失敗時顯示「複製診斷資訊」"
+      "showDiagnosticsOnError": "發生錯誤時顯示診斷資訊複製入口"
     }
   },
   "chats": {
@@ -727,26 +727,29 @@
       "unavailable": "[無法顯示的訊息]"
     },
     "upload": {
-      "tooLarge": "檔案超過 {{limit}} MiB 上限，請壓縮檔案或移除後重新選擇。",
-      "tooLargeUnknown": "檔案超過伺服器大小上限，請壓縮檔案或移除後重新選擇。",
-      "empty": "檔案為空，請移除後重新選擇。",
-      "filename": "檔案名稱不能為空或超過 255 個字元，請縮短名稱後重新選擇。",
-      "unsupportedMedia": "無法辨識為圖片或影片，請移除後透過「檔案」入口傳送。",
-      "invalidType": "檔案類型不符合上傳要求，請移除後重新選擇。",
-      "authentication": "登入狀態已失效，請重新登入後重試。",
-      "forbidden": "伺服器不允許此次上傳，請確認帳號是否有上傳權限。",
-      "storageRejected": "檔案儲存服務拒絕了此次上傳，請重試。",
+      "tooLarge": "檔案過大。",
+      "empty": "檔案為空。",
+      "filenameMissing": "檔案名稱為空。",
+      "filenameTooLong": "檔案名稱超過 255 個字元。",
+      "unsupportedMedia": "無法辨識為圖片或影片。",
+      "invalidType": "不支援此檔案類型。",
+      "authentication": "登入狀態已失效。",
+      "forbidden": "沒有上傳權限。",
+      "storageIncomplete": "檔案未傳完整。",
+      "validationFailed": "上傳驗證失敗。",
+      "copyError": "複製錯誤資訊",
+      "errorCopied": "錯誤資訊已複製",
+      "copyErrorFailed": "複製失敗。",
       "rateLimited": "上傳請求過於頻繁。",
       "server": "上傳服務暫時無法使用。",
-      "timeout": "上傳請求逾時。",
-      "network": "無法連線至上傳服務，請檢查網路連線。",
-      "processingTimeout": "媒體處理長時間沒有進展，請重試，或移除後透過「檔案」入口傳送原始檔案。",
-      "processingFailed": "無法處理此媒體，請重試，或移除後透過「檔案」入口傳送原始檔案。",
-      "rejected": "伺服器未接受此檔案，請重試或重新選擇檔案。",
-      "unknown": "上傳未完成，請重試。",
+      "timeout": "上傳逾時。",
+      "network": "網路連線異常。",
+      "processingFailed": "圖片或影片處理失敗。",
+      "fileTypeFailed": "無法辨識檔案類型。",
+      "unknown": "上傳失敗。",
       "autoRetry": "將自動重試。",
       "retrying": "正在重試上傳…",
-      "unreadable": "無法讀取本機檔案，請移除後重新選擇。",
+      "unreadable": "無法讀取本機檔案。",
       "failedTitle": "上傳失敗",
       "attachmentsTitle": "附件"
     }
@@ -932,7 +935,11 @@
       "repliesOnly": "僅回覆已有話題",
       "readOnly": "禁止發言"
     },
-    "placeholder": { "threadsOnly": "僅限話題內發言", "repliesOnly": "僅可回覆已有話題", "readOnly": "目前禁止發言" },
+    "placeholder": {
+      "threadsOnly": "僅限話題內發言",
+      "repliesOnly": "僅可回覆已有話題",
+      "readOnly": "目前禁止發言"
+    },
     "blocked": {
       "threadsOnly": "僅能在話題內發言，不能傳送或編輯群組主聊天訊息。",
       "repliesOnly": "僅能回覆已有話題，不能在群組主聊天發言或建立話題。",

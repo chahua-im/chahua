@@ -4,7 +4,6 @@ import { By } from '@angular/platform-browser';
 import { AlertController, getPlatforms, type AlertButton, type AlertOptions } from '@ionic/angular';
 import { Blob as NodeBlob, File as NodeFile } from 'node:buffer';
 import { vi } from 'vitest';
-import { RpcApi } from '../../../generated/rpc-api';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
 import {
   AttachmentUploadPurpose,
@@ -21,7 +20,7 @@ import { RpcErrorCode } from '../../api/rpc-error';
 import { decodeId, encodeId } from '../../api/snowflake-id';
 import { testChat, testMessage, wireChat } from '../../api/testing';
 import type { MessageContent } from '../message/message';
-import { AttachmentUpload, UploadStatus } from '../upload';
+import { AttachmentUploads, AttachmentUpload, UploadStatus } from '../upload';
 import { UploadErrorCode } from '../upload-error';
 import { UploadProgress } from '../upload-progress/upload-progress';
 import { VoiceRecorder } from '../voice-recorder/voice-recorder';
@@ -117,6 +116,7 @@ describe('Message composer upload ownership', () => {
   };
 
   beforeEach(() => {
+    vi.stubGlobal('localStorage', { getItem: () => null, setItem: vi.fn() });
     queueUploads = [];
     TestBed.configureTestingModule({
       providers: [provideHttpClient(), provideChahuaBaseUrl('/_api'), provideRpcTesting()],
@@ -189,7 +189,7 @@ describe('Message composer upload ownership', () => {
     await vi.waitFor(() => expect(created).toHaveLength(1));
     const dialog = created[0];
     expect(dialog.subHeader).toBe('note.txt');
-    expect(dialog.message).toContain('MiB');
+    expect(dialog.message).toBe('文件过大。');
     expect(dialog.buttons).toEqual(expect.arrayContaining([expect.objectContaining({ text: '删除' })]));
     expect(dialog.buttons).not.toEqual(expect.arrayContaining([expect.objectContaining({ text: '重试' })]));
     await dialog.dismiss(undefined, 'destructive');
@@ -276,8 +276,7 @@ describe('Message composer upload ownership', () => {
     fixture.detectChanges();
   }
   function queuedUpload(name = 'queued.gif') {
-    const upload = new AttachmentUpload(
-      TestBed.inject(RpcApi),
+    const upload = TestBed.inject(AttachmentUploads).create(
       new File(['queued'], name, { type: 'image/gif' }),
       AttachmentUploadPurpose.media,
     );
@@ -286,7 +285,8 @@ describe('Message composer upload ownership', () => {
   }
   async function startStorage(id: SnowflakeID = encodeId('100'), purpose = AttachmentUploadPurpose.media) {
     const index = FakeUpload.requests.length;
-    (await peer.expectAsync('attachments.getConfig', {})).flush({ maxFileSizeBytes: 1024 });
+    if (!index) peer.expect('attachments.getConfig').flush({ maxFileSizeBytes: 1024 });
+    else peer.expectNone('attachments.getConfig');
     (await peer.expectAsync('attachments.createUploadUrl', (params) => params['purpose'] === purpose)).flush({
       attachmentId: decodeId(id),
       uploadHeaders: {},
@@ -602,9 +602,8 @@ describe('Message composer upload ownership', () => {
     fixture.componentRef.setInput('editing', undefined);
     fixture.detectChanges();
     const retained = add(AttachmentUploadPurpose.media);
-    const retainedRequest = peer.expect('attachments.getConfig');
+    peer.expectNone('attachments.getConfig');
     composer.reset();
-    retainedRequest.flush({ maxFileSizeBytes: 1024 });
     expect(URL.revokeObjectURL).toHaveBeenCalledWith(retained.url);
     expect(sentRequest.abort).not.toHaveBeenCalled();
     expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(sent.url);
@@ -675,13 +674,12 @@ describe('Message composer upload ownership', () => {
     expect(composer['error']()).toBe(true);
     expect(composer['canSend']()).toBe(false);
     const owned = add(AttachmentUploadPurpose.media);
-    const ownedRequest = peer.expect('attachments.getConfig');
+    peer.expectNone('attachments.getConfig');
     composer['remove'](borrowed);
     expect(composer['visualUploads']()).toEqual([owned]);
     expect(composer['error']()).toBe(false);
     expect(selection).toEqual([borrowed]);
     composer['remove'](owned);
-    ownedRequest.flush({ maxFileSizeBytes: 1024 });
     expect(URL.revokeObjectURL).toHaveBeenCalledWith(owned.url);
     expect(composer['canSend']()).toBe(false);
     composer['submit']();
@@ -761,19 +759,18 @@ describe('Message composer upload ownership', () => {
     fixture.destroy();
     request.error(RpcErrorCode.Unavailable);
     expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(borrowed.url);
-    peer.expect('attachments.getConfig').error(RpcErrorCode.Unavailable);
+    peer.expectNone('attachments.getConfig');
   });
 
   it.each(['reset', 'destroy'] as const)('only cancels tasks still owned by the composer on %s', async (action) => {
     const sent = add();
     const sentRequest = await startStorage(encodeId('100'), AttachmentUploadPurpose.file);
     const retained = add(AttachmentUploadPurpose.media);
-    const retainedRequest = peer.expect('attachments.getConfig');
+    peer.expectNone('attachments.getConfig');
     composer['submit']();
     expect(composer['uploads']()).toEqual([retained]);
     if (action === 'reset') composer.reset();
     else fixture.destroy();
-    retainedRequest.flush({ maxFileSizeBytes: 1024 });
     expect(URL.revokeObjectURL).toHaveBeenCalledWith(retained.url);
     expect(sentRequest.abort).not.toHaveBeenCalled();
     expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(sent.url);

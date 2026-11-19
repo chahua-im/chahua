@@ -58,7 +58,7 @@ import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
 import { mayBeMediaFile } from '../media-processing/file-type';
 import type { MessageContent } from '../message/message';
 import { StickerPicker } from '../sticker-picker/sticker-picker';
-import { AttachmentUpload, UploadStatus } from '../upload';
+import { AttachmentUploads, AttachmentUpload, UploadStatus } from '../upload';
 import { UploadProgress } from '../upload-progress/upload-progress';
 import { UploadFailure } from '../upload-failure';
 import { VoicePlayer } from '../voice-player/voice-player';
@@ -160,6 +160,7 @@ export class MessageComposer {
   protected readonly macOS = !isPlatform('ios') && navigator.userAgent.includes('Macintosh');
   protected readonly Status = UploadStatus;
   private readonly api = inject(RpcApi);
+  private readonly attachmentUploads = inject(AttachmentUploads);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly voice = viewChild(VoiceRecorder);
   protected readonly Panel = Panel;
@@ -436,7 +437,7 @@ export class MessageComposer {
       this.unsupported.set(true);
       return;
     }
-    const upload = new AttachmentUpload(this.api, file, purpose);
+    const upload = this.attachmentUploads.create(file, purpose);
     this.uploads.update((items) => [...items, upload]);
     return upload;
   }
