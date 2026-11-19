@@ -39,8 +39,15 @@ async fn post_group(
     Json(body): Json<CreateChatBody>,
 ) -> Result<impl IntoResponse, AppError> {
     conn.run(move |mut conn| async move {
-        let response =
-            groups::post_group(uid, body, &mut conn, &state.authz_service, &state.id_gen).await?;
+        let response = groups::post_group(
+            uid,
+            body,
+            &mut conn,
+            &state.authz_service,
+            &state.id_gen,
+            &state.ws_registry,
+        )
+        .await?;
         Ok((StatusCode::CREATED, Json(response)))
     })
     .await

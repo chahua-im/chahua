@@ -5,6 +5,7 @@ mod metrics;
 pub use metrics::WsMetrics;
 
 use crate::dto::ws::{OnlineClientStatus, PresenceUpdatePayload, ServerWsMessage};
+use crate::services::message_sync::SyncSubscription;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -43,6 +44,7 @@ impl AppPresenceState {
 pub struct ConnectionEntry {
     pub conn_id: u64,
     pub client_id: String,
+    pub message_sync: Option<Arc<SyncSubscription>>,
     pub tx: mpsc::Sender<Arc<ServerWsMessage>>,
     /// Sticky, coalescing invalidation independent of the lossy ordinary-event queue.
     pub unread_changed: Arc<tokio::sync::Notify>,
@@ -153,6 +155,23 @@ impl ConnectionRegistry {
         uid: i32,
         client_id: String,
     ) -> (Arc<ConnectionEntry>, mpsc::Receiver<Arc<ServerWsMessage>>) {
+        self.register_inner(uid, client_id, None)
+    }
+
+    pub fn register_sync(
+        &self,
+        uid: i32,
+        client_id: String,
+    ) -> (Arc<ConnectionEntry>, mpsc::Receiver<Arc<ServerWsMessage>>) {
+        self.register_inner(uid, client_id, Some(Arc::new(SyncSubscription::default())))
+    }
+
+    fn register_inner(
+        &self,
+        uid: i32,
+        client_id: String,
+        message_sync: Option<Arc<SyncSubscription>>,
+    ) -> (Arc<ConnectionEntry>, mpsc::Receiver<Arc<ServerWsMessage>>) {
         let conn_id = next_conn_id();
         let (tx, rx) = mpsc::channel(256);
         let now = now_secs();
@@ -160,6 +179,7 @@ impl ConnectionRegistry {
             conn_id,
             client_id,
             tx,
+            message_sync,
             unread_changed: Arc::new(tokio::sync::Notify::new()),
             states_changed: Arc::new(tokio::sync::Notify::new()),
             lagged: tokio::sync::Notify::new(),
@@ -179,9 +199,16 @@ impl ConnectionRegistry {
     /// Remove a single connection. Call when the socket closes.
     pub fn remove_connection(&self, uid: i32, conn_id: u64) {
         if let dashmap::mapref::entry::Entry::Occupied(mut entry) = self.inner.entry(uid) {
-            entry
-                .get_mut()
-                .retain(|connection| connection.conn_id != conn_id);
+            entry.get_mut().retain(|connection| {
+                if connection.conn_id == conn_id {
+                    if let Some(subscription) = &connection.message_sync {
+                        subscription.close();
+                    }
+                    false
+                } else {
+                    true
+                }
+            });
             if entry.get().is_empty() {
                 entry.remove();
             }
@@ -214,9 +241,33 @@ impl ConnectionRegistry {
             self.invalidate_unread(uids);
         }
         let msg_type = message.message_type();
+        let (sync_chat, suppress_sync) = match &*message {
+            ServerWsMessage::Message(payload)
+            | ServerWsMessage::MessageUpdated(payload)
+            | ServerWsMessage::MessageDeleted(payload) => (Some(payload.chat_id), true),
+            ServerWsMessage::MessagesBulkDeleted(payload) => (payload.chat_id.parse().ok(), true),
+            ServerWsMessage::ReactionUpdated(payload) => (Some(payload.chat_id), true),
+            ServerWsMessage::ThreadUpdate(payload) => (Some(payload.chat_id), false),
+            ServerWsMessage::ChatMembershipChanged(payload) => (Some(payload.chat_id), false),
+            ServerWsMessage::MembershipMessagePolicyChanged(payload) => {
+                (Some(payload.chat_id), false)
+            }
+            _ => (None, false),
+        };
         for &uid in uids {
             if let Some(vec) = self.inner.get(&uid) {
                 for entry in vec.iter() {
+                    if let Some(subscription) = &entry.message_sync {
+                        if let Some(chat_id) = sync_chat {
+                            subscription.mark(chat_id);
+                        }
+                        if matches!(&*message, ServerWsMessage::ChatSettingsChanged(_)) {
+                            subscription.mark_attached();
+                        }
+                        if suppress_sync {
+                            continue;
+                        }
+                    }
                     if entry.tx.try_send(message.clone()).is_err() {
                         tracing::warn!(
                             uid,
@@ -227,6 +278,19 @@ impl ConnectionRegistry {
                         entry.lagged.notify_one();
                     } else {
                         self.metrics.record_message_pushed(msg_type);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Wake only the specified users' sync connections after a committed membership change.
+    pub fn wake_message_sync(&self, uids: &[i32], chat_id: i64) {
+        for uid in uids {
+            if let Some(entries) = self.inner.get(uid) {
+                for entry in entries.iter() {
+                    if let Some(subscription) = &entry.message_sync {
+                        subscription.mark(chat_id);
                     }
                 }
             }
@@ -363,9 +427,16 @@ impl ConnectionRegistry {
         let mut pruned_uids: Vec<i32> = Vec::new();
         for (uid, conn_ids) in uids_to_trim {
             if let dashmap::mapref::entry::Entry::Occupied(mut entry) = self.inner.entry(uid) {
-                entry
-                    .get_mut()
-                    .retain(|connection| !conn_ids.contains(&connection.conn_id));
+                entry.get_mut().retain(|connection| {
+                    if conn_ids.contains(&connection.conn_id) {
+                        if let Some(subscription) = &connection.message_sync {
+                            subscription.close();
+                        }
+                        false
+                    } else {
+                        true
+                    }
+                });
                 if entry.get().is_empty() {
                     entry.remove();
                 }
@@ -420,6 +491,61 @@ mod tests {
 
     fn registry() -> ConnectionRegistry {
         ConnectionRegistry::new(Arc::new(WsMetrics::new(&prometheus::Registry::new())))
+    }
+
+    #[tokio::test]
+    async fn sync_connections_wake_without_legacy_message_frames_and_close_on_removal() {
+        let registry = registry();
+        let (_legacy, mut legacy_rx) = registry.register(7, "legacy".into());
+        let (sync, mut sync_rx) = registry.register_sync(7, "sync".into());
+        let subscription = sync.message_sync.as_ref().unwrap();
+        while legacy_rx.try_recv().is_ok() {}
+        while sync_rx.try_recv().is_ok() {}
+
+        registry.broadcast_to_uids(
+            &[7],
+            Arc::new(ServerWsMessage::ReactionUpdated(
+                crate::dto::ws::ReactionUpdatePayload {
+                    message_id: 1,
+                    chat_id: 42,
+                    reactions: vec![],
+                },
+            )),
+        );
+        assert!(matches!(
+            &*legacy_rx.try_recv().unwrap(),
+            ServerWsMessage::ReactionUpdated(_)
+        ));
+        assert!(sync_rx.try_recv().is_err());
+        tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            subscription.notified(),
+        )
+        .await
+        .unwrap();
+
+        crate::services::chat::publish_membership_changed(&registry, 7, 43);
+        assert!(matches!(
+            &*legacy_rx.try_recv().unwrap(),
+            ServerWsMessage::ChatMembershipChanged(_)
+        ));
+        assert!(matches!(
+            &*sync_rx.try_recv().unwrap(),
+            ServerWsMessage::ChatMembershipChanged(_)
+        ));
+        tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            subscription.notified(),
+        )
+        .await
+        .unwrap();
+
+        registry.remove_connection(7, sync.conn_id);
+        assert!(subscription.is_closed());
+        let (stale, _rx) = registry.register_sync(8, "stale".into());
+        stale.last_ping_at.store(0, Ordering::Relaxed);
+        registry.prune_stale(1);
+        assert!(stale.message_sync.as_ref().unwrap().is_closed());
     }
 
     #[tokio::test]

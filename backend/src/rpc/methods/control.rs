@@ -1,6 +1,8 @@
 use tokio::sync::oneshot;
 
 use crate::dto::auth::AuthTokenResponse;
+use crate::dto::message_sync::{MessageSyncPageParams, MessageSyncResumeParams};
+use crate::dto::rpc::session::EmptyResult;
 use crate::dto::rpc::{
     auth::{AuthCreateDevSessionParams, AuthRefreshParams},
     conversations::{ConversationsWatchStatesParams, ConversationsWatchUnreadParams},
@@ -52,6 +54,30 @@ pub async fn open(
     params: SessionOpenParams,
 ) -> Result<SessionOpenResult, RpcError> {
     command(context, |reply| RpcControlCommand::Open { params, reply }).await
+}
+
+pub async fn message_sync_resume(
+    context: &RpcCallContext,
+    _services: &RpcServices,
+    params: MessageSyncResumeParams,
+) -> Result<EmptyResult, RpcError> {
+    command(context, |reply| RpcControlCommand::MessageSyncResume {
+        params,
+        reply,
+    })
+    .await
+}
+
+pub async fn message_sync_page(
+    context: &RpcCallContext,
+    _services: &RpcServices,
+    params: MessageSyncPageParams,
+) -> Result<EmptyResult, RpcError> {
+    command(context, |reply| RpcControlCommand::MessageSyncPage {
+        params,
+        reply,
+    })
+    .await
 }
 
 pub async fn create_dev_session(

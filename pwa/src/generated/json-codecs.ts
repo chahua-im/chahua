@@ -233,6 +233,9 @@ export const jsonSchemas: Record<string, JsonCodec> = {
   MembershipMessagePolicyChanged: {
     chatId: 1,
   },
+  MessageIdConflictResponse: {
+    existingMessage: 'MessageResponse',
+  },
   MessagePreview: {
     id: 1,
     systemLinks: 'SystemMessageLinks',
@@ -255,6 +258,28 @@ export const jsonSchemas: Record<string, JsonCodec> = {
   MessageStickerResponse: {
     id: 1,
     media: 'MessageStickerMediaResponse',
+  },
+  MessageSyncBatch: {
+    changes: ['MessageSyncChange'],
+    chatId: 1,
+  },
+  MessageSyncChange: {
+    message: 'MessageResponse',
+    messageId: 1,
+    threadRootId: 1,
+  },
+  MessageSyncPageResult: {
+    chatId: 1,
+    page: 'ListMessagesResponse',
+  },
+  MessageSyncReady: {
+    chatId: 1,
+  },
+  MessageSyncReset: {
+    chatId: 1,
+  },
+  MessageSyncRevoked: {
+    chatId: 1,
   },
   NotificationException: {
     chatId: 1,
@@ -1103,6 +1128,12 @@ export const wsPayloadCodecs: Record<string, JsonCodec> = {
   messageDeleted: 'MessageResponse',
   messagesBulkDeleted: 'BulkDeletedPayload',
   reactionUpdated: 'ReactionUpdatePayload',
+  messageSyncHello: 'MessageSyncHello',
+  messageSyncBatch: 'MessageSyncBatch',
+  messageSyncReady: 'MessageSyncReady',
+  messageSyncReset: 'MessageSyncReset',
+  messageSyncRevoked: 'MessageSyncRevoked',
+  messageSyncPageResult: 'MessageSyncPageResult',
   presenceUpdate: 'PresenceUpdatePayload',
   presenceSnapshot: 'PresenceSnapshotPayload',
   conversationUnread: 'ConversationUnreadPayload',

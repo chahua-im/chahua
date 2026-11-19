@@ -27,6 +27,7 @@ import {
   type MessagePreview,
   type MessageResponse,
   type ThreadListItem,
+  MessageSyncResetReason,
   type ThreadSubscriptionStatusResponse,
 } from '../../generated/models';
 import { Connection, ResyncReason } from '../api/connection';
@@ -37,6 +38,7 @@ import { activeQuery } from '../api/query';
 import type { SnowflakeID } from '../api/snowflake-id';
 import { isMessageChange, type MessageChange } from '../messages/message-change';
 import { isMembershipMessage } from '../messages/system-message';
+import { MessageSync, requiresMessagePurge } from '../messages/message-sync';
 import { ChatPins } from './chat-pins';
 
 export type ChatInfo = Pick<ChatListItem, 'kind' | 'name' | 'avatar' | 'peer'> &
@@ -66,6 +68,8 @@ export enum ChatChangeKind {
   Membership,
   Attention,
   MembershipMessagePolicy,
+  MessagePurge,
+  Restored,
   Removed,
 }
 
@@ -190,6 +194,9 @@ export class ChatStore {
   private readonly destroyRef = inject(DestroyRef);
   private readonly realtime = inject(Connection);
   private readonly session = inject(SessionStore);
+  private readonly messageSync = inject(MessageSync);
+  private readonly revokedChats = new Set<SnowflakeID>();
+  private readonly revokedThreads = new Map<SnowflakeID, Set<SnowflakeID>>();
   private readonly mentionAccount = computed(() => this.session.user()?.uid);
   private readonly inaccessible = linkedSignal(() => {
     this.mentionAccount();
@@ -202,6 +209,15 @@ export class ChatStore {
   isAccessible(chatId: SnowflakeID, threadId?: SnowflakeID): boolean {
     const inaccessible = this.inaccessible();
     return !inaccessible.has(chatId) && (threadId == null || !inaccessible.has(threadId));
+  }
+  acceptsSnapshot(chatId: SnowflakeID, version: number, threadId?: SnowflakeID): boolean {
+    return (
+      this.isAccessible(chatId, threadId) &&
+      Math.max(
+        this.accessVersions().get(chatId) ?? 0,
+        threadId == null ? 0 : (this.accessVersions().get(threadId) ?? 0),
+      ) <= version
+    );
   }
   private readonly knownMentions = new Map<SnowflakeID, { mentioned: boolean; version: number }>();
   private readonly scheduledReads = new Map<SnowflakeID, Promise<MarkChatReadStateResponse>>();
@@ -252,44 +268,75 @@ export class ChatStore {
   watchReadStates(scopes: readonly ConversationRef[]) {
     return this.stateWatch.watch(scopes);
   }
+  private removeAccess(chatId: SnowflakeID, threadId?: SnowflakeID) {
+    const key = threadId ?? chatId;
+    this.inaccessible.update((scopes) => new Set(scopes).add(key));
+    this.accessVersions().set(key, this.snapshot());
+    for (const pins of this.pinScopes.values()) {
+      if (pins.chatId === chatId && (!threadId || pins.threadId === threadId)) pins.clear();
+    }
+    // List caches need the thread ownership before its summaries are removed.
+    this.changed(ChatChangeKind.Removed, chatId, threadId);
+    if (!threadId) {
+      this.fresh.delete(chatId);
+      this.detailsFresh.delete(chatId);
+      this.requests.delete(chatId);
+      this.entries.update((entries) => {
+        const next = new Map(entries);
+        next.delete(chatId);
+        return next;
+      });
+      this.summaries.update((summaries) => {
+        const next = new Map(summaries);
+        next.delete(chatId);
+        return next;
+      });
+    }
+    this.threadSummaries.update((summaries) => {
+      const next = new Map(summaries);
+      for (const [id, summary] of next) {
+        if (summary.value.chatId === chatId && (!threadId || id === threadId)) next.delete(id);
+      }
+      return next;
+    });
+  }
+
+  private purgeMessages(chatId: SnowflakeID) {
+    const version = this.snapshot();
+    this.accessVersions().set(chatId, version);
+    for (const pins of this.pinScopes.values()) if (pins.chatId === chatId) pins.clear();
+    this.summaries.update((summaries) => {
+      const current = summaries.get(chatId);
+      if (!current) return summaries;
+      return new Map(summaries).set(chatId, {
+        ...current,
+        value: { ...current.value, lastMessage: undefined, lastMessageAt: undefined },
+        previewVersion: version,
+      });
+    });
+    this.changed(ChatChangeKind.MessagePurge, chatId);
+    this.threadSummaries.update((summaries) => {
+      const next = new Map(summaries);
+      for (const [id, summary] of next) if (summary.value.chatId === chatId) next.delete(id);
+      return next;
+    });
+  }
+  threadBelongsTo(rootId: SnowflakeID, chatId: SnowflakeID) {
+    return this.threadSummaries().get(rootId)?.value.chatId === chatId;
+  }
+
   private acceptReadStates(states: ConversationState[]) {
     for (const state of states) {
       const { chatId, threadId, accessible } = state;
+      if (this.revokedChats.has(chatId)) continue;
       const key = threadId ?? chatId;
-      this.inaccessible.update((scopes) => {
-        const next = new Set(scopes);
-        if (accessible) next.delete(key);
-        else next.add(key);
-        return next;
-      });
-      if (!accessible) {
-        this.accessVersions().set(key, this.snapshot());
-        for (const pins of this.pinScopes.values()) {
-          if (pins.chatId === chatId && (!threadId || pins.threadId === threadId)) pins.clear();
-        }
-        if (!threadId) {
-          this.fresh.delete(chatId);
-          this.detailsFresh.delete(chatId);
-          this.requests.delete(chatId);
-          this.entries.update((entries) => {
-            const next = new Map(entries);
-            next.delete(chatId);
-            return next;
-          });
-          this.summaries.update((summaries) => {
-            const next = new Map(summaries);
-            next.delete(chatId);
-            return next;
-          });
-        }
-        this.threadSummaries.update((summaries) => {
-          const next = new Map(summaries);
-          for (const [id, summary] of next) {
-            if (summary.value.chatId === chatId && (!threadId || id === threadId)) next.delete(id);
-          }
+      if (!accessible) this.removeAccess(chatId, threadId);
+      else
+        this.inaccessible.update((scopes) => {
+          const next = new Set(scopes);
+          next.delete(key);
           return next;
         });
-      }
       // Local mutations establish their own cursor. Replace the watch after their
       // response, so a snapshot started before the mutation cannot undo it.
       if (
@@ -308,7 +355,7 @@ export class ChatStore {
         if (operation) operation.version++;
         this.applyReadState(chatId, state);
       }
-      this.changed(accessible ? ChatChangeKind.Read : ChatChangeKind.Removed, chatId, threadId);
+      if (accessible) this.changed(ChatChangeKind.Read, chatId, threadId);
     }
   }
 
@@ -421,6 +468,8 @@ export class ChatStore {
       const uid = this.mentionAccount();
       if (uid === account) return;
       account = uid;
+      this.revokedChats.clear();
+      this.revokedThreads.clear();
       this.defaultsVersion++;
       this.defaultsRequest = undefined;
       this.defaultsDirty = false;
@@ -433,6 +482,38 @@ export class ChatStore {
       this.invalidate();
       for (const pins of this.pinScopes.values()) pins.clear();
       this.pinScopes.clear();
+    });
+    this.messageSync.revoked$.pipe(takeUntilDestroyed()).subscribe(({ chatId }) => {
+      const threads = new Set<SnowflakeID>();
+      for (const [id, summary] of this.threadSummaries()) {
+        if (summary.value.chatId === chatId) threads.add(id);
+      }
+      for (const [id, subscription] of this.subscriptions()) {
+        if (subscription.chatId === chatId) threads.add(id);
+      }
+      for (const pins of this.pinScopes.values()) {
+        if (pins.chatId === chatId && pins.threadId != null) threads.add(pins.threadId);
+      }
+      this.revokedThreads.set(chatId, threads);
+      this.revokedChats.add(chatId);
+      this.removeAccess(chatId);
+      this.stateWatch.refresh();
+    });
+    this.messageSync.resets$.pipe(takeUntilDestroyed()).subscribe(({ chatId, reason }) => {
+      if (reason === MessageSyncResetReason.noBaseline && this.revokedChats.delete(chatId)) {
+        const threads = this.revokedThreads.get(chatId);
+        this.revokedThreads.delete(chatId);
+        this.accessVersions().set(chatId, this.snapshot());
+        this.inaccessible.update((scopes) => {
+          const next = new Set(scopes);
+          next.delete(chatId);
+          for (const id of threads ?? []) next.delete(id);
+          return next;
+        });
+        this.stateWatch.refresh();
+        this.changed(ChatChangeKind.Restored, chatId);
+      }
+      if (requiresMessagePurge(reason)) this.purgeMessages(chatId);
     });
     effect((onCleanup) => {
       this.muteTime();

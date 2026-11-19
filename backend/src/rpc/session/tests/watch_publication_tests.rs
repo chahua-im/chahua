@@ -35,6 +35,7 @@ async fn bound_shared(
                 generation: 0,
                 version: TokenVersion::V2,
             },
+            false,
         )
         .await
         .expect("test session binds");
@@ -197,6 +198,7 @@ async fn held_unread_forwarding_discards_cleared_watch_and_invalid_replacement_k
         },
         &shared,
         &services,
+        &sink,
         &mut activity_tasks,
     )
     .await;

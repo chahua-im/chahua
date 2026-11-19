@@ -148,7 +148,12 @@ describe('explicit conversation state watches', () => {
     peer.expectNone('chats.getUnreadCount');
     publish([row(3)], false);
     expect(query.items()[0].unreadCount).toBe(3);
+    const refreshing = query.refresh();
+    const delayed = peer.expect('chats.list', { limit: 50 });
     publish([{ ...row(0), accessible: false }], false);
+    expect(query.items()).toEqual([]);
+    delayed.flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
+    await refreshing;
     expect(query.items()).toEqual([]);
   });
 

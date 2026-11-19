@@ -29,6 +29,7 @@ import type {
   ConversationsWatchStatesParams,
   ConversationsWatchUnreadParams,
   CreateStickerFromMessageBody,
+  EmptyResult,
   ExceptionsQuery,
   FriendsAcceptRequestParams,
   FriendsArchiveRequestParams,
@@ -80,6 +81,9 @@ import type {
   ListSavedMessagesQuery,
   ListThreadParticipantsQuery,
   ListThreadsQuery,
+  MessageSyncChat,
+  MessageSyncPageParams,
+  MessageSyncResumeParams,
   MessagesDeleteManyParams,
   MessagesDeleteParams,
   MessagesEditParams,
@@ -204,6 +208,11 @@ export class RpcApi {
   readonly conversations = {
     watchUnread: (params: ConversationsWatchUnreadParams) => this.#call<null>('conversations.watchUnread', params),
     watchStates: (params: ConversationsWatchStatesParams) => this.#call<null>('conversations.watchStates', params),
+  } as const;
+
+  readonly messageSync = {
+    resume: (params: MessageSyncResumeParams) => this.#call<EmptyResult>('messageSync.resume', params),
+    page: (params: MessageSyncPageParams) => this.#call<EmptyResult>('messageSync.page', params),
   } as const;
 
   readonly messages = {

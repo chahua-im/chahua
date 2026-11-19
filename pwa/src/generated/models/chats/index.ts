@@ -31,6 +31,7 @@ export * from './markAsReadBody';
 export * from './markAsUnreadBody';
 export * from './markChatReadStateResponse';
 export * from './mentionBadges';
+export * from './messageIdConflictResponse';
 export * from './messageMetadataInput';
 export * from './messageSearchSort';
 export * from './reactionDetailGroup';

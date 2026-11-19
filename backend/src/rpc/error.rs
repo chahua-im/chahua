@@ -111,6 +111,7 @@ impl utoipa::ToSchema for RpcErrorCode {}
 pub(crate) enum RpcLifecycleFailure {
     Revoked,
     AuthLookupUnavailable,
+    MessageSyncUnavailable,
 }
 
 impl RpcLifecycleFailure {
@@ -118,6 +119,7 @@ impl RpcLifecycleFailure {
         match self {
             Self::Revoked => RpcErrorCode::Unauthorized,
             Self::AuthLookupUnavailable => RpcErrorCode::Unavailable,
+            Self::MessageSyncUnavailable => RpcErrorCode::Unavailable,
         }
     }
 
@@ -125,6 +127,7 @@ impl RpcLifecycleFailure {
         match self {
             Self::Revoked => "Session revoked",
             Self::AuthLookupUnavailable => "Auth lookup unavailable",
+            Self::MessageSyncUnavailable => "Message sync unavailable",
         }
     }
 }

@@ -9,6 +9,7 @@ pub mod groups;
 pub mod invites;
 pub mod link_previews;
 pub mod members;
+pub mod message_sync;
 pub mod messages;
 pub mod notification_preferences;
 pub mod pins;

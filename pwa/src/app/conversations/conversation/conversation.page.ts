@@ -119,6 +119,7 @@ import { AvatarMention } from '../../messages/avatar-mention';
 import { MessageDatePipe } from '../../messages/message-date.pipe';
 import { MessageMenu } from '../../messages/message-menu/message-menu';
 import { MessageOutbox, type OutgoingMessage } from '../../messages/message-outbox';
+import { MessageSync, requiresMessagePurge } from '../../messages/message-sync';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
 import { isVisibleMessage } from '../../messages/message-visibility';
 import { Message, type MessageContent } from '../../messages/message/message';
@@ -499,6 +500,7 @@ export class ConversationPage {
   protected readonly session = inject(SessionStore);
   protected readonly preferences = inject(Preferences);
   protected readonly conversation = inject(ConversationStore);
+  private readonly messageSync = inject(MessageSync);
   private readonly chatInfo = inject(ChatStore);
   private readonly router = inject(Router);
   private readonly drafts = inject(DraftStore);
@@ -1137,6 +1139,7 @@ export class ConversationPage {
   private subscriptionVersion = 0;
   private retryAction = () => {};
   private readonly position = signal<ScrollPosition | undefined>(undefined);
+  private syncWindowNavigation?: { version: number };
   private membershipScrollPosition?: ScrollPosition;
   private readonly entryReadId = signal<SnowflakeID | undefined>(undefined);
   private firstUnreadAfter(boundary?: SnowflakeID) {
@@ -1302,6 +1305,28 @@ export class ConversationPage {
   );
 
   constructor() {
+    this.conversation.setSyncWindow(() => {
+      if (!this.isCurrent()) return undefined;
+      const entry = this.entryKey();
+      const navigation = (this.syncWindowNavigation = { version: this.navigationVersion });
+      const position = this.membershipScrollPosition ?? { type: PositionKind.Bottom as const };
+      return {
+        around: position.type === PositionKind.Anchor ? position.messageId : undefined,
+        restore: () => {
+          if (!this.isCurrent(entry) || navigation.version !== this.navigationVersion) return;
+          if (position.type !== PositionKind.Anchor) {
+            this.position.set(position);
+            return;
+          }
+          const visible = this.rows().filter((row) => row.confirmed);
+          const anchor = visible.find((row) => row.confirmed!.id >= position.messageId) ?? visible.at(-1);
+          this.position.set(anchor ? { ...position, messageId: anchor.confirmed!.id } : { type: PositionKind.Bottom });
+        },
+      };
+    });
+    this.messageSync.resets$.pipe(takeUntilDestroyed()).subscribe(({ chatId, reason }) => {
+      if (chatId === this.id() && requiresMessagePurge(reason)) this.clearMessagePreviews();
+    });
     registerEscape(() => (this.active() ? this.escapeComposer() : false));
     this.chatInfo.receiptPrivacyChanges$.pipe(takeUntilDestroyed()).subscribe((peerUid) => {
       if (peerUid == null || peerUid === this.peerUid()) this.invalidateReadReceipt(true);
@@ -1379,12 +1404,7 @@ export class ConversationPage {
         chatId === this.id() &&
         (threadId == null || threadId === this.threadId())
       ) {
-        this.threadRootVersion++;
-        this.threadRootUpdate = undefined;
-        this.loadedThreadRoot.set(undefined);
-        this.navigationVersion++;
-        this.pendingNavigation.set(undefined);
-        this.position.set(undefined);
+        this.clearMessagePreviews();
       }
       if (chatId !== this.id() || (threadId ?? undefined) !== (this.threadId() ?? undefined)) return;
       if (kind === ChatChangeKind.Read) {
@@ -1399,7 +1419,7 @@ export class ConversationPage {
     this.realtime.messages$.pipe(takeUntilDestroyed()).subscribe((message) => {
       if (!this.isCurrent() || !this.conversation.accepts(message)) return;
       const follow = this.atBottom() && this.conversation.atLatest() && !this.position();
-      this.conversation.receive(message);
+      if (!this.messageSync.active()) this.conversation.receive(message);
       if (follow) this.position.set({ type: PositionKind.Bottom });
       else if (!this.threadId()) void this.chatInfo.scheduleReadState(this.id()).catch(() => {});
     });
@@ -1552,7 +1572,7 @@ export class ConversationPage {
       const active = this.active();
       const page = this.conversation.page();
       untracked(() => {
-        if (!active || !page || hide === this.conversation.hideMembershipMessages) return;
+        if (!active || !page || this.messageSync.active() || hide === this.conversation.hideMembershipMessages) return;
         void this.reloadMembershipVisibility(hide);
       });
     });
@@ -1608,6 +1628,7 @@ export class ConversationPage {
     this.scrolling.reset();
     this.entryVersion.update((version) => version + 1);
     this.active.set(true);
+    this.messageSync.setPriority(id, this);
     const draft = this.drafts.get(id, threadId);
     this.draft.set(draft?.text ?? '');
     this.draftLinks.set(draft?.linkPreviews ?? []);
@@ -1634,6 +1655,7 @@ export class ConversationPage {
       return;
     }
     this.active.set(true);
+    this.messageSync.setPriority(this.id(), this);
     void this.conversation.reconnect();
     void this.loadPins();
     void this.refreshConversationMetadata().catch(() => {});
@@ -1688,6 +1710,7 @@ export class ConversationPage {
     this.linkPreviewOpen.set(false);
     this.scrolling.reset();
     this.active.set(false);
+    this.messageSync.clearPriority(this);
     this.cancelEdit();
     this.entered = false;
     this.navigationVersion++;
@@ -1790,6 +1813,23 @@ export class ConversationPage {
     } finally {
       if (entry === this.entryKey() && version === this.navigationVersion) this.pendingNavigation.set(undefined);
     }
+  }
+
+  private clearMessagePreviews() {
+    this.threadRootVersion++;
+    this.threadRootUpdate = undefined;
+    this.loadedThreadRoot.set(undefined);
+    this.navigationVersion++;
+    if (this.syncWindowNavigation) this.syncWindowNavigation.version = this.navigationVersion;
+    this.pendingNavigation.set(undefined);
+    this.position.set(undefined);
+    this.cancelReply();
+    this.cancelEdit();
+    this.cancelSelection();
+    this.cancelForward();
+    this.forwardSources.set([]);
+    this.topicForwardOpen.set(false);
+    this.linkPreviewOpen.set(false);
   }
 
   private async reloadMembershipVisibility(

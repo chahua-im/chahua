@@ -302,6 +302,31 @@ diesel::table! {
 }
 
 diesel::table! {
+    message_sync_change (chat_id, seq, message_id) {
+        chat_id -> Int8,
+        seq -> Int8,
+        message_id -> Int8,
+        created -> Bool,
+        recorded_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    message_sync_head (chat_id) {
+        chat_id -> Int8,
+        head -> Int8,
+        retained_after -> Int8,
+    }
+}
+
+diesel::table! {
+    message_sync_meta (singleton) {
+        singleton -> Bool,
+        epoch -> Uuid,
+    }
+}
+
+diesel::table! {
     use diesel::sql_types::*;
     use super::sql_types::MessageType;
     use super::sql_types::TranscodeStatus;
@@ -560,6 +585,8 @@ diesel::joinable!(groups -> media (avatar_image_id));
 diesel::joinable!(message_mentions -> groups (chat_id));
 diesel::joinable!(message_mentions -> messages (message_id));
 diesel::joinable!(message_reactions -> messages (message_id));
+diesel::joinable!(message_sync_change -> groups (chat_id));
+diesel::joinable!(message_sync_head -> groups (chat_id));
 diesel::joinable!(messages -> forwarded_bundles (forwarded_bundle_id));
 diesel::joinable!(messages -> stickers (sticker_id));
 diesel::joinable!(pinned_messages -> groups (chat_id));
@@ -592,6 +619,9 @@ diesel::allow_tables_to_appear_in_same_query!(
     media,
     message_mentions,
     message_reactions,
+    message_sync_change,
+    message_sync_head,
+    message_sync_meta,
     messages,
     pinned_messages,
     policies,

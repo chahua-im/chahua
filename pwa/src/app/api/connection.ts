@@ -5,6 +5,7 @@ import { rpcEvents, rpcMethods, rpcSchemas } from '../../generated/rpc-codecs';
 import type { ConversationRef, ConversationView, MessageResponse, ServerWsMessage } from '../../generated/models';
 import { ServerWsMessageType } from '../../generated/models';
 import { isMessageChange, type MessageChange, type PinChange } from '../messages/message-change';
+import { MessageSync } from '../messages/message-sync';
 import { decodeJsonIds, encodeJsonIds } from './json-ids';
 import { RpcConnectionState, RpcTransport, type RpcNotification } from './rpc-transport';
 import type { SnowflakeID } from './snowflake-id';
@@ -29,6 +30,7 @@ export class Connection {
   readonly connected = signal(false);
   private readonly destroy = inject(DestroyRef);
   private readonly transport = inject(RpcTransport);
+  private readonly sync = inject(MessageSync);
   private readonly resync = new Subject<ResyncReason>();
   private readonly events = new Subject<ServerWsMessage>();
   readonly events$ = this.events.asObservable();
@@ -103,24 +105,33 @@ export class Connection {
     this.acceptedIds.clear();
     this.recalledIds.clear();
     this.clearWatches();
+    this.sync.reset();
   }
 
   constructor() {
+    this.transport.notifications$
+      .pipe(takeUntilDestroyed(this.destroy))
+      .subscribe((notification) => this.receive(notification));
     let authenticated = false;
     this.transport.state$.pipe(takeUntilDestroyed(this.destroy)).subscribe((state) => {
       const connected = state === RpcConnectionState.Authenticated;
       this.connected.set(connected);
-      if (!connected) this.clearWatches();
-      if (connected && !authenticated) this.resync.next(ResyncReason.Connected);
+      if (!connected) {
+        this.clearWatches();
+        this.sync.disconnect();
+      } else if (!authenticated) {
+        this.sync.connect(this.transport.authenticatedUid());
+        this.resync.next(ResyncReason.Connected);
+      }
       authenticated = connected;
     });
     this.transport.foreground$.pipe(takeUntilDestroyed(this.destroy)).subscribe(() => {
       if (this.connected()) this.resync.next(ResyncReason.Foreground);
     });
-    this.transport.notifications$
-      .pipe(takeUntilDestroyed(this.destroy))
-      .subscribe((notification) => this.receive(notification));
-    this.destroy.onDestroy(() => this.clearWatches());
+    this.destroy.onDestroy(() => {
+      this.clearWatches();
+      this.sync.disconnect();
+    });
   }
 
   private clearWatch(method: WatchMethod) {
@@ -173,6 +184,7 @@ export class Connection {
       type: type as ServerWsMessageType,
       payload: encodeJsonIds(notification.params, codec, rpcSchemas),
     } as unknown as ServerWsMessage;
+    if (this.sync.receive(event, this)) return;
     if (event.type === ServerWsMessageType.message) this.accept(event.payload);
     else if (isMessageChange(event)) this.acceptChange(event);
     else this.events.next(event);

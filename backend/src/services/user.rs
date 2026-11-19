@@ -1,9 +1,15 @@
 use crate::dto::users::UserGroupTagInfo;
+use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use diesel::sql_query;
 use diesel::PgConnection;
 use serde::Deserialize;
 use std::collections::HashMap;
+
+use crate::{
+    dto::{groups::MembershipMessagePolicy, users::ChatSettings},
+    models::{GroupKind, GroupRole, MembershipMessageVisibility},
+};
 
 pub fn load_chat_settings(
     conn: &mut PgConnection,
@@ -30,13 +36,26 @@ pub fn load_chat_settings_for_chat(
     conn: &mut PgConnection,
     uid: i32,
     chat_id: i64,
-) -> QueryResult<(
-    crate::dto::users::ChatSettings,
-    crate::models::GroupKind,
-    crate::dto::groups::MembershipMessagePolicy,
-)> {
+) -> QueryResult<(ChatSettings, GroupKind, MembershipMessagePolicy)> {
+    let viewer = load_chat_viewer(conn, uid, chat_id)?.ok_or(diesel::result::Error::NotFound)?;
+    Ok((viewer.settings, viewer.kind, viewer.policy))
+}
+
+pub(crate) struct ChatViewer {
+    pub settings: ChatSettings,
+    pub kind: GroupKind,
+    pub policy: MembershipMessagePolicy,
+    pub role: Option<GroupRole>,
+    pub joined_at: Option<DateTime<Utc>>,
+}
+
+pub(crate) fn load_chat_viewer(
+    conn: &mut PgConnection,
+    uid: i32,
+    chat_id: i64,
+) -> QueryResult<Option<ChatViewer>> {
     use crate::schema::{group_membership, groups, user_extra};
-    let (kind, show, show_unread_message_count, visibility, role) = groups::table
+    let row = groups::table
         .left_join(user_extra::table.on(user_extra::uid.eq(uid)))
         .left_join(
             group_membership::table.on(group_membership::chat_id
@@ -50,23 +69,30 @@ pub fn load_chat_settings_for_chat(
             user_extra::show_unread_message_count.nullable(),
             groups::membership_message_visibility,
             group_membership::role.nullable(),
+            group_membership::joined_at.nullable(),
         ))
         .first::<(
-            crate::models::GroupKind,
+            GroupKind,
             Option<bool>,
             Option<bool>,
-            crate::models::MembershipMessageVisibility,
-            Option<crate::models::GroupRole>,
-        )>(conn)?;
-    Ok((
-        crate::dto::users::ChatSettings {
-            show_membership_messages: show.unwrap_or(true),
-            show_unread_message_count: show_unread_message_count.unwrap_or(false),
-        },
-        kind,
-        crate::dto::groups::MembershipMessagePolicy {
-            visibility,
-            can_view: kind == crate::models::GroupKind::Dm || visibility.allows(role.as_ref()),
+            MembershipMessageVisibility,
+            Option<GroupRole>,
+            Option<DateTime<Utc>>,
+        )>(conn)
+        .optional()?;
+    Ok(row.map(
+        |(kind, show, show_unread_message_count, visibility, role, joined_at)| ChatViewer {
+            settings: ChatSettings {
+                show_membership_messages: show.unwrap_or(true),
+                show_unread_message_count: show_unread_message_count.unwrap_or(false),
+            },
+            kind,
+            policy: MembershipMessagePolicy {
+                visibility,
+                can_view: kind == GroupKind::Dm || visibility.allows(role.as_ref()),
+            },
+            role,
+            joined_at,
         },
     ))
 }

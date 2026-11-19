@@ -21,14 +21,23 @@ impl std::fmt::Debug for IsolatedTables {
 struct TableName {
     #[diesel(sql_type = diesel::sql_types::Text)]
     name: String,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    qualified_name: String,
+}
+
+#[derive(QueryableByName)]
+struct TriggerDefinition {
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    name: String,
 }
 
 impl diesel::r2d2::CustomizeConnection<PgConnection, diesel::r2d2::Error> for IsolatedTables {
     fn on_acquire(&self, connection: &mut PgConnection) -> Result<(), diesel::r2d2::Error> {
         crate::metrics::queries::attach_connection_metrics(connection, self.0.clone());
         let names = diesel::sql_query(
-            "SELECT tablename::text AS name FROM pg_catalog.pg_tables \
-             WHERE schemaname = 'public' AND tablename <> '__diesel_schema_migrations' \
+            "SELECT tablename::text AS name, format('%I.%I', schemaname, tablename) AS qualified_name \
+             FROM pg_catalog.pg_tables \
+             WHERE schemaname = current_schema() AND tablename <> '__diesel_schema_migrations' \
              ORDER BY tablename",
         )
         .load::<TableName>(connection)
@@ -37,9 +46,28 @@ impl diesel::r2d2::CustomizeConnection<PgConnection, diesel::r2d2::Error> for Is
             let name = table.name.replace('"', "\"\"");
             connection
                 .batch_execute(&format!(
-                    "CREATE TEMP TABLE \"{name}\" (LIKE public.\"{name}\" INCLUDING ALL); \
-                 INSERT INTO pg_temp.\"{name}\" SELECT * FROM public.\"{name}\";",
+                    "CREATE TEMP TABLE \"{name}\" (LIKE {source} INCLUDING ALL); \
+                     INSERT INTO pg_temp.\"{name}\" SELECT * FROM {source};",
+                    source = table.qualified_name,
                 ))
+                .map_err(diesel::r2d2::Error::QueryError)?;
+        }
+        // LIKE does not copy triggers. Point the production definitions at the
+        // isolated tables, with the same transition tables and capture function.
+        let triggers = diesel::sql_query(
+            "SELECT regexp_replace(pg_get_triggerdef(t.oid), ' ON .* REFERENCING ', \
+                    format(' ON pg_temp.%I REFERENCING ', c.relname)) AS name \
+             FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid \
+             JOIN pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = current_schema() AND t.tgname IN \
+                   ('messages_sync_insert', 'messages_sync_update', \
+                    'message_reactions_sync_insert', 'message_reactions_sync_delete')",
+        )
+        .load::<TriggerDefinition>(connection)
+        .map_err(diesel::r2d2::Error::QueryError)?;
+        for trigger in triggers {
+            connection
+                .batch_execute(&trigger.name)
                 .map_err(diesel::r2d2::Error::QueryError)?;
         }
         Ok(())

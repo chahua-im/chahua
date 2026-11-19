@@ -232,12 +232,36 @@ export class ChatListStore {
         else for (const { state } of this.queries.values()) this.clearUnreadErrors(state, [chatId]);
         return;
       }
-      if (kind === ChatChangeKind.Removed) {
-        if (threadId)
-          for (const { state } of [this.activeThreads, this.archivedThreads])
-            state.ids.update((ids) => ids.filter((id) => id !== threadId));
-        else
-          for (const { state } of this.queries.values()) state.ids.update((ids) => ids.filter((id) => id !== chatId));
+      if (kind === ChatChangeKind.Removed || kind === ChatChangeKind.MessagePurge) {
+        const removedThreads = new Set(
+          [this.activeThreads.state, this.archivedThreads.state]
+            .flatMap((state) => state.ids())
+            .filter((id) => (threadId ? id === threadId : this.chatInfo.threadBelongsTo(id, chatId))),
+        );
+        for (const { state } of this.queries.values()) {
+          if (kind === ChatChangeKind.Removed && !threadId) {
+            state.ids.update((ids) => ids.filter((id) => id !== chatId));
+            state.pendingRows.delete(chatId);
+            state.pendingUnread.delete(chatId);
+          }
+          if (kind === ChatChangeKind.MessagePurge) this.invalidateQuery(state);
+        }
+        for (const { state } of [this.activeThreads, this.archivedThreads]) {
+          state.ids.update((ids) => ids.filter((id) => !removedThreads.has(id)));
+          for (const id of removedThreads) {
+            state.pendingRows.delete(id);
+            state.pendingReads.delete(id);
+          }
+          if (kind === ChatChangeKind.MessagePurge) {
+            this.invalidate(state);
+            if (state.consumers && !document.hidden) void this.loadThreads(state);
+          }
+        }
+        return;
+      }
+      if (kind === ChatChangeKind.Restored) {
+        this.refreshChats();
+        void this.invalidateThreads();
         return;
       }
       if (kind === ChatChangeKind.Attention) {
@@ -469,7 +493,12 @@ export class ChatListStore {
               query,
               page.chats.map((chat) => chat.id),
             );
-            query.ids.update((ids) => [...new Set([...ids, ...page.chats.map((chat) => chat.id)])]);
+            query.ids.update((ids) => [
+              ...new Set([
+                ...ids,
+                ...page.chats.filter((chat) => this.chatInfo.acceptsSnapshot(chat.id, version)).map((chat) => chat.id),
+              ]),
+            ]);
             this.applyBoundary(query, page.chats, page.nextCursor);
           }
           if (mode !== ListFetch.Recent || recentVersion === query.recentVersion) return;
@@ -540,14 +569,19 @@ export class ChatListStore {
     const show = this.session.user()?.showMembershipMessages ?? true;
     const filterChanged = query.showMembershipMessages !== show;
     const pages: Awaited<ReturnType<ChatListStore['readPage']>>[] = [];
-    const read: SnowflakeID[] = [];
+    const read = new Map<SnowflakeID, number>();
     const apply = ({ page, version, policyGeneration }: Awaited<ReturnType<ChatListStore['readPage']>>) => {
       this.chatInfo.acceptChats(page.chats, version, policyGeneration);
       this.clearUnreadErrors(
         query,
         page.chats.map((chat) => chat.id),
       );
-      query.ids.update((ids) => [...new Set([...ids, ...page.chats.map((chat) => chat.id)])]);
+      query.ids.update((ids) => [
+        ...new Set([
+          ...ids,
+          ...page.chats.filter((chat) => this.chatInfo.acceptsSnapshot(chat.id, version)).map((chat) => chat.id),
+        ]),
+      ]);
       this.applyBoundary(query, page.chats, page.nextCursor);
     };
     let loaded = 0;
@@ -557,13 +591,13 @@ export class ChatListStore {
       if (this.destroyRef.destroyed || generation !== query.generation) return false;
       if (filterChanged) pages.push(result);
       else apply(result);
-      read.push(...result.page.chats.map((chat) => chat.id));
+      for (const chat of result.page.chats) read.set(chat.id, result.version);
       loaded += result.page.chats.length;
       cursor = result.page.nextCursor;
     } while (cursor && loaded < depth);
     for (const page of pages) apply(page);
     query.showMembershipMessages = show;
-    query.ids.set([...new Set(read)]);
+    query.ids.set([...read].filter(([id, version]) => this.chatInfo.acceptsSnapshot(id, version)).map(([id]) => id));
     return true;
   }
 
@@ -579,7 +613,12 @@ export class ChatListStore {
         query,
         page.chats.map((chat) => chat.id),
       );
-      query.ids.update((ids) => [...new Set([...ids, ...page.chats.map((chat) => chat.id)])]);
+      query.ids.update((ids) => [
+        ...new Set([
+          ...ids,
+          ...page.chats.filter((chat) => this.chatInfo.acceptsSnapshot(chat.id, version)).map((chat) => chat.id),
+        ]),
+      ]);
       cursor = page.nextCursor;
       const time = page.chats.at(-1)?.lastMessageAt;
       if (time && Date.parse(time) < boundary) break;
@@ -753,7 +792,10 @@ export class ChatListStore {
               page.chats.map((chat) => chat.id),
             );
             query.ids.update((ids) => [
-              ...new Set([...ids.filter((value) => value !== id), ...page.chats.map((row) => row.id)]),
+              ...new Set([
+                ...ids.filter((value) => value !== id),
+                ...page.chats.filter((row) => this.chatInfo.acceptsSnapshot(row.id, version)).map((row) => row.id),
+              ]),
             ]);
           } else {
             const page = await this.response(this.threadsApi.list({ limit: 1, rootId: id, archived: query.archived }));
@@ -771,7 +813,9 @@ export class ChatListStore {
             query.ids.update((ids) => [
               ...new Set([
                 ...ids.filter((value) => value !== id),
-                ...page.threads.map((row) => row.threadRootMessage.id),
+                ...page.threads
+                  .filter((row) => this.chatInfo.acceptsSnapshot(row.chatId, version, row.threadRootMessage.id))
+                  .map((row) => row.threadRootMessage.id),
               ]),
             ]);
           }
@@ -1064,7 +1108,11 @@ export class ChatListStore {
             current.ids.update((ids) => [
               ...new Set([
                 ...(before || headOnly ? ids : []),
-                ...page.threads.map((thread) => thread.threadRootMessage.id),
+                ...page.threads
+                  .filter((thread) =>
+                    this.chatInfo.acceptsSnapshot(thread.chatId, readVersion, thread.threadRootMessage.id),
+                  )
+                  .map((thread) => thread.threadRootMessage.id),
               ]),
             ]);
             current.cursor.set(page.nextCursor);

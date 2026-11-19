@@ -16,6 +16,7 @@ import {
 import { Connection } from '../api/connection';
 import { RpcErrorCode } from '../api/rpc-error';
 import { provideRpcTesting, RpcTestPeer } from '../api/rpc-testing';
+import { RpcTransport } from '../api/rpc-transport';
 import { decodeId, encodeId, type SnowflakeID } from '../api/snowflake-id';
 import { mockRealtime, testChat, testMessage, testUser, wireMessage } from '../api/testing';
 import { SessionStore } from '../session/session-store';
@@ -1081,5 +1082,68 @@ describe('MessageOutbox', () => {
     await item.operation;
     live.next({ ...testMessage, sender: item.message().sender, clientGeneratedId: item.clientGeneratedId });
     expect(item.delivery()).toBe(MessageDelivery.Failed);
+  });
+});
+
+describe('MessageOutbox with message sync', () => {
+  it('settles a send once and applies the coalesced current state to one row', async () => {
+    TestBed.configureTestingModule({
+      providers: [
+        ...provideRpcTesting(),
+        { provide: SessionStore, useValue: { user: signal(testUser) } },
+        { provide: AlertController, useValue: { create: vi.fn() } },
+      ],
+    });
+    const peer = TestBed.inject(RpcTestPeer);
+    try {
+      const connection = TestBed.inject(Connection);
+      const outbox = TestBed.inject(MessageOutbox);
+      const rows = new Map<SnowflakeID, MessageResponse>();
+      const arrivals = vi.fn((message: MessageResponse) => rows.set(message.id, message));
+      connection.messages$.subscribe(arrivals);
+      connection.changes$.subscribe((event) => {
+        if (event.type === ServerWsMessageType.messageUpdated && rows.has(event.payload.id))
+          rows.set(event.payload.id, event.payload);
+      });
+
+      TestBed.inject(RpcTransport).open({ token: 'fixture-token', appVersion: 'test' }).subscribe();
+      peer.open();
+      peer.expect('session.open').flush({
+        protocolVersion: 1,
+        authenticated: true,
+        uid: testUser.uid,
+        clientId: 'fixture-client',
+        messageSync: 1,
+      });
+      const resume = await peer.expectAsync('messageSync.resume');
+      peer.notify('events.messageSyncReset', { chatId, cursor: 'baseline', reason: 'noBaseline' });
+      resume.flush({});
+
+      const item = outbox.enqueue(testChat.id, undefined, 'coalesced', text);
+      const settled = vi.fn();
+      const operation = item.operation!.then(settled);
+      const sent = peer.expect('messages.send');
+      const message = wireAccepted(item.clientGeneratedId);
+      sent.flush(message);
+      await operation;
+
+      const reactions = [{ emoji: '👍', count: 2, reactedByMe: true }];
+      peer.notify('events.messageSyncBatch', {
+        chatId,
+        from: 'baseline',
+        to: 'after',
+        changes: [{ kind: 'upsert', appeared: true, message: { ...message, reactions } }],
+      });
+
+      expect(settled).toHaveBeenCalledOnce();
+      expect(item.delivery()).toBe(MessageDelivery.Sent);
+      expect(outbox.items()).toEqual([item]);
+      expect(arrivals).toHaveBeenCalledOnce();
+      expect([...rows.values()]).toEqual([expect.objectContaining({ id: encodeId(message.id), reactions })]);
+      peer.verify();
+    } finally {
+      TestBed.resetTestingModule();
+      vi.restoreAllMocks();
+    }
   });
 });

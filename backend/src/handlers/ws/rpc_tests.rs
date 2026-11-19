@@ -516,3 +516,333 @@ async fn pipelined_upgrade_frames_cannot_replace_the_first_authenticated_identit
     client.close(None).await.unwrap();
     wait_removed(&services).await;
 }
+
+async fn send_wire(client: &mut Client, value: Value) {
+    client
+        .send(Message::Text(value.to_string().into()))
+        .await
+        .unwrap();
+}
+
+async fn next_wire(client: &mut Client) -> Value {
+    timeout(Duration::from_secs(5), async {
+        loop {
+            match client.next().await.expect("socket remains open").unwrap() {
+                Message::Text(text) => return serde_json::from_str(&text).unwrap(),
+                Message::Close(frame) => panic!("unexpected close {frame:?}"),
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("wire frame deadline")
+}
+
+async fn after_presence(client: &mut Client) -> Value {
+    loop {
+        let frame = next_wire(client).await;
+        if frame["method"] != "events.presenceUpdate" && frame["type"] != "presenceUpdate" {
+            return frame;
+        }
+    }
+}
+
+async fn next_notification(client: &mut Client, method: &str) -> Value {
+    timeout(Duration::from_secs(5), async {
+        loop {
+            let frame = next_wire(client).await;
+            if frame["method"] == method {
+                return frame["params"].clone();
+            }
+        }
+    })
+    .await
+    .expect("notification deadline")
+}
+
+async fn send_call(client: &mut Client, id: &str, method: &str, params: Value) {
+    send_wire(
+        client,
+        json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn message_sync_both_protocols_isolate_live_events_and_order_rpc_pages() {
+    let Some(services) = crate::rpc::test_support::services().await else {
+        return;
+    };
+    services
+        .db
+        .get()
+        .unwrap()
+        .batch_execute(
+            "-- These are temp tables. Resume should attach only the fixture chat.
+         DELETE FROM group_membership WHERE uid IN (1, 2);
+         INSERT INTO groups (id, name) VALUES (9876770000, 'sync wire');
+         INSERT INTO group_membership (chat_id, uid, role)
+             VALUES (9876770000, 1, 'member'), (9876770000, 2, 'admin');",
+        )
+        .unwrap();
+    let server = server(&services).await;
+    let token = |uid, client, ticket| {
+        if ticket {
+            services
+                .auth_token_service
+                .issue_legacy_session(uid, client, 0)
+                .unwrap()
+        } else {
+            services
+                .auth_token_service
+                .issue_session(uid, client, 0)
+                .unwrap()
+        }
+    };
+    let chat_id = "9876770000";
+    let mut ticket = connect(&server, &token(1, "sync-ticket-header", false)).await;
+    send_wire(
+        &mut ticket,
+        json!({"type": "auth", "ticket": token(1, "sync-ticket", true), "messageSync": 1}),
+    )
+    .await;
+    assert_eq!(
+        next_wire(&mut ticket).await,
+        json!({"type": "messageSyncHello", "payload": {"version": 1}})
+    );
+    assert_eq!(next_wire(&mut ticket).await["type"], "presenceUpdate");
+    send_wire(
+        &mut ticket,
+        json!({"type": "messageSyncResume", "chats": [], "last": true, "priorityChatId": chat_id}),
+    )
+    .await;
+    let frame = after_presence(&mut ticket).await;
+    assert_eq!(frame["type"], "messageSyncReset");
+    assert_eq!(frame["payload"]["chatId"], chat_id);
+
+    let mut legacy_ticket = connect(&server, &token(1, "old-ticket-header", false)).await;
+    send_wire(
+        &mut legacy_ticket,
+        json!({"type": "auth", "ticket": token(1, "old-ticket", true), "messageSync": 9}),
+    )
+    .await;
+    assert_eq!(
+        next_wire(&mut legacy_ticket).await["type"],
+        "presenceUpdate"
+    );
+    let mut legacy_rpc = connect(&server, &token(1, "old-rpc-header", false)).await;
+    let opened = rpc(
+        &mut legacy_rpc,
+        "open",
+        "session.open",
+        json!({
+            "protocolVersion": 1, "token": token(1, "old-rpc", false), "messageSync": 9,
+        }),
+    )
+    .await;
+    assert!(opened.get("messageSync").is_none());
+    send_call(
+        &mut legacy_rpc,
+        "disabled",
+        "messageSync.resume",
+        json!({"chats": [], "last": true}),
+    )
+    .await;
+    let disabled = after_presence(&mut legacy_rpc).await;
+    assert_eq!(disabled["id"], "disabled");
+    assert_eq!(
+        disabled["error"]["message"],
+        "message sync is not enabled for this session"
+    );
+
+    let receiver_token = token(1, "sync-rpc", false);
+    let mut receiver = connect(&server, &receiver_token).await;
+    let opened = rpc(
+        &mut receiver,
+        "open",
+        "session.open",
+        json!({
+            "protocolVersion": 1, "token": &receiver_token, "messageSync": 1,
+        }),
+    )
+    .await;
+    assert_eq!(opened["messageSync"], 1);
+    send_call(
+        &mut receiver,
+        "resume",
+        "messageSync.resume",
+        json!({
+            "chats": [], "last": true, "priorityChatId": chat_id,
+        }),
+    )
+    .await;
+    assert_eq!(
+        after_presence(&mut receiver).await["method"],
+        "events.messageSyncReset"
+    );
+    assert_eq!(after_presence(&mut receiver).await["result"], json!({}));
+
+    let sender_token = token(2, "sync-test-sender", false);
+    let mut sender = connect(&server, &sender_token).await;
+    rpc(
+        &mut sender,
+        "open",
+        "session.open",
+        json!({"protocolVersion": 1, "token": &sender_token}),
+    )
+    .await;
+    let sent = rpc(&mut sender, "send", "messages.send", json!({
+        "chatId": chat_id, "message": "live", "messageType": "text", "clientGeneratedId": "sync-wire-send",
+    })).await;
+    let msg_id = sent["id"].as_str().unwrap();
+    let live = after_presence(&mut receiver).await;
+    assert_eq!(live["method"], "events.messageSyncBatch");
+    assert_eq!(live["params"]["changes"][0]["message"]["id"], msg_id);
+    assert_eq!(live["params"]["changes"][0]["appeared"], true);
+    let ticket_live = after_presence(&mut ticket).await;
+    assert_eq!(ticket_live["type"], "messageSyncBatch");
+    assert_eq!(
+        ticket_live["payload"]["changes"][0]["message"]["id"],
+        msg_id
+    );
+    assert_eq!(
+        after_presence(&mut legacy_rpc).await["method"],
+        "events.message"
+    );
+    assert_eq!(after_presence(&mut legacy_ticket).await["type"], "message");
+
+    let checkpoint = live["params"]["to"].clone();
+    receiver.close(None).await.unwrap();
+    let edit = |body| {
+        diesel::update(crate::schema::messages::table.find(msg_id.parse::<i64>().unwrap()))
+            .set(crate::schema::messages::message.eq(body))
+            .execute(&mut services.db.get().unwrap())
+            .unwrap();
+    };
+    edit("while offline");
+    let mut receiver = connect(&server, &receiver_token).await;
+    rpc(
+        &mut receiver,
+        "open",
+        "session.open",
+        json!({
+            "protocolVersion": 1, "token": &receiver_token, "messageSync": 1,
+        }),
+    )
+    .await;
+    send_call(
+        &mut receiver,
+        "resume",
+        "messageSync.resume",
+        json!({
+            "chats": [{"chatId": chat_id, "cursor": checkpoint}], "last": true,
+        }),
+    )
+    .await;
+    let resumed = after_presence(&mut receiver).await;
+    assert_eq!(resumed["method"], "events.messageSyncBatch");
+    assert_eq!(resumed["params"]["from"], checkpoint);
+    assert_eq!(
+        resumed["params"]["changes"][0]["message"]["message"],
+        "while offline"
+    );
+    let ready = after_presence(&mut receiver).await;
+    assert_eq!(ready["method"], "events.messageSyncReady");
+    assert_eq!(ready["params"]["cursor"], resumed["params"]["to"]);
+    assert_eq!(after_presence(&mut receiver).await["result"], json!({}));
+
+    edit("inside page snapshot");
+    send_call(
+        &mut receiver,
+        "page",
+        "messageSync.page",
+        json!({"requestId": 4, "chatId": chat_id}),
+    )
+    .await;
+    let batch = after_presence(&mut receiver).await;
+    assert_eq!(batch["method"], "events.messageSyncBatch");
+    let page = after_presence(&mut receiver).await;
+    assert_eq!(page["method"], "events.messageSyncPageResult");
+    assert_eq!(page["params"]["at"], batch["params"]["to"]);
+    assert_eq!(page["params"]["requestId"], 4);
+    assert_eq!(
+        page["params"]["page"]["messages"][0]["message"],
+        "inside page snapshot"
+    );
+    assert_eq!(after_presence(&mut receiver).await["result"], json!({}));
+
+    rpc(
+        &mut sender,
+        "role",
+        "groups.updateMember",
+        json!({"chatId": chat_id, "uid": 1, "role": "admin"}),
+    )
+    .await;
+    let reset = next_notification(&mut receiver, "events.messageSyncReset").await;
+    assert_eq!(reset["chatId"], chat_id);
+    assert_eq!(reset["reason"], "visibilityChanged");
+
+    rpc(
+        &mut sender,
+        "remove",
+        "groups.removeMember",
+        json!({"chatId": chat_id, "uid": 1}),
+    )
+    .await;
+    let revoked = next_notification(&mut receiver, "events.messageSyncRevoked").await;
+    assert_eq!(revoked, json!({"chatId": chat_id}));
+    send_call(
+        &mut receiver,
+        "revoked",
+        "messageSync.page",
+        json!({"requestId": 5, "chatId": chat_id}),
+    )
+    .await;
+    let page = next_notification(&mut receiver, "events.messageSyncPageResult").await;
+    assert_eq!(
+        page,
+        json!({"requestId": 5, "chatId": chat_id, "at": null, "page": null})
+    );
+    assert_eq!(after_presence(&mut receiver).await["result"], json!({}));
+
+    rpc(
+        &mut sender,
+        "rejoin",
+        "groups.addMember",
+        json!({"chatId": chat_id, "uid": 1}),
+    )
+    .await;
+    let reset = next_notification(&mut receiver, "events.messageSyncReset").await;
+    assert_eq!(reset["chatId"], chat_id);
+    assert_eq!(reset["reason"], "noBaseline");
+
+    send_call(
+        &mut receiver,
+        "duplicate",
+        "messageSync.resume",
+        json!({"chats": [], "last": true}),
+    )
+    .await;
+    let error = timeout(Duration::from_secs(5), async {
+        loop {
+            let frame = next_wire(&mut receiver).await;
+            if frame["id"] == "duplicate" {
+                return frame;
+            }
+        }
+    })
+    .await
+    .expect("duplicate resume error deadline");
+    assert_eq!(error["error"]["code"], -32602);
+    let closed = timeout(Duration::from_secs(5), receiver.next())
+        .await
+        .unwrap();
+    use tokio_tungstenite::tungstenite::{error::ProtocolError, Error};
+    assert!(matches!(
+        closed,
+        None | Some(Ok(Message::Close(_)))
+            | Some(Err(Error::Protocol(
+                ProtocolError::ResetWithoutClosingHandshake
+            )))
+    ));
+}

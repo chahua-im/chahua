@@ -87,6 +87,7 @@ local runspace infrastructure and does not send media or push deliveries.
 ## Further reading
 
 - [Metrics and operational contracts](docs/metrics.md)
+- [Durable message sync](docs/message-sync.md)
 - [Authentication and user-provider design](../docs/auth-provider/README.md)
 - [Stickers](docs/stickers.md)
 - [Speaking restrictions](docs/speaking-restrictions.md)

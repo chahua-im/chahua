@@ -19,6 +19,8 @@ pub struct TicketResponse {
 pub enum ClientWsMessage {
     Auth {
         ticket: String,
+        #[serde(default)]
+        message_sync: Option<serde_json::Value>,
     },
     Ping {
         state: Option<OnlineClientStatus>,
@@ -41,6 +43,8 @@ pub enum ClientWsMessage {
         request_id: u32,
         conversations: Vec<crate::dto::conversations::ConversationRef>,
     },
+    MessageSyncResume(crate::dto::message_sync::MessageSyncResumeParams),
+    MessageSyncPage(crate::dto::message_sync::MessageSyncPageParams),
     #[serde(other)]
     Unknown,
 }
@@ -79,7 +83,7 @@ pub struct BulkDeletedPayload {
     pub message_ids: Vec<String>,
 }
 
-/// The one source of truth for legacy server event variants and their wire
+/// The one source of truth for server event variants and their wire
 /// literals. RPC event metadata and encoding consume this list as well.
 macro_rules! server_ws_messages {
     ($callback:ident) => {
@@ -91,6 +95,12 @@ macro_rules! server_ws_messages {
             MessageDeleted(crate::dto::messages::MessageResponse) => "messageDeleted",
             MessagesBulkDeleted(crate::dto::ws::BulkDeletedPayload) => "messagesBulkDeleted",
             ReactionUpdated(crate::dto::ws::ReactionUpdatePayload) => "reactionUpdated",
+            MessageSyncHello(crate::dto::message_sync::MessageSyncHello) => "messageSyncHello",
+            MessageSyncBatch(crate::dto::message_sync::MessageSyncBatch) => "messageSyncBatch",
+            MessageSyncReady(crate::dto::message_sync::MessageSyncReady) => "messageSyncReady",
+            MessageSyncReset(crate::dto::message_sync::MessageSyncReset) => "messageSyncReset",
+            MessageSyncRevoked(crate::dto::message_sync::MessageSyncRevoked) => "messageSyncRevoked",
+            MessageSyncPageResult(crate::dto::message_sync::MessageSyncPageResult) => "messageSyncPageResult",
             PresenceUpdate(crate::dto::ws::PresenceUpdatePayload) => "presenceUpdate",
             PresenceSnapshot(crate::dto::ws::PresenceSnapshotPayload) => "presenceSnapshot",
             ConversationUnread(crate::dto::conversations::ConversationUnreadPayload) => "conversationUnread",
@@ -405,10 +415,21 @@ mod tests {
     }
 
     #[test]
+    fn auth_accepts_optional_sync_versions_without_changing_legacy_auth() {
+        for value in ["null", "2", "\"future\""] {
+            let text = format!(r#"{{"type":"auth","ticket":"session","messageSync":{value}}}"#);
+            assert!(matches!(
+                serde_json::from_str::<ClientWsMessage>(&text).unwrap(),
+                ClientWsMessage::Auth { ticket, .. } if ticket == "session"
+            ));
+        }
+    }
+
+    #[test]
     fn decodes_flat_client_controls_with_variant_specific_fields() {
         assert!(matches!(
             serde_json::from_str::<ClientWsMessage>(r#"{"type":"auth","ticket":"session"}"#).unwrap(),
-            ClientWsMessage::Auth { ticket } if ticket == "session"
+            ClientWsMessage::Auth { ticket, .. } if ticket == "session"
         ));
         assert!(matches!(
             serde_json::from_str::<ClientWsMessage>(r#"{"type":"ping","state":"active"}"#).unwrap(),

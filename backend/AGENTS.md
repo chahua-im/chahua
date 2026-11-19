@@ -49,7 +49,7 @@ Run backend work from `backend/`:
 - For local development, run `node runspace/dev.mjs dev` from the repository root, or `node runspace/dev.mjs backend` for only the backend. These load shared infrastructure settings and worktree-specific ports, and use bacon to rebuild/restart on changes. See `docs/local-setup.md` at the repository root.
 - `cargo build` verifies the Rust backend compiles.
 - `cargo test` runs the test suite (inline `#[test]`/`#[tokio::test]` modules).
-- `cargo clippy` checks lint issues before review.
+- After implementation is complete, run `cargo fmt`, then `cargo clippy --all-targets --all-features -- -D warnings`. Fix all lint errors before review.
 - `diesel migration run` applies local PostgreSQL migrations.
 
 ## Prometheus metrics

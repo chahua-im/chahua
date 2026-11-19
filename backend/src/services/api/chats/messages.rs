@@ -26,6 +26,7 @@ use crate::services::message_search::{
     filter_authoritative_hits_with_counts, validate_search_query, MessageSearchMetrics,
     MessageSearchService, MessageSearchSort, SearchCandidateDropCounts,
 };
+use crate::services::message_visibility::{history_query, MessageVisibility};
 use crate::services::messages::{
     attach_metadata, attachment_position, authorize_message_send, load_username_by_uid,
     parse_attachment_ids, project_message_id_conflict, send_client_message,
@@ -144,55 +145,22 @@ pub async fn get_messages(
     let max = validate_limit(q.max, MAX_MESSAGES_LIMIT);
 
     let q_thread_id = q.thread_id;
-    macro_rules! raw_query {
-        () => {{
-            let mut b = messages::table
-                .into_boxed()
-                .filter(dsl::chat_id.eq(chat_id).and(dsl::is_published.eq(true)));
-            if let Some(tid) = q_thread_id {
-                b = b.filter(
-                    dsl::reply_root_id
-                        .eq(tid)
-                        .and(dsl::deleted_at.is_null())
-                        .or(dsl::id.eq(tid)),
-                );
-            } else {
-                b = b.filter(
-                    dsl::reply_root_id
-                        .is_null()
-                        .and(dsl::deleted_at.is_null().or(dsl::has_thread.eq(true))),
-                );
-            }
-            b
-        }};
-    }
-
     let (chat_settings, kind, membership_message_policy) =
         crate::services::user::load_chat_settings_for_chat(conn, uid, chat_id)?;
-    let filtering = !membership_message_policy.can_view
-        || crate::services::system_messages::hides_membership_messages(
-            chat_settings.show_membership_messages,
-            kind,
-            q_thread_id,
-        );
-    macro_rules! base_query {
-        () => {{
-            let mut query = raw_query!();
-            if filtering {
-                query = query.filter(diesel::dsl::sql::<diesel::sql_types::Bool>(
-                    crate::services::system_messages::NON_MEMBERSHIP_PREDICATE,
-                ));
-            }
-            query
-        }};
+    let filtering = MessageVisibility {
+        kind,
+        show_membership_messages: chat_settings.show_membership_messages,
+        can_view_membership_messages: membership_message_policy.can_view,
     }
+    .hides_membership(q_thread_id);
+    let base_query = || history_query(chat_id, q_thread_id, filtering);
 
     // around=<id>: fetch a window centered on the target message
     if let Some(target) = q.around {
         let half = max / 2;
 
         // Messages with id >= target, ordered ASC (target first, then newer)
-        let newer_rows: Vec<Message> = base_query!()
+        let newer_rows: Vec<Message> = base_query()
             .filter(dsl::id.ge(target))
             .order(dsl::id.asc())
             .limit(half + 2)
@@ -200,7 +168,7 @@ pub async fn get_messages(
             .load(conn)?;
 
         // Messages with id < target, ordered DESC (closest to target first)
-        let older_rows: Vec<Message> = base_query!()
+        let older_rows: Vec<Message> = base_query()
             .filter(dsl::id.lt(target))
             .order(dsl::id.desc())
             .limit(half + 1)
@@ -226,7 +194,7 @@ pub async fn get_messages(
         // Preserve an explicitly requested hidden target for exact-link validation.
         // It remains hidden by the client, which positions its visible neighbour.
         if filtering && membership_message_policy.can_view {
-            if let Some(target_message) = raw_query!()
+            if let Some(target_message) = history_query(chat_id, q_thread_id, false)
                 .filter(dsl::id.eq(target))
                 .select(Message::as_select())
                 .first::<Message>(conn)
@@ -256,7 +224,7 @@ pub async fn get_messages(
 
     // after=<id>: fetch messages newer than `after`, ascending order
     if let Some(after) = q.after {
-        let rows: Vec<Message> = base_query!()
+        let rows: Vec<Message> = base_query()
             .filter(dsl::id.gt(after))
             .order(dsl::id.asc())
             .limit(max + 1)
@@ -283,12 +251,12 @@ pub async fn get_messages(
 
     // Default: before cursor, descending (newest first in response, reversed by client)
     let rows: Vec<Message> = match q.before {
-        None => base_query!()
+        None => base_query()
             .order(dsl::id.desc())
             .limit(max + 1)
             .select(Message::as_select())
             .load(conn),
-        Some(before) => base_query!()
+        Some(before) => base_query()
             .filter(dsl::id.lt(before))
             .order(dsl::id.desc())
             .limit(max + 1)
