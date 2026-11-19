@@ -192,6 +192,7 @@ async fn post_message(
             principal,
             chat_id,
             body,
+            true,
             &mut conn,
             crate::services::api::chats::messages::PostMessageDeps {
                 id_gen: &state.id_gen,
@@ -411,6 +412,7 @@ pub(super) async fn post_thread_message(
             chat_id,
             thread_id,
             body,
+            true,
             &mut conn,
             crate::services::api::chats::messages::PostThreadMessageDeps {
                 id_gen: &state.id_gen,

@@ -12,7 +12,7 @@ import type { User } from './user';
 export interface ForwardedFromInfo {
   originalChatId: SnowflakeID;
   originalMessageId: SnowflakeID;
-  /** Source reply context is display-only in the destination conversation. */
+  /** Preview of the original reply target. */
   originalReplyTo?: MessagePreview;
   sender: User;
 }

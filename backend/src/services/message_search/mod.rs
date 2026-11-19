@@ -301,8 +301,8 @@ impl MessageSearchService {
         }
     }
 
-    pub fn upsert_response_best_effort(self: &Arc<Self>, response: MessageResponse) {
-        if let Some(document) = project_message_response_document(&response) {
+    pub fn upsert_response_best_effort(self: &Arc<Self>, response: &MessageResponse) {
+        if let Some(document) = project_message_response_document(response) {
             self.upsert_document_best_effort(document);
         }
     }

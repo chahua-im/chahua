@@ -73,7 +73,7 @@ pub struct ThreadInfo {
     pub reply_count: i64,
 }
 
-#[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ForwardedFromInfo {
     pub sender: User,
@@ -83,7 +83,7 @@ pub struct ForwardedFromInfo {
     #[serde(with = "crate::serde_i64_string")]
     #[schema(value_type = String)]
     pub original_message_id: i64,
-    /// Source reply context is display-only in the destination conversation.
+    /// Preview of the original reply target.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub original_reply_to: Option<Box<MessagePreview>>,
 }
@@ -121,12 +121,18 @@ pub struct SystemMessageLinks {
 #[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageResponse {
+    /// Audio still awaiting a final transcode result.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub audio_pending: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_kind: Option<crate::models::SystemMessageKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_links: Option<SystemMessageLinks>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub forwarded_from: Option<ForwardedFromInfo>,
+    /// The original reply target is available in this message's chat and thread scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub can_jump_to_original_reply: Option<bool>,
     #[serde(with = "crate::serde_i64_string")]
     #[schema(value_type = String)]
     pub id: i64,
@@ -150,6 +156,9 @@ pub struct MessageResponse {
     pub has_attachments: bool,
     /// Present only while at least one published, non-deleted, non-system reply exists.
     pub thread_info: Option<ThreadInfo>,
+    /// Display-only reply count captured from the forwarded source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forwarded_thread_reply_count: Option<i64>,
     pub reply_to_message: Option<Box<MessagePreview>>,
     pub attachments: Vec<AttachmentResponse>,
     pub reactions: Vec<ReactionSummary>,
@@ -211,6 +220,8 @@ pub struct ForwardedMessagesPreviewResponse {
 #[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ForwardedMessagePreviewResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forwarded_thread_reply_count: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<MessageMetadataResponse>,
     #[serde(with = "crate::serde_i64_string")]
@@ -247,6 +258,8 @@ pub struct ForwardedMessagesPreviewSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct ForwardedMessagePreviewSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forwarded_thread_reply_count: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<MessageMetadataResponse>,
     #[serde(with = "crate::serde_i64_string")]
     #[schema(value_type = String)]
@@ -281,6 +294,8 @@ pub enum ForwardedBundlePayloadItem {
 #[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ForwardedMessageSnapshot {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forwarded_thread_reply_count: Option<i64>,
     #[serde(with = "crate::serde_i64_string")]
     #[schema(value_type = String)]
     pub original_message_id: i64,
@@ -292,7 +307,7 @@ pub struct ForwardedMessageSnapshot {
     pub sender_uid: i32,
     pub original_created_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sticker: Option<ForwardedStickerSnapshot>,
+    pub sticker: Option<ForwardedStickerRef>,
     pub reply: Option<ForwardedReplySnapshot>,
     pub attachments: Vec<AttachmentSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -301,35 +316,31 @@ pub struct ForwardedMessageSnapshot {
     pub mention_uids: Vec<i32>,
 }
 
-/// Immutable sticker data kept in a forwarded bundle.
-///
-/// Public URLs and favorite state belong to the reader, so they are rebuilt
-/// when the bundle is read rather than persisted here.
+/// Durable sticker identity. Compact previews also use its emoji during assembly.
 #[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ForwardedStickerSnapshot {
+pub struct ForwardedStickerRef {
     #[serde(with = "crate::serde_i64_string")]
     #[schema(value_type = String)]
     pub id: i64,
-    #[serde(with = "crate::serde_i64_string")]
-    #[schema(value_type = String)]
-    pub media_id: i64,
-    pub media_storage_key: String,
+    #[serde(default, skip_serializing)]
     pub emoji: String,
-    pub name: Option<String>,
-    pub description: Option<String>,
-    pub created_at: DateTime<Utc>,
-    pub content_type: String,
-    pub size: i64,
-    pub width: Option<i32>,
-    pub height: Option<i32>,
 }
 
-/// A forwarded reply only references another member of its immediate bundle.
+/// Internal replies reference a bundle item. External replies carry their send-time summary.
 #[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ForwardedReplySnapshot {
-    Redacted,
+    // Preserve the original wire tag so older clients and stored bundles remain readable.
+    #[serde(rename = "redacted")]
+    External {
+        #[serde(
+            default,
+            rename = "externalPreview",
+            skip_serializing_if = "Option::is_none"
+        )]
+        preview: Option<Box<MessagePreview>>,
+    },
     Internal {
         #[serde(rename = "originalMessageId", with = "crate::serde_i64_string")]
         #[schema(value_type = String)]
@@ -340,7 +351,16 @@ pub enum ForwardedReplySnapshot {
 #[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ForwardedReplyResponse {
-    Redacted,
+    // Preserve the original wire tag so older clients and stored bundles remain readable.
+    #[serde(rename = "redacted")]
+    External {
+        #[serde(
+            default,
+            rename = "externalPreview",
+            skip_serializing_if = "Option::is_none"
+        )]
+        preview: Option<Box<MessagePreview>>,
+    },
     Internal {
         #[serde(rename = "originalMessageId", with = "crate::serde_i64_string")]
         #[schema(value_type = String)]
@@ -352,6 +372,8 @@ pub enum ForwardedReplyResponse {
 #[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ForwardedBundleRefSnapshot {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forwarded_thread_reply_count: Option<i64>,
     #[serde(with = "crate::serde_i64_string")]
     #[schema(value_type = String)]
     pub original_message_id: i64,
@@ -379,6 +401,8 @@ pub struct ForwardedMessagesResponse {
 #[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ForwardedMessageResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forwarded_thread_reply_count: Option<i64>,
     #[serde(with = "crate::serde_i64_string")]
     #[schema(value_type = String)]
     pub original_message_id: i64,
