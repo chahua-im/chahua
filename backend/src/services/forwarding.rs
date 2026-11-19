@@ -5,7 +5,8 @@ use crate::{
     dto::messages::{
         ForwardMessagesBody, ForwardedBundlePayloadItem, ForwardedMessagesPreviewSnapshot,
     },
-    errors::AppError,
+    dto::rpc::messages::ForwardTarget,
+    errors::{AppError, ForwardPlaceholderConsent},
     models::{
         ForwardPlaceholder, GroupKind, Message, MessageType, NewForwardedBundle, TranscodeStatus,
     },
@@ -18,80 +19,60 @@ use crate::{
     utils::ids::{self, IdGen},
 };
 
-const MAX_FORWARD_MESSAGES: usize = 100;
+pub(super) const MAX_FORWARD_MESSAGES: usize = 100;
 const SYSTEM_MESSAGE_FORWARD_FORBIDDEN: &str = "System messages cannot be forwarded";
 const INVITE_MESSAGE_FORWARD_FORBIDDEN: &str = "Invite messages cannot be forwarded";
 
-fn canonical_forward_message_ids(message_ids: &[i64]) -> Result<Vec<i64>, AppError> {
-    if message_ids.len() < 2 {
+pub(super) fn canonical_forward_message_ids(
+    mut message_ids: Vec<i64>,
+) -> Result<Vec<i64>, AppError> {
+    if message_ids.is_empty() {
         return Err(AppError::BadRequest(
-            "Select at least two messages to forward",
+            "Select at least one message to forward",
         ));
     }
     if message_ids.len() > MAX_FORWARD_MESSAGES {
         return Err(AppError::BadRequest("Too many messages to forward"));
     }
 
-    let mut canonical_ids = message_ids.to_vec();
-    canonical_ids.sort_unstable();
-    if canonical_ids.windows(2).any(|pair| pair[0] == pair[1]) {
+    message_ids.sort_unstable();
+    if message_ids.windows(2).any(|pair| pair[0] == pair[1]) {
         return Err(AppError::BadRequest(
             "Message IDs cannot contain duplicates",
         ));
     }
 
-    Ok(canonical_ids)
-}
-
-pub(crate) fn validate_forwardable_source(
-    message_type: &MessageType,
-    transcode_status: TranscodeStatus,
-) -> Result<(), AppError> {
-    if matches!(message_type, MessageType::System) {
-        return Err(AppError::BadRequest(SYSTEM_MESSAGE_FORWARD_FORBIDDEN));
-    }
-    if matches!(message_type, MessageType::Invite) {
-        return Err(AppError::BadRequest(INVITE_MESSAGE_FORWARD_FORBIDDEN));
-    }
-    // Published legacy audio can still be transcoded, which deletes the old
-    // object. Only snapshot audio once its attachment has reached a final state.
-    if matches!(message_type, MessageType::Audio)
-        && !matches!(
-            transcode_status,
-            TranscodeStatus::Done | TranscodeStatus::Failed
-        )
-    {
-        return Err(AppError::BadRequest(
-            "Audio messages cannot be forwarded until transcoding finishes",
-        ));
-    }
-    Ok(())
+    Ok(message_ids)
 }
 
 pub(crate) fn source_placeholder(
     message: &Message,
     allow_placeholders: bool,
 ) -> Result<Option<ForwardPlaceholder>, AppError> {
-    if message.message_type == MessageType::Audio
-        && !matches!(
-            message.transcode_status,
-            TranscodeStatus::Done | TranscodeStatus::Failed
-        )
-        && allow_placeholders
-    {
-        return Ok(Some(ForwardPlaceholder::PendingAudio));
-    }
-    validate_forwardable_source(&message.message_type, message.transcode_status)?;
-    // Already captured placeholders never recover their original content.
-    if message.message_type == MessageType::Placeholder {
-        return message
+    match message.message_type {
+        MessageType::System => Err(AppError::BadRequest(SYSTEM_MESSAGE_FORWARD_FORBIDDEN)),
+        MessageType::Invite => Err(AppError::BadRequest(INVITE_MESSAGE_FORWARD_FORBIDDEN)),
+        // Transcoding can replace the storage object even for published legacy audio.
+        _ if message.audio_pending() => {
+            let reason = ForwardPlaceholder::PendingAudio;
+            if allow_placeholders {
+                Ok(Some(reason))
+            } else {
+                Err(AppError::ForwardPlaceholderRequired(
+                    ForwardPlaceholderConsent {
+                        by_message: [(message.id, reason)].into(),
+                    },
+                ))
+            }
+        }
+        MessageType::Placeholder => message
             .message
             .as_deref()
             .and_then(ForwardPlaceholder::from_code)
             .map(Some)
-            .ok_or(AppError::Internal("Invalid stored placeholder reason"));
+            .ok_or(AppError::Internal("Invalid stored placeholder reason")),
+        _ => Ok(None),
     }
-    Ok(None)
 }
 
 fn forwarded_payload_matches_selection(
@@ -139,19 +120,86 @@ pub(crate) fn check_source_membership(
     chat_id: i64,
     uid: i32,
 ) -> Result<(), AppError> {
-    let exists = group_membership::table
+    let member = group_membership::table
         .filter(
             group_membership::chat_id
                 .eq(chat_id)
                 .and(group_membership::uid.eq(uid)),
         )
-        .count()
-        .get_result::<i64>(conn)?;
+        .select(group_membership::uid)
+        .for_key_share()
+        .first::<i32>(conn)
+        .optional()?;
 
-    if exists == 0 {
+    if member.is_none() {
         return Err(AppError::Forbidden("Not a member of this chat"));
     }
     Ok(())
+}
+
+pub(super) struct ForwardSources {
+    pub selected: Vec<Message>,
+    pub external_replies: Vec<Message>,
+}
+
+pub(super) fn load_forward_sources(
+    conn: &mut PgConnection,
+    uid: i32,
+    chat_id: i64,
+    ids: &[i64],
+) -> Result<ForwardSources, AppError> {
+    check_source_membership(conn, chat_id, uid)?;
+    load_locked_forward_sources(conn, uid, chat_id, ids)
+}
+
+/// Caller has established chat access and canonicalized the selected IDs.
+pub(super) fn load_locked_forward_sources(
+    conn: &mut PgConnection,
+    uid: i32,
+    chat_id: i64,
+    ids: &[i64],
+) -> Result<ForwardSources, AppError> {
+    let query = messages::table
+        .filter(dsl::chat_id.eq(chat_id))
+        .filter(dsl::deleted_at.is_null())
+        .order(dsl::id.asc())
+        .select(Message::as_select());
+    let own_pending_audio = dsl::sender_uid
+        .eq(uid)
+        .and(dsl::message_type.eq(MessageType::Audio))
+        .and(dsl::transcode_status.eq_any([TranscodeStatus::None, TranscodeStatus::Pending]));
+    let selected = dsl::id
+        .eq_any(ids)
+        .and(dsl::is_published.eq(true).or(own_pending_audio));
+    if ids.len() == 1 {
+        return Ok(ForwardSources {
+            selected: query.filter(selected).for_key_share().load(conn)?,
+            external_replies: Vec::new(),
+        });
+    }
+
+    // Reply links are fixed at insert. Discover their IDs without locking, then lock
+    // sources and quotes together in the same ID order as bulk recall.
+    let source = diesel::alias!(crate::schema::messages as source);
+    let reply_ids = source
+        .filter(source.field(dsl::chat_id).eq(chat_id))
+        .filter(source.field(dsl::id).eq_any(ids))
+        .filter(source.field(dsl::reply_to_id).is_not_null())
+        .select(source.field(dsl::reply_to_id).assume_not_null());
+    let quoted = dsl::id
+        .eq_any(diesel::dsl::array(reply_ids))
+        .and(dsl::is_published.eq(true));
+    let rows = query
+        .filter(selected.or(quoted))
+        .for_key_share()
+        .load::<Message>(conn)?;
+    let (selected, external_replies) = rows
+        .into_iter()
+        .partition(|row| ids.binary_search(&row.id).is_ok());
+    Ok(ForwardSources {
+        selected,
+        external_replies,
+    })
 }
 
 fn direct_child_bundle_ids(items: &[ForwardedBundlePayloadItem]) -> Vec<i64> {
@@ -174,17 +222,16 @@ fn forwarded_wrapper_text(message_count: usize) -> String {
 }
 
 fn prepared_forward_message(
-    chat_id: i64,
+    target: &ForwardTarget,
     chat_kind: GroupKind,
     sender_uid: i32,
-    body: &ForwardMessagesBody,
     bundle_id: i64,
     preview: ForwardedMessagesPreviewSnapshot,
 ) -> PreparedMessageSend {
     PreparedMessageSend {
         system_kind: None,
         forwarded_from_message_id: None,
-        chat_id,
+        chat_id: target.chat_id,
         chat_kind,
         sender_uid,
         message: Some(forwarded_wrapper_text(preview.total)),
@@ -192,14 +239,13 @@ fn prepared_forward_message(
         message_type: MessageType::Forwarded,
         sticker_id: None,
         reply_to_id: None,
-        reply_root_id: body.thread_id,
-        client_generated_id: body.client_generated_id.clone(),
-        attachment_ids: Vec::new(),
+        reply_root_id: target.thread_id,
+        client_generated_id: target.client_generated_id.clone(),
+        attachments: Default::default(),
         publish_immediately: true,
         forwarded_bundle_id: Some(bundle_id),
-        forwarded_preview_total: Some(preview.total),
-        forwarded_preview_contains_forwarded_messages: Some(preview.contains_forwarded_messages),
-        forwarded_preview_items: Some(preview.messages),
+        forwarded_preview: Some(preview),
+        forward_origin: None,
     }
 }
 
@@ -211,7 +257,12 @@ pub async fn prepare_forward_message(
     destination_kind: GroupKind,
     body: &ForwardMessagesBody,
 ) -> Result<PreparedMessageSend, AppError> {
-    let canonical_message_ids = canonical_forward_message_ids(&body.message_ids)?;
+    if body.message_ids.len() < 2 {
+        return Err(AppError::BadRequest(
+            "Select at least two messages to forward",
+        ));
+    }
+    let canonical_message_ids = canonical_forward_message_ids(body.message_ids.clone())?;
     acquire_forward_retry_lock(conn, &body.client_generated_id)?;
 
     let existing = messages::table
@@ -221,6 +272,11 @@ pub async fn prepare_forward_message(
         .first::<Message>(conn)
         .optional()?;
 
+    let target = ForwardTarget {
+        chat_id: destination_chat_id,
+        thread_id: body.thread_id,
+        client_generated_id: body.client_generated_id.clone(),
+    };
     if let Some(existing) = existing {
         if existing.sender_uid != uid
             || existing.chat_id != destination_chat_id
@@ -236,6 +292,8 @@ pub async fn prepare_forward_message(
         let bundle = load_forwarded_bundle(conn, bundle_id)
             .map_err(|_| AppError::Conflict(MESSAGE_ID_CONFLICT))?;
         let contains_forwarded_messages = !bundle.child_bundle_ids.is_empty();
+        let preview = serde_json::from_value(bundle.preview.clone())
+            .map_err(|_| AppError::Internal("Invalid forwarded preview"))?;
         let (message_count, items) = deserialize_forwarded_bundle_payload(bundle)?;
         if !forwarded_payload_matches_selection(&items, body.source_chat_id, &canonical_message_ids)
         {
@@ -243,43 +301,50 @@ pub async fn prepare_forward_message(
         }
 
         return Ok(prepared_forward_message(
-            destination_chat_id,
+            &target,
             destination_kind,
             uid,
-            body,
             bundle_id,
             ForwardedMessagesPreviewSnapshot {
                 total: message_count,
                 contains_forwarded_messages,
-                messages: build_forwarded_preview_items(&items),
+                messages: preview,
             },
         ));
     }
 
-    check_source_membership(conn, body.source_chat_id, uid)?;
-    let source_messages: Vec<Message> = messages::table
-        .filter(
-            dsl::chat_id
-                .eq(body.source_chat_id)
-                .and(dsl::id.eq_any(&canonical_message_ids))
-                .and(dsl::deleted_at.is_null())
-                .and(
-                    dsl::is_published.eq(true).or(dsl::sender_uid
-                        .eq(uid)
-                        .and(dsl::message_type.eq(MessageType::Audio))
-                        .and(
-                            dsl::transcode_status
-                                .eq_any([TranscodeStatus::None, TranscodeStatus::Pending]),
-                        )),
-                ),
-        )
-        .order(dsl::id.asc())
-        .select(Message::as_select())
-        .load(conn)?;
-    if source_messages.len() != canonical_message_ids.len() {
+    let source_messages =
+        load_forward_sources(conn, uid, body.source_chat_id, &canonical_message_ids)?;
+    if source_messages.selected.len() != canonical_message_ids.len() {
         return Err(AppError::BadRequest("Invalid message IDs"));
     }
-    let items = capture_forwarded_bundle_items(conn, &source_messages, body.allow_placeholders)?;
+    let (prepared, bundle) = capture_forward_message(
+        conn,
+        id_gen,
+        &target,
+        destination_kind,
+        uid,
+        source_messages,
+        |_, _| body.allow_placeholders,
+    )
+    .await?;
+    diesel::insert_into(forwarded_bundles::table)
+        .values(&bundle)
+        .execute(conn)?;
+    Ok(prepared)
+}
+
+/// Capture a bundle from authorized sources for the caller to publish.
+pub(super) async fn capture_forward_message(
+    conn: &mut PgConnection,
+    id_gen: &IdGen,
+    target: &ForwardTarget,
+    destination_kind: GroupKind,
+    uid: i32,
+    source_messages: ForwardSources,
+    permits: impl Fn(i64, ForwardPlaceholder) -> bool,
+) -> Result<(PreparedMessageSend, NewForwardedBundle), AppError> {
+    let items = capture_forwarded_bundle_items(conn, source_messages, permits)?;
     let message_count = items.len();
     let child_bundle_ids = direct_child_bundle_ids(&items);
     let contains_forwarded_messages = !child_bundle_ids.is_empty();
@@ -292,44 +357,43 @@ pub async fn prepare_forward_message(
         AppError::Internal("ID generation failed")
     })?;
 
-    diesel::insert_into(forwarded_bundles::table)
-        .values(NewForwardedBundle {
-            id: bundle_id,
-            created_by_uid: uid,
-            created_at: Utc::now(),
-            item_count: message_count as i32,
-            payload,
-            child_bundle_ids,
-            preview,
-        })
-        .execute(conn)?;
+    let bundle = NewForwardedBundle {
+        id: bundle_id,
+        created_by_uid: uid,
+        created_at: Utc::now(),
+        item_count: message_count as i32,
+        payload,
+        child_bundle_ids,
+        preview,
+    };
 
-    Ok(prepared_forward_message(
-        destination_chat_id,
-        destination_kind,
-        uid,
-        body,
-        bundle_id,
-        ForwardedMessagesPreviewSnapshot {
-            total: message_count,
-            contains_forwarded_messages,
-            messages: preview_items,
-        },
+    Ok((
+        prepared_forward_message(
+            target,
+            destination_kind,
+            uid,
+            bundle_id,
+            ForwardedMessagesPreviewSnapshot {
+                total: message_count,
+                contains_forwarded_messages,
+                messages: preview_items,
+            },
+        ),
+        bundle,
     ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        canonical_forward_message_ids, direct_child_bundle_ids,
-        forwarded_payload_matches_selection, validate_forwardable_source,
+        canonical_forward_message_ids, direct_child_bundle_ids, forwarded_payload_matches_selection,
     };
     use crate::{
         dto::messages::{
             ForwardedBundlePayloadItem, ForwardedBundleRefSnapshot, ForwardedMessageSnapshot,
             ForwardedMessagesPreviewSnapshot,
         },
-        models::{GroupKind, MessageType, TranscodeStatus},
+        models::{GroupKind, MessageType},
     };
     use chrono::Utc;
 
@@ -339,6 +403,7 @@ mod tests {
     ) -> ForwardedBundlePayloadItem {
         ForwardedBundlePayloadItem::MessageSnapshot {
             snapshot: ForwardedMessageSnapshot {
+                forwarded_thread_reply_count: None,
                 original_message_id,
                 original_chat_id,
                 message: Some(format!("message {original_message_id}")),
@@ -355,33 +420,22 @@ mod tests {
     }
 
     #[test]
-    fn forward_selection_is_canonical_across_lost_response_retries() {
-        let first_attempt = canonical_forward_message_ids(&[30, 10, 20]).unwrap();
-        let retry = canonical_forward_message_ids(&[20, 30, 10]).unwrap();
-
-        assert_eq!(first_attempt, vec![10, 20, 30]);
-        assert_eq!(retry, first_attempt);
-    }
-
-    #[test]
-    fn forward_selection_requires_two_to_one_hundred_distinct_messages() {
-        for ids in [vec![], vec![10], vec![10, 10], (1..=101).collect()] {
+    fn forward_selection_accepts_one_to_one_hundred_distinct_messages() {
+        for ids in [vec![], vec![10, 20, 10], (1..=101).collect()] {
             assert!(matches!(
-                canonical_forward_message_ids(&ids),
+                canonical_forward_message_ids(ids),
                 Err(crate::errors::AppError::BadRequest(_))
             ));
         }
         assert_eq!(
-            canonical_forward_message_ids(&[20, 10]).unwrap(),
+            canonical_forward_message_ids(vec![20, 10]).unwrap(),
             vec![10, 20]
         );
         let maximum: Vec<i64> = (1..=100).collect();
-        assert_eq!(canonical_forward_message_ids(&maximum).unwrap(), maximum);
-    }
-
-    #[test]
-    fn forward_selection_rejects_duplicate_original_messages() {
-        assert!(canonical_forward_message_ids(&[10, 20, 10]).is_err());
+        assert_eq!(
+            canonical_forward_message_ids(maximum.clone()).unwrap(),
+            maximum
+        );
     }
 
     #[test]
@@ -394,45 +448,9 @@ mod tests {
     }
 
     #[test]
-    fn rejects_non_forwardable_source_message_types() {
-        assert!(validate_forwardable_source(&MessageType::System, TranscodeStatus::None).is_err());
-        assert!(validate_forwardable_source(&MessageType::Invite, TranscodeStatus::None).is_err());
-    }
-
-    #[test]
-    fn rejects_audio_whose_storage_object_may_still_be_replaced() {
-        for status in [TranscodeStatus::None, TranscodeStatus::Pending] {
-            assert!(matches!(
-                validate_forwardable_source(&MessageType::Audio, status),
-                Err(crate::errors::AppError::BadRequest(
-                    "Audio messages cannot be forwarded until transcoding finishes"
-                ))
-            ));
-        }
-    }
-
-    #[test]
-    fn allows_audio_with_a_final_transcode_outcome() {
-        for status in [TranscodeStatus::Done, TranscodeStatus::Failed] {
-            assert!(validate_forwardable_source(&MessageType::Audio, status).is_ok());
-        }
-    }
-
-    #[test]
-    fn non_audio_sources_do_not_require_transcoding() {
-        for message_type in [
-            MessageType::Text,
-            MessageType::File,
-            MessageType::Sticker,
-            MessageType::Forwarded,
-        ] {
-            assert!(validate_forwardable_source(&message_type, TranscodeStatus::None).is_ok());
-        }
-    }
-
-    #[test]
     fn child_bundle_ids_are_derived_from_payload_references() {
         let bundle_ref = ForwardedBundleRefSnapshot {
+            forwarded_thread_reply_count: None,
             original_message_id: 12,
             original_chat_id: 42,
             forwarded_bundle_id: 99,
@@ -496,7 +514,13 @@ mod tests {
                     .await
                     .unwrap();
             assert_eq!(prepared.reply_root_id, thread_id);
-            assert_eq!(prepared.forwarded_preview_total, Some(2));
+            assert_eq!(
+                prepared
+                    .forwarded_preview
+                    .as_ref()
+                    .map(|preview| preview.total),
+                Some(2)
+            );
             diesel::insert_into(messages::table)
                 .values((
                     messages::id.eq(message_id),

@@ -488,12 +488,11 @@ async fn send_friendship_accepted_message(
                 reply_to_id: None,
                 reply_root_id: None,
                 client_generated_id: uuid::Uuid::new_v4().to_string(),
-                attachment_ids: vec![],
+                attachments: Default::default(),
                 publish_immediately: true,
                 forwarded_bundle_id: None,
-                forwarded_preview_total: None,
-                forwarded_preview_contains_forwarded_messages: None,
-                forwarded_preview_items: None,
+                forwarded_preview: None,
+                forward_origin: None,
             },
         )
         .await

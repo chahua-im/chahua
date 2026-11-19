@@ -42,6 +42,7 @@ pub enum LinkPreviewStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredMessageMetadata {
+    #[serde(default)]
     pub link_previews: Vec<StoredLinkPreview>,
 }
 
