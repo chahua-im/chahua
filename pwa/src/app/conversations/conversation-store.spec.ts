@@ -15,7 +15,7 @@ import { Connection } from '../api/connection';
 import { RpcErrorCode } from '../api/rpc-error';
 import { RpcTransport } from '../api/rpc-transport';
 import { RpcTestPeer, provideRpcTesting, type RpcTestRequest } from '../api/rpc-testing';
-import { decodeId, encodeId } from '../api/snowflake-id';
+import { decodeId, encodeId, type SnowflakeID } from '../api/snowflake-id';
 import { mockRealtime, testUser, testChat, testMessage, wireChat, wireMessage } from '../api/testing';
 import { MessageActions } from '../messages/message-actions';
 import { isVisibleMessage } from '../messages/message-visibility';
@@ -67,7 +67,7 @@ describe('ConversationStore', () => {
       chatSettings: { showMembershipMessages: true },
       messages: [
         { ...wire('50'), metadata: pending },
-        { ...wire('60'), metadata: ready },
+        { ...wire('60'), metadata: ready, forwardedThreadReplyCount: 12 },
       ],
     });
     await loading;
@@ -75,6 +75,41 @@ describe('ConversationStore', () => {
     const deleted = timeline.items().find((item) => item.id === encodeId('60'));
     expect(deleted?.isDeleted).toBe(true);
     expect(deleted?.metadata).toBeUndefined();
+    expect(deleted?.forwardedThreadReplyCount).toBeUndefined();
+  });
+
+  it('disables a cached forwarded reply jump when its original is recalled', () => {
+    TestBed.inject(SessionStore).user.set(testUser);
+    TestBed.inject(ChatStore).remember([testChat]);
+    const recent = TestBed.inject(RecentConversationWindows);
+    const scope = { chatId: testChat.id };
+    const original = { ...message('100'), mentions: [] };
+    const forward = {
+      ...message('200'),
+      canJumpToOriginalReply: true,
+      forwardedFrom: {
+        originalMessageId: encodeId('150'),
+        originalChatId: scope.chatId,
+        originalReplyTo: original,
+        sender: original.sender,
+      },
+    };
+    recent.keep(scope, {
+      range: {
+        chatSettings: { showMembershipMessages: true, showUnreadMessageCount: true },
+        membershipMessagePolicy: testChat.membershipMessagePolicy,
+        messages: [forward],
+      },
+      atBottom: true,
+      hideMembershipMessages: false,
+    });
+    TestBed.inject(Connection).acceptChange({
+      type: ServerWsMessageType.messagesBulkDeleted,
+      payload: { chatId: scope.chatId, messageIds: [original.id] },
+    });
+    const cached = recent.take(scope, false)!.range.messages[0];
+    expect(cached.canJumpToOriginalReply).toBeUndefined();
+    expect(cached.forwardedFrom?.originalReplyTo?.message).toBe(original.message);
   });
 
   it.each([
@@ -2184,6 +2219,32 @@ describe('ConversationStore with message sync', () => {
     expect(await opening).toBe(true);
     expect(timeline.items().map(({ id }) => decodeId(id))).toEqual(['20', '30']);
     expect(restore).toHaveBeenCalledOnce();
+    peer.expectNone('messageSync.page');
+  });
+
+  it('keeps visible history while reloading around a scroll outside the pending sync window', async () => {
+    const anchor = encodeId('20');
+    const restore = vi.fn();
+    let latestAnchor: SnowflakeID | undefined;
+    timeline.setSyncWindow(() => ({ around: anchor, latestAnchor: () => latestAnchor, restore }));
+
+    const initial = timeline.open(anchor);
+    page(await peer.expectAsync('messageSync.page'), [wire('10'), wire('20'), wire('55')]);
+    await initial;
+    const rows = timeline.items();
+
+    reset('expired-head', 'expired');
+    const replacement = await peer.expectAsync('messageSync.page', (params) => params['around'] === '20');
+    latestAnchor = encodeId('55');
+    page(replacement, [wire('10'), wire('20'), wire('30')], { newerCursor: '30' });
+
+    const rescoped = await peer.expectAsync('messageSync.page', (params) => params['around'] === '55');
+    expect(timeline.items()).toBe(rows);
+    expect(restore).not.toHaveBeenCalled();
+    page(rescoped, [wire('50'), wire('55'), wire('60')], { olderCursor: '50' });
+
+    await vi.waitFor(() => expect(restore).toHaveBeenCalledOnce());
+    expect(timeline.items().map(({ id }) => decodeId(id))).toEqual(['50', '55', '60']);
     peer.expectNone('messageSync.page');
   });
 

@@ -36,22 +36,27 @@
           <a [href]="item.url" target="_blank" rel="noopener" (click)="view(item.id ?? item.url, $event)">
             <img appMediaLoaded [src]="item.url" loading="lazy" decoding="async" (error)="fail(item.id ?? item.url)" />
           </a>
-        } @else {
+        } @else if (item.sticker) {
           <video
             appMediaLoaded
-            [appVideoPreview]="!item.sticker"
             [src]="item.url"
-            [autoplay]="item.sticker"
-            [loop]="item.sticker"
-            [muted]="item.sticker"
+            autoplay
+            loop
+            [muted]="true"
             playsinline
             preload="metadata"
             (error)="fail(item.id ?? item.url)"></video>
-          @if (!item.sticker) {
-            <button class="video-open" type="button" (click)="view(item.id ?? item.url, $event)">
-              <ion-icon [icon]="playIcon" />
-            </button>
-          }
+        } @else {
+          <video
+            appMediaLoaded
+            appVideoPreview
+            [src]="item.url"
+            playsinline
+            preload="metadata"
+            (error)="fail(item.id ?? item.url)"></video>
+          <button class="video-open" type="button" (click)="view(item.id ?? item.url, $event)">
+            <ion-icon [icon]="playIcon" />
+          </button>
         }
         @if (item.pendingUpload; as state) {
           <div class="upload-overlay">
@@ -89,7 +94,14 @@
       </div>
     } @else if (item.kind === MediaKind.Audio) {
       <div class="audio-frame">
-        <app-voice-player [src]="item.url" [dock]="dock()" />
+        @if (staticPreview()) {
+          <span class="voice-preview">
+            <ion-icon [icon]="voiceIcon" />
+            {{ 'messages.preview.audio' | transloco }}
+          </span>
+        } @else {
+          <app-voice-player [src]="item.url" [dock]="dock()" />
+        }
         @if (item.upload; as upload) {
           @if (upload.state().error) {
             <app-upload-failure

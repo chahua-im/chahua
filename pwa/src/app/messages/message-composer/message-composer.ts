@@ -120,6 +120,8 @@ enum Panel {
 })
 export class MessageComposer {
   readonly text = model('');
+  readonly disabled = input(false);
+  readonly placeholder = input<string>();
   readonly dockStickers = input(false);
   readonly stickersOpened = output<void>();
   readonly relationship = input<FriendRelationshipResponse>();
@@ -127,7 +129,7 @@ export class MessageComposer {
   readonly groupChatWriteRestricted = input(false);
   readonly writePermissionPending = input(false);
   protected readonly writeDisabled = computed(
-    () => this.groupChatWriteRestricted() || this.writePermissionPending() || !!this.restriction(),
+    () => this.disabled() || this.groupChatWriteRestricted() || this.writePermissionPending() || !!this.restriction(),
   );
   protected readonly blocked = signal(false);
   private canWrite() {
@@ -416,6 +418,7 @@ export class MessageComposer {
       this.addFile(file, mayBeMediaFile(file) ? AttachmentUploadPurpose.media : AttachmentUploadPurpose.file);
   }
   protected paste(event: ClipboardEvent) {
+    if (this.forwarding()) return;
     const files = Array.from(event.clipboardData?.files ?? []);
     if (!files.length) return;
     event.preventDefault();
@@ -555,7 +558,7 @@ export class MessageComposer {
     input?.setSelectionRange(range.start + token.length, range.start + token.length);
   }
 
-  private mentionSnapshot(): MentionInfo[] {
+  mentionSnapshot(): MentionInfo[] {
     const display = this.display();
     const known = new Map([
       ...this.mentionInfos(),

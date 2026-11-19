@@ -133,6 +133,7 @@ export class MessageMenu {
   readonly allowSelect = input(false);
   readonly select = output<MessageResponse | OutgoingMessage>();
   protected readonly forwarding = signal<readonly ForwardSource[]>([]);
+  readonly forwardOpen = computed(() => this.forwarding().length > 0);
   protected readonly stickerSource = signal<{ message: MessageResponse; packs: StickerPackSummary[] } | undefined>(
     undefined,
   );
@@ -297,7 +298,6 @@ export class MessageMenu {
       !message.isDeleted &&
       message.messageType === MessageType.text &&
       !message.forwardedFrom &&
-      !this.queued()?.forwarding &&
       (this.groupChatWriteDisabled() ||
         this.chatInfo.canSpeak(
           this.chatId(),

@@ -26,7 +26,7 @@ import {
   IonButton,
   IonContent,
 } from '@ionic/angular';
-import { alertCircleOutline, documentAttachOutline, downloadOutline, playCircle } from 'ionicons/icons';
+import { alertCircleOutline, documentAttachOutline, downloadOutline, micOutline, playCircle } from 'ionicons/icons';
 import { type MessageResponse, MessageType } from '../../../generated/models';
 import type { SnowflakeID } from '../../api/snowflake-id';
 import { openMediaViewer } from '../media-viewer/media-viewer';
@@ -103,6 +103,8 @@ export class MessageAttachments {
     );
   }
   readonly message = input.required<MessageAttachmentSource>();
+  readonly staticPreview = input(false);
+  protected readonly voiceIcon = micOutline;
   readonly dockEnabled = input(true);
   readonly overlayTime = input(false);
   readonly outgoing = input(false);

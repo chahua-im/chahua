@@ -1,0 +1,179 @@
+:host {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  --forward-panel-header-button-background: light-dark(
+    var(--ion-background-color-step-100, var(--ion-color-light)),
+    var(--ion-background-color-step-200, var(--ion-color-light))
+  );
+  --forward-panel-border: light-dark(
+    var(--ion-background-color-step-150, var(--ion-color-light-shade)),
+    var(--ion-background-color-step-250, var(--ion-color-light-tint))
+  );
+}
+
+.dialog {
+  box-sizing: border-box;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  padding: 16px 20px 20px;
+  overflow: auto;
+}
+
+.dialog > :not(.source) {
+  flex-shrink: 0;
+}
+
+.heading,
+.target {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.heading h2 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.heading ion-button {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  margin: 0;
+  font-size: 20px;
+  --padding-start: 0;
+  --padding-end: 0;
+  --border-radius: 50%;
+  --background: var(--forward-panel-header-button-background);
+  --color: var(--ion-color-medium);
+}
+
+.source {
+  --source-label-height: 1.25rem;
+  --source-label-gap: 6px;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(var(--source-label-height) + var(--source-label-gap) + 64px);
+}
+
+.section-label {
+  flex-shrink: 0;
+  margin: 0 0 6px;
+  color: var(--ion-color-medium);
+  font-size: var(--app-font-compact);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 8px;
+  border: 1px solid var(--forward-panel-border);
+  border-radius: 12px;
+  background: var(--app-conversation-background);
+}
+
+.preview > app-message {
+  // Leave room for the outgoing bubble's tail inside the preview border.
+  margin-inline-end: 8px;
+}
+
+.source .section-label {
+  line-height: var(--source-label-height);
+  margin-block-end: var(--source-label-gap);
+}
+
+.loading {
+  display: grid;
+  min-height: 96px;
+  place-items: center;
+}
+
+.target {
+  min-height: 56px;
+  padding: 8px 10px;
+  border: 1px solid var(--forward-panel-border);
+  border-radius: 12px;
+}
+
+.target-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.target-name > * {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.target-name app-message-preview {
+  color: var(--ion-color-medium);
+}
+
+.target-actions {
+  display: flex;
+  flex-shrink: 0;
+}
+
+.target-actions ion-button {
+  width: 40px;
+  height: 40px;
+  margin: 0;
+  --padding-start: 0;
+  --padding-end: 0;
+}
+
+.target-actions ion-button > [slot='icon-only'] {
+  // Ionic uses the button's font size to calculate its minimum size.
+  font-size: 22px;
+}
+
+footer {
+  margin-block-start: auto;
+}
+
+footer app-message-composer {
+  --composer-bar-margin: 0;
+  --composer-safe-area-bottom: 0px;
+}
+
+.restriction,
+.sending {
+  margin: 0 0 8px;
+  color: var(--ion-color-medium);
+}
+
+.sending {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sending ion-spinner {
+  width: 18px;
+  height: 18px;
+}
+
+@media (width < 768px) {
+  .dialog {
+    padding: 0 16px max(16px, var(--ion-safe-area-bottom, 0px));
+  }
+}

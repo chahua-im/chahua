@@ -85,28 +85,33 @@
   @let groupRestricted = groupChatWriteRestricted();
   @let restrictionKey =
     groupRestricted ? 'speaking.groupChatWriteRestricted' : mode ? 'speaking.placeholder.' + mode : undefined;
-  @let placeholder = restrictionKey ?? 'messages.composer.placeholder' | transloco;
+  @let placeholderText =
+    restrictionKey ? (restrictionKey | transloco) : (placeholder() ?? ('messages.composer.placeholder' | transloco));
   @if (voiceActive() && restrictionKey) {
-    <p class="ion-padding-horizontal">{{ groupRestricted ? placeholder : ('speaking.blocked.' + mode | transloco) }}</p>
+    <p class="ion-padding-horizontal">
+      {{ groupRestricted ? placeholderText : ('speaking.blocked.' + mode | transloco) }}
+    </p>
   }
   <div class="compose-context" [hidden]="voiceActive() && !forwarding()"><ng-content /></div>
   <div class="compose-row">
-    <button
-      type="button"
-      #attachButton
-      class="attach-button"
-      [disabled]="voiceActive() || forwarding() || writeDisabled()"
-      (pointerdown)="$event.preventDefault()"
-      (click)="openAttachments(attachmentMenu, attachButton)">
-      <ion-icon [icon]="icons.attachOutline" />
-    </button>
+    @if (!forwarding()) {
+      <button
+        type="button"
+        #attachButton
+        class="attach-button"
+        [disabled]="voiceActive() || writeDisabled()"
+        (pointerdown)="$event.preventDefault()"
+        (click)="openAttachments(attachmentMenu, attachButton)">
+        <ion-icon [icon]="icons.attachOutline" />
+      </button>
+    }
     <div class="input-wrapper" [hidden]="voiceActive()">
       <div class="input-row">
         <ion-textarea
           appScrollbars
           [disabled]="writeDisabled()"
           [class.restricted]="!!restrictionKey"
-          [placeholder]="placeholder"
+          [placeholder]="placeholderText"
           [autoGrow]="true"
           [rows]="1"
           [value]="restrictionKey ? '' : display().text"
@@ -116,7 +121,7 @@
           (paste)="paste($event)"
           (keydown)="key($event)" />
         @if (restrictionKey) {
-          <span class="restriction-placeholder">{{ placeholder }}</span>
+          <span class="restriction-placeholder">{{ placeholderText }}</span>
         }
         @if (!editing() && !forwarding()) {
           <button

@@ -31,6 +31,7 @@ export class RpcTransportError extends Error {
   constructor(
     readonly kind: 'disconnected' | 'timeout' | 'overloaded' | 'protocol',
     message: string = kind,
+    readonly sent = kind !== 'overloaded',
   ) {
     super(message);
     this.name = 'RpcTransportError';
