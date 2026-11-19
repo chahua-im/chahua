@@ -273,3 +273,11 @@
   font-size: 48px;
   filter: drop-shadow(0 1px 3px rgb(0 0 0 / 45%));
 }
+
+.voice-preview {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 50px;
+  padding-inline: 0.75rem;
+}

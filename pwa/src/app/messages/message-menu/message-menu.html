@@ -37,6 +37,7 @@
               }
               <div #preview class="preview">
                 <app-message
+                  class="menu-preview compact-preview"
                   [message]="message"
                   [delivery]="queued()?.delivery()"
                   [uploads]="queued()?.uploads ?? []"

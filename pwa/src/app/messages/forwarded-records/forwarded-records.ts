@@ -31,7 +31,7 @@ import { TranslocoPipe } from '@jsverse/transloco';
 import { chevronBack, documentTextOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { RpcApi } from '../../../generated/rpc-api';
-import { ServerWsMessageType, type ForwardedMessagesResponse, type MessagePreview } from '../../../generated/models';
+import { ServerWsMessageType, type ForwardedMessagesResponse } from '../../../generated/models';
 import { RpcError, RpcErrorCode } from '../../api/rpc-error';
 import { Connection, ResyncReason } from '../../api/connection';
 import { ChatChangeKind, ChatStore } from '../../chats/chat-store';
@@ -46,6 +46,7 @@ import { messageRows } from '../../conversations/message-rows';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
 import { VoicePlayback } from '../voice-player/voice-playback';
+import { forwardedRecordContents } from './forwarded-record-content';
 
 @Component({
   selector: 'app-forwarded-records',
@@ -132,30 +133,10 @@ export class ForwardedRecords {
   protected readonly loading = signal(false);
   protected readonly failed = signal(false);
   protected readonly unavailable = signal(false);
-  private readonly messages = computed(
-    () =>
-      this.data()?.messages.map((message) => {
-        const reply = message.reply;
-        const preview = reply?.kind === 'internal' ? reply.preview : undefined;
-        const quote: Omit<MessagePreview, 'clientGeneratedId'> | undefined = preview
-          ? {
-              ...preview,
-              id: preview.originalMessageId,
-              createdAt: preview.originalCreatedAt,
-              isDeleted: false,
-              mentions: preview.mentions ?? [],
-            }
-          : undefined;
-        const content: MessageContent = {
-          ...message,
-          id: message.originalMessageId,
-          chatId: message.originalChatId,
-          createdAt: message.originalCreatedAt,
-          replyToMessage: quote,
-        };
-        return { ...content, redacted: reply?.kind === 'redacted' };
-      }) ?? [],
-  );
+  private readonly messages = computed(() => {
+    const data = this.data();
+    return data ? forwardedRecordContents(data) : [];
+  });
   protected readonly rows = computed(() => messageRows(this.messages()));
   protected readonly backHref = computed(() => {
     const root =

@@ -48,13 +48,14 @@ type MessagePageParams = Omit<MessagesListParams, 'chatId' | 'max' | 'threadId'>
 
 interface SyncWindow {
   around?: SnowflakeID;
+  latestAnchor?: () => SnowflakeID | undefined;
   restore?: () => void;
 }
 
 interface WindowRead {
   around?: SnowflakeID;
   policyGeneration: number;
-  restore?: () => void;
+  viewport?: SyncWindow;
   received?: boolean;
 }
 
@@ -171,12 +172,12 @@ export class ConversationStore {
       // This scope already awaits a replacing page. A page-triggered reset
       // precedes its PageResult, so retrying here would discard a fresh snapshot.
       pending.policyGeneration = this.chatInfo.membershipPolicyRequestGeneration();
-      if (!provisional) pending.restore = recovery?.restore;
+      if (!provisional) pending.viewport = recovery;
       return;
     }
     if (provisional && !purge && !pending) return;
     this.cancelLoading();
-    if (recovery) void this.open(recovery.around, false, this.hideMembershipMessages, recovery.restore);
+    if (recovery) void this.open(recovery.around, false, this.hideMembershipMessages, recovery);
   }
 
   canLoad(direction: PageDirection) {
@@ -258,7 +259,7 @@ export class ConversationStore {
     around?: SnowflakeID,
     exact = false,
     hideMembershipMessages = this.hideMembershipMessages,
-    restore?: () => void,
+    viewport?: SyncWindow,
   ): Promise<boolean> {
     this.retryReplacement = undefined;
     this.retryNewer = false;
@@ -323,7 +324,7 @@ export class ConversationStore {
     this.needsResync = false;
     const windowRead: WindowRead = {
       around,
-      restore,
+      viewport,
       policyGeneration: this.chatInfo.membershipPolicyRequestGeneration(),
     };
     this.windowRead = windowRead;
@@ -354,7 +355,37 @@ export class ConversationStore {
       }
       if (windowRead.policyGeneration !== this.chatInfo.membershipPolicyRequestGeneration())
         throw new ChatSettingsChanged();
+      if (this.provisional()) {
+        // An unedited history row predates any confirmed edit in the retained window.
+        const edits = new Map(
+          this.items()
+            .filter((row) => row.isEdited && !row.isDeleted)
+            .map((row) => [row.id, row]),
+        );
+        page.messages = page.messages.map((row) => {
+          const edit = edits.get(row.id);
+          if (!edit || row.isEdited || row.isDeleted) return row;
+          return {
+            ...row,
+            isEdited: true,
+            message: edit.message,
+            metadata: edit.metadata,
+            mentions: edit.mentions,
+            hasAttachments: edit.hasAttachments,
+            attachments: edit.attachments,
+          };
+        });
+      }
       page = this.applyPendingUpdates(page, sync && !page.newerCursor, sync && !page.olderCursor);
+      const latestAnchor = windowRead.viewport?.latestAnchor?.();
+      if (
+        latestAnchor != null &&
+        latestAnchor !== around &&
+        ((page.olderCursor && latestAnchor < page.olderCursor) || (page.newerCursor && latestAnchor > page.newerCursor))
+      ) {
+        // Keep the existing window until a replacement covers the new reading position.
+        return this.open(latestAnchor, false, hideMembershipMessages, windowRead.viewport);
+      }
       this.chatInfo.rememberMentions(page.messages, mentionVersion);
       // `around` also returns neighbours when the target has been deleted.
       const missing = exact && !page.messages.some((message) => message.id === around && isVisibleMessage(message));
@@ -370,7 +401,7 @@ export class ConversationStore {
       this.currentPage.set(nextPage);
       this.restoredRange.set(false);
       if (replaced) this.replacedWindows.next(nextPage);
-      windowRead.restore?.();
+      windowRead.viewport?.restore?.();
       if (missing) this.currentError.set(ConversationError.Missing);
       return !missing;
     } catch (error) {
@@ -381,7 +412,7 @@ export class ConversationStore {
           this.filtersMembershipMessages() &&
             (!(this.session.user()?.showMembershipMessages ?? true) ||
               this.chatInfo.membershipPolicy(this.context!.chatId)?.canView === false),
-          windowRead.restore,
+          windowRead.viewport,
         );
       }
       if (version === this.version && error instanceof InaccessibleMessagePage) {
@@ -397,8 +428,8 @@ export class ConversationStore {
         });
         void this.diagnostics.captureWorker();
         this.needsResync = true;
-        if (windowRead.restore)
-          this.retryReplacement = () => void this.open(around, exact, this.hideMembershipMessages, windowRead.restore);
+        if (windowRead.viewport?.restore)
+          this.retryReplacement = () => void this.open(around, exact, this.hideMembershipMessages, windowRead.viewport);
         this.currentError.set(ConversationError.Open);
       }
       return false;
@@ -504,7 +535,7 @@ export class ConversationStore {
     )
       return;
     if (!this.latestSeenId || message.id > this.latestSeenId) this.latestSeenId = message.id;
-    const incoming = redactRecalledCitations(message, this.deletedIds);
+    const incoming = this.refreshCitation(message);
     if (this.sync.active() && (this.loading() || this.paging())) this.pendingCreates.set(message.id, incoming);
     const page = this.page();
     if (!page) return;
@@ -579,12 +610,12 @@ export class ConversationStore {
 
   update(message: MessageResponse, restoreToTimeline = false) {
     if (!this.accepts(message)) return;
-    if (message.isDeleted) this.deletedIds.add(message.id);
-    else this.editedPreviews.set(message.id, toMessagePreview(message));
+    if (message.isDeleted) {
+      this.deletedIds.add(message.id);
+      message = redactDeletedMessage(message);
+    } else this.editedPreviews.set(message.id, toMessagePreview(message));
     const known = this.items().find((item) => item.id === message.id);
-    this.patch(message.id, (current) =>
-      redactRecalledCitations(replaceEditedMessage(known ?? current, message), this.deletedIds),
-    );
+    this.patch(message.id, (current) => replaceEditedMessage(known ?? current, message));
     if (restoreToTimeline && (!known || this.loading())) this.receive(message);
   }
 
@@ -613,7 +644,7 @@ export class ConversationStore {
   private patch(messageId: SnowflakeID, update: MessageUpdate) {
     // A response already in flight may contain the pre-event snapshot, including messages not loaded yet.
     if (this.loading() || this.paging()) this.queuePatch(messageId, update);
-    this.patchPage((message) => (message.id === messageId ? update(message) : this.refreshCitation(message)));
+    this.patchPage((message) => this.refreshCitation(message.id === messageId ? update(message) : message));
   }
 
   private queuePatch(messageId: SnowflakeID, update: MessageUpdate) {
@@ -741,14 +772,14 @@ export class ConversationStore {
       const window = this.syncWindow();
       if (window && (this.page() || this.needsWindow || this.error() === ConversationError.Open)) {
         this.needsWindow = true;
-        await this.open(window.around, false, this.hideMembershipMessages, window.restore);
+        await this.open(window.around, false, this.hideMembershipMessages, window);
       }
       return;
     }
     if (this.needsWindow) {
       if (this.loading()) return;
       const window = this.syncWindow(true);
-      if (!(await this.open(window?.around, false, this.hideMembershipMessages, window?.restore))) return;
+      if (!(await this.open(window?.around, false, this.hideMembershipMessages, window))) return;
     }
     this.needsResync = true;
     if (this.retryNewer) {

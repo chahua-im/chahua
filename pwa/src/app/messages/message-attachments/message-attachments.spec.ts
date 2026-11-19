@@ -443,6 +443,12 @@ describe('MessageAttachments', () => {
     const video = element.querySelector('video')!;
     expect(video.controls).toBe(false);
     expect(video.autoplay && video.loop && video.muted).toBe(true);
+    expect(video.hasAttribute('appVideoPreview')).toBe(false);
+    fixture.componentRef.setInput('staticPreview', true);
+    fixture.detectChanges();
+    expect(element.querySelector('video')).toBe(video);
+    expect(video.autoplay && video.loop && video.muted).toBe(true);
+    expect(element.querySelector('.video-open')).toBeNull();
   });
 
   it.each([
@@ -540,6 +546,10 @@ describe('MessageAttachments', () => {
     expect(element.querySelector('audio')).toBeNull();
     const audio = fixture.debugElement.query(By.directive(VoicePlayer)).componentInstance as VoicePlayer;
     expect(audio.src()).toBe('https://example.com/voice.ogg');
+    fixture.componentRef.setInput('staticPreview', true);
+    fixture.detectChanges();
+    expect(element.querySelector('app-voice-player')).toBeNull();
+    expect(element.querySelector('.voice-preview')?.textContent?.trim()).toBe('[语音]');
   });
 
   function upload(url: string, kind = 'image/jpeg') {

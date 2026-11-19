@@ -6,10 +6,11 @@
 .chat-row {
   --avatar-column-width: 44px;
   --bubble-max-width: calc(100% - 36px - var(--avatar-column-width));
+  --bubble-column: fit-content(var(--bubble-max-width));
   position: relative;
   transition: transform 160ms ease-out;
   display: grid;
-  grid-template-columns: 44px fit-content(var(--bubble-max-width)) auto;
+  grid-template-columns: 44px var(--bubble-column) auto;
   align-items: end;
   justify-content: start;
   padding: 2px 7px;
@@ -33,26 +34,14 @@
   }
 }
 
-.chat-row.preview {
-  padding: 0;
-  grid-template-columns: 44px minmax(0, 1fr) auto;
-}
-
 // Without author details the avatar column collapses and bubbles take its place.
 .chat-row.no-details {
   --avatar-column-width: 0px;
-  grid-template-columns: fit-content(var(--bubble-max-width)) auto;
-
-  &:not(.preview) {
-    padding-inline: 15px;
-  }
+  grid-template-columns: var(--bubble-column) auto;
+  padding-inline: 15px;
 
   &:not(.sent) > :not(.reply-button, .swipe-reply) {
     grid-column: 1;
-  }
-
-  &.preview {
-    grid-template-columns: minmax(0, 1fr) auto;
   }
 }
 
@@ -114,19 +103,11 @@
 }
 
 .sent {
-  grid-template-columns: auto fit-content(var(--bubble-max-width)) 44px;
+  grid-template-columns: auto var(--bubble-column) 44px;
   justify-content: end;
 
   &.no-details {
-    grid-template-columns: auto fit-content(var(--bubble-max-width));
-
-    &.preview {
-      grid-template-columns: auto minmax(0, 1fr);
-    }
-  }
-
-  &.preview {
-    grid-template-columns: auto minmax(0, 1fr) 44px;
+    grid-template-columns: auto var(--bubble-column);
   }
 
   .avatar-slot {

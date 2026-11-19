@@ -5,7 +5,7 @@ import { IonContent, IonRouterOutlet, NavController } from '@ionic/angular';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
-import { ServerWsMessageType, type ServerWsMessage } from '../../../generated/models';
+import { MessageType, ServerWsMessageType, type ServerWsMessage } from '../../../generated/models';
 import { Connection, ResyncReason } from '../../api/connection';
 import { RpcErrorCode } from '../../api/rpc-error';
 import { provideRpcTesting, RpcTestPeer } from '../../api/rpc-testing';
@@ -108,14 +108,33 @@ describe('ForwardedRecords', () => {
     expect(fixture.nativeElement.textContent).toContain('captured content');
   });
 
-  it('retains preview metadata when mapping a full forwarded record', async () => {
+  it('renders captured link metadata, topic counts and localized invite placeholders', async () => {
     const { fixture, peer } = create({ id: wireChat.id, messageId: wireMessage.id });
     const metadata = { linkPreviews: [{ url: 'https://example.com/', status: 'ready', title: 'Forwarded title' }] };
-    peer
-      .expect('messages.listForwardedMessages', { chatId: wireChat.id, messageId: wireMessage.id })
-      .flush({ total: 1, messages: [{ ...record, metadata }] });
+    peer.expect('messages.listForwardedMessages', { chatId: wireChat.id, messageId: wireMessage.id }).flush({
+      total: 2,
+      messages: [
+        {
+          ...record,
+          metadata,
+          forwardedThreadReplyCount: 12,
+          reply: {
+            kind: 'redacted',
+            externalPreview: { ...wireMessage, mentions: [], message: '发送时的外部引用' },
+          },
+        },
+        { ...record, originalMessageId: '456', messageType: MessageType.placeholder, message: 'groupInvite' },
+      ],
+    });
     await fixture.whenStable();
     expect(fixture.componentInstance['messages']()[0].metadata).toEqual(metadata);
+    const element: HTMLElement = fixture.nativeElement;
+    expect(element.querySelector('div.reply-preview')?.textContent).toContain('发送时的外部引用');
+    expect(element.querySelector('.message-metadata .forwarded-topic')?.textContent?.trim()).toBe('12 条回复');
+    expect(element.querySelector('.message-metadata > time')).not.toBeNull();
+    expect(element.querySelector('button.thread-entry')).toBeNull();
+    expect(element.textContent).toContain('[加入群聊邀请]');
+    expect(element.querySelector('app-invite-card')).toBeNull();
   });
 
   it('keeps a text placeholder for the sticky record avatar while loading or on failure', async () => {

@@ -163,7 +163,7 @@ describe('RpcTransport', () => {
     transport.setReconnectToken('replacement-token');
     peer.disconnect();
 
-    expect(failed).toHaveBeenCalledWith(expect.objectContaining({ kind: 'disconnected' }));
+    expect(failed).toHaveBeenCalledWith(expect.objectContaining({ kind: 'disconnected', sent: true }));
     mutation.flush({ id: 'late' });
     oldSocket.receive({ jsonrpc: '2.0', method: 'events.message', params: { id: 'stale' } });
     expect(notifications).not.toHaveBeenCalled();
@@ -294,10 +294,10 @@ describe('RpcTransport', () => {
     expect(initiallySent).toHaveLength(16);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toBeInstanceOf(RpcTransportError);
-    expect((errors[0] as RpcTransportError).kind).toBe('overloaded');
+    expect(errors[0]).toMatchObject({ kind: 'overloaded', sent: false });
 
     vi.advanceTimersByTime(30_001);
-    expect(timeout).toHaveBeenCalledWith(expect.objectContaining({ kind: 'timeout' }));
+    expect(timeout).toHaveBeenCalledWith(expect.objectContaining({ kind: 'timeout', sent: false }));
     for (const request of [...initiallySent, ...peer.match('messages.list'), ...peer.match('messages.search')])
       request.flush(null);
 

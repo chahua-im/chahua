@@ -1,35 +1,13 @@
-import { computed, inject, linkedSignal, Service } from '@angular/core';
-import type { LinkPreviewInput, MessageResponse } from '../../generated/models';
+import { computed, inject, Service } from '@angular/core';
+import type { LinkPreviewInput } from '../../generated/models';
 import { decodeId, type SnowflakeID } from '../api/snowflake-id';
-import { SessionStore } from '../session/session-store';
 import { AccountStorage, AccountStore } from '../storage/account-storage';
 import type { Draft } from '../storage/account-database';
 
 @Service()
 export class DraftStore {
-  private readonly session = inject(SessionStore);
   private readonly storage = inject(AccountStorage);
-  private readonly account = computed(() => this.session.user()?.uid);
-  // Forward drafts keep server message data, never upload tasks, and only survive within this session.
-  private readonly forwards = linkedSignal({
-    source: this.account,
-    computation: (): Record<string, readonly MessageResponse[] | undefined> => ({}),
-  });
   private readonly items = computed(() => this.storage.entries(AccountStore.Drafts));
-
-  forward(chatId: SnowflakeID, threadId?: SnowflakeID) {
-    return this.forwards()[this.key(chatId, threadId)];
-  }
-
-  setForward(chatId: SnowflakeID, threadId: SnowflakeID | undefined, sources?: readonly MessageResponse[]) {
-    const key = this.key(chatId, threadId);
-    this.forwards.update((items) => {
-      const next = { ...items };
-      if (sources) next[key] = sources;
-      else delete next[key];
-      return next;
-    });
-  }
 
   get(chatId: SnowflakeID, threadId?: SnowflakeID) {
     return this.items()[this.key(chatId, threadId)];
