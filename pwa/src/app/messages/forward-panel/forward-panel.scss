@@ -3,14 +3,14 @@
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  --forward-panel-header-button-background: light-dark(
-    var(--ion-background-color-step-100, var(--ion-color-light)),
-    var(--ion-background-color-step-200, var(--ion-color-light))
-  );
   --forward-panel-border: light-dark(
     var(--ion-background-color-step-150, var(--ion-color-light-shade)),
     var(--ion-background-color-step-250, var(--ion-color-light-tint))
   );
+}
+
+ion-header {
+  flex: none;
 }
 
 .dialog {
@@ -26,37 +26,6 @@
 
 .dialog > :not(.source) {
   flex-shrink: 0;
-}
-
-.heading,
-.target {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.heading h2 {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  font-size: 20px;
-  font-weight: 650;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.heading ion-button {
-  flex-shrink: 0;
-  width: 36px;
-  height: 36px;
-  margin: 0;
-  font-size: 20px;
-  --padding-start: 0;
-  --padding-end: 0;
-  --border-radius: 50%;
-  --background: var(--forward-panel-header-button-background);
-  --color: var(--ion-color-medium);
 }
 
 .source {
@@ -106,6 +75,9 @@
 }
 
 .target {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   min-height: 56px;
   padding: 8px 10px;
   border: 1px solid var(--forward-panel-border);
@@ -173,7 +145,14 @@ footer app-message-composer {
 }
 
 @media (width < 768px) {
+  :host ion-header > ion-toolbar:only-of-type {
+    // The picker reserves the handle area and top safe area above the toolbar.
+    padding-block: 0;
+    --padding-top: 0;
+    --padding-bottom: 0;
+  }
+
   .dialog {
-    padding: 0 16px max(16px, var(--ion-safe-area-bottom, 0px));
+    padding: 16px 16px max(16px, var(--ion-safe-area-bottom, 0px));
   }
 }

@@ -1,7 +1,6 @@
 import { Component, computed, DestroyRef, effect, inject, input, signal, untracked } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
-  IonButton,
   IonButtons,
   IonContent,
   IonHeader,
@@ -26,6 +25,7 @@ import { messageChangePatch, recalledMessageIds } from '../../messages/message-c
 import { Message } from '../../messages/message/message';
 import { PanelNavigation } from '../../navigation/panel-navigation';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
+import { ModalButton } from '../../ui/modal-button';
 import { fillScrollViewport } from '../../scrolling/fill-scroll-viewport';
 import { LoadError } from '../../ui/load-error/load-error';
 
@@ -36,6 +36,7 @@ const SEARCH_PAGE_SIZE = 40;
   host: { class: 'ion-page' },
   templateUrl: './chat-search.html',
   imports: [
+    ModalButton,
     ContentScrollbars,
     LoadError,
     IonHeader,
@@ -49,7 +50,6 @@ const SEARCH_PAGE_SIZE = 40;
     IonSegment,
     IonSegmentButton,
     IonLabel,
-    IonButton,
     IonSpinner,
     Message,
     TranslocoPipe,

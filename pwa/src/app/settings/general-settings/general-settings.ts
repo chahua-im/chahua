@@ -1,7 +1,7 @@
+import { ModalButton } from '../../ui/modal-button';
 import { Component, DestroyRef, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import {
-  IonButton,
   IonButtons,
   IonContent,
   IonHeader,
@@ -24,7 +24,6 @@ import { TranslocoPipe } from '@jsverse/transloco';
 import {
   chatbubblesOutline,
   mailUnreadOutline,
-  chevronBackOutline,
   contrastOutline,
   happyOutline,
   moonOutline,
@@ -45,10 +44,10 @@ import { Preferences } from '../preferences';
   templateUrl: './general-settings.html',
   styleUrl: './general-settings.scss',
   imports: [
+    ModalButton,
     RouterLink,
     ContentScrollbars,
     TranslocoPipe,
-    IonButton,
     IonButtons,
     IonContent,
     IonHeader,
@@ -88,7 +87,6 @@ export class GeneralSettings {
   protected readonly systemIcon = contrastOutline;
   protected readonly lightIcon = sunnyOutline;
   protected readonly darkIcon = moonOutline;
-  protected readonly backIcon = chevronBackOutline;
   protected readonly stickerIcon = happyOutline;
 
   protected setFontSize(value: number | { lower: number; upper: number }) {

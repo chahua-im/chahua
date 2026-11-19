@@ -181,7 +181,7 @@
         <ion-toolbar>
           <ion-title>{{ 'messages.upload.attachmentsTitle' | transloco }}</ion-title>
           <ion-buttons slot="end">
-            <ion-button (click)="closeUploads()">{{ 'common.close' | transloco }}</ion-button>
+            <app-modal-button (pressed)="closeUploads()" />
           </ion-buttons>
         </ion-toolbar>
       </ion-header>

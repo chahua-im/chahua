@@ -1,3 +1,4 @@
+import { ModalButton } from '../../ui/modal-button';
 import { LoadError } from '../../ui/load-error/load-error';
 import { Component, computed, DestroyRef, effect, inject, input, signal, untracked } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -40,6 +41,7 @@ import { ContentScrollbars } from '../../scrolling/content-scrollbars';
   selector: 'app-privacy-exceptions',
   templateUrl: './privacy-exceptions.html',
   imports: [
+    ModalButton,
     LoadError,
     TranslocoPipe,
     ChatAvatar,

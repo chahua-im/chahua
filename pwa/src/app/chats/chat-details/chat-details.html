@@ -1,13 +1,9 @@
 @let chatId = id()!;
 <ion-content #overview appScrollbars color="light" [class.overview-covered]="page() !== View.Info">
   @if (hasParentPanel()) {
-    <ion-button class="back-button" slot="fixed" fill="clear" [disabled]="busy()" (click)="back()">
-      <ion-icon slot="icon-only" [icon]="icons.chevronBackOutline" />
-    </ion-button>
+    <app-modal-button back class="back-button" slot="fixed" [disabled]="busy()" (pressed)="back()" />
   }
-  <ion-button class="close-button" slot="fixed" fill="clear" (click)="close()">
-    <ion-icon slot="icon-only" [icon]="icons.closeOutline" />
-  </ion-button>
+  <app-modal-button class="close-button" slot="fixed" [disabled]="busy()" (pressed)="close()" />
   @if (overviewVisited() || page() === View.Info) {
     @if (chat() || person()) {
       <div class="profile ion-text-center ion-padding">
@@ -280,9 +276,7 @@
       <ion-header>
         <ion-toolbar>
           <ion-buttons slot="start">
-            <ion-button [disabled]="busy()" (click)="back()">
-              <ion-icon slot="icon-only" [icon]="icons.chevronBackOutline" />
-            </ion-button>
+            <app-modal-button back [disabled]="busy()" (pressed)="back()" />
           </ion-buttons>
           <ion-title>
             @switch (section) {
@@ -307,7 +301,7 @@
             }
           </ion-title>
           <ion-buttons slot="end">
-            <ion-button (click)="close()"><ion-icon slot="icon-only" [icon]="icons.closeOutline" /></ion-button>
+            <app-modal-button [disabled]="busy()" (pressed)="close()" />
           </ion-buttons>
         </ion-toolbar>
       </ion-header>

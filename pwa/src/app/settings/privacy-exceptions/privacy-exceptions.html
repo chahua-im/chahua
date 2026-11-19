@@ -58,7 +58,7 @@
       <ion-toolbar>
         <ion-title>{{ 'settings.privacyExceptions.add' | transloco }}</ion-title>
         <ion-buttons slot="end">
-          <ion-button [disabled]="busy()" (click)="pickerOpen.set(false)">{{ 'common.cancel' | transloco }}</ion-button>
+          <app-modal-button [disabled]="busy()" (pressed)="pickerOpen.set(false)" />
         </ion-buttons>
       </ion-toolbar>
       <ion-searchbar

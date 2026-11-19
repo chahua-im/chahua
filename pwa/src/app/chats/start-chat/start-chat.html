@@ -1,5 +1,14 @@
 <ion-header>
   <ion-toolbar>
+    @if (kind() !== Kind.Friend) {
+      <ion-buttons slot="start">
+        <ion-button (click)="panels.close()">{{ 'common.cancel' | transloco }}</ion-button>
+      </ion-buttons>
+    } @else if (panels.paths().length > 1) {
+      <ion-buttons slot="start">
+        <app-modal-button back (pressed)="panels.back()" />
+      </ion-buttons>
+    }
     <ion-title>
       {{
         (kind() === Kind.Create
@@ -10,9 +19,11 @@
         ) | transloco
       }}
     </ion-title>
-    <ion-buttons slot="end">
-      <ion-button (click)="panels.close()">{{ 'common.cancel' | transloco }}</ion-button>
-    </ion-buttons>
+    @if (kind() === Kind.Friend) {
+      <ion-buttons slot="end">
+        <app-modal-button (pressed)="panels.close()" />
+      </ion-buttons>
+    }
   </ion-toolbar>
 </ion-header>
 <ion-content appScrollbars color="light">

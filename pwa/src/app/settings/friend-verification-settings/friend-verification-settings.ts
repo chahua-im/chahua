@@ -1,3 +1,4 @@
+import { ModalButton } from '../../ui/modal-button';
 import { Component, computed, DestroyRef, inject, signal } from '@angular/core';
 import { applyWhen, disabled, form, FormField, maxLength, pattern, required } from '@angular/forms/signals';
 import {
@@ -19,7 +20,7 @@ import {
   IonToolbar,
 } from '@ionic/angular';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { banOutline, chatbubbleOutline, chevronBackOutline, helpCircleOutline, personAddOutline } from 'ionicons/icons';
+import { banOutline, chatbubbleOutline, helpCircleOutline, personAddOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { RpcApi } from '../../../generated/rpc-api';
 import { FriendAddVerificationMode } from '../../../generated/models';
@@ -32,6 +33,7 @@ import { LoadError } from '../../ui/load-error/load-error';
   templateUrl: './friend-verification-settings.html',
   styleUrl: '../settings/settings.scss',
   imports: [
+    ModalButton,
     ContentScrollbars,
     FormField,
     LoadError,
@@ -63,7 +65,6 @@ export class FriendVerificationSettings {
   protected readonly messageIcon = chatbubbleOutline;
   protected readonly questionIcon = helpCircleOutline;
   protected readonly forbidIcon = banOutline;
-  protected readonly backIcon = chevronBackOutline;
   protected readonly Mode = FriendAddVerificationMode;
   protected readonly loading = signal(true);
   protected readonly saving = signal(false);

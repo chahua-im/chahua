@@ -888,7 +888,7 @@ describe('ChatDetails', () => {
     const fixture = await open();
     fixture.detectChanges();
     const dismiss = vi.spyOn(TestBed.inject(PanelNavigation), 'close').mockResolvedValue(true);
-    (fixture.nativeElement.querySelector('.close-button') as HTMLElement).click();
+    (fixture.nativeElement.querySelector('.close-button ion-button') as HTMLElement).click();
     expect(dismiss).toHaveBeenCalledTimes(1);
   });
 
@@ -901,7 +901,7 @@ describe('ChatDetails', () => {
     paths.set(['/settings', '/profile/2']);
     fixture.detectChanges();
     const close = vi.spyOn(panels, 'close');
-    (fixture.nativeElement.querySelector('.back-button') as HTMLElement).click();
+    (fixture.nativeElement.querySelector('.back-button ion-button') as HTMLElement).click();
     expect(panels.back).toHaveBeenCalledOnce();
     expect(close).not.toHaveBeenCalled();
   });

@@ -333,7 +333,7 @@ describe('MessageMenu', () => {
     };
     open();
     const panel = fixture.nativeElement.querySelector('app-emoji-panel');
-    panel.querySelector('.picker-back').click();
+    panel.querySelector('app-modal-button[back] ion-button').click();
     fixture.detectChanges();
     expect(panel.isConnected).toBe(true);
     expect(panel.classList.contains('ion-hide')).toBe(true);

@@ -1,18 +1,25 @@
+@let editingQuestion = !loading() && !loadError() && verification().mode === Mode.question;
 <ion-header>
   <ion-toolbar>
     <ion-buttons slot="start">
-      <ion-button (click)="panels.back()">
-        <ion-icon slot="icon-only" [icon]="backIcon"></ion-icon>
-      </ion-button>
+      @if (editingQuestion) {
+        <ion-button (click)="panels.back()">{{ 'common.cancel' | transloco }}</ion-button>
+      } @else {
+        <app-modal-button back (pressed)="panels.back()" />
+      }
     </ion-buttons>
     <ion-title>{{ 'settings.friendVerification.title' | transloco }}</ion-title>
-    @if (!loading() && !loadError() && verification().mode === Mode.question) {
+    @if (editingQuestion) {
       <ion-buttons slot="end">
         <ion-button
           [disabled]="!dirty() || verificationForm().disabled() || verificationForm().invalid()"
           (click)="saveVerification()">
           {{ 'common.save' | transloco }}
         </ion-button>
+      </ion-buttons>
+    } @else {
+      <ion-buttons slot="end">
+        <app-modal-button (pressed)="panels.close()" />
       </ion-buttons>
     }
   </ion-toolbar>

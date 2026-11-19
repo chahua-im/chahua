@@ -14,7 +14,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
-import { IonButton, IonContent, IonSpinner } from '@ionic/angular';
+import { IonButton, IonButtons, IonContent, IonHeader, IonSpinner, IonToolbar } from '@ionic/angular';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { firstValueFrom } from 'rxjs';
 import { RpcApi } from '../../generated/rpc-api';
@@ -25,6 +25,7 @@ import { ChatDetails, DetailView } from '../chats/chat-details/chat-details';
 import { StartChat } from '../chats/start-chat/start-chat';
 import { ChatListStore } from '../chats/chat-list-store';
 import { ConversationPage } from '../conversations/conversation/conversation.page';
+import { ModalButton } from '../ui/modal-button';
 import type { ViewerMedia } from '../messages/media-viewer/media-viewer';
 import { panelComponents } from '../panel-routes';
 import { matchPanel, PanelContent, panelInputs } from './panel-definitions';
@@ -33,11 +34,34 @@ import { PanelNavigation, panelIdentity } from './panel-navigation';
 @Component({
   selector: 'app-panel-page',
   host: { class: 'ion-page' },
-  imports: [ContentScrollbars, NgComponentOutlet, IonContent, IonSpinner, IonButton, TranslocoPipe],
+  imports: [
+    ContentScrollbars,
+    ModalButton,
+    NgComponentOutlet,
+    IonButton,
+    IonButtons,
+    IonContent,
+    IonHeader,
+    IonSpinner,
+    IonToolbar,
+    TranslocoPipe,
+  ],
   template: `
     @if (content(); as page) {
       <ng-container *ngComponentOutlet="page.component; inputs: inputs()" />
     } @else {
+      <ion-header>
+        <ion-toolbar>
+          @if (panels.paths().length > 1 || path() !== identity(path())) {
+            <ion-buttons slot="start">
+              <app-modal-button back (pressed)="panels.back()" />
+            </ion-buttons>
+          }
+          <ion-buttons slot="end">
+            <app-modal-button (pressed)="panels.close()" />
+          </ion-buttons>
+        </ion-toolbar>
+      </ion-header>
       <ion-content appScrollbars>
         @if (failed()) {
           <p class="ion-padding">{{ 'chats.link.failed' | transloco }}</p>
@@ -45,7 +69,6 @@ import { PanelNavigation, panelIdentity } from './panel-navigation';
         } @else {
           <div class="loading-status"><ion-spinner /></div>
         }
-        <ion-button fill="clear" (click)="panels.back()">{{ 'common.close' | transloco }}</ion-button>
       </ion-content>
     }
   `,
@@ -55,6 +78,7 @@ export class PanelPage {
   readonly active = input(true);
   readonly source = input<unknown>();
   protected readonly panels = inject(PanelNavigation);
+  protected readonly identity = panelIdentity;
   private readonly router = inject(Router);
   private readonly api = inject(RpcApi);
   private readonly lists = inject(ChatListStore);

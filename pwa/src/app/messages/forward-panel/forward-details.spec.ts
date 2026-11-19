@@ -86,6 +86,8 @@ describe('ForwardDetails', () => {
     expect(details['frames']()).toHaveLength(3);
     details['back']();
     expect(details['frames']()).toHaveLength(2);
+    expect(details['canDismiss'](undefined, 'close')).toBe(true);
+    expect(details['frames']()).toHaveLength(2);
     expect(details['canDismiss'](undefined, 'back')).toBe(false);
     expect(details['frames']()).toHaveLength(1);
     expect(messages.listForwardedMessages).toHaveBeenCalledOnce();

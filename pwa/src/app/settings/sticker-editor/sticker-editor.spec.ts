@@ -78,6 +78,28 @@ describe('StickerEditor dismissal', () => {
     expect(editor['value']().emoji).toBe('🍵🍰');
     expect(editor['choosingEmoji']()).toBe(false);
   });
+  it('returns from emoji selection without clearing the sticker form', () => {
+    const isOpen = vi.spyOn(IonModal.prototype, 'isOpen', 'set').mockImplementation(() => {});
+    try {
+      const fixture = TestBed.createComponent(StickerEditor);
+      fixture.componentRef.setInput('title', '贴纸');
+      fixture.componentRef.setInput('withEmoji', true);
+      const editor = fixture.componentInstance;
+      const value = { name: '茶', emoji: '🍵' };
+      editor['value'].set(value);
+      editor['openEmojiPicker']();
+      fixture.detectChanges();
+      const picker = fixture.nativeElement.querySelector('ion-modal.emoji-panel-modal');
+      picker.dispatchEvent(new CustomEvent('ionMount'));
+      fixture.detectChanges();
+      expect(picker.querySelector('ion-button[title="关闭"]')).toBeNull();
+      picker.querySelector('ion-button[title="返回"]').click();
+      expect(editor['choosingEmoji']()).toBe(false);
+      expect(editor['value']()).toEqual(value);
+    } finally {
+      isOpen.mockRestore();
+    }
+  });
   it('allows saved and navigation dismissal while blocking cancellation during a save', async () => {
     TestBed.overrideComponent(StickerEditor, {
       set: { template: '<ion-modal [canDismiss]="canDismiss" />' },

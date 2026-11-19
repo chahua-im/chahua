@@ -95,7 +95,10 @@ describe('Settings', () => {
         SessionStore,
         Preferences,
         { provide: ModalController, useValue: { dismiss } },
-        { provide: PanelNavigation, useValue: { back: dismiss, close: dismiss, registerLeaveCheck: () => () => {} } },
+        {
+          provide: PanelNavigation,
+          useValue: { back: dismiss, close: dismiss, paths: () => [], registerLeaveCheck: () => () => {} },
+        },
         { provide: PushNotifications, useValue: notifications },
         { provide: AppUpdates, useValue: updates },
         { provide: Presence, useValue: presence },
