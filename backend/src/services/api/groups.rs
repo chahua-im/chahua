@@ -189,6 +189,7 @@ pub async fn post_group(
     conn: &mut PgConnection,
     authz_service: &AuthorizationService,
     id_gen: &Arc<IdGen>,
+    ws_registry: &ConnectionRegistry,
 ) -> Result<CreateChatResponse, AppError> {
     authz_service.require_permission(conn, uid, AuthzAction::ChatCreate, AuthzResource::Global)?;
 
@@ -226,6 +227,7 @@ pub async fn post_group(
             last_read_message_id: None,
         })
         .execute(conn)?;
+    ws_registry.wake_message_sync(&[uid], id);
 
     Ok(CreateChatResponse {
         id,

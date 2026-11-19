@@ -21,6 +21,7 @@ use crate::services::authentication::verify_session;
 use crate::services::client_tracking::{
     record_header_activity, should_record_client_activity, ClientTrackingService,
 };
+use crate::services::message_sync::{ReplayService, SyncDriver, SyncError, SyncSink};
 use crate::services::presence::{
     parse_legacy_presence_watch, snapshot_after_pending_changes, PresenceChanges, PresenceWatch,
 };
@@ -176,7 +177,10 @@ async fn handle_auth_and_socket(mut socket: WebSocket, state: AppState, headers:
         return;
     }
 
-    let Ok(ClientWsMessage::Auth { ticket }) = serde_json::from_str::<ClientWsMessage>(&first_text)
+    let Ok(ClientWsMessage::Auth {
+        ticket,
+        message_sync,
+    }) = serde_json::from_str::<ClientWsMessage>(&first_text)
     else {
         return;
     };
@@ -202,7 +206,21 @@ async fn handle_auth_and_socket(mut socket: WebSocket, state: AppState, headers:
     let uid = session.uid;
     let client_id = session.client_id;
     let registry = state.ws_registry.clone();
-    let (entry, rx) = registry.register(uid, client_id);
+    let sync_enabled = message_sync.as_ref().and_then(serde_json::Value::as_u64) == Some(1);
+    let (entry, rx) = if sync_enabled {
+        registry.register_sync(uid, client_id)
+    } else {
+        registry.register(uid, client_id)
+    };
+    if sync_enabled {
+        let hello = ServerWsMessage::MessageSyncHello(crate::dto::message_sync::MessageSyncHello {
+            version: 1,
+        });
+        if TicketSyncSink(&mut socket).send(&hello).await.is_err() {
+            registry.remove_connection(uid, entry.conn_id);
+            return;
+        }
+    }
     handle_socket(socket, state, uid, registry, entry, rx, track_client).await;
 }
 
@@ -306,6 +324,35 @@ async fn handle_rpc_socket(socket: WebSocket, state: AppState, first_text: Strin
     let _ = timeout(RPC_IO_TIMEOUT, &mut session_task).await;
 }
 
+struct TicketSyncSink<'a>(&'a mut WebSocket);
+
+impl SyncSink for TicketSyncSink<'_> {
+    async fn send(&mut self, message: &ServerWsMessage) -> Result<(), SyncError> {
+        let text = serde_json::to_string(message).map_err(|_| SyncError::Delivery)?;
+        timeout(RPC_IO_TIMEOUT, self.0.send(Message::Text(text.into())))
+            .await
+            .map_err(|_| SyncError::Delivery)?
+            .map_err(|_| SyncError::Delivery)
+    }
+}
+
+async fn close_sync_error(socket: &mut WebSocket, error: SyncError) {
+    let code = match error {
+        SyncError::Protocol(_) => 1008,
+        SyncError::Backend(error) => {
+            warn!(?error, "message sync backend failed");
+            1011
+        }
+        SyncError::Delivery => 1011,
+    };
+    let _ = socket
+        .send(Message::Close(Some(axum::extract::ws::CloseFrame {
+            code,
+            reason: "".into(),
+        })))
+        .await;
+}
+
 async fn handle_socket(
     mut socket: WebSocket,
     state: AppState,
@@ -316,6 +363,16 @@ async fn handle_socket(
     track_client: bool,
 ) {
     let conn_id = entry.conn_id;
+    let subscription = entry.message_sync.clone();
+    let mut sync = subscription.as_ref().map(|subscription| {
+        let replay = ReplayService::new(
+            state.db.clone(),
+            state.media.clone(),
+            state.avatars.clone(),
+            &state.config.auth.jwt_signing_key,
+        );
+        SyncDriver::new(uid, replay, subscription.clone())
+    });
     let started_at = Instant::now();
     let mut presence_changes = state.presence_service.subscribe_changes();
     let mut activity_tasks = tokio::task::JoinSet::new();
@@ -352,7 +409,28 @@ async fn handle_socket(
                 }
             }
             // A live socket with a dropped event cannot safely skip foreground calibration.
-            _ = entry.lagged.notified() => break,
+            _ = entry.lagged.notified() => {
+                if sync.is_some() {
+                    close_sync_error(&mut socket, SyncError::Delivery).await;
+                }
+                break;
+            }
+            _ = async {
+                match subscription.as_ref() {
+                    Some(subscription) => subscription.notified().await,
+                    None => std::future::pending().await,
+                }
+            }, if sync.as_ref().is_some_and(SyncDriver::is_resumed) => {
+                if subscription.as_ref().is_some_and(|subscription| subscription.is_closed()) {
+                    break;
+                }
+                if let Some(driver) = sync.as_mut() {
+                    if let Err(error) = driver.drain(TicketSyncSink(&mut socket)).await {
+                        close_sync_error(&mut socket, error).await;
+                        break;
+                    }
+                }
+            }
             Some(message) = states_messages.recv() => {
                 let request_id = match &message {
                     ServerWsMessage::ConversationStates(payload) => payload.request_id,
@@ -409,6 +487,10 @@ async fn handle_socket(
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         let Ok(message) = serde_json::from_str::<ClientWsMessage>(&text) else {
+                            if sync.is_some() {
+                                close_sync_error(&mut socket, SyncError::Protocol("invalid WebSocket control")).await;
+                                break;
+                            }
                             continue;
                         };
                         match message {
@@ -503,6 +585,22 @@ async fn handle_socket(
                                         conversations,
                                     })
                                 });
+                            }
+                            ClientWsMessage::MessageSyncResume(params) => {
+                                if let Some(driver) = sync.as_mut() {
+                                    if let Err(error) = driver.resume(params, TicketSyncSink(&mut socket)).await {
+                                        close_sync_error(&mut socket, error).await;
+                                        break;
+                                    }
+                                }
+                            }
+                            ClientWsMessage::MessageSyncPage(params) => {
+                                if let Some(driver) = sync.as_mut() {
+                                    if let Err(error) = driver.page(params, TicketSyncSink(&mut socket)).await {
+                                        close_sync_error(&mut socket, error).await;
+                                        break;
+                                    }
+                                }
                             }
                             ClientWsMessage::Auth { .. } | ClientWsMessage::Unknown => {}
                         }

@@ -25,6 +25,7 @@ import type {
   ConversationsWatchStatesParams,
   ConversationsWatchUnreadParams,
   CreateStickerFromMessageBody,
+  EmptyResult,
   ExceptionsQuery,
   FriendsAcceptRequestParams,
   FriendsArchiveRequestParams,
@@ -76,6 +77,9 @@ import type {
   ListSavedMessagesQuery,
   ListThreadParticipantsQuery,
   ListThreadsQuery,
+  MessageSyncChat,
+  MessageSyncPageParams,
+  MessageSyncResumeParams,
   MessagesDeleteManyParams,
   MessagesDeleteParams,
   MessagesEditParams,
@@ -710,6 +714,9 @@ export const rpcSchemas: Record<string, JsonCodec> = {
   MentionInfo: {
     userGroup: 'UserGroupTagInfo',
   },
+  MessageIdConflictResponse: {
+    existingMessage: 'MessageResponse',
+  },
   MessageMetadataInput: {
     linkPreviews: ['LinkPreviewInput'],
   },
@@ -752,6 +759,43 @@ export const rpcSchemas: Record<string, JsonCodec> = {
   MessageStickerResponse: {
     id: 1,
     media: 'MessageStickerMediaResponse',
+  },
+  MessageSyncBatch: {
+    changes: ['MessageSyncChange'],
+    chatId: 1,
+  },
+  MessageSyncChange: {
+    message: 'MessageResponse',
+    messageId: 1,
+    threadRootId: 1,
+  },
+  MessageSyncChat: {
+    chatId: 1,
+  },
+  MessageSyncPageParams: {
+    after: 1,
+    around: 1,
+    before: 1,
+    chatId: 1,
+    threadId: 1,
+  },
+  MessageSyncPageResult: {
+    chatId: 1,
+    page: 'ListMessagesResponse',
+  },
+  MessageSyncReady: {
+    chatId: 1,
+  },
+  MessageSyncReset: {
+    chatId: 1,
+    reason: 'MessageSyncResetReason',
+  },
+  MessageSyncResumeParams: {
+    chats: ['MessageSyncChat'],
+    priorityChatId: 1,
+  },
+  MessageSyncRevoked: {
+    chatId: 1,
   },
   MessagesDeleteManyParams: {
     chatId: 1,
@@ -1358,6 +1402,14 @@ export const rpcMethods: Record<string, RpcMethodCodec> = {
   'conversations.watchStates': {
     params: 'ConversationsWatchStatesParams',
   },
+  'messageSync.resume': {
+    params: 'MessageSyncResumeParams',
+    result: 'EmptyResult',
+  },
+  'messageSync.page': {
+    params: 'MessageSyncPageParams',
+    result: 'EmptyResult',
+  },
   'messages.list': {
     params: 'MessagesListParams',
     result: 'ListMessagesResponse',
@@ -1881,6 +1933,8 @@ export const rpcMethodClasses: Record<string, RpcMethodClass> = {
   'presence.watch': 'control',
   'conversations.watchUnread': 'control',
   'conversations.watchStates': 'control',
+  'messageSync.resume': 'control',
+  'messageSync.page': 'control',
   'messages.list': 'read',
   'messages.previewLinks': 'read',
   'messages.send': 'mutation',
@@ -2024,6 +2078,12 @@ export const rpcEvents: Record<string, JsonCodec> = {
   'events.messageDeleted': 'MessageResponse',
   'events.messagesBulkDeleted': 'BulkDeletedPayload',
   'events.reactionUpdated': 'ReactionUpdatePayload',
+  'events.messageSyncHello': 'MessageSyncHello',
+  'events.messageSyncBatch': 'MessageSyncBatch',
+  'events.messageSyncReady': 'MessageSyncReady',
+  'events.messageSyncReset': 'MessageSyncReset',
+  'events.messageSyncRevoked': 'MessageSyncRevoked',
+  'events.messageSyncPageResult': 'MessageSyncPageResult',
   'events.presenceUpdate': 'PresenceUpdatePayload',
   'events.presenceSnapshot': 'PresenceSnapshotPayload',
   'events.conversationUnread': 'ConversationUnreadPayload',
@@ -2060,6 +2120,12 @@ export interface RpcEventMap {
   'events.messageDeleted': Shared.MessageResponse;
   'events.messagesBulkDeleted': Shared.BulkDeletedPayload;
   'events.reactionUpdated': Shared.ReactionUpdatePayload;
+  'events.messageSyncHello': Shared.MessageSyncHello;
+  'events.messageSyncBatch': Shared.MessageSyncBatch;
+  'events.messageSyncReady': Shared.MessageSyncReady;
+  'events.messageSyncReset': Shared.MessageSyncReset;
+  'events.messageSyncRevoked': Shared.MessageSyncRevoked;
+  'events.messageSyncPageResult': Shared.MessageSyncPageResult;
   'events.presenceUpdate': Shared.PresenceUpdatePayload;
   'events.presenceSnapshot': Shared.PresenceSnapshotPayload;
   'events.conversationUnread': Shared.ConversationUnreadPayload;

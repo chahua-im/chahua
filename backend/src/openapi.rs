@@ -211,6 +211,18 @@ const SNOWFLAKE_COMPONENT_FIELDS: &[(&str, &[&str])] = &[
     ("ThreadReadStateResponse", &["lastReadMessageId"]),
     ("SearchUsersQuery", &["excludeMemberOf"]),
     ("ChatMembershipChangedPayload", &["chatId"]),
+    ("MessageSyncChat", &["chatId"]),
+    ("MessageSyncResumeParams", &["priorityChatId"]),
+    (
+        "MessageSyncPageParams",
+        &["chatId", "threadId", "before", "after", "around"],
+    ),
+    ("MessageSyncBatch", &["chatId"]),
+    ("MessageSyncChange", &["messageId", "threadRootId"]),
+    ("MessageSyncReady", &["chatId"]),
+    ("MessageSyncReset", &["chatId"]),
+    ("MessageSyncRevoked", &["chatId"]),
+    ("MessageSyncPageResult", &["chatId"]),
     ("ReactionUpdatePayload", &["messageId", "chatId"]),
     ("ThreadUpdatePayload", &["threadRootId", "chatId"]),
     (

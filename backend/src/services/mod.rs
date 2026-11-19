@@ -15,6 +15,8 @@ pub mod link_previews;
 pub mod media;
 pub mod message_deletion;
 pub mod message_search;
+pub mod message_sync;
+pub(crate) mod message_visibility;
 pub mod messages;
 pub mod notification_preferences;
 pub mod presence;

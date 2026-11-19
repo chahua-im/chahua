@@ -29,6 +29,7 @@ pub enum SessionInvalidatedReason {
 #[serde(rename_all = "camelCase")]
 pub enum SessionUnavailableReason {
     AuthLookupUnavailable,
+    MessageSyncUnavailable,
 }
 
 /// Payload for the `session.invalidated` notification.

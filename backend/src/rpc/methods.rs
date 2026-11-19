@@ -106,6 +106,8 @@ register_methods! {
     ("presence.watch", crate::dto::rpc::presence::PresenceWatchParams, (), Control, control::watch_presence),
     ("conversations.watchUnread", crate::dto::rpc::conversations::ConversationsWatchUnreadParams, (), Control, control::watch_unread),
     ("conversations.watchStates", crate::dto::rpc::conversations::ConversationsWatchStatesParams, (), Control, control::watch_states),
+    ("messageSync.resume", crate::dto::message_sync::MessageSyncResumeParams, crate::dto::rpc::session::EmptyResult, Control, control::message_sync_resume),
+    ("messageSync.page", crate::dto::message_sync::MessageSyncPageParams, crate::dto::rpc::session::EmptyResult, Control, control::message_sync_page),
 ("messages.list", crate::dto::rpc::messages::MessagesListParams, crate::dto::messages::ListMessagesResponse, Read, messages::list),
 ("messages.previewLinks", crate::dto::rpc::messages::MessagesPreviewLinksParams, Vec<crate::dto::link_previews::LinkPreviewResponse>, Read, messages::preview_links),
 ("messages.send", crate::dto::rpc::messages::MessagesSendParams, crate::dto::messages::MessageResponse, Mutation, messages::send),
@@ -260,9 +262,19 @@ pub async fn dispatch_call(
         method = registered_method
     );
     let result = async {
+        if matches!(method.as_str(), "messageSync.resume" | "messageSync.page")
+            && !context.message_sync_enabled
+        {
+            return Err(RpcError::with_message(
+                RpcErrorCode::InvalidParams,
+                "message sync is not enabled for this session",
+            ));
+        }
         if context.session.is_none()
             && method != "session.open"
             && method != "auth.createDevSession"
+            && method != "messageSync.resume"
+            && method != "messageSync.page"
         {
             return Err(RpcError::with_message(
                 RpcErrorCode::Unauthorized,

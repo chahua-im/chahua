@@ -78,6 +78,7 @@ pub struct RpcCallContext {
     pub session: Option<Arc<VerifiedSession>>,
     pub connection_id: u64,
     pub rpc_id: Option<protocol::RpcId>,
+    pub(crate) message_sync_enabled: bool,
     pub controls: tokio::sync::mpsc::Sender<session::RpcControlCommand>,
     /// Notification calls have no response through which a typed generation
     /// guard failure can reach the engine, so they report it out-of-band.

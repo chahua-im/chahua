@@ -327,6 +327,7 @@ pub async fn delete_remove_member(
     })?;
 
     deps.ws_registry.invalidate_unread(&[target_uid]);
+    deps.ws_registry.wake_message_sync(&[target_uid], chat_id);
     let (system_kind, sender_uid, message) = if is_admin_removing_other {
         (
             SystemMessageKind::MemberRemoved,

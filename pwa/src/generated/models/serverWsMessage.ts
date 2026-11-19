@@ -20,6 +20,12 @@ import type { GroupSpeakingModeResponse } from './groups/groupSpeakingModeRespon
 import type { MemberSpeakingModeResponse } from './members/memberSpeakingModeResponse';
 import type { MembershipMessagePolicyChanged } from './membershipMessagePolicyChanged';
 import type { MessageResponse } from './messageResponse';
+import type { MessageSyncBatch } from './messageSyncBatch';
+import type { MessageSyncHello } from './messageSyncHello';
+import type { MessageSyncPageResult } from './messageSyncPageResult';
+import type { MessageSyncReady } from './messageSyncReady';
+import type { MessageSyncReset } from './messageSyncReset';
+import type { MessageSyncRevoked } from './messageSyncRevoked';
 import type { NotificationPayload } from './notificationPayload';
 import type { PinUpdatePayload } from './pinUpdatePayload';
 import type { PresenceSnapshotPayload } from './presenceSnapshotPayload';
@@ -60,6 +66,30 @@ export type ServerWsMessage =
   | {
       payload: ReactionUpdatePayload;
       type: 'reactionUpdated';
+    }
+  | {
+      payload: MessageSyncHello;
+      type: 'messageSyncHello';
+    }
+  | {
+      payload: MessageSyncBatch;
+      type: 'messageSyncBatch';
+    }
+  | {
+      payload: MessageSyncReady;
+      type: 'messageSyncReady';
+    }
+  | {
+      payload: MessageSyncReset;
+      type: 'messageSyncReset';
+    }
+  | {
+      payload: MessageSyncRevoked;
+      type: 'messageSyncRevoked';
+    }
+  | {
+      payload: MessageSyncPageResult;
+      type: 'messageSyncPageResult';
     }
   | {
       payload: PresenceUpdatePayload;

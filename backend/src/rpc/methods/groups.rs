@@ -39,6 +39,7 @@ pub async fn create(
         &mut conn,
         &services.authz_service,
         &services.id_gen,
+        &services.ws_registry,
     )
     .await
 }

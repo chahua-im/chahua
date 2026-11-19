@@ -67,6 +67,7 @@ pub struct AppConfig {
     pub node_id: u64,
     pub message_search_enabled: bool,
     pub message_search: Option<crate::services::message_search::MessageSearchConfig>,
+    pub message_sync_retention_hours: u32,
     pub push: Option<Arc<PushConfig>>,
 }
 
@@ -80,6 +81,7 @@ pub struct ConfigFile {
     auth: AuthSettings,
     avatars: AvatarSettings,
     message_search: SearchSettings,
+    message_sync: MessageSyncSettings,
     push: PushSettings,
     ids: IdSettings,
     logging: LoggingSettings,
@@ -121,6 +123,11 @@ struct SearchSettings {
     enabled: Option<bool>,
     meili_url: Option<String>,
     index_uid: Option<String>,
+}
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct MessageSyncSettings {
+    retention_hours: Option<toml::Value>,
 }
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -203,7 +210,15 @@ impl AppConfig {
     pub fn from_env(file: ConfigFile) -> Self {
         Self::resolve(
             file,
-            |name| std::env::var(name).ok(),
+            |name| match std::env::var(name) {
+                Ok(value) => Some(value),
+                Err(std::env::VarError::NotUnicode(_))
+                    if name == "MESSAGE_SYNC_RETENTION_HOURS" =>
+                {
+                    panic!("MESSAGE_SYNC_RETENTION_HOURS must be an integer from 1 to 2160")
+                }
+                Err(_) => None,
+            },
             cfg!(debug_assertions),
         )
     }
@@ -215,6 +230,7 @@ impl AppConfig {
             auth,
             avatars,
             message_search,
+            message_sync,
             push,
             ids,
             logging: _,
@@ -348,6 +364,16 @@ impl AppConfig {
         }
         .filter(|id| *id <= 15)
         .expect("NODE_ID must be an integer from 0 to 15");
+        let message_sync_retention_hours = match env("MESSAGE_SYNC_RETENTION_HOURS") {
+            Some(value) => value.parse::<i64>().ok(),
+            None => match message_sync.retention_hours {
+                Some(value) => value.as_integer(),
+                None => Some(72),
+            },
+        }
+        .filter(|hours| (1..=2160).contains(hours))
+        .unwrap_or_else(|| panic!("MESSAGE_SYNC_RETENTION_HOURS must be an integer from 1 to 2160"))
+            as u32;
         Self {
             server: ServerConfig {
                 app_addr: socket(
@@ -389,6 +415,7 @@ impl AppConfig {
             node_id,
             message_search_enabled: enabled,
             message_search: search,
+            message_sync_retention_hours,
             push: {
                 let public_key = env("VAPID_PUBLIC_KEY").or(push.vapid_public_key);
                 let private_key = env("VAPID_PRIVATE_KEY");
@@ -504,6 +531,42 @@ mod tests {
         assert_eq!(search.meili_url, "http://search:7700");
         assert_eq!(search.meili_master_key, "key");
         assert_eq!(search.index_uid, "custom");
+    }
+
+    #[test]
+    fn message_sync_retention_uses_environment_then_file_then_default() {
+        let values = base();
+        let config = AppConfig::resolve(ConfigFile::default(), env(&values), false);
+        assert_eq!(config.message_sync_retention_hours, 72);
+        let file = || parse("[message_sync]\nretention_hours = 48\n");
+        let config = AppConfig::resolve(file(), env(&values), false);
+        assert_eq!(config.message_sync_retention_hours, 48);
+        let mut values = values;
+        values.push(("MESSAGE_SYNC_RETENTION_HOURS", "2160"));
+        let config = AppConfig::resolve(file(), env(&values), false);
+        assert_eq!(config.message_sync_retention_hours, 2160);
+    }
+
+    #[test]
+    fn message_sync_retention_rejects_values_outside_the_range() {
+        const MESSAGE: &str = "MESSAGE_SYNC_RETENTION_HOURS must be an integer from 1 to 2160";
+        for value in ["0", "2161", "not an integer"] {
+            let mut values = base();
+            values.push(("MESSAGE_SYNC_RETENTION_HOURS", value));
+            let error = std::panic::catch_unwind(|| {
+                AppConfig::resolve(ConfigFile::default(), env(&values), false)
+            })
+            .err()
+            .unwrap();
+            assert_eq!(error.downcast_ref::<&str>(), Some(&MESSAGE));
+        }
+        for value in ["0", "2161", "1.5", "'72'"] {
+            let file = parse(&format!("[message_sync]\nretention_hours = {value}\n"));
+            let error = std::panic::catch_unwind(|| AppConfig::resolve(file, env(&base()), false))
+                .err()
+                .unwrap();
+            assert_eq!(error.downcast_ref::<&str>(), Some(&MESSAGE));
+        }
     }
 
     #[test]

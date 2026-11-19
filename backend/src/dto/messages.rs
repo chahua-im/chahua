@@ -407,7 +407,7 @@ pub struct ForwardedMessageResponse {
     pub forwarded_preview: Option<ForwardedMessagesPreviewResponse>,
 }
 
-#[derive(Serialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ListMessagesResponse {
     pub membership_message_policy: crate::dto::groups::MembershipMessagePolicy,

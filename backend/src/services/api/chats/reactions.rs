@@ -250,40 +250,43 @@ pub fn delete_reaction(
     check_membership(conn, chat_id, uid)?;
     social::require_chat_writable(conn, chat_id, uid)?;
 
-    // Verify message exists and is not deleted (no reaction removal on deleted messages)
-    let message: Message = messages::table
-        .filter(messages::id.eq(message_id))
-        .filter(diesel::dsl::sql::<diesel::sql_types::Bool>(
-            crate::services::system_messages::NON_MEMBERSHIP_PREDICATE,
-        ))
-        .filter(messages::chat_id.eq(chat_id))
-        .filter(messages::deleted_at.is_null())
-        .filter(messages::is_published.eq(true))
-        .first(conn)
-        .optional()?
-        .ok_or(AppError::NotFound("Message not found"))?;
+    let (message, deleted) = conn.transaction::<_, AppError, _>(|conn| {
+        // Serialize the flag update with reaction insertion and deletion.
+        let message: Message = messages::table
+            .filter(messages::id.eq(message_id))
+            .filter(diesel::dsl::sql::<diesel::sql_types::Bool>(
+                crate::services::system_messages::NON_MEMBERSHIP_PREDICATE,
+            ))
+            .filter(messages::chat_id.eq(chat_id))
+            .filter(messages::deleted_at.is_null())
+            .filter(messages::is_published.eq(true))
+            .for_no_key_update()
+            .first(conn)
+            .optional()?
+            .ok_or(AppError::NotFound("Message not found"))?;
 
-    let deleted = diesel::delete(
-        message_reactions::table
-            .filter(message_reactions::message_id.eq(message_id))
-            .filter(message_reactions::user_uid.eq(uid))
-            .filter(message_reactions::emoji.eq(&emoji)),
-    )
-    .execute(conn)?;
+        let deleted = diesel::delete(
+            message_reactions::table
+                .filter(message_reactions::message_id.eq(message_id))
+                .filter(message_reactions::user_uid.eq(uid))
+                .filter(message_reactions::emoji.eq(&emoji)),
+        )
+        .execute(conn)?;
 
-    if deleted > 0 {
-        let remaining: i64 = message_reactions::table
-            .filter(message_reactions::message_id.eq(message_id))
-            .count()
-            .get_result(conn)
-            .unwrap_or(0);
-
-        if remaining == 0 {
-            diesel::update(messages::table.filter(messages::id.eq(message_id)))
+        if deleted > 0
+            && !diesel::select(diesel::dsl::exists(
+                message_reactions::table.filter(message_reactions::message_id.eq(message_id)),
+            ))
+            .get_result::<bool>(conn)?
+        {
+            diesel::update(messages::table.find(message_id))
                 .set(messages::has_reactions.eq(false))
                 .execute(conn)?;
         }
+        Ok((message, deleted))
+    })?;
 
+    if deleted > 0 {
         let member_uids = broadcast_reaction_update(conn, avatars, registry, chat_id, message_id);
         // Removing a reaction changes the author's unread count too. Notify only
         // that user rather than making every chat member refetch unread state.

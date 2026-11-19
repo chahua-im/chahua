@@ -8,6 +8,43 @@ async fn exchange(input: &RpcSessionInput, output: &mut RpcSessionOutput, reques
 }
 
 #[tokio::test]
+async fn anonymous_sync_opt_in_is_not_enabled() {
+    let Some(services) = crate::rpc::test_support::services().await else {
+        return;
+    };
+    let (input_rx, output_tx, dependencies, transport) = rpc_session_channels(services);
+    let task = tokio::spawn(serve_rpc_session(input_rx, output_tx, dependencies));
+    let RpcSessionTransport { input, mut output } = transport;
+    let opened = exchange(
+        &input,
+        &mut output,
+        json!({
+            "jsonrpc":"2.0", "id":1, "method":"session.open",
+            "params":{"protocolVersion":1, "messageSync":1}
+        }),
+    )
+    .await;
+    assert_eq!(opened["result"]["authenticated"], false);
+    assert!(opened["result"].get("messageSync").is_none());
+    for (id, method) in [(2, "messageSync.resume"), (3, "messageSync.page")] {
+        let response = exchange(
+            &input,
+            &mut output,
+            json!({
+                "jsonrpc":"2.0", "id":id, "method":method, "params":{}
+            }),
+        )
+        .await;
+        assert_eq!(response["error"]["code"], -32602);
+        assert_eq!(
+            response["error"]["message"],
+            "message sync is not enabled for this session"
+        );
+    }
+    close_session(input, output, task).await;
+}
+
+#[tokio::test]
 async fn malformed_control_notifications_cannot_bypass_pending_control_bound() {
     let Some(services) = crate::rpc::test_support::services().await else {
         return;

@@ -26,6 +26,7 @@ use tokio::{
 use crate::{
     dto::{
         auth::{AuthTokenResponse, DevSessionRequest},
+        message_sync::{MessageSyncPageParams, MessageSyncResumeParams},
         rpc::{
             auth::AuthCreateDevSessionParams,
             conversations::{ConversationsWatchStatesParams, ConversationsWatchUnreadParams},
@@ -43,6 +44,7 @@ use crate::{
         api::auth::{self, PostDevSessionDeps},
         auth_token::VerifiedSession,
         authentication,
+        message_sync::{ReplayService, SyncDriver, SyncError, SyncSink},
         presence::{snapshot_after_pending_changes, validate_presence_watch, PresenceWatch},
         unread,
         ws_registry::{AppPresenceState, ConnectionEntry},
@@ -105,6 +107,14 @@ pub type ControlReply<T> = oneshot::Sender<Result<T, RpcError>>;
 
 /// Typed commands carried by the session's bounded, serial control lane.
 pub enum RpcControlCommand {
+    MessageSyncResume {
+        params: MessageSyncResumeParams,
+        reply: ControlReply<crate::dto::rpc::session::EmptyResult>,
+    },
+    MessageSyncPage {
+        params: MessageSyncPageParams,
+        reply: ControlReply<crate::dto::rpc::session::EmptyResult>,
+    },
     Open {
         params: SessionOpenParams,
         reply: ControlReply<SessionOpenResult>,
@@ -613,6 +623,7 @@ struct BoundSession {
     unread_receiver: Option<watch::Receiver<Option<unread::watch::UnreadWatch>>>,
     states_subscription: watch::Sender<Option<unread::states::StateWatch>>,
     states_receiver: Option<watch::Receiver<Option<unread::states::StateWatch>>>,
+    sync_driver: Option<Arc<Mutex<SyncDriver>>>,
 }
 
 struct SessionState {
@@ -676,6 +687,11 @@ impl SessionShared {
             connection_id: state.bound.as_ref().map_or(0, |bound| bound.entry.conn_id),
             rpc_id,
             controls,
+            message_sync_enabled: state.activated
+                && state
+                    .bound
+                    .as_ref()
+                    .is_some_and(|bound| bound.sync_driver.is_some()),
             guard_failures: Some(guard_failures),
             close_session: Some(RpcSessionCloser {
                 state: self.transport.clone(),
@@ -725,16 +741,39 @@ impl SessionShared {
         Ok(())
     }
 
-    async fn bind(&self, services: &RpcServices, session: VerifiedSession) -> Result<(), RpcError> {
+    async fn bind(
+        &self,
+        services: &RpcServices,
+        session: VerifiedSession,
+        sync_enabled: bool,
+    ) -> Result<(), RpcError> {
         if self.transport.is_closed() {
             return Err(RpcError::with_message(
                 RpcErrorCode::Unavailable,
                 "Session unavailable",
             ));
         }
-        let (entry, registry_events) = services
-            .ws_registry
-            .register(session.uid, session.client_id.clone());
+        let (entry, registry_events) = if sync_enabled {
+            services
+                .ws_registry
+                .register_sync(session.uid, session.client_id.clone())
+        } else {
+            services
+                .ws_registry
+                .register(session.uid, session.client_id.clone())
+        };
+        let sync_driver = entry.message_sync.as_ref().map(|subscription| {
+            Arc::new(Mutex::new(SyncDriver::new(
+                session.uid,
+                ReplayService::new(
+                    services.db.clone(),
+                    services.media.clone(),
+                    services.avatars.clone(),
+                    &services.config.auth.jwt_signing_key,
+                ),
+                subscription.clone(),
+            )))
+        });
         let (presence_subscription, presence_receiver) =
             watch::channel::<Option<VersionedPresenceWatch>>(None);
         let (unread_subscription, unread_receiver) =
@@ -764,6 +803,7 @@ impl SessionShared {
             unread_receiver: Some(unread_receiver),
             states_subscription,
             states_receiver: Some(states_receiver),
+            sync_driver,
         });
         Ok(())
     }
@@ -860,6 +900,7 @@ impl SessionShared {
                 presence_receiver: bound.presence_receiver.take(),
                 unread_receiver: bound.unread_receiver.take(),
                 states_receiver: bound.states_receiver.take(),
+                sync_driver: bound.sync_driver.clone(),
             };
             state.activated = true;
             activation
@@ -871,7 +912,52 @@ impl SessionShared {
             presence_receiver,
             unread_receiver,
             states_receiver,
+            sync_driver,
         } = activation;
+        if let (Some(driver), Some(subscription)) = (sync_driver, entry.message_sync.clone()) {
+            let shared = self.clone();
+            let sink = sink.clone();
+            tokio::spawn(async move {
+                let mut close = shared.transport.close_subscription();
+                let drain = async {
+                    loop {
+                        subscription.notified().await;
+                        if subscription.is_closed() {
+                            shared.transport.close();
+                            break;
+                        }
+                        let mut driver = driver.lock().await;
+                        let result = driver
+                            .drain(RpcSyncSink {
+                                shared: &shared,
+                                sink: &sink,
+                            })
+                            .await;
+                        match result {
+                            Ok(()) => {}
+                            Err(SyncError::Backend(error)) => {
+                                tracing::error!(?error, "RPC message sync drain failed");
+                                handle_lifecycle_failure(
+                                    RpcLifecycleFailure::MessageSyncUnavailable,
+                                    &shared,
+                                    &sink,
+                                )
+                                .await;
+                                break;
+                            }
+                            Err(_) => {
+                                shared.transport.close();
+                                break;
+                            }
+                        }
+                    }
+                };
+                tokio::select! {
+                    _ = shared.transport.wait_closed(&mut close) => {}
+                    _ = drain => {}
+                }
+            });
+        }
         if let Some(events) = registry_events {
             tokio::spawn(forward_registry_events(
                 events,
@@ -984,6 +1070,7 @@ struct Activation {
     presence_receiver: Option<watch::Receiver<Option<VersionedPresenceWatch>>>,
     unread_receiver: Option<watch::Receiver<Option<unread::watch::UnreadWatch>>>,
     states_receiver: Option<watch::Receiver<Option<unread::states::StateWatch>>>,
+    sync_driver: Option<Arc<Mutex<SyncDriver>>>,
 }
 
 async fn send_authorized_event(
@@ -1306,11 +1393,12 @@ async fn bind_authenticated(
     services: &RpcServices,
     session: VerifiedSession,
     app_version: Option<String>,
+    sync_enabled: bool,
 ) -> Result<SessionOpenResult, RpcError> {
-    let response = SessionOpenResult::authenticated(&session);
+    let response = SessionOpenResult::authenticated(&session, sync_enabled.then_some(1));
     let app_version = shared.binding_app_version(app_version).await;
     record_bind_activity(services, &session, app_version).await?;
-    shared.bind(services, session).await?;
+    shared.bind(services, session, sync_enabled).await?;
     Ok(response)
 }
 
@@ -1318,6 +1406,7 @@ async fn run_controls(
     mut controls: mpsc::Receiver<RpcControlCommand>,
     shared: Arc<SessionShared>,
     services: RpcServices,
+    sink: RpcOutputSink,
 ) {
     let mut close = shared.transport.close_subscription();
     let mut activity_tasks = JoinSet::new();
@@ -1333,9 +1422,75 @@ async fn run_controls(
                 }
             }
             command = controls.recv() => match command {
-                Some(command) => handle_control(command, &shared, &services, &mut activity_tasks).await,
+                Some(command) => handle_control(command, &shared, &services, &sink, &mut activity_tasks).await,
                 None => break,
             }
+        }
+    }
+}
+
+struct RpcSyncSink<'a> {
+    shared: &'a Arc<SessionShared>,
+    sink: &'a RpcOutputSink,
+}
+
+impl SyncSink for RpcSyncSink<'_> {
+    async fn send(&mut self, frame: &ServerWsMessage) -> Result<(), SyncError> {
+        send_authorized_event(self.shared, self.sink, frame)
+            .await
+            .map_err(|_| SyncError::Delivery)
+    }
+}
+
+async fn run_sync_control(
+    shared: &Arc<SessionShared>,
+    services: &RpcServices,
+    sink: &RpcOutputSink,
+    resume: Option<MessageSyncResumeParams>,
+    page: Option<MessageSyncPageParams>,
+) -> Result<crate::dto::rpc::session::EmptyResult, RpcError> {
+    let driver = {
+        let state = shared.state.lock().await;
+        state
+            .bound
+            .as_ref()
+            .and_then(|bound| bound.sync_driver.clone())
+    }
+    .ok_or_else(|| {
+        RpcError::with_message(
+            RpcErrorCode::InvalidParams,
+            "message sync is not enabled for this session",
+        )
+    })?;
+    let _ = guard_bound(shared, services).await?;
+    let mut close = shared.transport.close_subscription();
+    let operation = async {
+        let mut driver = driver.lock().await;
+        let sender = RpcSyncSink { shared, sink };
+        if let Some(params) = resume {
+            driver.resume(params, sender).await
+        } else {
+            driver
+                .page(page.expect("page control has parameters"), sender)
+                .await
+        }
+    };
+    let result = tokio::select! {
+        _ = shared.transport.wait_closed(&mut close) => Err(SyncError::Delivery),
+        result = operation => result,
+    };
+    match result {
+        Ok(()) => Ok(crate::dto::rpc::session::EmptyResult {}),
+        Err(SyncError::Protocol(message)) => {
+            Err(RpcError::with_message(RpcErrorCode::InvalidParams, message))
+        }
+        Err(SyncError::Backend(error)) => {
+            tracing::error!(?error, "RPC message sync operation failed");
+            Err(RpcLifecycleFailure::MessageSyncUnavailable.into())
+        }
+        Err(SyncError::Delivery) => {
+            shared.transport.close();
+            Err(RpcError::new(RpcErrorCode::Unavailable))
         }
     }
 }
@@ -1344,9 +1499,18 @@ async fn handle_control(
     command: RpcControlCommand,
     shared: &Arc<SessionShared>,
     services: &RpcServices,
+    sink: &RpcOutputSink,
     activity_tasks: &mut JoinSet<()>,
 ) {
     match command {
+        RpcControlCommand::MessageSyncResume { params, reply } => {
+            let result = run_sync_control(shared, services, sink, Some(params), None).await;
+            let _ = reply.send(result);
+        }
+        RpcControlCommand::MessageSyncPage { params, reply } => {
+            let result = run_sync_control(shared, services, sink, None, Some(params)).await;
+            let _ = reply.send(result);
+        }
         RpcControlCommand::Open { params, reply } => {
             let result = async {
                 if params.protocol_version != 1 {
@@ -1364,7 +1528,14 @@ async fn handle_control(
                 match params.token {
                     Some(token) => {
                         let session = verify_open(services, token).await?;
-                        bind_authenticated(shared, services, session, params.app_version).await
+                        bind_authenticated(
+                            shared,
+                            services,
+                            session,
+                            params.app_version,
+                            params.message_sync == Some(1),
+                        )
+                        .await
                     }
                     None => {
                         shared.mark_anonymous(params.app_version).await?;
@@ -1416,7 +1587,7 @@ async fn handle_control(
                     RpcError::new(RpcErrorCode::DispatcherInternal)
                 })??;
                 let response = issued.response;
-                bind_authenticated(shared, services, issued.session, None).await?;
+                bind_authenticated(shared, services, issued.session, None, false).await?;
                 Ok(response)
             }
             .await;
@@ -1774,7 +1945,9 @@ async fn schedule_call(
     let method = call.method.clone();
     let activate_after_success =
         matches!(method.as_str(), "session.open" | "auth.createDevSession");
-    let counts_toward_batch = id.is_some() || activate_after_success;
+    let counts_toward_batch = id.is_some()
+        || activate_after_success
+        || matches!(method.as_str(), "messageSync.resume" | "messageSync.page");
     let failure_transport = shared.transport.clone();
     supervise(
         async move {
@@ -1808,10 +1981,21 @@ async fn schedule_call(
                     return;
                 }
             };
+            if id.is_none()
+                && matches!(method.as_str(), "messageSync.resume" | "messageSync.page")
+                && context.message_sync_enabled
+                && error == Some(RpcErrorCode::InvalidParams)
+            {
+                shared.transport.close();
+                return;
+            }
             let result = WorkResult {
                 id,
                 destination,
-                close_after_error,
+                close_after_error: close_after_error
+                    || (matches!(method.as_str(), "messageSync.resume" | "messageSync.page")
+                        && context.message_sync_enabled
+                        && error == Some(RpcErrorCode::InvalidParams)),
                 response,
                 activate_after_success,
                 counts_toward_batch,
@@ -1906,6 +2090,9 @@ async fn handle_lifecycle_failure(
         RpcLifecycleFailure::AuthLookupUnavailable => SessionNotification::Unavailable {
             reason: SessionUnavailableReason::AuthLookupUnavailable,
         },
+        RpcLifecycleFailure::MessageSyncUnavailable => SessionNotification::Unavailable {
+            reason: SessionUnavailableReason::MessageSyncUnavailable,
+        },
     };
     match encode_session_notification(&notification) {
         Ok(text) => {
@@ -1946,7 +2133,12 @@ pub async fn serve_rpc_session(
     let (controls_tx, controls_rx) = mpsc::channel(CONTROL_QUEUE);
     let (results_tx, mut results_rx) = mpsc::channel::<WorkResult>(RESULT_QUEUE);
     let (guard_tx, mut guard_rx) = mpsc::unbounded_channel();
-    tokio::spawn(run_controls(controls_rx, shared.clone(), services.clone()));
+    tokio::spawn(run_controls(
+        controls_rx,
+        shared.clone(),
+        services.clone(),
+        sink.clone(),
+    ));
     let admission = SessionAdmission {
         ordinary: Arc::new(Semaphore::new(MAX_IN_FLIGHT)),
         // One executing control and the existing bounded queue.
@@ -2236,7 +2428,7 @@ pub async fn serve_rpc_session(
                                     let counts_toward_batch = call.id.is_some()
                                         || matches!(
                                             call.method.as_str(),
-                                            "session.open" | "auth.createDevSession"
+                                            "session.open" | "auth.createDevSession" | "messageSync.resume" | "messageSync.page"
                                         );
                                     if counts_toward_batch {
                                         batch.pending += 1;

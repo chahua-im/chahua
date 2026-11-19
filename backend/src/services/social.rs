@@ -950,6 +950,7 @@ pub async fn create_friend_request(
                 let dm_chat_id = create_dm_for_friendship(conn, dm_group_id, from, to, now)?;
                 Ok((updated, dm_chat_id))
             })?;
+        deps.ws_registry.wake_message_sync(&[from, to], dm_chat_id);
         deps.presence_service.pair_policy_changed(from, to);
         // The auto-accepter (`from`) just reciprocated the pending request.
         send_friendship_accepted_message(conn, deps, from, to, dm_chat_id, chat_kind).await;
@@ -1084,6 +1085,10 @@ pub async fn resolve_friend_request(
             Ok((ResolveOutcome::Resolved(request), None))
         })?;
     if let Some((chat_id, chat_kind)) = dm_chat_id {
+        deps.ws_registry.wake_message_sync(
+            &[outcome.request().from_uid, outcome.request().to_uid],
+            chat_id,
+        );
         deps.presence_service
             .pair_policy_changed(outcome.request().from_uid, outcome.request().to_uid);
         send_friendship_accepted_message(

@@ -20,6 +20,7 @@ import { ChatListStore } from '../chats/chat-list-store';
 import { ChatStore } from '../chats/chat-store';
 import { ListTab } from '../chats/list-tabs';
 import { ConversationNavigation } from '../conversations/conversation-navigation';
+import { MessageSync } from '../messages/message-sync';
 import { SessionStore } from '../session/session-store';
 import { PushNotifications } from './push-notifications';
 
@@ -61,6 +62,7 @@ describe('online notifications', () => {
   const unread = { value: total, activate: vi.fn(() => release) };
   const badges = { setAppBadge: vi.fn(), clearAppBadge: vi.fn() };
   const modals = { getTop: vi.fn(), dismiss: vi.fn() };
+  const canNotify = vi.fn((_chatId: SnowflakeID) => true);
   const settle = () => vi.advanceTimersByTimeAsync(200);
 
   async function request(method: string, params?: Record<string, unknown>): Promise<RpcTestRequest> {
@@ -86,6 +88,7 @@ describe('online notifications', () => {
     commands.length = 0;
     state = { archived: false, muteOverride: false };
     subscription = { subscribed: true, archived: false };
+    canNotify.mockReset().mockReturnValue(true);
     events = new Subject();
     reads = new Subject();
     clicks = new Subject();
@@ -132,6 +135,7 @@ describe('online notifications', () => {
         ]),
         provideRpcTesting(),
         { provide: Connection, useValue: { events$: events, resync$: new Subject() } },
+        { provide: MessageSync, useValue: { canNotify } },
         {
           provide: ChatStore,
           useValue: {
@@ -197,6 +201,40 @@ describe('online notifications', () => {
     vi.useRealTimers();
   });
 
+  it('suppresses catch-up creates but closes deleted alerts and notifies after coverage', async () => {
+    canNotify.mockReturnValue(false);
+    events.next({ type: ServerWsMessageType.message, payload: incoming });
+    events.next({
+      type: ServerWsMessageType.messageUpdated,
+      payload: { ...incoming, isDeleted: true },
+    });
+    const deletedId = encodeId('9007199254741888');
+    events.next({
+      type: ServerWsMessageType.messagesBulkDeleted,
+      payload: { chatId: incoming.chatId, messageIds: [deletedId] },
+    });
+    await settle();
+    expect(canNotify).toHaveBeenCalledWith(incoming.chatId);
+    expect(commands).not.toContainEqual(expect.objectContaining({ type: 'CHAHUA_NOTIFY' }));
+    expect(commands).toContainEqual(
+      expect.objectContaining({ type: 'CHAHUA_CLOSE', messageIds: [decodeId(incoming.id)] }),
+    );
+    expect(commands).toContainEqual(
+      expect.objectContaining({ type: 'CHAHUA_CLOSE', messageIds: [decodeId(deletedId)] }),
+    );
+
+    canNotify.mockReturnValue(true);
+    const live = { ...incoming, id: encodeId('9007199254741999') };
+    events.next({ type: ServerWsMessageType.message, payload: live });
+    await settle();
+    expect(commands).toContainEqual(
+      expect.objectContaining({
+        type: 'CHAHUA_NOTIFY',
+        payload: expect.objectContaining({ data: expect.objectContaining({ messageId: decodeId(live.id) }) }),
+      }),
+    );
+  });
+
   it('sends foreground messages to the system notification worker once and shares the server badge total', async () => {
     events.next({ type: ServerWsMessageType.message, payload: incoming });
     events.next({ type: ServerWsMessageType.message, payload: incoming });
@@ -220,6 +258,7 @@ describe('online notifications', () => {
         provideRouter([]),
         provideRpcTesting(),
         { provide: Connection, useValue: { events$: events, resync$: new Subject() } },
+        { provide: MessageSync, useValue: { canNotify } },
         { provide: ChatStore, useValue: { changes$: reads } },
         {
           provide: ChatListStore,

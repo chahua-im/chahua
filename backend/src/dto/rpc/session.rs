@@ -10,6 +10,8 @@ pub struct SessionOpenParams {
     pub protocol_version: u8,
     pub token: Option<String>,
     pub app_version: Option<String>,
+    #[serde(default)]
+    pub message_sync: Option<u8>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -33,6 +35,8 @@ pub enum SessionOpenResult {
         uid: i32,
         #[serde(rename = "clientId")]
         client_id: String,
+        #[serde(rename = "messageSync", skip_serializing_if = "Option::is_none")]
+        message_sync: Option<u8>,
     },
     Anonymous {
         #[serde(rename = "protocolVersion")]
@@ -43,12 +47,13 @@ pub enum SessionOpenResult {
 }
 
 impl SessionOpenResult {
-    pub fn authenticated(session: &VerifiedSession) -> Self {
+    pub fn authenticated(session: &VerifiedSession, message_sync: Option<u8>) -> Self {
         Self::Authenticated {
             protocol_version: 1,
             authenticated: true,
             uid: session.uid,
             client_id: session.client_id.clone(),
+            message_sync,
         }
     }
 
@@ -85,8 +90,12 @@ mod tests {
             version: TokenVersion::V2,
         };
         let authenticated =
-            serde_json::to_value(SessionOpenResult::authenticated(&session)).unwrap();
+            serde_json::to_value(SessionOpenResult::authenticated(&session, None)).unwrap();
         let anonymous = serde_json::to_value(SessionOpenResult::anonymous()).unwrap();
+        assert_eq!(
+            serde_json::to_value(SessionOpenResult::authenticated(&session, Some(1))).unwrap(),
+            json!({"protocolVersion": 1, "authenticated": true, "uid": 7, "clientId": "client-7", "messageSync": 1})
+        );
         assert_eq!(
             authenticated,
             json!({"protocolVersion": 1, "authenticated": true, "uid": 7, "clientId": "client-7"})
@@ -100,14 +109,12 @@ mod tests {
         for (index, wire) in [authenticated, anonymous].into_iter().enumerate() {
             let variant = &schema["oneOf"][index];
             let declared = variant["properties"].as_object().unwrap();
-            assert_eq!(
-                wire.as_object().unwrap().keys().collect::<Vec<_>>(),
-                declared.keys().collect::<Vec<_>>()
-            );
-            assert_eq!(
-                variant["required"].as_array().unwrap().len(),
-                declared.len()
-            );
+            for key in wire.as_object().unwrap().keys() {
+                assert!(declared.contains_key(key));
+            }
+            let required = variant["required"].as_array().unwrap();
+            assert_eq!(required.len(), wire.as_object().unwrap().len());
+            assert!(!required.iter().any(|key| key == "messageSync"));
             assert_eq!(
                 declared["authenticated"]["enum"],
                 Value::Array(vec![wire["authenticated"].clone()])
@@ -115,3 +122,6 @@ mod tests {
         }
     }
 }
+
+#[derive(Serialize, ToSchema)]
+pub struct EmptyResult {}

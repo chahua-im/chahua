@@ -112,6 +112,10 @@ function isSessionOpenResult(value: unknown): value is SessionOpenResult {
 export class RpcTransport {
   private readonly stateValue = signal(RpcConnectionState.Closed);
   readonly state = this.stateValue.asReadonly();
+  private readonly messageSyncActiveValue = signal(false);
+  readonly messageSyncActive = this.messageSyncActiveValue.asReadonly();
+  private readonly authenticatedUidValue = signal<number | undefined>(undefined);
+  readonly authenticatedUid = this.authenticatedUidValue.asReadonly();
   private readonly stateChanges = new BehaviorSubject<RpcConnectionState>(RpcConnectionState.Closed);
   readonly state$ = this.stateChanges.asObservable();
   private readonly notifications = new Subject<RpcNotification>();
@@ -213,6 +217,10 @@ export class RpcTransport {
     this.stopCurrent(new RpcTransportError('disconnected', 'The RPC transport was closed'), false);
   }
 
+  reconnect(): void {
+    this.stopCurrent(new RpcTransportError('disconnected', 'The RPC connection is being restarted'), true);
+  }
+
   /** Changes only the credential used by a future reconnect, never the live session. */
   setReconnectToken(token: string): void {
     this.reconnectToken = token;
@@ -262,7 +270,7 @@ export class RpcTransport {
         'session.open',
         {
           protocolVersion: PROTOCOL_VERSION,
-          ...(this.reconnectToken == null ? {} : { token: this.reconnectToken }),
+          ...(this.reconnectToken == null ? {} : { token: this.reconnectToken, messageSync: 1 }),
           appVersion,
         },
         (result) => this.acceptSessionOpen(epoch, result),
@@ -294,6 +302,8 @@ export class RpcTransport {
     this.clearHandshakeDeadline();
     this.lastHeartbeat = Date.now();
     if (result.authenticated) {
+      this.messageSyncActiveValue.set('messageSync' in result && result.messageSync === 1);
+      this.authenticatedUidValue.set(result.uid);
       this.hasAuthenticatedSession = true;
       this.retryAttempt = 0;
       this.transition(RpcConnectionState.Authenticated);
@@ -638,6 +648,8 @@ export class RpcTransport {
       reason: error instanceof RpcTransportError ? error.message : undefined,
     });
     const closingEpoch = this.epoch;
+    this.messageSyncActiveValue.set(false);
+    this.authenticatedUidValue.set(undefined);
     window.clearTimeout(this.reconnectTimer);
     this.reconnectTimer = undefined;
     this.clearHeartbeat();

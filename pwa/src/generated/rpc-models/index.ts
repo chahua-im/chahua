@@ -122,6 +122,7 @@ export type {
   MembershipMessageVisibility,
   MentionBadges,
   MentionInfo,
+  MessageIdConflictResponse,
   MessageMetadataInput,
   MessageMetadataResponse,
   MessagePreview,
@@ -131,6 +132,14 @@ export type {
   MessageSearchSort,
   MessageStickerMediaResponse,
   MessageStickerResponse,
+  MessageSyncBatch,
+  MessageSyncChange,
+  MessageSyncHello,
+  MessageSyncPageResult,
+  MessageSyncReady,
+  MessageSyncReset,
+  MessageSyncResetReason,
+  MessageSyncRevoked,
   MessageType,
   MuteBody,
   MuteResponse,
@@ -304,6 +313,7 @@ export type CreateStickerFromMessageBody = {
   messageId: Shared.SnowflakeID;
   name?: string;
 };
+export type EmptyResult = {};
 export type ExceptionsQuery = { after?: Shared.SnowflakeID; kind: Shared.GroupKind; limit?: number };
 export type FriendsAcceptRequestParams = { requestId: Shared.SnowflakeID };
 export type FriendsArchiveRequestParams = { requestId: Shared.SnowflakeID };
@@ -423,6 +433,21 @@ export type ListMessagesQuery = {
 export type ListSavedMessagesQuery = { before?: Shared.SnowflakeID; limit?: number };
 export type ListThreadParticipantsQuery = { cursor?: number; limit?: number };
 export type ListThreadsQuery = { archived?: boolean; before?: string; limit?: number; rootId?: Shared.SnowflakeID };
+export type MessageSyncChat = { chatId: Shared.SnowflakeID; cursor?: string };
+export type MessageSyncPageParams = {
+  after?: Shared.SnowflakeID;
+  around?: Shared.SnowflakeID;
+  before?: Shared.SnowflakeID;
+  chatId: Shared.SnowflakeID;
+  max?: number;
+  requestId: number;
+  threadId?: Shared.SnowflakeID;
+};
+export type MessageSyncResumeParams = {
+  chats: Array<MessageSyncChat>;
+  last: boolean;
+  priorityChatId?: Shared.SnowflakeID;
+};
 export type MessagesDeleteManyParams = { chatId: Shared.SnowflakeID; messageIds: Array<Shared.SnowflakeID> };
 export type MessagesDeleteParams = { chatId: Shared.SnowflakeID; messageId: Shared.SnowflakeID };
 export type MessagesEditParams = {
@@ -561,14 +586,14 @@ export type ServiceTokensListParams = {};
 export type ServiceTokensRotateParams = { id: Shared.SnowflakeID };
 export type SessionInvalidatedNotification = { reason: SessionInvalidatedReason };
 export type SessionInvalidatedReason = 'revoked';
-export type SessionOpenParams = { appVersion?: string; protocolVersion: number; token?: string };
+export type SessionOpenParams = { appVersion?: string; messageSync?: number; protocolVersion: number; token?: string };
 export type SessionOpenResult =
-  | { authenticated: true; clientId: string; protocolVersion: 1; uid: number }
+  | { authenticated: true; clientId: string; messageSync?: number; protocolVersion: 1; uid: number }
   | { authenticated: false; protocolVersion: 1 };
 export type SessionPingParams = { state?: Shared.OnlineClientStatus };
 export type SessionSetAppStateParams = { state?: Shared.OnlineClientStatus };
 export type SessionUnavailableNotification = { reason: SessionUnavailableReason };
-export type SessionUnavailableReason = 'authLookupUnavailable';
+export type SessionUnavailableReason = 'authLookupUnavailable' | 'messageSyncUnavailable';
 export type SessionsListClientsParams = {};
 export type StickerPackDiscoveryQuery = { limit?: number; offset?: number; q?: string; sort?: Shared.StickerPackSort };
 export type StickersAddToPackParams = { packId: Shared.SnowflakeID; stickerId: Shared.SnowflakeID };

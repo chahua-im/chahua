@@ -88,7 +88,9 @@ describe('SessionStore', () => {
 
   async function bootstrap(token = 'test-link-token', user = testUser, group = { groupId: 3, name: '三水' }) {
     peer.open();
-    (await peer.expectAsync('session.open', { protocolVersion: 1, token, appVersion: 'PWA2-dev' })).flush({
+    (
+      await peer.expectAsync('session.open', { protocolVersion: 1, token, messageSync: 1, appVersion: 'PWA2-dev' })
+    ).flush({
       protocolVersion: 1,
       authenticated: true,
       uid: user.uid,

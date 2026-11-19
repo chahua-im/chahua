@@ -18,7 +18,7 @@ function openAuthenticated(transport: RpcTransport, peer: RpcTestPeer, token = '
   const received = vi.fn();
   transport.open({ token, appVersion: 'test' }).subscribe({ next: received, error: received });
   peer.open();
-  peer.expect('session.open', { protocolVersion: 1, token, appVersion: 'test' }).flush(OPEN_RESULT);
+  peer.expect('session.open', { protocolVersion: 1, token, messageSync: 1, appVersion: 'test' }).flush(OPEN_RESULT);
   return received;
 }
 
@@ -42,6 +42,53 @@ describe('RpcTransport', () => {
     expect(received).toHaveBeenCalledWith(OPEN_RESULT);
     expect(peer.latest.readyState).toBe(1);
     expect(transport.state()).toBe(RpcConnectionState.Authenticated);
+    peer.verify();
+  });
+
+  it('publishes negotiated sync and uid before authentication and clears them on disconnect and rebind', () => {
+    const { transport, peer } = configure();
+    const authenticated = vi.fn();
+    transport.state$.subscribe((state) => {
+      if (state === RpcConnectionState.Authenticated)
+        authenticated(transport.messageSyncActive(), transport.authenticatedUid());
+    });
+    transport.open({ token: 'token', appVersion: 'test' }).subscribe();
+    peer.open();
+    peer
+      .expect('session.open', { protocolVersion: 1, token: 'token', messageSync: 1, appVersion: 'test' })
+      .flush({ ...OPEN_RESULT, messageSync: 1 });
+    expect(authenticated).toHaveBeenLastCalledWith(true, 1);
+    peer.disconnect();
+    expect(transport.messageSyncActive()).toBe(false);
+    expect(transport.authenticatedUid()).toBeUndefined();
+    vi.advanceTimersByTime(1_000);
+    peer.open();
+    peer.expect('session.open').flush(OPEN_RESULT);
+    expect(authenticated).toHaveBeenLastCalledWith(false, 1);
+    transport.open({ token: 'other', appVersion: 'test' }).subscribe();
+    expect(transport.messageSyncActive()).toBe(false);
+    expect(transport.authenticatedUid()).toBeUndefined();
+    peer.open();
+    peer.expect('session.open').flush({ ...OPEN_RESULT, uid: 2, messageSync: 1 });
+    expect(authenticated).toHaveBeenLastCalledWith(true, 2);
+    transport.close();
+    expect(transport.messageSyncActive()).toBe(false);
+    expect(transport.authenticatedUid()).toBeUndefined();
+    peer.verify();
+  });
+
+  it('reconnects through the normal backoff path', () => {
+    const { transport, peer } = configure();
+    openAuthenticated(transport, peer);
+    const oldSocket = peer.latest;
+    transport.reconnect();
+    expect(transport.state()).toBe(RpcConnectionState.Reconnecting);
+    vi.advanceTimersByTime(1_000);
+    expect(peer.latest).not.toBe(oldSocket);
+    peer.open();
+    peer
+      .expect('session.open', { protocolVersion: 1, token: 'fixture-token', messageSync: 1, appVersion: 'test' })
+      .flush(OPEN_RESULT);
     peer.verify();
   });
 
@@ -123,7 +170,7 @@ describe('RpcTransport', () => {
     vi.advanceTimersByTime(1_000);
     peer.open();
     peer
-      .expect('session.open', { protocolVersion: 1, token: 'replacement-token', appVersion: 'test' })
+      .expect('session.open', { protocolVersion: 1, token: 'replacement-token', messageSync: 1, appVersion: 'test' })
       .flush(OPEN_RESULT);
     peer.expectNone('messages.send');
     expect(transport.state()).toBe(RpcConnectionState.Authenticated);
@@ -207,7 +254,9 @@ describe('RpcTransport', () => {
     expect(invalidated).not.toHaveBeenCalled();
     request.flush(null);
     peer.open();
-    peer.expect('session.open', { protocolVersion: 1, token: 'replacement', appVersion: 'test' }).flush(OPEN_RESULT);
+    peer
+      .expect('session.open', { protocolVersion: 1, token: 'replacement', messageSync: 1, appVersion: 'test' })
+      .flush(OPEN_RESULT);
     expect(transport.state()).toBe(RpcConnectionState.Authenticated);
     peer.verify();
   });
@@ -280,7 +329,9 @@ describe('RpcTransport', () => {
     expect(transport.state()).toBe(RpcConnectionState.Reconnecting);
     vi.advanceTimersByTime(1_000);
     peer.open();
-    peer.expect('session.open', { protocolVersion: 1, token: 'retained-token', appVersion: 'test' }).flush(OPEN_RESULT);
+    peer
+      .expect('session.open', { protocolVersion: 1, token: 'retained-token', messageSync: 1, appVersion: 'test' })
+      .flush(OPEN_RESULT);
     expect(transport.state()).toBe(RpcConnectionState.Authenticated);
     peer.verify();
   });
@@ -449,7 +500,9 @@ describe('RpcTransport', () => {
 
     peer.notify('session.unavailable', { reason: 'authLookupUnavailable' });
     peer.open();
-    peer.expect('session.open', { protocolVersion: 1, token: 'new-token', appVersion: 'test' }).flush(OPEN_RESULT);
+    peer
+      .expect('session.open', { protocolVersion: 1, token: 'new-token', messageSync: 1, appVersion: 'test' })
+      .flush(OPEN_RESULT);
     expect(transport.state()).toBe(RpcConnectionState.Authenticated);
     peer.verify();
   });
@@ -461,10 +514,12 @@ describe('RpcTransport', () => {
     });
     peer.open();
     peer
-      .expect('session.open', { protocolVersion: 1, token: 'old-token', appVersion: 'test' })
+      .expect('session.open', { protocolVersion: 1, token: 'old-token', messageSync: 1, appVersion: 'test' })
       .error(RpcErrorCode.Unauthorized, 'Unauthorized');
     peer.open();
-    peer.expect('session.open', { protocolVersion: 1, token: 'new-token', appVersion: 'test' }).flush(OPEN_RESULT);
+    peer
+      .expect('session.open', { protocolVersion: 1, token: 'new-token', messageSync: 1, appVersion: 'test' })
+      .flush(OPEN_RESULT);
     expect(transport.state()).toBe(RpcConnectionState.Authenticated);
     peer.verify();
   });

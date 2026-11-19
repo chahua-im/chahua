@@ -19,6 +19,7 @@ import { decodeId, encodeId, type SnowflakeID } from '../api/snowflake-id';
 import { ChatListStore } from '../chats/chat-list-store';
 import { ChatStore } from '../chats/chat-store';
 import { ConversationNavigation } from '../conversations/conversation-navigation';
+import { MessageSync } from '../messages/message-sync';
 import { PanelNavigation } from '../navigation/panel-navigation';
 import { SessionStore } from '../session/session-store';
 import { Preferences } from '../settings/preferences';
@@ -60,6 +61,7 @@ export class PushNotifications {
 
   private readonly destroy = inject(DestroyRef);
   private readonly connection = inject(Connection);
+  private readonly messageSync = inject(MessageSync);
   private readonly chats = inject(ChatStore);
   private readonly lists = inject(ChatListStore);
   private readonly preferences = inject(Preferences);
@@ -161,7 +163,10 @@ export class PushNotifications {
       if (!this.session.user()) return;
       switch (event.type) {
         case ServerWsMessageType.message:
-          void this.notify(event.payload).catch(() => {});
+          if (this.messageSync.canNotify(event.payload.chatId)) void this.notify(event.payload).catch(() => {});
+          break;
+        case ServerWsMessageType.messageUpdated:
+          if (event.payload.isDeleted) this.closeMessages([event.payload.id]);
           break;
         case ServerWsMessageType.messageDeleted:
           this.closeMessages([event.payload.id]);
