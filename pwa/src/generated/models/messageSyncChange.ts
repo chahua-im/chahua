@@ -17,5 +17,5 @@ export type MessageSyncChange =
   | {
       kind: 'delete';
       messageId: SnowflakeID;
-      threadRootId?: SnowflakeID;
+      threadRootId: null | SnowflakeID;
     };

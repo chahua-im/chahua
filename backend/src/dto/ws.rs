@@ -101,6 +101,7 @@ macro_rules! server_ws_messages {
             MessageSyncReset(crate::dto::message_sync::MessageSyncReset) => "messageSyncReset",
             MessageSyncRevoked(crate::dto::message_sync::MessageSyncRevoked) => "messageSyncRevoked",
             MessageSyncPageResult(crate::dto::message_sync::MessageSyncPageResult) => "messageSyncPageResult",
+            MessageSyncResumed(crate::dto::message_sync::MessageSyncResumed) => "messageSyncResumed",
             PresenceUpdate(crate::dto::ws::PresenceUpdatePayload) => "presenceUpdate",
             PresenceSnapshot(crate::dto::ws::PresenceSnapshotPayload) => "presenceSnapshot",
             ConversationUnread(crate::dto::conversations::ConversationUnreadPayload) => "conversationUnread",

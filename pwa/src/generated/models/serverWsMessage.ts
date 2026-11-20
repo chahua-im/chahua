@@ -25,6 +25,7 @@ import type { MessageSyncHello } from './messageSyncHello';
 import type { MessageSyncPageResult } from './messageSyncPageResult';
 import type { MessageSyncReady } from './messageSyncReady';
 import type { MessageSyncReset } from './messageSyncReset';
+import type { MessageSyncResumed } from './messageSyncResumed';
 import type { MessageSyncRevoked } from './messageSyncRevoked';
 import type { NotificationPayload } from './notificationPayload';
 import type { PinUpdatePayload } from './pinUpdatePayload';
@@ -90,6 +91,10 @@ export type ServerWsMessage =
   | {
       payload: MessageSyncPageResult;
       type: 'messageSyncPageResult';
+    }
+  | {
+      payload: MessageSyncResumed;
+      type: 'messageSyncResumed';
     }
   | {
       payload: PresenceUpdatePayload;

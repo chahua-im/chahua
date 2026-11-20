@@ -197,6 +197,7 @@ export class ChatStore {
   private readonly messageSync = inject(MessageSync);
   private readonly revokedChats = new Set<SnowflakeID>();
   private readonly revokedThreads = new Map<SnowflakeID, Set<SnowflakeID>>();
+  private readonly legacyAccessWatches = new Map<SnowflakeID, () => void>();
   private readonly mentionAccount = computed(() => this.session.user()?.uid);
   private readonly inaccessible = linkedSignal(() => {
     this.mentionAccount();
@@ -330,13 +331,20 @@ export class ChatStore {
       const { chatId, threadId, accessible } = state;
       if (this.revokedChats.has(chatId)) continue;
       const key = threadId ?? chatId;
+      const regainedAccess = accessible && this.inaccessible().has(key);
+      const restored = regainedAccess && threadId == null;
       if (!accessible) this.removeAccess(chatId, threadId);
-      else
+      else if (regainedAccess) {
         this.inaccessible.update((scopes) => {
           const next = new Set(scopes);
           next.delete(key);
           return next;
         });
+        if (restored) {
+          this.legacyAccessWatches.get(chatId)?.();
+          this.legacyAccessWatches.delete(chatId);
+        }
+      }
       // Local mutations establish their own cursor. Replace the watch after their
       // response, so a snapshot started before the mutation cannot undo it.
       if (
@@ -344,8 +352,10 @@ export class ChatStore {
         (threadId
           ? this.readRequests.has(threadId)
           : this.readOperations.get(chatId)?.read || this.readOperations.get(chatId)?.rewind)
-      )
+      ) {
+        if (restored) this.changed(ChatChangeKind.Restored, chatId, threadId);
         continue;
+      }
       if (threadId)
         this.threadReads.update((reads) =>
           new Map(reads).set(threadId, { state, version: ++this.version, dirty: false }),
@@ -355,6 +365,7 @@ export class ChatStore {
         if (operation) operation.version++;
         this.applyReadState(chatId, state);
       }
+      if (restored) this.changed(ChatChangeKind.Restored, chatId, threadId);
       if (accessible) this.changed(ChatChangeKind.Read, chatId, threadId);
     }
   }
@@ -470,6 +481,7 @@ export class ChatStore {
       account = uid;
       this.revokedChats.clear();
       this.revokedThreads.clear();
+      this.clearLegacyAccessWatches();
       this.defaultsVersion++;
       this.defaultsRequest = undefined;
       this.defaultsDirty = false;
@@ -500,7 +512,10 @@ export class ChatStore {
       this.stateWatch.refresh();
     });
     this.messageSync.resets$.pipe(takeUntilDestroyed()).subscribe(({ chatId, reason }) => {
-      if (reason === MessageSyncResetReason.noBaseline && this.revokedChats.delete(chatId)) {
+      if (
+        reason === MessageSyncResetReason.noBaseline &&
+        (this.revokedChats.delete(chatId) || this.inaccessible().has(chatId))
+      ) {
         const threads = this.revokedThreads.get(chatId);
         this.revokedThreads.delete(chatId);
         this.accessVersions().set(chatId, this.snapshot());
@@ -538,6 +553,20 @@ export class ChatStore {
       this.knownMentions.clear();
     });
     this.realtime.resync$.pipe(takeUntilDestroyed()).subscribe((reason) => {
+      if (reason === ResyncReason.Connected) {
+        if (this.messageSync.active()) {
+          this.clearLegacyAccessWatches();
+        } else if (this.revokedChats.size) {
+          // Keep the access fence until a new server snapshot confirms rejoin.
+          // A removed chat no longer contributes to the list's visible watch.
+          for (const chatId of this.revokedChats) {
+            this.legacyAccessWatches.set(chatId, this.stateWatch.watch([{ chatId }]));
+          }
+          this.revokedChats.clear();
+          this.revokedThreads.clear();
+          this.stateWatch.refresh();
+        }
+      }
       this.muteTime.set(Date.now());
       for (const query of this.relationships.values()) void query.refresh();
       this.invalidate();
@@ -574,6 +603,10 @@ export class ChatStore {
         for (const pins of this.pinScopes.values()) pins.receiveChange(event);
       }
       switch (event.type) {
+        case ServerWsMessageType.chatMembershipChanged:
+          // Legacy servers do not push a fresh access snapshot on every rejoin.
+          if (this.legacyAccessWatches.has(event.payload.chatId)) this.stateWatch.refresh();
+          break;
         case ServerWsMessageType.membershipMessagePolicyChanged:
           // Notifications carry no setting snapshot. Failed reads remain stale and retry on normal access.
           void this.refreshMembershipPolicy(event.payload.chatId).catch(() => {});
@@ -646,6 +679,11 @@ export class ChatStore {
         }
       }
     });
+  }
+
+  private clearLegacyAccessWatches() {
+    for (const stop of this.legacyAccessWatches.values()) stop();
+    this.legacyAccessWatches.clear();
   }
 
   /** Chat-list previews request the authorized peer receipt after an invalidation event. */

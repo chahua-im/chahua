@@ -26,6 +26,13 @@ impl SyncSubscription {
         }
     }
 
+    pub(crate) fn mark_if_attached(&self, chat_id: i64) {
+        let mut state = self.state.lock().unwrap();
+        if state.attached.contains(&chat_id) && state.dirty.insert(chat_id) {
+            self.changed.notify_one();
+        }
+    }
+
     pub(crate) fn mark_attached(&self) {
         let mut state = self.state.lock().unwrap();
         let SubscriptionState {
@@ -53,7 +60,7 @@ impl SyncSubscription {
         self.changed.notified().await;
     }
 
-    pub(super) fn attach(&self, chats: impl IntoIterator<Item = i64>) {
+    pub(crate) fn attach(&self, chats: impl IntoIterator<Item = i64>) {
         let mut state = self.state.lock().unwrap();
         if !state.closed {
             state.attached.extend(chats);

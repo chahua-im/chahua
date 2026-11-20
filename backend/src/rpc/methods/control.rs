@@ -18,19 +18,24 @@ async fn command<T>(
     make: impl FnOnce(ControlReply<T>) -> RpcControlCommand,
 ) -> Result<T, RpcError> {
     let (reply, result) = oneshot::channel();
-    match context.controls.try_send(make(reply)) {
-        Ok(()) => {}
-        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-            if let Some(close_session) = &context.close_session {
-                close_session.close();
+    let command = make(reply);
+    if let Some(slot) = &context.sync_control {
+        slot.send(command);
+    } else {
+        match context.controls.try_send(command) {
+            Ok(()) => {}
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                if let Some(close_session) = &context.close_session {
+                    close_session.close();
+                }
+                return Err(RpcError::new(RpcErrorCode::Overloaded));
             }
-            return Err(RpcError::new(RpcErrorCode::Overloaded));
-        }
-        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-            return Err(RpcError::with_message(
-                RpcErrorCode::Unavailable,
-                "Session unavailable",
-            ));
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                return Err(RpcError::with_message(
+                    RpcErrorCode::Unavailable,
+                    "Session unavailable",
+                ));
+            }
         }
     }
     let outcome = result
@@ -62,6 +67,11 @@ pub async fn message_sync_resume(
     params: MessageSyncResumeParams,
 ) -> Result<EmptyResult, RpcError> {
     command(context, |reply| RpcControlCommand::MessageSyncResume {
+        sync_seq: context
+            .sync_control
+            .as_ref()
+            .expect("sync control slot")
+            .seq,
         params,
         reply,
     })
@@ -74,6 +84,11 @@ pub async fn message_sync_page(
     params: MessageSyncPageParams,
 ) -> Result<EmptyResult, RpcError> {
     command(context, |reply| RpcControlCommand::MessageSyncPage {
+        sync_seq: context
+            .sync_control
+            .as_ref()
+            .expect("sync control slot")
+            .seq,
         params,
         reply,
     })

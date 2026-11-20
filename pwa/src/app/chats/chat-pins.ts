@@ -12,10 +12,11 @@ import { preserveReactionOwnership } from '../messages/reaction-state';
 export class ChatPins {
   private pinsFresh = false;
   private pinRevision = 0;
-  private pinEpoch = 0;
+  private readonly pinEpoch = signal(0);
   private readonly pinItems = signal<PinResponse[]>([]);
   private readonly pendingPins = signal<Promise<void> | undefined>(undefined);
   readonly items = this.pinItems.asReadonly();
+  readonly pinPurgeGeneration = this.pinEpoch.asReadonly();
   readonly loading = computed(() => !!this.pendingPins());
   constructor(
     readonly chatId: SnowflakeID,
@@ -32,7 +33,7 @@ export class ChatPins {
   }
   clear() {
     this.invalidate();
-    this.pinEpoch++;
+    this.pinEpoch.update((generation) => generation + 1);
     this.pendingPins.set(undefined);
     this.pinItems.set([]);
   }
@@ -53,14 +54,14 @@ export class ChatPins {
   private async loadPins() {
     while (!this.destroyRef.destroyed) {
       if (!this.accessible()) return;
-      const epoch = this.pinEpoch;
+      const epoch = this.pinEpoch();
       const revision = this.pinRevision;
       const { pins } = await this.response(
         this.threadId
           ? this.pinsApi.listForThread({ chatId: this.chatId, threadRootId: this.threadId })
           : this.pinsApi.list({ chatId: this.chatId }),
       );
-      if (epoch !== this.pinEpoch || !this.accessible()) return;
+      if (epoch !== this.pinEpoch() || !this.accessible()) return;
       if (revision !== this.pinRevision) continue;
       this.pinItems.set(pins);
       this.pinsFresh = true;

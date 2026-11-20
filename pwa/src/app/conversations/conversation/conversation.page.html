@@ -241,8 +241,7 @@
       } @empty {
         @if (
           conversation.page() &&
-          !conversation.loading() &&
-          !conversation.error() &&
+          (conversation.provisional() || (!conversation.loading() && !conversation.error())) &&
           !conversation.page()?.olderCursor &&
           !conversation.page()?.newerCursor
         ) {

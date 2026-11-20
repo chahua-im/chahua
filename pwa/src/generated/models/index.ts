@@ -78,6 +78,7 @@ export * from './messageSyncPageResult';
 export * from './messageSyncReady';
 export * from './messageSyncResetReason';
 export * from './messageSyncReset';
+export * from './messageSyncResumed';
 export * from './messageSyncRevoked';
 export * from './notificationType';
 export * from './notificationPayload';

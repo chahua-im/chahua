@@ -2084,6 +2084,7 @@ export const rpcEvents: Record<string, JsonCodec> = {
   'events.messageSyncReset': 'MessageSyncReset',
   'events.messageSyncRevoked': 'MessageSyncRevoked',
   'events.messageSyncPageResult': 'MessageSyncPageResult',
+  'events.messageSyncResumed': 'MessageSyncResumed',
   'events.presenceUpdate': 'PresenceUpdatePayload',
   'events.presenceSnapshot': 'PresenceSnapshotPayload',
   'events.conversationUnread': 'ConversationUnreadPayload',
@@ -2126,6 +2127,7 @@ export interface RpcEventMap {
   'events.messageSyncReset': Shared.MessageSyncReset;
   'events.messageSyncRevoked': Shared.MessageSyncRevoked;
   'events.messageSyncPageResult': Shared.MessageSyncPageResult;
+  'events.messageSyncResumed': Shared.MessageSyncResumed;
   'events.presenceUpdate': Shared.PresenceUpdatePayload;
   'events.presenceSnapshot': Shared.PresenceSnapshotPayload;
   'events.conversationUnread': Shared.ConversationUnreadPayload;

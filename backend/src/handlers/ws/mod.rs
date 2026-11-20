@@ -420,11 +420,11 @@ async fn handle_socket(
                     Some(subscription) => subscription.notified().await,
                     None => std::future::pending().await,
                 }
-            }, if sync.as_ref().is_some_and(SyncDriver::is_resumed) => {
+            } => {
                 if subscription.as_ref().is_some_and(|subscription| subscription.is_closed()) {
                     break;
                 }
-                if let Some(driver) = sync.as_mut() {
+                if let Some(driver) = sync.as_mut().filter(|driver| driver.is_resumed()) {
                     if let Err(error) = driver.drain(TicketSyncSink(&mut socket)).await {
                         close_sync_error(&mut socket, error).await;
                         break;
@@ -588,8 +588,14 @@ async fn handle_socket(
                             }
                             ClientWsMessage::MessageSyncResume(params) => {
                                 if let Some(driver) = sync.as_mut() {
+                                    let last = params.last;
                                     if let Err(error) = driver.resume(params, TicketSyncSink(&mut socket)).await {
                                         close_sync_error(&mut socket, error).await;
+                                        break;
+                                    }
+                                    if last && TicketSyncSink(&mut socket).send(
+                                        &ServerWsMessage::MessageSyncResumed(crate::dto::message_sync::MessageSyncResumed {}),
+                                    ).await.is_err() {
                                         break;
                                     }
                                 }

@@ -139,6 +139,7 @@ export type {
   MessageSyncReady,
   MessageSyncReset,
   MessageSyncResetReason,
+  MessageSyncResumed,
   MessageSyncRevoked,
   MessageType,
   MuteBody,

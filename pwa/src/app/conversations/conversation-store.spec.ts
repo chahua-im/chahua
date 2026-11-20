@@ -17,6 +17,7 @@ import { RpcTestPeer, provideRpcTesting, type RpcTestRequest } from '../api/rpc-
 import { decodeId, encodeId } from '../api/snowflake-id';
 import { mockRealtime, testUser, testChat, testMessage, wireChat, wireMessage } from '../api/testing';
 import { ConversationError, ConversationStore, PageDirection } from './conversation-store';
+import { RecentConversationWindows } from './recent-conversation-windows';
 
 const message = (id: string) => ({ ...testMessage, id: encodeId(id) });
 const wire = (id: string) => ({ ...wireMessage, id });
@@ -1653,6 +1654,16 @@ describe('ConversationStore with message sync', () => {
     ]);
   });
 
+  it.each([false, true])('inserts a delayed arrival inside a historical interval (buffered: %s)', async (buffered) => {
+    const opened = timeline.open(encodeId('20'));
+    page(await peer.expectAsync('messageSync.page'), [wire('10'), wire('20')], { newerCursor: '20' });
+    if (!buffered) await opened;
+    batch('published', [upsert('15', 'inside the window', true), upsert('25', 'beyond the window', true)]);
+    expect(await opened).toBe(true);
+    expect(timeline.atLatest()).toBe(false);
+    expect(timeline.items().map(({ id }) => decodeId(id))).toEqual(['10', '15', '20']);
+  });
+
   it('keeps a covered historical range without a history read on reconnect', async () => {
     const opened = timeline.open(encodeId('20'));
     page(await peer.expectAsync('messageSync.page'), [wire('10'), wire('20')], {
@@ -1678,6 +1689,82 @@ describe('ConversationStore with message sync', () => {
     ]);
   });
 
+  it.each([false, true])('restores an aligned inactive tail without history (initially empty: %s)', async (empty) => {
+    const opened = timeline.open();
+    page(await peer.expectAsync('messageSync.page'), empty ? [] : [wire('10'), wire('20')]);
+    await opened;
+    timeline.retainRecent(undefined, true);
+    timeline.reset(encodeId('321'));
+    if (!empty) {
+      batch('hidden', [
+        upsert('10', 'edited while away'),
+        { kind: 'delete', messageId: '20', threadRootId: null },
+        upsert('30', 'arrived while away', true),
+      ]);
+    }
+    const resume = authenticate();
+    for (const request of peer.match('users.getNotificationSettings')) request.flush({});
+    timeline.reset(testChat.id);
+    expect(timeline.takeRecent(false)).toBeDefined();
+    const warm = timeline.open();
+    const visible = timeline.items().filter((message) => !message.isDeleted);
+    expect(visible.map(({ message }) => message)).toEqual(empty ? [] : ['edited while away', 'arrived while away']);
+    expect(timeline.page()).toBeDefined();
+    peer.expectNone('messageSync.page');
+
+    peer.notify('events.messageSyncReady', { chatId, cursor });
+    resume.flush({});
+    expect(await warm).toBe(true);
+    expect(timeline.items().filter((message) => !message.isDeleted)).toEqual(visible);
+    peer.expectNone('messageSync.page');
+  });
+
+  it.each([false, true])('holds an expired inactive range during one replacement (revoked: %s)', async (revoked) => {
+    const opened = timeline.open();
+    page(await peer.expectAsync('messageSync.page'), [wire('10')]);
+    await opened;
+    timeline.retainRecent(undefined, true);
+    timeline.reset(encodeId('321'));
+    const resume = authenticate();
+    for (const request of peer.match('users.getNotificationSettings')) request.flush({});
+    timeline.reset(testChat.id);
+    expect(timeline.takeRecent(false)).toBeDefined();
+    const warm = timeline.open();
+    reset('expired-head', 'expired');
+    expect(timeline.items().map(({ id }) => decodeId(id))).toEqual(['10']);
+    peer.expectNone('messageSync.page');
+    resume.flush({});
+    const fresh = await peer.expectAsync('messageSync.page', { chatId, max: 50, requestId: 2 });
+    expect(timeline.items().map(({ id }) => decodeId(id))).toEqual(['10']);
+    if (revoked) peer.notify('events.messageSyncRevoked', { chatId });
+    page(fresh, [wire('20')], {}, 'expired-head');
+    expect(await warm).toBe(!revoked);
+    expect(timeline.items().map(({ id }) => decodeId(id))).toEqual(revoked ? [] : ['20']);
+    peer.expectNone('messageSync.page');
+  });
+
+  it('cold-loads a scope evicted by nine other retained windows', async () => {
+    const opened = timeline.open();
+    page(await peer.expectAsync('messageSync.page'), [wire('10')]);
+    await opened;
+    const range = timeline.page()!;
+    timeline.retainRecent(undefined, true);
+    timeline.reset();
+    const recent = TestBed.inject(RecentConversationWindows);
+    for (let i = 1; i <= 9; i++) {
+      const chatId = encodeId(String(500 + i));
+      const messages = range.messages.map((message) => ({ ...message, chatId }));
+      recent.keep({ chatId }, { range: { ...range, messages }, atBottom: true, hideMembershipMessages: false });
+    }
+    timeline.reset(testChat.id);
+    expect(timeline.takeRecent(false)).toBeUndefined();
+    const reopened = timeline.open();
+    expect(timeline.page()).toBeUndefined();
+    page(await peer.expectAsync('messageSync.page'), [wire('20')]);
+    expect(await reopened).toBe(true);
+    expect(timeline.items().map(({ id }) => decodeId(id))).toEqual(['20']);
+  });
+
   it('keeps a historical window until its anchor page can replace an expired range', async () => {
     const anchor = encodeId('20');
     const restore = vi.fn();
@@ -1699,6 +1786,34 @@ describe('ConversationStore with message sync', () => {
     expect(timeline.items().map(({ id }) => decodeId(id))).toEqual(['20', '30']);
     expect(restore).toHaveBeenCalledOnce();
     peer.expectNone('messageSync.page');
+  });
+
+  it('reopens a hidden expired window at its retained anchor on a legacy reconnect', async () => {
+    timeline.setSyncWindow(() => undefined);
+    const initial = timeline.open(encodeId('20'));
+    page(await peer.expectAsync('messageSync.page'), [wire('10'), wire('20')], {
+      olderCursor: '10',
+      newerCursor: '20',
+    });
+    await initial;
+    reset('expired-head', 'expired');
+    expect(timeline.canLoad(PageDirection.Older)).toBe(false);
+
+    peer.authenticate();
+    const reconnecting = timeline.reconnect();
+    expect(timeline.items().map(({ id }) => decodeId(id))).toEqual(['10', '20']);
+    peer.expect('messages.list', { chatId, around: '20', max: 50 }).flush({
+      chatSettings: settings,
+      membershipMessagePolicy: testChat.membershipMessagePolicy,
+      messages: [wire('20'), wire('30')],
+      olderCursor: '20',
+      newerCursor: '30',
+    });
+    for (const request of peer.match('users.getNotificationSettings')) request.flush({});
+    await reconnecting;
+    expect(timeline.items().map(({ id }) => decodeId(id))).toEqual(['20', '30']);
+    expect(timeline.canLoad(PageDirection.Older)).toBe(true);
+    expect(timeline.canLoad(PageDirection.Newer)).toBe(true);
   });
 
   it('does not replace the retained range with a page received before a reset', async () => {

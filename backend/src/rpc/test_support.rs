@@ -55,13 +55,13 @@ impl diesel::r2d2::CustomizeConnection<PgConnection, diesel::r2d2::Error> for Is
         // LIKE does not copy triggers. Point the production definitions at the
         // isolated tables, with the same transition tables and capture function.
         let triggers = diesel::sql_query(
-            "SELECT regexp_replace(pg_get_triggerdef(t.oid), ' ON .* REFERENCING ', \
-                    format(' ON pg_temp.%I REFERENCING ', c.relname)) AS name \
+            "SELECT regexp_replace(pg_get_triggerdef(t.oid), ' ON \\S+', \
+                    format(' ON pg_temp.%I', c.relname)) AS name \
              FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid \
              JOIN pg_namespace n ON n.oid = c.relnamespace \
              WHERE n.nspname = current_schema() AND t.tgname IN \
                    ('messages_sync_insert', 'messages_sync_update', \
-                    'message_reactions_sync_insert', 'message_reactions_sync_delete')",
+                    'message_reactions_sync_insert', 'message_reactions_sync_delete', 'message_sync_flush')",
         )
         .load::<TriggerDefinition>(connection)
         .map_err(diesel::r2d2::Error::QueryError)?;

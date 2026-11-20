@@ -35,7 +35,7 @@ pub struct MessageSyncResumeParams {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageSyncPageParams {
-    pub request_id: u32,
+    pub request_id: u64,
     #[serde(deserialize_with = "decode_id")]
     #[schema(value_type = String)]
     pub chat_id: i64,
@@ -60,6 +60,9 @@ pub struct MessageSyncHello {
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct MessageSyncResumed {}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
@@ -74,12 +77,8 @@ pub enum MessageSyncChange {
         #[serde(rename = "messageId", with = "crate::serde_i64_string")]
         #[schema(value_type = String)]
         message_id: i64,
-        #[serde(
-            rename = "threadRootId",
-            with = "crate::serde_i64_string::opt",
-            skip_serializing_if = "Option::is_none"
-        )]
-        #[schema(value_type = Option<String>)]
+        #[serde(rename = "threadRootId", with = "crate::serde_i64_string::opt")]
+        #[schema(value_type = Option<String>, required = true)]
         thread_root_id: Option<i64>,
     },
 }
@@ -136,7 +135,7 @@ pub struct MessageSyncRevoked {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageSyncPageResult {
-    pub request_id: u32,
+    pub request_id: u64,
     #[serde(with = "crate::serde_i64_string")]
     #[schema(value_type = String)]
     pub chat_id: i64,
@@ -172,14 +171,23 @@ mod tests {
             chat_id: id,
             from: "cursor_a".into(),
             to: "cursor_b".into(),
-            changes: vec![MessageSyncChange::Delete {
-                message_id: id - 1,
-                thread_root_id: Some(id - 2),
-            }],
+            changes: vec![
+                MessageSyncChange::Delete {
+                    message_id: id - 1,
+                    thread_root_id: Some(id - 2),
+                },
+                MessageSyncChange::Delete {
+                    message_id: id - 3,
+                    thread_root_id: None,
+                },
+            ],
         });
         let payload = json!({
             "chatId": id_string, "from": "cursor_a", "to": "cursor_b",
-            "changes": [{"kind": "delete", "messageId": (id-1).to_string(), "threadRootId": (id-2).to_string()}],
+            "changes": [
+                {"kind": "delete", "messageId": (id-1).to_string(), "threadRootId": (id-2).to_string()},
+                {"kind": "delete", "messageId": (id-3).to_string(), "threadRootId": null},
+            ],
         });
         assert_eq!(
             serde_json::to_value(&event).unwrap(),
@@ -190,20 +198,20 @@ mod tests {
             json!({"jsonrpc": "2.0", "method": "events.messageSyncBatch", "params": payload}),
         );
         let event = ServerWsMessage::MessageSyncPageResult(MessageSyncPageResult {
-            request_id: 17,
+            request_id: 4_294_967_296,
             chat_id: id,
             at: None,
             page: None,
         });
         assert_eq!(
             serde_json::to_value(event).unwrap()["payload"],
-            json!({"requestId": 17, "chatId": id_string, "at": null, "page": null}),
+            json!({"requestId": 4_294_967_296_u64, "chatId": id_string, "at": null, "page": null}),
         );
         let params = serde_json::from_value::<MessageSyncPageParams>(json!({
-            "requestId": 17, "chatId": id_string, "around": (id-1).to_string(),
+            "requestId": 4_294_967_296_u64, "chatId": id_string, "around": (id-1).to_string(),
         }))
         .unwrap();
-        assert_eq!(params.request_id, 17);
+        assert_eq!(params.request_id, 4_294_967_296);
         assert_eq!(params.chat_id, id);
         assert_eq!(params.around, Some(id - 1));
         assert!(serde_json::from_value::<MessageSyncPageParams>(

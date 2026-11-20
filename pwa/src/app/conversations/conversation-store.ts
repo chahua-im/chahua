@@ -8,22 +8,31 @@ import type { MessagesListParams } from '../../generated/rpc-models';
 import {
   ServerWsMessageType,
   GroupKind,
-  type ListMessagesResponse,
   type MessagePreview,
   type MessageResponse,
   type MessageSyncReset,
   type ReactionSummary,
   type ThreadUpdatePayload,
 } from '../../generated/models';
-import { Connection } from '../api/connection';
+import { Connection, ResyncReason } from '../api/connection';
 import { ChatChangeKind, ChatStore } from '../chats/chat-store';
 import { decodeId, type SnowflakeID } from '../api/snowflake-id';
 import { type MessageChange } from '../messages/message-change';
-import { mergeMessages } from '../messages/message-merge';
+import { mergeMessageArrivals, mergeMessages } from '../messages/message-merge';
 import { isVisibleMessage } from '../messages/message-visibility';
 import { MessageSync, requiresMessagePurge } from '../messages/message-sync';
 import { preserveReactionOwnership } from '../messages/reaction-state';
 import { Diagnostics } from '../pwa/diagnostics';
+import {
+  acceptsConversationMessage,
+  redactDeletedMessage,
+  replaceEditedMessage,
+  replaceMessageCitation,
+  toMessagePreview,
+  type ConversationContext,
+  type MessageRange,
+} from './conversation-window';
+import { RecentConversationWindows } from './recent-conversation-windows';
 export enum PageDirection {
   Older,
   Newer,
@@ -33,12 +42,7 @@ export enum ConversationError {
   Open,
   Page,
 }
-type MessageRange = Pick<
-  ListMessagesResponse,
-  'messages' | 'olderCursor' | 'newerCursor' | 'chatSettings' | 'membershipMessagePolicy'
->;
 type MessageUpdate = (message: MessageResponse) => MessageResponse;
-type ConversationContext = Readonly<{ chatId: SnowflakeID; threadId?: SnowflakeID }>;
 type MessagePageParams = Omit<MessagesListParams, 'chatId' | 'max' | 'threadId'>;
 
 interface SyncWindow {
@@ -61,6 +65,7 @@ export class ConversationStore {
   private readonly destroyRef = inject(DestroyRef);
   private readonly diagnostics = inject(Diagnostics);
   private readonly sync = inject(MessageSync);
+  private readonly recent = inject(RecentConversationWindows);
   private version = 0;
   private readonly cancel = new Subject<void>();
   private latestSeenId?: SnowflakeID;
@@ -69,7 +74,7 @@ export class ConversationStore {
   private needsResync = false;
   private retryNewer = false;
   private needsWindow = false;
-  private alignedWindow = false;
+  private alignedGeneration?: number;
   private readSyncWindow?: () => SyncWindow | undefined;
   private windowRead?: WindowRead;
   private readonly pendingCreates = new Map<SnowflakeID, MessageResponse>();
@@ -83,6 +88,8 @@ export class ConversationStore {
   private readonly pageDirection = signal<PageDirection | undefined>(undefined);
   private readonly currentError = signal<ConversationError | undefined>(undefined);
   private readonly failedPageDirection = signal<PageDirection | undefined>(undefined);
+  private readonly restoredRange = signal(false);
+  readonly provisional = this.restoredRange.asReadonly();
   readonly page = this.currentPage.asReadonly();
   readonly items = computed(() => this.page()?.messages ?? []);
   readonly loading = this.isLoading.asReadonly();
@@ -96,6 +103,7 @@ export class ConversationStore {
   private readonly realtime = inject(Connection);
   private readonly chatInfo = inject(ChatStore);
   private context?: ConversationContext;
+  private contextAccount?: number;
 
   constructor() {
     this.destroyRef.onDestroy(() => this.reset());
@@ -106,6 +114,7 @@ export class ConversationStore {
         return;
       }
       if (kind !== ChatChangeKind.MembershipMessagePolicy || this.context.threadId) return;
+      this.alignedGeneration = undefined;
       if (this.chatInfo.membershipPolicy(chatId)?.canView === false) {
         this.currentPage.update(
           (page) => page && { ...page, messages: page.messages.filter((message) => !isMembershipMessage(message)) },
@@ -117,6 +126,10 @@ export class ConversationStore {
       if (this.sync.active()) this.receive(message);
     });
     this.sync.resets$.pipe(takeUntilDestroyed()).subscribe((reset) => this.receiveReset(reset));
+    this.sync.accountResets$.pipe(takeUntilDestroyed()).subscribe(() => this.reset());
+    this.realtime.resync$.pipe(takeUntilDestroyed()).subscribe((reason) => {
+      if (reason === ResyncReason.Connected && !this.sync.active()) this.alignedGeneration = undefined;
+    });
     this.realtime.events$.pipe(takeUntilDestroyed()).subscribe((event) => {
       if (event.type === ServerWsMessageType.threadUpdate && !this.sync.active()) this.updateThread(event.payload);
     });
@@ -127,8 +140,9 @@ export class ConversationStore {
     this.readSyncWindow = readWindow;
   }
 
-  private syncWindow(): SyncWindow | undefined {
-    if (this.readSyncWindow) return this.readSyncWindow();
+  private syncWindow(includeRetained = false): SyncWindow | undefined {
+    const visible = this.readSyncWindow?.();
+    if (visible || (this.readSyncWindow && !includeRetained)) return visible;
     const page = this.page();
     return { around: page?.newerCursor != null ? page.messages[Math.floor(page.messages.length / 2)]?.id : undefined };
   }
@@ -141,16 +155,22 @@ export class ConversationStore {
     const recovery = this.syncWindow();
     const pending = this.windowRead;
     this.needsWindow = true;
+    this.alignedGeneration = undefined;
     this.retryNewer = false;
     this.latestSeenId = undefined;
-    if (purge) this.currentPage.set(undefined);
-    if (pending && !pending.received && recovery && (!page || pending.around === recovery.around)) {
+    const provisional = this.provisional();
+    if (purge) {
+      this.currentPage.set(undefined);
+      this.restoredRange.set(false);
+    }
+    if (pending && !pending.received && (provisional || (recovery && (!page || pending.around === recovery.around)))) {
       // This scope already awaits a replacing page. A page-triggered reset
       // precedes its PageResult, so retrying here would discard a fresh snapshot.
       pending.policyGeneration = this.chatInfo.membershipPolicyRequestGeneration();
-      pending.restore = recovery.restore;
+      if (!provisional) pending.restore = recovery?.restore;
       return;
     }
+    if (provisional && !purge && !pending) return;
     this.cancelLoading();
     if (recovery) void this.open(recovery.around, false, this.hideMembershipMessages, recovery.restore);
   }
@@ -161,6 +181,7 @@ export class ConversationStore {
     return (
       !!cursor &&
       !this.needsWindow &&
+      !this.provisional() &&
       !this.loading() &&
       !this.paging() &&
       this.pageHidesMembershipMessages === this.hideMembershipMessages
@@ -169,13 +190,48 @@ export class ConversationStore {
 
   reset(chatId?: SnowflakeID, threadId?: SnowflakeID) {
     this.context = chatId ? { chatId, threadId } : undefined;
+    this.contextAccount = this.session.user()?.uid;
     this.cancelLoading();
     this.latestSeenId = undefined;
     this.needsResync = false;
     this.needsWindow = false;
-    this.alignedWindow = false;
+    this.alignedGeneration = undefined;
+    this.restoredRange.set(false);
     this.retryNewer = false;
     this.currentPage.set(undefined);
+  }
+
+  retainRecent(anchor?: SnowflakeID, atBottom = false) {
+    const scope = this.context;
+    const range = this.page();
+    if (!scope || !range || this.contextAccount !== this.session.user()?.uid) return;
+    this.recent.keep(scope, {
+      range,
+      anchor,
+      atBottom,
+      hideMembershipMessages: this.pageHidesMembershipMessages,
+      alignedGeneration: this.needsWindow || this.needsResync ? undefined : this.alignedGeneration,
+    });
+  }
+
+  takeRecent(hideMembershipMessages: boolean) {
+    if (!this.context) return undefined;
+    const saved = this.recent.take(this.context, hideMembershipMessages);
+    if (!saved) return undefined;
+    this.hideMembershipMessages = this.pageHidesMembershipMessages = saved.hideMembershipMessages;
+    this.alignedGeneration = saved.alignedGeneration;
+    this.restoredRange.set(true);
+    this.currentPage.set(saved.range);
+    return { anchor: saved.anchor, atBottom: saved.atBottom };
+  }
+
+  private hasSyncAlignment() {
+    return (
+      this.sync.active() &&
+      this.alignedGeneration != null &&
+      this.context != null &&
+      (this.alignedGeneration === this.sync.connectionGeneration || this.sync.isCovered(this.context.chatId))
+    );
   }
 
   private clearInaccessiblePage() {
@@ -215,6 +271,39 @@ export class ConversationStore {
     this.pageDirection.set(undefined);
     this.isLoading.set(false);
     this.currentError.set(undefined);
+    const provisional = this.provisional();
+    if (provisional) {
+      if (filterChanged) {
+        this.currentPage.set(undefined);
+        this.restoredRange.set(false);
+        this.alignedGeneration = undefined;
+      } else {
+        if (!this.realtime.connected()) return false;
+        try {
+          await this.sync.waitForResume();
+        } catch {
+          return false;
+        }
+        if (version !== this.version) return false;
+        const page = this.page();
+        if (
+          page &&
+          !this.needsWindow &&
+          this.hasSyncAlignment() &&
+          (around == null
+            ? page.newerCursor == null
+            : exact
+              ? page.messages.some((message) => message.id === around && isVisibleMessage(message))
+              : page.messages.length > 0 && page.messages[0].id <= around && around <= page.messages.at(-1)!.id)
+        ) {
+          this.alignedGeneration = this.sync.connectionGeneration;
+          this.needsResync = false;
+          this.restoredRange.set(false);
+          return true;
+        }
+      }
+      this.needsWindow = true;
+    }
     if (
       !this.needsResync &&
       !this.needsWindow &&
@@ -240,7 +329,11 @@ export class ConversationStore {
       let page = await firstValueFrom(this.getMessages(around ? { around } : {}, user, windowRead));
       if (version !== this.version) return false;
       // A reconnect can happen while the first response is in flight. Reconcile once before committing it.
-      if (!sync && ((!page.newerCursor && this.needsResync) || (!page.messages.length && this.latestSeenId))) {
+      if (
+        !provisional &&
+        !sync &&
+        ((!page.newerCursor && this.needsResync) || (!page.messages.length && this.latestSeenId))
+      ) {
         this.needsResync = false;
         const lastId = page.messages.at(-1)?.id;
         const newer = await firstValueFrom(this.getMessages(lastId ? { after: lastId } : {}, user));
@@ -265,8 +358,9 @@ export class ConversationStore {
       }
       this.pageHidesMembershipMessages = this.hideMembershipMessages;
       this.needsWindow = false;
-      this.alignedWindow = sync;
+      this.alignedGeneration = sync ? this.sync.connectionGeneration : undefined;
       this.currentPage.set(sync ? page : this.withLiveCursor(page));
+      this.restoredRange.set(false);
       windowRead.restore?.();
       if (missing) this.currentError.set(ConversationError.Missing);
       return !missing;
@@ -338,9 +432,11 @@ export class ConversationStore {
         throw new ChatSettingsChanged();
       this.currentPage.update((value) => {
         if (!value) return value;
-        const messages = mergeMessages(
-          value.messages,
-          this.applyPendingUpdates(page, sync && direction === PageDirection.Newer && !page.newerCursor).messages,
+        const combined = mergeMessages(value.messages, this.applyPendingUpdates(page).messages);
+        const messages = mergeMessageArrivals(
+          combined,
+          [...this.pendingCreates.values()].map((message) => this.applyPendingUpdate(message)),
+          sync && direction === PageDirection.Newer && !page.newerCursor,
         );
         const updated = {
           ...value,
@@ -390,13 +486,14 @@ export class ConversationStore {
       return;
     if (!this.latestSeenId || message.id > this.latestSeenId) this.latestSeenId = message.id;
     if (this.sync.active() && (this.loading() || this.paging())) this.pendingCreates.set(message.id, message);
-    // A live message cannot bridge a gap between historical messages and the present.
-    if (!this.atLatest()) return;
-    const page = this.page()!;
-    this.currentPage.set({
-      ...page,
-      messages: mergeMessages(page.messages, [message]),
-    });
+    const page = this.page();
+    if (!page) return;
+    const atTail =
+      this.atLatest() &&
+      !this.needsWindow &&
+      (!this.provisional() || (this.sync.active() && this.alignedGeneration != null));
+    const messages = mergeMessageArrivals(page.messages, [message], atTail);
+    if (messages !== page.messages) this.currentPage.set({ ...page, messages });
   }
 
   private applyMessageChange(event: MessageChange) {
@@ -442,27 +539,13 @@ export class ConversationStore {
     if (message.isDeleted) this.deletedIds.add(message.id);
     else this.editedPreviews.set(message.id, toMessagePreview(message));
     const known = this.items().find((item) => item.id === message.id);
-    this.patch(message.id, (current) => ({
-      ...message,
-      reactions: preserveReactionOwnership(known?.reactions ?? current.reactions, message.reactions),
-    }));
+    this.patch(message.id, (current) => replaceEditedMessage(known ?? current, message));
   }
 
   delete(messageId: SnowflakeID) {
     this.deletedIds.add(messageId);
     // Bulk deletion carries ids only, so the recalled body must be dropped here.
-    this.patch(messageId, (message) => ({
-      ...message,
-      isDeleted: true,
-      forwardedFrom: undefined,
-      forwardedPreview: undefined,
-      forwardedBundleId: undefined,
-      message: undefined,
-      metadata: undefined,
-      attachments: [],
-      mentions: [],
-      sticker: undefined,
-    }));
+    this.patch(messageId, redactDeletedMessage);
   }
 
   updateReactions(messageId: SnowflakeID, reactions: ReactionSummary[]) {
@@ -497,49 +580,26 @@ export class ConversationStore {
     this.editedPreviews.clear();
   }
 
-  private applyPendingUpdates(page: MessageRange, includeCreates = false): MessageRange {
-    const messages = includeCreates ? mergeMessages(page.messages, [...this.pendingCreates.values()]) : page.messages;
-    return {
-      ...page,
-      messages: messages.map((message) =>
-        this.refreshCitation(this.pendingUpdates.get(message.id)?.(message) ?? message),
-      ),
-    };
+  private applyPendingUpdates(page: MessageRange, includeTail = false): MessageRange {
+    const messages = mergeMessageArrivals(page.messages, this.pendingCreates.values(), includeTail);
+    return { ...page, messages: messages.map((message) => this.applyPendingUpdate(message)) };
   }
 
-  /** The recalled message stays in the timeline as a tombstone; messages quoting it lose their snapshot. */
-  private redactCitation(message: MessageResponse) {
-    const quote = message.replyToMessage;
-    if (!quote || !this.deletedIds.has(quote.id)) return message;
-    return {
-      ...message,
-      replyToMessage: {
-        ...quote,
-        isDeleted: true,
-        message: undefined,
-        attachments: [],
-        mentions: [],
-        sticker: undefined,
-      },
-    };
+  private applyPendingUpdate(message: MessageResponse) {
+    return this.refreshCitation(this.pendingUpdates.get(message.id)?.(message) ?? message);
   }
 
   /** Quoting messages embed a server snapshot of the cited message; edits and recalls reach them through here. */
   private refreshCitation(message: MessageResponse): MessageResponse {
     const quote = message.replyToMessage;
     if (!quote) return message;
-    if (this.deletedIds.has(quote.id)) return this.redactCitation(message);
+    if (this.deletedIds.has(quote.id)) return replaceMessageCitation(message, quote.id, null);
     const fresh = this.editedPreviews.get(quote.id);
-    return fresh ? { ...message, replyToMessage: fresh } : message;
+    return fresh ? replaceMessageCitation(message, quote.id, fresh) : message;
   }
 
   accepts(message: MessageResponse) {
-    return (
-      message.chatId === this.context?.chatId &&
-      (this.context?.threadId
-        ? message.replyRootId === this.context?.threadId || message.id === this.context?.threadId
-        : !message.replyRootId)
-    );
+    return acceptsConversationMessage(this.context, message);
   }
 
   updateThread(update: ThreadUpdatePayload) {
@@ -620,7 +680,7 @@ export class ConversationStore {
         !this.chatInfo.isAccessible(this.context.chatId, this.context.threadId)
       )
         return;
-      if (!this.needsWindow && this.page() && (this.sync.isCovered(this.context.chatId) || this.alignedWindow)) return;
+      if (!this.needsWindow && this.page() && this.hasSyncAlignment()) return;
       if (this.loading()) return;
       const window = this.syncWindow();
       if (window && (this.page() || this.needsWindow || this.error() === ConversationError.Open)) {
@@ -628,6 +688,11 @@ export class ConversationStore {
         await this.open(window.around, false, this.hideMembershipMessages, window.restore);
       }
       return;
+    }
+    if (this.needsWindow) {
+      if (this.loading()) return;
+      const window = this.syncWindow(true);
+      if (!(await this.open(window?.around, false, this.hideMembershipMessages, window?.restore))) return;
     }
     this.needsResync = true;
     if (this.retryNewer) {
@@ -655,24 +720,4 @@ export class ConversationStore {
       ? { ...page, newerCursor: lastId }
       : page;
   }
-}
-
-/** Mirrors the server's MessagePreview shape embedded as replyToMessage. */
-function toMessagePreview(message: MessageResponse): MessagePreview {
-  return {
-    metadata: message.metadata,
-    id: message.id,
-    clientGeneratedId: message.clientGeneratedId,
-    forwardedFromName: message.forwardedFrom?.sender.name,
-    createdAt: message.createdAt,
-    sender: message.sender,
-    message: message.message,
-    messageType: message.messageType,
-    systemKind: message.systemKind,
-    systemLinks: message.systemLinks,
-    sticker: message.sticker ? { emoji: message.sticker.emoji } : undefined,
-    attachments: message.attachments.map(({ kind }) => ({ kind })),
-    isDeleted: message.isDeleted,
-    mentions: message.mentions ?? [],
-  };
 }

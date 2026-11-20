@@ -19,7 +19,7 @@ import { TranslocoPipe } from '@jsverse/transloco';
 import type { MessageResponse } from '../../../generated/models';
 import { Connection } from '../../api/connection';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
-import { ChatStore } from '../../chats/chat-store';
+import { ChatChangeKind, ChatStore } from '../../chats/chat-store';
 import { MessageDatePipe } from '../../messages/message-date.pipe';
 import { MessageMenu } from '../../messages/message-menu/message-menu';
 import { isVisibleMessage } from '../../messages/message-visibility';
@@ -98,6 +98,9 @@ export class PinnedMessagesPage {
       .subscribe(() => {
         if (this.active) void this.load();
       });
+    this.chatInfo.changes$.pipe(takeUntilDestroyed()).subscribe(({ kind, chatId }) => {
+      if (this.active && kind === ChatChangeKind.MessagePurge && chatId === this.id()) void this.load();
+    });
     this.destroyRef.onDestroy(() => this.leave());
   }
   private activate() {

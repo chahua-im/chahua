@@ -175,12 +175,14 @@ enum ThreadActionKind {
 
 type SelectedMessage = MessageResponse | OutgoingMessage;
 
+type ViewportPosition =
+  { type: PositionKind.Bottom } | { type: PositionKind.Anchor; messageId: SnowflakeID; offset?: number };
+
 type ScrollPosition =
-  | { type: PositionKind.Bottom }
+  | ViewportPosition
   // Unread anchors on the divider captured on entry unless a messageId names the live unread start.
   | { type: PositionKind.Unread; messageId?: SnowflakeID }
-  | { type: PositionKind.Message | PositionKind.Reaction; messageId: SnowflakeID }
-  | { type: PositionKind.Anchor; messageId: SnowflakeID; offset: number };
+  | { type: PositionKind.Message | PositionKind.Reaction; messageId: SnowflakeID };
 
 interface ConversationEntry {
   chatId: SnowflakeID;
@@ -1140,7 +1142,10 @@ export class ConversationPage {
   private retryAction = () => {};
   private readonly position = signal<ScrollPosition | undefined>(undefined);
   private syncWindowNavigation?: { version: number };
-  private membershipScrollPosition?: ScrollPosition;
+  private membershipScrollPosition?: ViewportPosition;
+  private viewportPosition?: ViewportPosition;
+  private provisionalScrollTop?: number;
+  private provisionalScrollVersion = 0;
   private readonly entryReadId = signal<SnowflakeID | undefined>(undefined);
   private firstUnreadAfter(boundary?: SnowflakeID) {
     if (!boundary) return undefined;
@@ -1255,16 +1260,21 @@ export class ConversationPage {
       entry: this.entryKey(),
       accessible: this.accessible(),
       idle: this.scrolling.idle(),
+      pinPurgeGeneration: this.pins().pinPurgeGeneration(),
       pins: this.pins()
         .items()
         .filter((pin) => isVisibleMessage(pin.message))
         .sort((a, b) => b.message.id - a.message.id),
     }),
-    computation: ({ entry, accessible, idle, pins }, previous): PinResponse[] =>
-      // Revocation takes precedence over the scroll-time visibility deferral.
+    computation: ({ entry, accessible, idle, pins, pinPurgeGeneration }, previous): PinResponse[] =>
+      // An access fence takes precedence over scroll-time visibility deferral.
       !accessible
         ? []
-        : !previous || entry !== previous.source.entry || idle || !!pins.length === !!previous.value.length
+        : !previous ||
+            entry !== previous.source.entry ||
+            pinPurgeGeneration !== previous.source.pinPurgeGeneration ||
+            idle ||
+            !!pins.length === !!previous.value.length
           ? pins
           : previous.value,
   });
@@ -1314,13 +1324,7 @@ export class ConversationPage {
         around: position.type === PositionKind.Anchor ? position.messageId : undefined,
         restore: () => {
           if (!this.isCurrent(entry) || navigation.version !== this.navigationVersion) return;
-          if (position.type !== PositionKind.Anchor) {
-            this.position.set(position);
-            return;
-          }
-          const visible = this.rows().filter((row) => row.confirmed);
-          const anchor = visible.find((row) => row.confirmed!.id >= position.messageId) ?? visible.at(-1);
-          this.position.set(anchor ? { ...position, messageId: anchor.confirmed!.id } : { type: PositionKind.Bottom });
+          this.position.set(this.resolveViewportPosition(position));
         },
       };
     });
@@ -1399,12 +1403,22 @@ export class ConversationPage {
         onCleanup(this.chatInfo.watchReadStates([{ chatId: this.id(), threadId: this.threadId() }]));
     });
     this.chatInfo.changes$.pipe(takeUntilDestroyed()).subscribe(({ kind, chatId, threadId, readThrough }) => {
+      if (kind === ChatChangeKind.MessagePurge && chatId === this.id() && this.isCurrent()) void this.loadPins();
       if (
         kind === ChatChangeKind.Removed &&
         chatId === this.id() &&
         (threadId == null || threadId === this.threadId())
       ) {
         this.clearMessagePreviews();
+      }
+      if (
+        kind === ChatChangeKind.Restored &&
+        chatId === this.id() &&
+        (threadId == null || threadId === this.threadId()) &&
+        this.isCurrent()
+      ) {
+        this.restoreConversation();
+        return;
       }
       if (chatId !== this.id() || (threadId ?? undefined) !== (this.threadId() ?? undefined)) return;
       if (kind === ChatChangeKind.Read) {
@@ -1546,6 +1560,8 @@ export class ConversationPage {
       if (this.isCurrent() && chatId === this.id() && threadId === this.threadId()) void this.goTo(target);
     });
     effect(() => {
+      // A retained row must not retire confirmation before its replacement is accepted.
+      if (this.conversation.provisional()) return;
       const messages = this.conversation.items();
       untracked(() => this.outbox.release(messages));
     });
@@ -1586,6 +1602,7 @@ export class ConversationPage {
       this.rows();
       this.messageElements();
       this.position();
+      this.conversation.provisional();
       this.panels.covered();
       if (this.active()) void this.positionAndRead();
     });
@@ -1622,6 +1639,11 @@ export class ConversationPage {
   }
 
   private activate(id: SnowflakeID, threadId?: SnowflakeID) {
+    this.retainConversation();
+    this.viewportPosition = undefined;
+    this.contentGeometry = undefined;
+    this.provisionalScrollTop = undefined;
+    this.provisionalScrollVersion = 0;
     this.membershipScrollPosition = undefined;
     this.resetReactionSession();
     this.resetMentionSession();
@@ -1629,21 +1651,30 @@ export class ConversationPage {
     this.entryVersion.update((version) => version + 1);
     this.active.set(true);
     this.messageSync.setPriority(id, this);
+    this.entryReadId.set(undefined);
+    this.atBottom.set(false);
+    this.position.set(undefined);
+    this.conversation.reset(id, threadId);
+    const recent = this.conversation.takeRecent(this.hideMembershipMessages());
+    if (recent) {
+      this.viewportPosition = this.resolveViewportPosition(
+        !recent.atBottom && recent.anchor != null
+          ? { type: PositionKind.Anchor, messageId: recent.anchor }
+          : { type: PositionKind.Bottom },
+      );
+      this.position.set(this.viewportPosition);
+    }
     const draft = this.drafts.get(id, threadId);
     this.draft.set(draft?.text ?? '');
     this.draftLinks.set(draft?.linkPreviews ?? []);
     this.savedReplyId.set(draft?.replyTo ? encodeId(draft.replyTo) : undefined);
     if (draft?.replyTo && !this.reply()) void this.restoreReply(encodeId(draft.replyTo));
-    this.conversation.reset(id, threadId);
     if (this.entered) {
       void this.enterReactionSession();
       void this.enterMentionSession();
     }
     void this.loadPins();
     void this.loadThreadRoot();
-    this.entryReadId.set(undefined);
-    this.atBottom.set(false);
-    this.position.set(undefined);
     void this.loadChatInfo().catch(() => {});
     if (!this.message() && !this.reply()) void this.goTo({ type: ConversationTargetKind.Resume });
   }
@@ -1656,7 +1687,8 @@ export class ConversationPage {
     }
     this.active.set(true);
     this.messageSync.setPriority(this.id(), this);
-    void this.conversation.reconnect();
+    if (this.conversation.provisional()) this.restoreConversation();
+    else void this.conversation.reconnect();
     void this.loadPins();
     void this.refreshConversationMetadata().catch(() => {});
   }
@@ -1703,6 +1735,14 @@ export class ConversationPage {
     );
   }
 
+  private retainConversation() {
+    const viewport = this.viewportPosition;
+    this.conversation.retainRecent(
+      viewport?.type === PositionKind.Anchor ? viewport.messageId : undefined,
+      viewport ? viewport.type === PositionKind.Bottom : this.atBottom() && this.conversation.atLatest(),
+    );
+  }
+
   private leave(retainRange = false) {
     const data = this.router.routerState.snapshot.root.firstChild?.data;
     const retainComposer = retainRange && (data?.['modal'] || data?.['preserveConversation']);
@@ -1714,6 +1754,7 @@ export class ConversationPage {
     this.cancelEdit();
     this.entered = false;
     this.navigationVersion++;
+    this.pendingNavigation.set(undefined);
     this.position.set(undefined);
     this.resetReactionSession();
     this.resetMentionSession(retainRange);
@@ -1721,6 +1762,9 @@ export class ConversationPage {
       this.conversation.cancelLoading();
       this.playback.pause();
     } else {
+      this.retainConversation();
+      this.viewportPosition = undefined;
+      this.contentGeometry = undefined;
       this.membershipScrollPosition = undefined;
       this.entryVersion.update((version) => version + 1);
       this.conversation.reset();
@@ -1752,7 +1796,16 @@ export class ConversationPage {
     this.pendingNavigation.set(target);
     try {
       this.retryAction = () => void this.goTo(target, replying, fromId);
-      this.position.set(undefined);
+      const provisional = this.conversation.provisional();
+      const scrollVersion = target.type === ConversationTargetKind.Resume ? 0 : this.provisionalScrollVersion;
+      if (!provisional) {
+        this.position.set(undefined);
+      } else if (
+        target.type === ConversationTargetKind.Message &&
+        this.messageEntries().some((row) => row.confirmed?.id === target.messageId)
+      ) {
+        this.position.set({ type: PositionKind.Message, messageId: target.messageId });
+      }
       let around: SnowflakeID | undefined;
       if (target.type === ConversationTargetKind.Resume) {
         const { chatId, threadId } = entry;
@@ -1772,6 +1825,20 @@ export class ConversationPage {
         }
         if (entry !== this.entryKey() || version !== this.navigationVersion) return;
         this.entryReadId.set(around);
+        // Choose the request anchor after replay too, in case browsing started during resume.
+        if (provisional && this.messageSync.active()) {
+          try {
+            await this.messageSync.waitForResume();
+          } catch {
+            return;
+          }
+          if (entry !== this.entryKey() || version !== this.navigationVersion) return;
+        }
+        // Read state can arrive after the user has started browsing the restored rows.
+        if (provisional && scrollVersion !== this.provisionalScrollVersion) {
+          const viewport = this.viewportPosition;
+          around = viewport?.type === PositionKind.Anchor ? viewport.messageId : undefined;
+        }
       } else if (target.type === ConversationTargetKind.Message) {
         around = target.messageId;
       }
@@ -1799,11 +1866,13 @@ export class ConversationPage {
           visible.find((row) => row.confirmed!.id > targetMessage.id)?.confirmed?.id ?? visible.at(-1)?.confirmed?.id;
       }
       this.position.set(
-        positionMessageId
-          ? target.type === ConversationTargetKind.Message
-            ? { type: PositionKind.Message, messageId: positionMessageId }
-            : { type: PositionKind.Unread }
-          : { type: PositionKind.Bottom },
+        provisional && scrollVersion !== this.provisionalScrollVersion && this.viewportPosition
+          ? this.resolveViewportPosition(this.viewportPosition)
+          : positionMessageId
+            ? target.type === ConversationTargetKind.Message
+              ? { type: PositionKind.Message, messageId: positionMessageId }
+              : { type: PositionKind.Unread }
+            : { type: PositionKind.Bottom },
       );
       if (replying && messageId) {
         const message = this.conversation.items().find((item) => item.id === messageId);
@@ -1832,6 +1901,17 @@ export class ConversationPage {
     this.linkPreviewOpen.set(false);
   }
 
+  private resolveViewportPosition(position: ViewportPosition): ViewportPosition {
+    if (position.type === PositionKind.Bottom) return position;
+    let anchor: SnowflakeID | undefined;
+    for (const { confirmed } of this.messageEntries()) {
+      if (!confirmed) continue;
+      anchor = confirmed.id;
+      if (anchor >= position.messageId) break;
+    }
+    return anchor != null ? { ...position, messageId: anchor } : { type: PositionKind.Bottom };
+  }
+
   private async reloadMembershipVisibility(
     hide: boolean,
     position = this.membershipScrollPosition ?? { type: PositionKind.Bottom as const },
@@ -1844,13 +1924,7 @@ export class ConversationPage {
     this.position.set(position);
     const loaded = await this.conversation.open(around, false, hide);
     if (!loaded || entry !== this.entryKey() || version !== this.navigationVersion) return;
-    if (position.type === PositionKind.Anchor) {
-      const messageId = position.messageId;
-      const visible = this.rows().filter((row) => row.confirmed);
-      const anchor = visible.find((row) => row.confirmed!.id >= messageId) ?? visible.at(-1);
-      position = anchor ? { ...position, messageId: anchor.confirmed!.id } : { type: PositionKind.Bottom };
-    }
-    this.position.set(position);
+    this.position.set(this.resolveViewportPosition(position));
   }
 
   protected navigateReply(messageId: SnowflakeID, fromId?: SnowflakeID) {
@@ -2063,6 +2137,7 @@ export class ConversationPage {
       this.stateWatchVisible() &&
       !this.document.hidden &&
       !this.panels.covered() &&
+      !this.conversation.provisional() &&
       !this.conversation.loading() &&
       !this.pendingNavigation() &&
       !this.position() &&
@@ -2190,9 +2265,11 @@ export class ConversationPage {
 
   private restoreConversation() {
     if (!this.accessible()) return;
-    if (this.conversation.error() === ConversationError.Open) {
-      // Reuse navigation/filter parameters and positioning, including exact message targets.
-      if (!this.conversation.loading() && !this.pendingNavigation()) this.retryAction();
+    const error = this.conversation.error();
+    if (this.conversation.provisional() || error === ConversationError.Open) {
+      // Keep the entry's navigation and positioning rather than racing it with reconnect paging.
+      if (error !== ConversationError.Missing && !this.pendingNavigation() && !this.conversation.loading())
+        this.retryAction();
       return;
     }
     void this.conversation.reconnect();
@@ -2244,6 +2321,8 @@ export class ConversationPage {
         // A changing header moves the viewport; keep messages at their screen positions.
         scroll.scrollTop += offset;
       }
+      if (this.conversation.provisional() && scroll.scrollTop !== scrollTop)
+        this.provisionalScrollTop = scroll.scrollTop;
       if (this.selectionScroll) this.selectionScroll.top += scroll.scrollTop - scrollTop;
       void this.trackScroll();
     });
@@ -2280,11 +2359,10 @@ export class ConversationPage {
             : message;
         if (message && element) {
           const rect = element.getBoundingClientRect();
-          const edge = position.type === PositionKind.Anchor ? rect.bottom : rect.top;
-          const inset =
-            position.type === PositionKind.Anchor
-              ? position.offset
-              : Math.max(0, (scroll.clientHeight - element.offsetHeight) / 2);
+          const anchored = position.type === PositionKind.Anchor;
+          const offset = anchored ? position.offset : undefined;
+          const edge = offset == null ? rect.top : rect.bottom;
+          const inset = anchored ? (offset ?? 0) : Math.max(0, (scroll.clientHeight - element.offsetHeight) / 2);
           scroll.scrollTop += edge - scroll.getBoundingClientRect().top - inset;
           if (position.type === PositionKind.Message || position.type === PositionKind.Reaction)
             message.animate(
@@ -2293,6 +2371,8 @@ export class ConversationPage {
             );
         }
       }
+      if (this.conversation.provisional())
+        this.provisionalScrollTop = Math.max(0, Math.min(scroll.scrollTop, scroll.scrollHeight - scroll.clientHeight));
       this.position.set(undefined);
       this.contentGeometry = undefined;
       this.selectionScroll = undefined;
@@ -2311,6 +2391,7 @@ export class ConversationPage {
     const scrollHeight = scroll.scrollHeight;
     const maxTop = Math.max(0, scrollHeight - height);
     const incomingTop = Math.min(maxTop, Math.max(0, scroll.scrollTop));
+    const provisional = this.conversation.provisional();
     if (
       previous?.entry === entry &&
       previous.anchorHeight > 0 &&
@@ -2343,7 +2424,7 @@ export class ConversationPage {
       !this.entered ||
       this.document.hidden ||
       this.panels.covered() ||
-      this.conversation.loading() ||
+      (this.conversation.loading() && !provisional) ||
       this.position()
     )
       return bounds;
@@ -2370,6 +2451,12 @@ export class ConversationPage {
     const geometryAnchor = allElements[first]?.nativeElement;
     const anchorRect = geometryAnchor?.getBoundingClientRect();
     const currentTop = Math.min(maxTop, bounds.above);
+    if (provisional) {
+      if (fromScrollEvent && this.provisionalScrollTop != null && incomingTop !== this.provisionalScrollTop)
+        this.provisionalScrollVersion++;
+      if (fromScrollEvent || this.provisionalScrollTop == null || currentTop !== incomingTop)
+        this.provisionalScrollTop = currentTop;
+    }
     this.contentGeometry =
       geometryAnchor && anchorRect
         ? {
@@ -2392,9 +2479,9 @@ export class ConversationPage {
       });
     }
     this.visibleDate.set(rows[first]?.message.createdAt);
-    this.rememberMembershipScrollPosition(first, viewport.top);
+    this.rememberViewportPositions(first, viewport.top, anchorRect?.bottom);
     this.updateFloatingDate(first, viewport.top);
-    this.markVisibleMessagesRead(viewport);
+    if (!provisional) this.markVisibleMessagesRead(viewport);
     return bounds;
   }
 
@@ -2415,29 +2502,33 @@ export class ConversationPage {
     this.stickyOffset.set(sticky && row.first ? Math.max(0, bubble.top + 34 - viewportBottom) : 0);
   }
 
-  private rememberMembershipScrollPosition(first: number, viewportTop: number) {
-    const rows = this.rows();
-    // Settings can change this filter while the cached conversation is covered.
-    // Retain a non-membership row so it survives toggling in either direction.
-    let anchor = first;
-    while (rows[anchor] && (!rows[anchor].confirmed || isMembershipMessage(rows[anchor].message))) anchor++;
-    // A range of only membership events still identifies a historical location.
-    // Resolve its visible neighbour after fetching around that original message.
-    if (!rows[anchor]) {
-      anchor = first;
-      while (rows[anchor] && !rows[anchor].confirmed) anchor++;
+  private rememberViewportPositions(first: number, viewportTop: number, firstBottom?: number) {
+    if (this.atBottom() && !this.conversation.page()?.newerCursor) {
+      this.viewportPosition = { type: PositionKind.Bottom };
+      this.membershipScrollPosition = this.viewportPosition;
+      return;
     }
-    const anchorMessage = rows[anchor]?.confirmed;
+    const rows = this.rows();
+    const elements = this.messageElements();
+    let anchor = first;
+    while (rows[anchor] && !rows[anchor].confirmed) anchor++;
+    const confirmed = rows[anchor]?.confirmed;
+    const bottom = anchor === first ? firstBottom : elements[anchor]?.nativeElement.getBoundingClientRect().bottom;
+    this.viewportPosition =
+      confirmed && bottom != null
+        ? { type: PositionKind.Anchor, messageId: confirmed.id, offset: bottom - viewportTop }
+        : undefined;
+    // Keep a non-membership anchor for filter changes if one is available.
+    while (rows[anchor] && (!rows[anchor].confirmed || isMembershipMessage(rows[anchor].message))) anchor++;
+    const membershipAnchor = rows[anchor]?.confirmed;
     this.membershipScrollPosition =
-      this.atBottom() && this.conversation.atLatest()
-        ? { type: PositionKind.Bottom }
-        : anchorMessage
-          ? {
-              type: PositionKind.Anchor,
-              messageId: anchorMessage.id,
-              offset: this.messageElements()[anchor].nativeElement.getBoundingClientRect().bottom - viewportTop,
-            }
-          : undefined;
+      membershipAnchor && membershipAnchor !== confirmed
+        ? {
+            type: PositionKind.Anchor,
+            messageId: membershipAnchor.id,
+            offset: elements[anchor].nativeElement.getBoundingClientRect().bottom - viewportTop,
+          }
+        : this.viewportPosition;
   }
 
   private updateFloatingDate(first: number, viewportTop: number) {
@@ -2558,9 +2649,11 @@ export class ConversationPage {
   protected async onScroll() {
     const entry = this.entryKey();
     const version = this.navigationVersion;
+    const provisional = this.conversation.provisional();
     const bounds = await this.trackScroll(true);
     if (!bounds || !this.isCurrent(entry) || version !== this.navigationVersion || !this.entered || this.position())
       return;
+    if (provisional || this.conversation.provisional()) return;
     const { height, above, below } = bounds;
     const threshold = height * 1.5;
     const older = this.conversation.canLoad(PageDirection.Older) && above < threshold;

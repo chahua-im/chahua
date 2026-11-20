@@ -14,9 +14,10 @@ import {
 } from '../../generated/models';
 import { RpcErrorCode } from '../api/rpc-error';
 import { RpcTestPeer, provideRpcTesting } from '../api/rpc-testing';
-import { Connection } from '../api/connection';
+import { Connection, ResyncReason } from '../api/connection';
 import { decodeId, encodeId } from '../api/snowflake-id';
 import { mockRealtime, testChat, testMessage, testUser, wireChat, wireMessage } from '../api/testing';
+import { MessageSync } from '../messages/message-sync';
 import { SessionStore } from '../session/session-store';
 import { ChatChangeKind, ChatStore } from './chat-store';
 
@@ -24,7 +25,7 @@ describe('ChatStore', () => {
   let store: ChatStore;
   let peer: RpcTestPeer;
   let scope: EnvironmentInjector;
-  let resync: Subject<void>;
+  let resync: Subject<ResyncReason | void>;
   let events: Subject<ServerWsMessage>;
   const watch = vi.fn<Connection['watchConversationStates']>();
   const publish = (accessible: boolean, chatId = testChat.id, threadId?: typeof testChat.id, full = false) =>
@@ -75,6 +76,35 @@ describe('ChatStore', () => {
       vi.useRealTimers();
       TestBed.resetTestingModule();
     }
+  });
+
+  it('restores a sync-revoked chat only after a fresh legacy access snapshot', () => {
+    const sync = TestBed.inject(MessageSync);
+    const active = vi.spyOn(sync, 'active').mockReturnValue(true);
+    sync.receive(
+      {
+        type: ServerWsMessageType.messageSyncRevoked,
+        payload: { chatId: testChat.id },
+      },
+      TestBed.inject(Connection),
+    );
+    expect(store.isAccessible(testChat.id)).toBe(false);
+
+    active.mockReturnValue(false);
+    resync.next(ResyncReason.Connected);
+    expect(store.isAccessible(testChat.id)).toBe(false);
+    expect(watch.mock.lastCall?.[1]).toContainEqual({ chatId: testChat.id });
+    publish(false, testChat.id, undefined, true);
+    const previousRequest = watch.mock.lastCall?.[0];
+    events.next({ type: ServerWsMessageType.chatMembershipChanged, payload: { chatId: testChat.id } });
+    expect(watch.mock.lastCall?.[0]).not.toBe(previousRequest);
+    expect(watch.mock.lastCall?.[1]).toContainEqual({ chatId: testChat.id });
+    expect(store.isAccessible(testChat.id)).toBe(false);
+    publish(true, testChat.id, undefined, true);
+    expect(store.isAccessible(testChat.id)).toBe(true);
+    store.acceptChats([testChat], store.snapshot());
+    expect(store.get(testChat.id)?.name).toBe(testChat.name);
+    for (const request of peer.match('users.getNotificationSettings')) request.flush({});
   });
 
   it('revokes cached membership previews, rejects old policy snapshots and keeps ordinary messages visible', async () => {

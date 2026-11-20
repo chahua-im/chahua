@@ -52,12 +52,18 @@ export class MessageSync {
   readonly resets$ = this.resets.asObservable();
   private readonly revocations = new Subject<MessageSyncRevoked>();
   readonly revoked$ = this.revocations.asObservable();
+  private readonly accountResets = new Subject<void>();
+  readonly accountResets$ = this.accountResets.asObservable();
   private readonly pending = new Map<number, PendingPage>();
   private uid?: number;
   private generation = 0;
   private requestId = 0;
   private priority?: { chatId: SnowflakeID; owner: object };
   private barrier?: Promise<void>;
+
+  get connectionGeneration(): number {
+    return this.generation;
+  }
 
   setPriority(chatId: SnowflakeID, owner: object) {
     this.priority = { chatId, owner };
@@ -94,6 +100,7 @@ export class MessageSync {
     this.cursors.clear();
     this.priority = undefined;
     this.requestId = 0;
+    this.accountResets.next();
   }
 
   isCovered(chatId: SnowflakeID): boolean {

@@ -5,7 +5,7 @@
 //! engine can be used by an in-memory or future stream transport.
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     future::Future,
     panic::AssertUnwindSafe,
     sync::{
@@ -108,12 +108,17 @@ pub type ControlReply<T> = oneshot::Sender<Result<T, RpcError>>;
 /// Typed commands carried by the session's bounded, serial control lane.
 pub enum RpcControlCommand {
     MessageSyncResume {
+        sync_seq: u64,
         params: MessageSyncResumeParams,
         reply: ControlReply<crate::dto::rpc::session::EmptyResult>,
     },
     MessageSyncPage {
+        sync_seq: u64,
         params: MessageSyncPageParams,
         reply: ControlReply<crate::dto::rpc::session::EmptyResult>,
+    },
+    MessageSyncSkip {
+        sync_seq: u64,
     },
     Open {
         params: SessionOpenParams,
@@ -146,6 +151,44 @@ pub enum RpcControlCommand {
         params: ConversationsWatchStatesParams,
         reply: ControlReply<()>,
     },
+}
+
+impl RpcControlCommand {
+    fn sync_seq(&self) -> Option<u64> {
+        match self {
+            Self::MessageSyncResume { sync_seq, .. }
+            | Self::MessageSyncPage { sync_seq, .. }
+            | Self::MessageSyncSkip { sync_seq } => Some(*sync_seq),
+            _ => None,
+        }
+    }
+}
+
+/// Reserve space before dispatch. Dropping an unused reservation fills the gap
+/// even if decoding fails or the dispatch future is cancelled before polling.
+pub(crate) struct SyncControlSlot {
+    pub(crate) seq: u64,
+    permit: std::sync::Mutex<Option<mpsc::OwnedPermit<RpcControlCommand>>>,
+}
+
+impl SyncControlSlot {
+    pub(crate) fn send(&self, command: RpcControlCommand) {
+        let permit = self
+            .permit
+            .lock()
+            .unwrap()
+            .take()
+            .expect("one sync control");
+        drop(permit.send(command));
+    }
+}
+
+impl Drop for SyncControlSlot {
+    fn drop(&mut self) {
+        if let Some(permit) = self.permit.get_mut().unwrap().take() {
+            drop(permit.send(RpcControlCommand::MessageSyncSkip { sync_seq: self.seq }));
+        }
+    }
 }
 
 /// Errors exposed by the transport-neutral input side.
@@ -692,6 +735,7 @@ impl SessionShared {
                     .bound
                     .as_ref()
                     .is_some_and(|bound| bound.sync_driver.is_some()),
+            sync_control: None,
             guard_failures: Some(guard_failures),
             close_session: Some(RpcSessionCloser {
                 state: self.transport.clone(),
@@ -1410,6 +1454,8 @@ async fn run_controls(
 ) {
     let mut close = shared.transport.close_subscription();
     let mut activity_tasks = JoinSet::new();
+    let mut next_sync_seq = 0;
+    let mut pending_sync = BTreeMap::new();
     loop {
         if shared.transport.is_closed() {
             break;
@@ -1421,9 +1467,20 @@ async fn run_controls(
                     tracing::warn!(?error, "RPC client activity worker failed");
                 }
             }
-            command = controls.recv() => match command {
-                Some(command) => handle_control(command, &shared, &services, &sink, &mut activity_tasks).await,
-                None => break,
+            command = controls.recv() => {
+                let Some(command) = command else { break };
+                if let Some(seq) = command.sync_seq() {
+                    pending_sync.insert(seq, command);
+                    while let Some(command) = pending_sync.remove(&next_sync_seq) {
+                        next_sync_seq += 1;
+                        handle_control(command, &shared, &services, &sink, &mut activity_tasks).await;
+                        if shared.transport.is_closed() {
+                            break;
+                        }
+                    }
+                } else {
+                    handle_control(command, &shared, &services, &sink, &mut activity_tasks).await;
+                }
             }
         }
     }
@@ -1503,14 +1560,15 @@ async fn handle_control(
     activity_tasks: &mut JoinSet<()>,
 ) {
     match command {
-        RpcControlCommand::MessageSyncResume { params, reply } => {
+        RpcControlCommand::MessageSyncResume { params, reply, .. } => {
             let result = run_sync_control(shared, services, sink, Some(params), None).await;
             let _ = reply.send(result);
         }
-        RpcControlCommand::MessageSyncPage { params, reply } => {
+        RpcControlCommand::MessageSyncPage { params, reply, .. } => {
             let result = run_sync_control(shared, services, sink, None, Some(params)).await;
             let _ = reply.send(result);
         }
+        RpcControlCommand::MessageSyncSkip { .. } => {}
         RpcControlCommand::Open { params, reply } => {
             let result = async {
                 if params.protocol_version != 1 {
@@ -1819,6 +1877,7 @@ struct SessionExecution<'a> {
     results: &'a mpsc::Sender<WorkResult>,
     admission: &'a SessionAdmission,
     budget: &'a RpcByteBudget,
+    next_sync_seq: u64,
 }
 
 async fn schedule_call(
@@ -1826,7 +1885,7 @@ async fn schedule_call(
     started: Instant,
     destination: ResultDestination,
     close_after_error: bool,
-    execution: &SessionExecution<'_>,
+    execution: &mut SessionExecution<'_>,
     outstanding: &mut HashSet<RpcId>,
     input_lease: Option<RpcFrameLease>,
 ) -> ScheduledCall {
@@ -1904,7 +1963,7 @@ async fn schedule_call(
         }
         None => None,
     };
-    let Some(context) = shared
+    let Some(mut context) = shared
         .call_context(controls, id.clone(), guard_failures)
         .await
     else {
@@ -1945,9 +2004,27 @@ async fn schedule_call(
     let method = call.method.clone();
     let activate_after_success =
         matches!(method.as_str(), "session.open" | "auth.createDevSession");
-    let counts_toward_batch = id.is_some()
-        || activate_after_success
-        || matches!(method.as_str(), "messageSync.resume" | "messageSync.page");
+    let sync_control = matches!(method.as_str(), "messageSync.resume" | "messageSync.page");
+    if sync_control && context.message_sync_enabled {
+        let Ok(permit) = context.controls.clone().try_reserve_owned() else {
+            let _ = record_rejection(
+                &services,
+                api,
+                started,
+                None,
+                RpcErrorCode::Overloaded,
+                &budget,
+            );
+            shared.transport.close();
+            return ScheduledCall::Immediate(None);
+        };
+        context.sync_control = Some(Arc::new(SyncControlSlot {
+            seq: execution.next_sync_seq,
+            permit: std::sync::Mutex::new(Some(permit)),
+        }));
+        execution.next_sync_seq += 1;
+    }
+    let counts_toward_batch = id.is_some() || activate_after_success || sync_control;
     let failure_transport = shared.transport.clone();
     supervise(
         async move {
@@ -1973,6 +2050,8 @@ async fn schedule_call(
                         return;
                     }
                 };
+            let message_sync_enabled = context.message_sync_enabled;
+            drop(context);
             let response = match prepare_recorded(&services, api, started, response, error, &budget)
             {
                 Ok(response) => response,
@@ -1982,8 +2061,8 @@ async fn schedule_call(
                 }
             };
             if id.is_none()
-                && matches!(method.as_str(), "messageSync.resume" | "messageSync.page")
-                && context.message_sync_enabled
+                && sync_control
+                && message_sync_enabled
                 && error == Some(RpcErrorCode::InvalidParams)
             {
                 shared.transport.close();
@@ -1993,8 +2072,8 @@ async fn schedule_call(
                 id,
                 destination,
                 close_after_error: close_after_error
-                    || (matches!(method.as_str(), "messageSync.resume" | "messageSync.page")
-                        && context.message_sync_enabled
+                    || (sync_control
+                        && message_sync_enabled
                         && error == Some(RpcErrorCode::InvalidParams)),
                 response,
                 activate_after_success,
@@ -2152,7 +2231,7 @@ pub async fn serve_rpc_session(
     let mut next_batch = 0_u64;
     let mut batches = HashMap::<u64, BatchAssembly>::new();
     let mut outstanding = HashSet::<RpcId>::new();
-    let execution = SessionExecution {
+    let mut execution = SessionExecution {
         shared: &shared,
         services: &services,
         controls: &controls_tx,
@@ -2160,6 +2239,7 @@ pub async fn serve_rpc_session(
         results: &results_tx,
         admission: &admission,
         budget: &dependencies.budget,
+        next_sync_seq: 0,
     };
 
     'session: loop {
@@ -2384,7 +2464,7 @@ pub async fn serve_rpc_session(
                             started,
                             ResultDestination::Single,
                             close_after_error,
-                            &execution,
+                            &mut execution,
                             &mut outstanding,
                             Some(input_lease),
                         ).await {
@@ -2438,7 +2518,7 @@ pub async fn serve_rpc_session(
                                         started,
                                         ResultDestination::Batch(batch_id),
                                         false,
-                                        &execution,
+                                        &mut execution,
                                         &mut outstanding,
                                         Some(input_lease.retain_for_dispatch()),
                                     ).await {

@@ -580,7 +580,8 @@ async fn message_sync_both_protocols_isolate_live_events_and_order_rpc_pages() {
         .batch_execute(
             "-- These are temp tables. Resume should attach only the fixture chat.
          DELETE FROM group_membership WHERE uid IN (1, 2);
-         INSERT INTO groups (id, name) VALUES (9876770000, 'sync wire');
+         INSERT INTO groups (id, name, membership_message_visibility)
+             VALUES (9876770000, 'sync wire', 'admins');
          INSERT INTO group_membership (chat_id, uid, role)
              VALUES (9876770000, 1, 'member'), (9876770000, 2, 'admin');",
         )
@@ -619,6 +620,21 @@ async fn message_sync_both_protocols_isolate_live_events_and_order_rpc_pages() {
     let frame = after_presence(&mut ticket).await;
     assert_eq!(frame["type"], "messageSyncReset");
     assert_eq!(frame["payload"]["chatId"], chat_id);
+    assert_eq!(
+        after_presence(&mut ticket).await,
+        json!({"type": "messageSyncResumed", "payload": {}})
+    );
+    let request_id = 4_294_967_296_u64;
+    send_wire(
+        &mut ticket,
+        json!({"type": "messageSyncPage", "requestId": request_id, "chatId": chat_id}),
+    )
+    .await;
+    let ticket_page = after_presence(&mut ticket).await;
+    assert_eq!(ticket_page["type"], "messageSyncPageResult");
+    assert_eq!(ticket_page["payload"]["requestId"], request_id);
+    assert_eq!(ticket_page["payload"]["at"], frame["payload"]["cursor"]);
+    assert_eq!(ticket_page["payload"]["page"]["messages"], json!([]));
 
     let mut legacy_ticket = connect(&server, &token(1, "old-ticket-header", false)).await;
     send_wire(
@@ -669,6 +685,16 @@ async fn message_sync_both_protocols_isolate_live_events_and_order_rpc_pages() {
     assert_eq!(opened["messageSync"], 1);
     send_call(
         &mut receiver,
+        "first-chunk",
+        "messageSync.resume",
+        json!({
+            "chats": [{"chatId": chat_id}],
+            "last": false,
+        }),
+    )
+    .await;
+    send_call(
+        &mut receiver,
         "resume",
         "messageSync.resume",
         json!({
@@ -676,11 +702,21 @@ async fn message_sync_both_protocols_isolate_live_events_and_order_rpc_pages() {
         }),
     )
     .await;
-    assert_eq!(
-        after_presence(&mut receiver).await["method"],
-        "events.messageSyncReset"
-    );
-    assert_eq!(after_presence(&mut receiver).await["result"], json!({}));
+    let mut saw_reset = false;
+    let mut replies = std::collections::HashSet::new();
+    while replies.len() < 2 {
+        let frame = after_presence(&mut receiver).await;
+        if frame["method"] == "events.messageSyncReset" {
+            assert!(!saw_reset);
+            assert_eq!(frame["params"]["chatId"], chat_id);
+            saw_reset = true;
+        } else {
+            let id = frame["id"].as_str().unwrap();
+            assert!(id == "first-chunk" || (id == "resume" && saw_reset));
+            assert_eq!(frame["result"], json!({}));
+            assert!(replies.insert(id.to_owned()));
+        }
+    }
 
     let sender_token = token(2, "sync-test-sender", false);
     let mut sender = connect(&server, &sender_token).await;
@@ -711,7 +747,22 @@ async fn message_sync_both_protocols_isolate_live_events_and_order_rpc_pages() {
     );
     assert_eq!(after_presence(&mut legacy_ticket).await["type"], "message");
 
-    let checkpoint = live["params"]["to"].clone();
+    rpc(
+        &mut sender,
+        "announce",
+        "groups.addMember",
+        json!({"chatId": chat_id, "uid": 3}),
+    )
+    .await;
+    let hidden = after_presence(&mut receiver).await;
+    assert_eq!(hidden["method"], "events.messageSyncBatch");
+    assert_eq!(hidden["params"]["from"], live["params"]["to"]);
+    assert_eq!(hidden["params"]["changes"], json!([]));
+    let checkpoint = hidden["params"]["to"].clone();
+    assert_ne!(checkpoint, live["params"]["to"]);
+    let ticket_hidden = after_presence(&mut ticket).await;
+    assert_eq!(ticket_hidden["type"], "messageSyncBatch");
+    assert_eq!(ticket_hidden["payload"], hidden["params"]);
     receiver.close(None).await.unwrap();
     let edit = |body| {
         diesel::update(crate::schema::messages::table.find(msg_id.parse::<i64>().unwrap()))
@@ -756,7 +807,7 @@ async fn message_sync_both_protocols_isolate_live_events_and_order_rpc_pages() {
         &mut receiver,
         "page",
         "messageSync.page",
-        json!({"requestId": 4, "chatId": chat_id}),
+        json!({"requestId": request_id, "chatId": chat_id}),
     )
     .await;
     let batch = after_presence(&mut receiver).await;
@@ -764,7 +815,7 @@ async fn message_sync_both_protocols_isolate_live_events_and_order_rpc_pages() {
     let page = after_presence(&mut receiver).await;
     assert_eq!(page["method"], "events.messageSyncPageResult");
     assert_eq!(page["params"]["at"], batch["params"]["to"]);
-    assert_eq!(page["params"]["requestId"], 4);
+    assert_eq!(page["params"]["requestId"], request_id);
     assert_eq!(
         page["params"]["page"]["messages"][0]["message"],
         "inside page snapshot"
@@ -838,6 +889,58 @@ async fn message_sync_both_protocols_isolate_live_events_and_order_rpc_pages() {
         .await
         .unwrap();
     use tokio_tungstenite::tungstenite::{error::ProtocolError, Error};
+    assert!(matches!(
+        closed,
+        None | Some(Ok(Message::Close(_)))
+            | Some(Err(Error::Protocol(
+                ProtocolError::ResetWithoutClosingHandshake
+            )))
+    ));
+}
+
+#[tokio::test]
+async fn message_sync_ticket_closes_when_pruned_before_final_resume_chunk() {
+    use tokio_tungstenite::tungstenite::{error::ProtocolError, Error};
+
+    let Some(services) = crate::rpc::test_support::services().await else {
+        return;
+    };
+    let server = server(&services).await;
+    let header = services
+        .auth_token_service
+        .issue_session(1, "prune-header", 0)
+        .unwrap();
+    let ticket = services
+        .auth_token_service
+        .issue_legacy_session(1, "prune-ticket", 0)
+        .unwrap();
+    let mut client = connect(&server, &header).await;
+    send_wire(
+        &mut client,
+        json!({"type": "auth", "ticket": ticket, "messageSync": 1}),
+    )
+    .await;
+    assert_eq!(next_wire(&mut client).await["type"], "messageSyncHello");
+    send_wire(
+        &mut client,
+        json!({"type": "messageSyncResume", "chats": [], "last": false}),
+    )
+    .await;
+    send_wire(&mut client, json!({"type": "ping", "state": "inactive"})).await;
+    assert_eq!(after_presence(&mut client).await["type"], "pong");
+
+    // Heartbeats have second precision. Prune without sending a final chunk.
+    timeout(Duration::from_secs(3), async {
+        while !services.ws_registry.online_connections(1).is_empty() {
+            services.ws_registry.prune_stale(0);
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let closed = timeout(Duration::from_secs(2), client.next())
+        .await
+        .unwrap();
     assert!(matches!(
         closed,
         None | Some(Ok(Message::Close(_)))

@@ -28,6 +28,7 @@ import {
   GroupKind,
   GroupRole,
   LinkPreviewStatus,
+  MessageSyncResetReason,
   MessageType,
   NotificationType,
   ServerWsMessageType,
@@ -48,6 +49,7 @@ import { MessageDelivery } from '../../messages/message-delivery';
 import { MessageAction } from '../../messages/message-menu/message-menu';
 import { MessageNotice } from '../../messages/message-notice';
 import { MessageOutbox, type OutgoingMessage } from '../../messages/message-outbox';
+import { MessageSync } from '../../messages/message-sync';
 import { Message, type MessageContent } from '../../messages/message/message';
 import { SavedMessageStore } from '../../messages/saved-message-store';
 import { StickerFavorites } from '../../messages/sticker-favorites';
@@ -389,6 +391,65 @@ describe('ConversationPage', () => {
     expect(fixture.nativeElement.querySelector('app-message-composer')).toBe(composer);
     expect(component['draft']()).toBe('local draft');
     expect(component['conversation'].error()).toBe(ConversationError.Open);
+  });
+
+  it('reopens the visible conversation when a sync-revoked chat is restored', async () => {
+    const sync = TestBed.inject(MessageSync);
+    const connection = TestBed.inject(Connection);
+    vi.spyOn(sync, 'active').mockReturnValue(true);
+    sync.receive({ type: ServerWsMessageType.messageSyncRevoked, payload: { chatId: testChat.id } }, connection);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-message')).toBeNull();
+
+    const reset = {
+      type: ServerWsMessageType.messageSyncReset,
+      payload: { chatId: testChat.id, reason: MessageSyncResetReason.noBaseline, cursor: 'rejoined' },
+    } as const;
+    sync.receive({ ...reset, payload: { ...reset.payload, chatId: encodeId('54321') } }, connection);
+    await Promise.resolve();
+    peer.expectNone('messageSync.page');
+
+    sync.receive(reset, connection);
+    const request = await peer.expectAsync('messageSync.page', { chatId: wireChat.id, requestId: 1, max: 50 });
+    sync.receive(
+      {
+        type: ServerWsMessageType.messageSyncPageResult,
+        payload: {
+          chatId: testChat.id,
+          requestId: 1,
+          at: 'rejoined',
+          page: {
+            chatSettings: { showMembershipMessages: true, showUnreadMessageCount: false },
+            membershipMessagePolicy: testChat.membershipMessagePolicy,
+            messages: [testMessage],
+          },
+        },
+      },
+      connection,
+    );
+    request.flush({});
+    await fixture.whenStable();
+    expect(component['conversation'].error()).toBeUndefined();
+    expect(fixture.nativeElement.querySelector('app-message')).not.toBeNull();
+  });
+
+  it('reopens the current legacy conversation when an access delta confirms rejoin', async () => {
+    const chats = TestBed.inject(ChatStore);
+    const state = { chatId: testChat.id, unreadCount: 0, unreadMentions: 0, unreadReactions: 0 };
+    chats['acceptReadStates']([{ ...state, accessible: false }]);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-message')).toBeNull();
+    peer.expectNone('messages.list');
+
+    chats['acceptReadStates']([{ ...state, accessible: true }]);
+    const request = await peer.expectAsync('messages.list', { chatId: wireChat.id, max: 50 });
+    request.flush({
+      chatSettings: { showMembershipMessages: true },
+      membershipMessagePolicy: testChat.membershipMessagePolicy,
+      messages: [wireMessage],
+    });
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('app-message')).not.toBeNull();
   });
 
   it('discards a held thread root on revocation without affecting a different thread', async () => {
@@ -1228,6 +1289,7 @@ describe('ConversationPage', () => {
   it('hides skeleton avatars and collapses message details for dm chats when the preference is off', async () => {
     TestBed.inject(ChatStore).remember([{ ...testChat, kind: GroupKind.dm }]);
     dmDetails.set(false);
+    component['conversation'].reset();
     fixture.destroy();
     fixture = TestBed.createComponent(ConversationPage);
     component = fixture.componentInstance;
@@ -1628,26 +1690,25 @@ describe('ConversationPage', () => {
       peer
         .expect('threads.getReadState', { chatId: wireChat.id, threadRootId: decodeId(threadId) })
         .flush({ lastReadMessageId: '101' });
-      await new Promise((resolve) => setTimeout(resolve, 0));
     }
-    peer
-      .expect(
-        'messages.list',
-        threadId
-          ? { chatId: wireChat.id, max: 50, around: '101', threadId: decodeId(threadId) }
-          : { chatId: wireChat.id, max: 50 },
-      )
-      .flush({
-        chatSettings: { showMembershipMessages: true },
-        messages: [{ ...wireMessage, ...(threadId ? { replyRootId: decodeId(threadId) } : {}) }],
-        olderCursor: wireMessage.id,
-      });
+    const request = await peer.expectAsync(
+      'messages.list',
+      threadId
+        ? { chatId: wireChat.id, max: 50, around: '101', threadId: decodeId(threadId) }
+        : { chatId: wireChat.id, max: 50 },
+    );
+    request.flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [{ ...wireMessage, ...(threadId ? { replyRootId: decodeId(threadId) } : {}) }],
+      olderCursor: wireMessage.id,
+    });
     await fixture.whenStable();
   }
 
   it.each(['loading', 'failed'])(
     'accepts input and renders a send before the initial page is available: %s',
     async (state) => {
+      component['conversation'].reset();
       fixture.destroy();
       fixture = TestBed.createComponent(ConversationPage);
       component = fixture.componentInstance;
@@ -1973,6 +2034,27 @@ describe('ConversationPage', () => {
     component['scrolling'].scrollEnd();
     await fixture.whenStable();
     expect(fixture.nativeElement.querySelector('.pinned-bar')).toBe(bar);
+  });
+
+  it('removes a purged pin preview during scrolling and reloads authorized pins', async () => {
+    pinMessage('201');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.pinned-bar')).not.toBeNull();
+    component['scrolling'].scrollStart();
+    component['conversation'].setSyncWindow(() => undefined);
+    const sync = TestBed.inject(MessageSync);
+    vi.spyOn(sync, 'active').mockReturnValue(true);
+    sync.receive(
+      {
+        type: ServerWsMessageType.messageSyncReset,
+        payload: { chatId: testChat.id, cursor: 'visibility', reason: MessageSyncResetReason.visibilityChanged },
+      },
+      TestBed.inject(Connection),
+    );
+    const freshPins = peer.expect('pins.list', { chatId: wireChat.id });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.pinned-bar')).toBeNull();
+    freshPins.flush({ pins: [] });
   });
 
   it('updates an existing pin preview during scrolling without replacing the bar', async () => {
@@ -2542,6 +2624,160 @@ describe('ConversationPage', () => {
     expect(component['draft']()).toBe('');
     expect(TestBed.inject(DraftStore).get(testChat.id)?.text).toBe('旧会话草稿');
     expect(TestBed.inject(DraftStore).get(encodeId('9007199254740995'))).toBeUndefined();
+  });
+
+  const otherConversationId = '9007199254740995';
+  const otherConversationMessage = {
+    ...wireMessage,
+    chatId: otherConversationId,
+    id: '9007199254741010',
+    clientGeneratedId: 'other-conversation-message',
+    message: '另一个会话的消息',
+  };
+
+  async function visitOtherConversation() {
+    fixture.componentRef.setInput('id', otherConversationId);
+    fixture.detectChanges();
+    peer.expect('groups.get', { chatId: otherConversationId }).flush({ ...wireChat, id: otherConversationId });
+    peer.expect('messages.list', { chatId: otherConversationId, max: 50 }).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [otherConversationMessage],
+    });
+    await settleMetadata();
+    await fixture.whenStable();
+    fixture.detectChanges();
+  }
+
+  it('restores A before its read state or history arrives and preserves a user scroll instead of jumping to unread', async () => {
+    Object.defineProperties(scroll, { clientHeight: { value: 100 }, scrollHeight: { value: 500 } });
+    vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 100));
+    const originalRow = fixture.nativeElement.querySelector('app-message') as HTMLElement;
+    vi.spyOn(originalRow, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 10, 300, 60));
+    component.ionViewDidEnter();
+    await fixture.whenStable();
+    await settleMetadata();
+    scroll.scrollTop = 120;
+    await component['trackScroll']();
+
+    await visitOtherConversation();
+    expect(fixture.nativeElement.querySelector('app-message')?.textContent).toContain(otherConversationMessage.message);
+    const chatInfo = TestBed.inject(ChatStore);
+    vi.mocked(chatInfo.markRead).mockClear();
+    const readState = deferred<{ unreadCount: number; lastReadMessageId: SnowflakeID }>();
+    vi.mocked(chatInfo.cachedReadState).mockReturnValueOnce(undefined);
+    vi.mocked(chatInfo.getReadState).mockReturnValueOnce(readState.promise);
+
+    fixture.componentRef.setInput('id', wireChat.id);
+    fixture.detectChanges();
+    const row = fixture.nativeElement.querySelector('app-message') as HTMLElement;
+    expect(row.textContent).toContain(wireMessage.message);
+    expect(row.textContent).not.toContain(otherConversationMessage.message);
+    expect(fixture.nativeElement.querySelector('app-message-list-skeleton')).toBeNull();
+    expect(chatInfo.getReadState).toHaveBeenCalledWith(testChat.id);
+    let rowTop = 130;
+    vi.spyOn(row, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, rowTop - scroll.scrollTop, 300, 60));
+    await component['positionAndRead']();
+    expect(scroll.scrollTop).toBe(130);
+    await settleMetadata();
+
+    scroll.scrollTop = 120;
+    await component['onScroll']();
+    expect(chatInfo.markRead).not.toHaveBeenCalled();
+    peer.expectNone('messages.list');
+
+    readState.resolve({ unreadCount: 80, lastReadMessageId: encodeId('9007199254741020') });
+    const replacement = await peer.expectAsync('messages.list', {
+      chatId: wireChat.id,
+      max: 50,
+      around: wireMessage.id,
+    });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-message')).toBe(row);
+    expect(chatInfo.markRead).not.toHaveBeenCalled();
+    peer.expectNone('messages.list');
+
+    rowTop = 160;
+    replacement.flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [{ ...wireMessage, message: '当前正文' }],
+      olderCursor: wireMessage.id,
+    });
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('app-message')?.textContent).toContain('当前正文');
+    });
+    await component['positionAndRead']();
+    expect(scroll.scrollTop).toBe(150);
+    expect(chatInfo.markRead).toHaveBeenCalledWith(testChat.id, testMessage.id);
+  });
+
+  it('fetches an out-of-range explicit target without blanking A or moving B when A completes late', async () => {
+    await visitOtherConversation();
+    const targetId = '9007199254741999';
+    fixture.componentRef.setInput('id', wireChat.id);
+    fixture.componentRef.setInput('message', targetId);
+    fixture.detectChanges();
+    const target = await peer.expectAsync('messages.list', { chatId: wireChat.id, max: 50, around: targetId });
+    expect(fixture.nativeElement.querySelector('app-message')?.textContent).toContain(wireMessage.message);
+    expect(fixture.nativeElement.querySelector('app-message-list-skeleton')).toBeNull();
+
+    fixture.componentRef.setInput('id', otherConversationId);
+    fixture.componentRef.setInput('message', undefined);
+    fixture.detectChanges();
+    const replacement = await peer.expectAsync('messages.list', { chatId: otherConversationId, max: 50 });
+    await component['positionAndRead']();
+    scroll.scrollTop = 37;
+    target.flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [{ ...wireMessage, id: targetId, message: '迟到的目标' }],
+    });
+    await Promise.resolve();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-message')?.textContent).toContain(otherConversationMessage.message);
+    expect(scroll.scrollTop).toBe(37);
+
+    replacement.flush({ chatSettings: { showMembershipMessages: true }, messages: [otherConversationMessage] });
+    await settleMetadata();
+    await fixture.whenStable();
+  });
+
+  it('restores a known empty window offline on ordinary reentry and calibrates it on reconnect', async () => {
+    const open = component['conversation'].open(encodeId('100'));
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '100' }).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [],
+    });
+    await open;
+    component.ionViewDidLeave();
+    expect(component['conversation'].page()).toBeUndefined();
+
+    const readState = deferred<{ unreadCount: number }>();
+    const chatInfo = TestBed.inject(ChatStore);
+    const connection = TestBed.inject(Connection);
+    connection.connected.set(false);
+    vi.mocked(chatInfo.cachedReadState).mockReturnValueOnce(undefined);
+    vi.mocked(chatInfo.getReadState).mockReturnValueOnce(readState.promise);
+    component.ionViewWillEnter();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.message-list .ion-text-center')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('app-message-list-skeleton')).toBeNull();
+    peer.expectNone('messages.list');
+
+    readState.resolve({ unreadCount: 0 });
+    await vi.waitFor(() => expect(component['pendingNavigation']()).toBeUndefined());
+    expect(component['conversation'].provisional()).toBe(true);
+    peer.expectNone('messages.list');
+
+    connection.connected.set(true);
+    resync.next(ResyncReason.Connected);
+    peer.expect('users.getNotificationSettings').flush(testUser);
+    peer.expect('groups.get', { chatId: wireChat.id }).flush(wireChat);
+    const replacement = await peer.expectAsync('messages.list', { chatId: wireChat.id, max: 50 });
+    peer.expectNone('messages.list');
+    replacement.flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
+    await settleMetadata();
+    await fixture.whenStable();
+    expect(component['conversation'].provisional()).toBe(false);
   });
 
   it('reuses the parent message and avatar when returning from a topic, then merges missed messages', async () => {
@@ -3805,7 +4041,8 @@ describe('ConversationPage', () => {
     component.ionViewWillEnter();
     if (component.threadId())
       for (const req of peer.match('messages.get')) req.flush({ ...wireMessage, id: decodeId(component.threadId()!) });
-    peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '100' }).flush({
+    const history = await peer.expectAsync('messages.list', { chatId: wireChat.id, max: 50, around: '100' });
+    history.flush({
       chatSettings: { showMembershipMessages: true },
       messages: [
         { ...wireMessage, id: '100', clientGeneratedId: 'message-100' },
@@ -3849,7 +4086,8 @@ describe('ConversationPage', () => {
     component.ionViewWillEnter();
     if (component.threadId())
       for (const req of peer.match('messages.get')) req.flush({ ...wireMessage, id: decodeId(component.threadId()!) });
-    peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '100' }).flush({
+    const history = await peer.expectAsync('messages.list', { chatId: wireChat.id, max: 50, around: '100' });
+    history.flush({
       chatSettings: { showMembershipMessages: true },
       messages: [
         { ...wireMessage, id: '100', clientGeneratedId: 'message-100' },
@@ -3866,6 +4104,8 @@ describe('ConversationPage', () => {
       return this.classList.contains('unread-separator') ? new DOMRect(0, 1050, 300, 20) : new DOMRect();
     });
     await fixture.whenStable();
+    fixture.detectChanges();
+    await component['positionAndRead']();
     expect(scroll.scrollTop).toBe(expectedTop);
     expect(fixture.nativeElement.querySelector('.unread-separator').textContent).toContain('未读消息');
     vi.mocked(TestBed.inject(ChatStore).cachedReadState).mockReturnValue({
@@ -6647,7 +6887,7 @@ describe('ConversationPage', () => {
       fixture.componentRef.setInput('id', wireChat.id);
       fixture.detectChanges();
       // A stale initial GET must not erase a confirmation retained by the shared outbox.
-      peer.expect('messages.list', { chatId: wireChat.id, max: 50 }).flush({
+      (await peer.expectAsync('messages.list', { chatId: wireChat.id, max: 50 })).flush({
         chatSettings: { showMembershipMessages: true },
         messages: [structuredClone(wireMessage)],
       });

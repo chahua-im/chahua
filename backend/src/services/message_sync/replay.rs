@@ -169,7 +169,7 @@ impl ReplayService {
                 .next()
                 .expect("projected row was selected by change ID");
             if visible {
-                appeared.push(created && row.deleted_at.is_none());
+                appeared.push(created);
                 upserts.push(row);
             } else {
                 changes.push(Change::Delete {
@@ -211,14 +211,11 @@ fn check_position(
     cursor: Option<&str>,
 ) -> Result<i64, ResetReason> {
     let token = cursor.ok_or(ResetReason::NoBaseline)?;
-    let from = key
-        .decode(token)
-        .filter(|from| from.u == now.u && from.c == now.c)
-        .ok_or(ResetReason::InvalidCursor)?;
+    let from = key.decode(token).ok_or(ResetReason::InvalidCursor)?;
     if from.e != now.e {
         return Err(ResetReason::EpochChanged);
     }
-    if !(0..=now.h).contains(&from.h) {
+    if from.u != now.u || from.c != now.c || !(0..=now.h).contains(&from.h) {
         return Err(ResetReason::InvalidCursor);
     }
     if from.f != now.f {

@@ -1134,6 +1134,7 @@ export const wsPayloadCodecs: Record<string, JsonCodec> = {
   messageSyncReset: 'MessageSyncReset',
   messageSyncRevoked: 'MessageSyncRevoked',
   messageSyncPageResult: 'MessageSyncPageResult',
+  messageSyncResumed: 'MessageSyncResumed',
   presenceUpdate: 'PresenceUpdatePayload',
   presenceSnapshot: 'PresenceSnapshotPayload',
   conversationUnread: 'ConversationUnreadPayload',

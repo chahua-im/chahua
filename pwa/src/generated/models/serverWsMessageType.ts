@@ -20,6 +20,7 @@ export enum ServerWsMessageType {
   messageSyncReset = 'messageSyncReset',
   messageSyncRevoked = 'messageSyncRevoked',
   messageSyncPageResult = 'messageSyncPageResult',
+  messageSyncResumed = 'messageSyncResumed',
   presenceUpdate = 'presenceUpdate',
   presenceSnapshot = 'presenceSnapshot',
   conversationUnread = 'conversationUnread',

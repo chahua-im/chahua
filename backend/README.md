@@ -77,13 +77,6 @@ Use the shared [local development setup](../docs/local-setup.md) for infrastruct
 configuration, and launcher commands. Run `cargo build`, `cargo test`, and
 `cargo clippy` from `backend/` as appropriate for the change.
 
-### Isolated RPC regression runner
-
-From the repository root, `node runspace/rpc-smoke.mjs` creates an isolated local
-database and exercises HTTP, legacy WebSocket, and RPC behavior. `--keep` retains
-the runtime for manual checks and prints the frontend proxy command. It requires
-local runspace infrastructure and does not send media or push deliveries.
-
 ## Further reading
 
 - [Metrics and operational contracts](docs/metrics.md)

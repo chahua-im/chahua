@@ -248,18 +248,28 @@ impl ConnectionRegistry {
             ServerWsMessage::MessagesBulkDeleted(payload) => (payload.chat_id.parse().ok(), true),
             ServerWsMessage::ReactionUpdated(payload) => (Some(payload.chat_id), true),
             ServerWsMessage::ThreadUpdate(payload) => (Some(payload.chat_id), false),
-            ServerWsMessage::ChatMembershipChanged(payload) => (Some(payload.chat_id), false),
             ServerWsMessage::MembershipMessagePolicyChanged(payload) => {
                 (Some(payload.chat_id), false)
             }
             _ => (None, false),
         };
+        // Replay must advance even for members excluded from the legacy
+        // recipient list, such as members who cannot see an announcement.
+        if let Some(chat_id) = sync_chat {
+            for entries in self.inner.iter() {
+                for entry in entries.value() {
+                    if let Some(subscription) = &entry.message_sync {
+                        subscription.mark_if_attached(chat_id);
+                    }
+                }
+            }
+        }
         for &uid in uids {
             if let Some(vec) = self.inner.get(&uid) {
                 for entry in vec.iter() {
                     if let Some(subscription) = &entry.message_sync {
-                        if let Some(chat_id) = sync_chat {
-                            subscription.mark(chat_id);
+                        if let ServerWsMessage::ChatMembershipChanged(payload) = &*message {
+                            subscription.mark(payload.chat_id);
                         }
                         if matches!(&*message, ServerWsMessage::ChatSettingsChanged(_)) {
                             subscription.mark_attached();
@@ -499,8 +509,13 @@ mod tests {
         let (_legacy, mut legacy_rx) = registry.register(7, "legacy".into());
         let (sync, mut sync_rx) = registry.register_sync(7, "sync".into());
         let subscription = sync.message_sync.as_ref().unwrap();
+        subscription.attach([42]);
+        let (hidden, mut hidden_rx) = registry.register_sync(8, "hidden".into());
+        let hidden_subscription = hidden.message_sync.as_ref().unwrap();
+        hidden_subscription.attach([42]);
         while legacy_rx.try_recv().is_ok() {}
         while sync_rx.try_recv().is_ok() {}
+        while hidden_rx.try_recv().is_ok() {}
 
         registry.broadcast_to_uids(
             &[7],
@@ -520,6 +535,13 @@ mod tests {
         tokio::time::timeout(
             std::time::Duration::from_millis(50),
             subscription.notified(),
+        )
+        .await
+        .unwrap();
+        assert!(hidden_rx.try_recv().is_err());
+        tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            hidden_subscription.notified(),
         )
         .await
         .unwrap();

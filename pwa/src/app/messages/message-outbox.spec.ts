@@ -1086,7 +1086,7 @@ describe('MessageOutbox', () => {
 });
 
 describe('MessageOutbox with message sync', () => {
-  it('settles a send once and applies the coalesced current state to one row', async () => {
+  it.each([false, true])('settles a send once when the batch arrives before a send failure: %s', async (fails) => {
     TestBed.configureTestingModule({
       providers: [
         ...provideRpcTesting(),
@@ -1124,8 +1124,10 @@ describe('MessageOutbox with message sync', () => {
       const operation = item.operation!.then(settled);
       const sent = peer.expect('messages.send');
       const message = wireAccepted(item.clientGeneratedId);
-      sent.flush(message);
-      await operation;
+      if (!fails) {
+        sent.flush(message);
+        await operation;
+      }
 
       const reactions = [{ emoji: '👍', count: 2, reactedByMe: true }];
       peer.notify('events.messageSyncBatch', {
@@ -1134,6 +1136,9 @@ describe('MessageOutbox with message sync', () => {
         to: 'after',
         changes: [{ kind: 'upsert', appeared: true, message: { ...message, reactions } }],
       });
+      if (fails) sent.error(RpcErrorCode.Unavailable, 'Send result unavailable');
+      await operation;
+      await Promise.resolve();
 
       expect(settled).toHaveBeenCalledOnce();
       expect(item.delivery()).toBe(MessageDelivery.Sent);

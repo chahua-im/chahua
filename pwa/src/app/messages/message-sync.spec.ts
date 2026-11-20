@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { firstValueFrom } from 'rxjs';
 import { vi } from 'vitest';
 import { Connection, ResyncReason } from '../api/connection';
 import { RpcTestPeer, provideRpcTesting, type RpcTestRequest } from '../api/rpc-testing';
@@ -126,5 +127,18 @@ describe('MessageSync', () => {
     expect(decodeId(payload.chatId)).toBe(id);
     expect(payload.messageIds.map(decodeId)).toEqual(['9223372036854775806']);
     expect(payload.threadRootIds.map(decodeId)).toEqual(['9223372036854775805']);
+  });
+
+  it('round-trips a page request ID above 32 bits through the generated codec', async () => {
+    open(peer);
+    const resume = peer.expect('messageSync.resume');
+    baseline(peer, chatId, 'baseline');
+    resume.flush({});
+    sync['requestId'] = 2 ** 32 - 1;
+    const loaded = firstValueFrom(sync.page({ chatId: encodeId(chatId) }, () => {}));
+    const page = await peer.expectAsync('messageSync.page', { chatId, requestId: 2 ** 32 });
+    peer.notify('events.messageSyncPageResult', { chatId, requestId: 2 ** 32, at: null, page: null });
+    page.flush({});
+    expect(await loaded).toEqual({ chatId: encodeId(chatId), requestId: 2 ** 32, at: null, page: null });
   });
 });
