@@ -471,6 +471,10 @@ ion-toast {
     flex-shrink: 0;
   }
 
+  &.forward-sent-toast::part(button) {
+    font-size: var(--app-font-compact);
+  }
+
   &::part(wrapper) {
     bottom: calc(var(--app-footer-height, 0px) + 8px);
   }
