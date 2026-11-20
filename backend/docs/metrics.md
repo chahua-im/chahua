@@ -241,6 +241,41 @@ malformed, oversized or otherwise unparsed envelope rejection is counted once as
 work still records if it completes after disconnect; cancellation before
 preparation is not a completion.
 
+### RPC admission queue
+
+Read and mutation calls wait for execution capacity in a process-wide queue.
+Accounts take turns, with running limits per connection, per account, and per
+process. Session/control calls use a separate lane. The queue limits and maximum
+wait are defined in `src/rpc/session.rs` and its `admission` module.
+
+| Family | Type / labels | Meaning and recording boundary | Buckets / cardinality |
+| --- | --- | --- | --- |
+| `rpc_admission_queue_depth` | Gauge; none | Calls currently waiting for execution capacity, excluding running calls. Incremented on enqueue; decremented on grant, timeout, or cancellation. | One series; exported as zero before first use. |
+| `rpc_admission_wait_duration_seconds` | Histogram; `outcome` | Time from enqueue until capacity is granted (`started`), the wait expires (`timeout`), or the waiting call is dropped (`cancelled`, including disconnect). | `H3`; three fixed outcome series, initialized at startup. |
+
+Immediate admissions and full-queue rejections have no queue wait observation.
+Execution time and socket transmission are excluded. A grant counts as `started`
+even if the call is cancelled before its worker resumes. Timeout observation
+includes any delay before the expired waiter is removed. No account, connection,
+or request identifiers are metric labels.
+
+**Current queue depth:**
+
+```promql
+rpc_admission_queue_depth{job="wetty-chat-backend"}
+```
+
+**Average queue wait over five minutes (seconds, all outcomes):**
+
+```promql
+sum(rate(rpc_admission_wait_duration_seconds_sum{job="wetty-chat-backend"}[5m]))
+/
+sum(rate(rpc_admission_wait_duration_seconds_count{job="wetty-chat-backend"}[5m]))
+```
+
+No completed queue waits in the window means no average is available. Filter both
+terms by `outcome="started"` to show the average only for granted calls.
+
 ### API stage diagnostics
 
 | Family | Type / labels | Meaning and recording boundary | Buckets / cardinality |
