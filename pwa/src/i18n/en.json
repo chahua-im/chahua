@@ -714,6 +714,7 @@
       "viewRecent": "Recent messages",
       "sending": "Forwarding…",
       "sent": "Forwarded",
+      "openChat": "Open chat ›",
       "sendFailed": "Could not forward messages",
       "networkError": "Network error. Please retry.",
       "busy": "Too many requests. Try again shortly.",

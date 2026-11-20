@@ -16,10 +16,23 @@ export type ConversationTarget =
   | { type: ConversationTargetKind.Latest }
   | { type: ConversationTargetKind.Message; messageId: SnowflakeID };
 
+function conversationRoute(chatId: SnowflakeID, threadId?: SnowflakeID) {
+  return ['/chats/chat', decodeId(chatId), ...(threadId ? ['thread', decodeId(threadId)] : [])];
+}
+
 @Service()
 export class ConversationNavigation {
   private readonly router = inject(Router);
   private readonly modals = inject(ModalController);
+
+  isOpen(chatId: SnowflakeID, threadId?: SnowflakeID) {
+    return this.router.isActive(this.router.createUrlTree(conversationRoute(chatId, threadId)), {
+      paths: 'exact',
+      queryParams: 'ignored',
+      fragment: 'ignored',
+      matrixParams: 'ignored',
+    });
+  }
 
   async open(chatId: SnowflakeID, threadId?: SnowflakeID, messageId?: SnowflakeID) {
     const opened = await this.navigate(chatId, threadId, messageId);
@@ -28,7 +41,7 @@ export class ConversationNavigation {
   }
 
   private async navigate(chatId: SnowflakeID, threadId?: SnowflakeID, messageId?: SnowflakeID) {
-    const commands = ['/chats/chat', decodeId(chatId), ...(threadId ? ['thread', decodeId(threadId)] : [])];
+    const commands = conversationRoute(chatId, threadId);
     const extras = messageId ? { fragment: `msg=${decodeId(messageId)}` } : {};
     const url = this.router.serializeUrl(this.router.createUrlTree(commands, extras));
     if (this.router.url === url) {

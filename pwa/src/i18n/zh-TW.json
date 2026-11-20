@@ -714,6 +714,7 @@
       "viewRecent": "最近訊息",
       "sending": "正在轉發…",
       "sent": "已轉發",
+      "openChat": "進入聊天 ›",
       "sendFailed": "轉發失敗",
       "networkError": "網路異常，請重試。",
       "busy": "目前請求過多，請稍後再試。",

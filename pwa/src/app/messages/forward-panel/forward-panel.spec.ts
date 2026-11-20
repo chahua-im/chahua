@@ -1,5 +1,6 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { provideRouter, Router } from '@angular/router';
 import { AlertController, ToastController } from '@ionic/angular';
 import { firstValueFrom, of, Subject, throwError } from 'rxjs';
 import { vi } from 'vitest';
@@ -10,6 +11,7 @@ import { decodeId, encodeId } from '../../api/snowflake-id';
 import { Connection } from '../../api/connection';
 import { RpcError, RpcErrorCode, RpcTransportError } from '../../api/rpc-error';
 import { ChatStore } from '../../chats/chat-store';
+import { ConversationNavigation } from '../../conversations/conversation-navigation';
 import { SessionStore } from '../../session/session-store';
 import { MessageOutbox } from '../message-outbox';
 import { ForwardPanel } from './forward-panel';
@@ -33,6 +35,7 @@ function setup() {
   };
   TestBed.configureTestingModule({
     providers: [
+      provideRouter([{ path: '**', children: [] }]),
       { provide: MessageOutbox, useValue: { enqueue } },
       { provide: RpcApi, useValue: { messages } },
       { provide: Connection, useValue: { ...mockRealtime({ messages$: live }), accept } },
@@ -92,6 +95,44 @@ describe('ForwardPanel', () => {
     expect(panel['open']()).toBe(false);
     expect(toast.present).toHaveBeenCalledOnce();
   });
+
+  it.each([
+    ['/chats/chat/333#msg=42', undefined],
+    ['/chats/chat/333/thread/777?tab=topics#msg=42', encodeId('777')],
+  ] as const)('shows just the success toast when the destination is already open at %s', async (url, threadId) => {
+    const { fixture, panel, toast } = setup();
+    await fixture.whenStable();
+    await TestBed.inject(Router).navigateByUrl(url);
+    await panel.choose({ ...target, chatId: encodeId('333'), threadId }, () => true);
+    await panel['send']();
+    expect(toast.present).toHaveBeenCalledOnce();
+    expect(TestBed.inject(ToastController).create).toHaveBeenCalledWith(expect.objectContaining({ buttons: [] }));
+  });
+
+  it.each([
+    ['/chats/chat/123', undefined],
+    ['/chats/chat/333/thread/777', undefined],
+    ['/chats/chat/333', encodeId('777')],
+    ['/chats/chat/333/thread/888', encodeId('777')],
+  ] as const)(
+    'opens the chosen chat or thread only on a toast click when viewing %s (target thread %s)',
+    async (url, threadId) => {
+      const { fixture, panel } = setup();
+      const open = vi.spyOn(TestBed.inject(ConversationNavigation), 'open').mockResolvedValue(true);
+      const createToast = vi.mocked(TestBed.inject(ToastController).create);
+      await fixture.whenStable();
+      await TestBed.inject(Router).navigateByUrl(url);
+      const chatId = encodeId('333');
+      await panel.choose({ ...target, chatId, threadId }, () => true);
+      await panel['send']();
+      fixture.destroy();
+      expect(open).not.toHaveBeenCalled();
+
+      const button = createToast.mock.calls[0][0]?.buttons?.[0];
+      if (typeof button === 'object') button.handler?.();
+      expect(open).toHaveBeenCalledExactlyOnceWith(chatId, threadId);
+    },
+  );
 
   it('drops the unsent comment when an uncertain forward is closed', async () => {
     const { fixture, panel, messages, live, enqueue } = setup();

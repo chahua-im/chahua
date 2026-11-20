@@ -37,6 +37,7 @@ import { RpcError, RpcErrorCode, RpcTransportError } from '../../api/rpc-error';
 import { ChatStore } from '../../chats/chat-store';
 import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
 import type { ChatPickerTarget, ChooseChat } from '../../chats/chat-picker/chat-picker';
+import { ConversationNavigation } from '../../conversations/conversation-navigation';
 import { SessionStore } from '../../session/session-store';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { LoadError } from '../../ui/load-error/load-error';
@@ -144,6 +145,7 @@ export class ForwardPanel {
   private readonly i18n = inject(TranslocoService);
   private readonly alerts = inject(AlertController);
   private readonly toasts = inject(ToastController);
+  private readonly navigation = inject(ConversationNavigation);
   private readonly destroyRef = inject(DestroyRef);
   protected readonly GroupKind = GroupKind;
   protected readonly recentMessagesIcon = chatbubbleEllipsesOutline;
@@ -410,9 +412,24 @@ export class ForwardPanel {
     void this.completeSend();
   }
   private async completeSend() {
+    const { chatId, threadId } = this.target();
     this.sending.set(false);
     this.close();
-    const toast = await this.toasts.create({ message: this.i18n.translate('messages.forward.sent'), duration: 2500 });
+    const toast = await this.toasts.create({
+      cssClass: 'forward-sent-toast',
+      message: this.i18n.translate('messages.forward.sent'),
+      duration: 5000,
+      buttons: this.navigation.isOpen(chatId, threadId)
+        ? []
+        : [
+            {
+              text: this.i18n.translate('messages.forward.openChat'),
+              handler: () => {
+                if (this.session.user()?.uid === this.owner) void this.navigation.open(chatId, threadId);
+              },
+            },
+          ],
+    });
     await toast.present();
   }
   protected close() {

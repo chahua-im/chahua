@@ -1770,17 +1770,7 @@ export class ConversationPage implements OnDestroy {
   }
 
   private isCurrent(entry = this.entryKey()) {
-    const threadId = this.threadId();
-    return (
-      entry === this.entryKey() &&
-      this.active() &&
-      this.router.isActive(`/chats/chat/${decodeId(this.id())}${threadId ? `/thread/${decodeId(threadId)}` : ''}`, {
-        paths: 'exact',
-        queryParams: 'ignored',
-        fragment: 'ignored',
-        matrixParams: 'ignored',
-      })
-    );
+    return entry === this.entryKey() && this.active() && this.navigation.isOpen(this.id(), this.threadId());
   }
 
   private retainConversation() {
