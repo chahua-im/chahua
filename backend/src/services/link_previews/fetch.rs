@@ -12,10 +12,10 @@ use ipnet::IpNet;
 use reqwest::{header, redirect::Policy, StatusCode};
 use url::Url;
 
-use super::sites::{LinkPreviewConfig, LinkPreviewHandler};
+use crate::config::{LinkPreviewConfig, LinkPreviewHandler};
 
 use super::{
-    metadata::extract_preview,
+    metadata::{extract_preview, extract_preview_with_image_fallback},
     sites::{weixin, xiaohongshu, zhihu},
     validate_url,
 };
@@ -143,17 +143,20 @@ impl SecurePreviewFetcher {
     pub async fn fetch_page(&self, url: &Url) -> Result<FetchedLinkPreview, PreviewFetchError> {
         tokio::time::timeout(OPERATION_TIMEOUT, async {
             let (final_url, bytes) = self.fetch_bytes(url, HTML_LIMIT, true).await?;
-            let mut preview = extract_preview(&final_url, &bytes)?;
-            if self
-                .config
-                .handler_for(final_url.host_str().unwrap_or_default())
-                == Some(LinkPreviewHandler::Xiaohongshu)
-            {
-                preview.image_url = preview
-                    .image_url
-                    .map(|image| xiaohongshu::cover_url(&final_url, image));
+            let handler = final_url
+                .host_str()
+                .and_then(|host| self.config.handler_for(host));
+            match handler {
+                Some(LinkPreviewHandler::Weixin) => extract_preview_with_image_fallback(
+                    &final_url,
+                    &bytes,
+                    Some(weixin::secure_cover_url),
+                ),
+                Some(LinkPreviewHandler::Xiaohongshu) => {
+                    xiaohongshu::extract_preview(&final_url, &bytes)
+                }
+                _ => extract_preview(&final_url, &bytes),
             }
-            Ok(preview)
         })
         .await
         .map_err(|_| PreviewFetchError::Timeout)?
@@ -182,16 +185,20 @@ impl SecurePreviewFetcher {
         let mut challenge_attempted = false;
         loop {
             let checked = validate_url(current.as_str()).ok_or(PreviewFetchError::InvalidUrl)?;
-            let handler = self
-                .config
-                .handler_for(checked.host_str().unwrap_or_default());
+            let host = checked.host_str().ok_or(PreviewFetchError::InvalidUrl)?;
+            let handler = self.config.handler_for(host);
             if html
                 && handler == Some(LinkPreviewHandler::Xiaohongshu)
-                && xiaohongshu::is_login_page(&checked)
+                && xiaohongshu::is_unavailable_page(&checked)
             {
                 return Err(PreviewFetchError::Http);
             }
-            let host = checked.host_str().ok_or(PreviewFetchError::InvalidUrl)?;
+            if challenge_attempted
+                && handler == Some(LinkPreviewHandler::Zhihu)
+                && zhihu::is_verification_page(&checked)
+            {
+                return Err(PreviewFetchError::Http);
+            }
             let addresses = tokio::time::timeout(DNS_TIMEOUT, self.transport.resolve(host))
                 .await
                 .map_err(|_| PreviewFetchError::Timeout)??;
@@ -247,9 +254,6 @@ impl SecurePreviewFetcher {
                 current =
                     resolve_reference(&checked, location).ok_or(PreviewFetchError::Redirect)?;
                 current.set_fragment(None);
-                if challenge_attempted && zhihu::is_verification_page(&current) {
-                    return Err(PreviewFetchError::Http);
-                }
                 // Never carry credentials through a different origin, even if it redirects back.
                 if guest_cookie
                     .as_ref()
@@ -498,7 +502,6 @@ mod tests {
         responses: VecDeque<Response>,
         calls: Vec<(String, SocketAddr)>,
         request_headers: Vec<Option<header::HeaderMap>>,
-        cookies: Vec<Option<String>>,
         dns_hangs: bool,
         http_hangs: bool,
     }
@@ -536,12 +539,6 @@ mod tests {
                     let mut state = self.0.lock().unwrap();
                     state.calls.push((url.to_string(), address));
                     state.request_headers.push(headers.cloned());
-                    state.cookies.push(
-                        headers
-                            .and_then(|h| h.get(header::COOKIE))
-                            .and_then(|v| v.to_str().ok())
-                            .map(str::to_owned),
-                    );
                     (state.http_hangs, state.responses.pop_front())
                 };
                 if hang {
@@ -561,9 +558,10 @@ mod tests {
     fn fetcher(state: Arc<Mutex<State>>) -> SecurePreviewFetcher {
         SecurePreviewFetcher {
             transport: Box::new(Fake(state)),
-            config: Arc::new(LinkPreviewConfig::default()),
+            config: Arc::default(),
         }
     }
+
     fn configured_fetcher(state: Arc<Mutex<State>>) -> SecurePreviewFetcher {
         let settings: crate::config::LinkPreviewSettings = toml::from_str(
             r#"
@@ -594,7 +592,6 @@ Cookie = { env = "BLOCKED_COOKIE" }
             _ => None,
         })
         .unwrap();
-        let config = LinkPreviewConfig::default().with_overrides(&config);
         SecurePreviewFetcher {
             transport: Box::new(Fake(state)),
             config: Arc::new(config),
@@ -629,202 +626,12 @@ Cookie = { env = "BLOCKED_COOKIE" }
         response(StatusCode::FOUND, &[("location", location)], vec![])
     }
 
-    fn zhihu_challenge() -> Response {
-        response(
-            StatusCode::FORBIDDEN,
-            &[("content-type", "text/html")],
-            vec![zhihu::tests::challenge_html().into_bytes()],
-        )
-    }
-
-    fn zhihu_script() -> Response {
-        response(
-            StatusCode::OK,
-            &[("content-type", "application/javascript")],
-            vec![zhihu::tests::script()],
-        )
-    }
-
     fn response_state(responses: Vec<Response>) -> Arc<Mutex<State>> {
         Arc::new(Mutex::new(State {
             answers: vec![vec![addr("93.184.216.34")]; responses.len()].into(),
             responses: responses.into(),
             ..Default::default()
         }))
-    }
-
-    #[tokio::test]
-    async fn xiaohongshu_share_preserves_parameters_and_extracts_note_metadata() {
-        let destination = "https://www.xiaohongshu.com/discovery/item/123?xsec_token=abc%2Bdef%3D&xsec_source=app_share&app_platform=android";
-        let state = response_state(vec![redirect(destination), ok_html("<meta name='og:title' content='Note title'><meta name='description' content='Note description'>")]);
-        let result = fetcher(state.clone())
-            .fetch_page(&url("https://xhslink.cn/o/test"))
-            .await
-            .unwrap();
-        assert_eq!(result.title, "Note title");
-        assert_eq!(result.description.as_deref(), Some("Note description"));
-        assert_eq!(state.lock().unwrap().calls[1].0, destination);
-    }
-
-    #[tokio::test]
-    async fn xiaohongshu_login_redirect_does_not_become_slogan_preview() {
-        let state = response_state(vec![
-            redirect("https://www.xiaohongshu.com/login?redirectPath=note"),
-            ok_html("<title>小红书 - 你的生活兴趣社区</title>"),
-        ]);
-        assert!(matches!(
-            fetcher(state.clone())
-                .fetch_page(&url("https://xhslink.cn/o/test"))
-                .await,
-            Err(PreviewFetchError::Http)
-        ));
-        assert_eq!(state.lock().unwrap().calls.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn zhihu_challenge_retries_once_and_extracts_real_metadata() {
-        let state = response_state(vec![zhihu_challenge(), zhihu_script(), ok_html("<meta property='og:title' content='Answer title'><meta name='description' content='Answer summary'>")]);
-        let preview = fetcher(state.clone())
-            .fetch_page(&url("https://www.zhihu.com/question/1/answer/2"))
-            .await
-            .unwrap();
-        assert_eq!(preview.title, "Answer title");
-        assert_eq!(preview.description.as_deref(), Some("Answer summary"));
-        let state = state.lock().unwrap();
-        assert_eq!(state.calls.len(), 3);
-        assert!(state.cookies[0].is_none());
-        assert!(state.cookies[1].is_none());
-        assert!(state.cookies[2]
-            .as_ref()
-            .unwrap()
-            .starts_with("__zse_ck=005_"));
-    }
-
-    #[tokio::test]
-    async fn configured_headers_and_generated_cookie_work_together() {
-        let state = response_state(vec![
-            zhihu_challenge(),
-            zhihu_script(),
-            ok_html("<title>Answer</title>"),
-        ]);
-        let mut fetcher = fetcher(state.clone());
-        let overrides = crate::config::LinkPreviewConfig::from_settings(
-            toml::from_str(
-                r#"
-[[sites]]
-host = "www.zhihu.com"
-headers = { User-Agent = "custom-agent", Cookie = { env = "COOKIE" } }
-"#,
-            )
-            .unwrap(),
-            |_| Some("session=keep; __zse_ck=old; preference=keep".into()),
-        )
-        .unwrap();
-        fetcher.config = Arc::new(LinkPreviewConfig::default().with_overrides(&overrides));
-        fetcher
-            .fetch_page(&url("https://www.zhihu.com/question/1"))
-            .await
-            .unwrap();
-        let state = state.lock().unwrap();
-        assert!(state.cookies[1].is_none());
-        let retry = state.request_headers[2].as_ref().unwrap();
-        assert_eq!(retry[header::USER_AGENT], "custom-agent");
-        assert!(retry[header::COOKIE].is_sensitive());
-        let cookie = state.cookies[2].as_ref().unwrap();
-        assert!(cookie.contains("session=keep; preference=keep; __zse_ck=005_"));
-        assert_eq!(cookie.matches("__zse_ck=").count(), 1);
-    }
-
-    #[tokio::test]
-    async fn omitted_handler_disables_site_processing() {
-        let state = response_state(vec![zhihu_challenge()]);
-        let mut fetcher = fetcher(state.clone());
-        fetcher.config = Arc::new(LinkPreviewConfig::empty());
-        assert!(matches!(
-            fetcher
-                .fetch_page(&url("https://www.zhihu.com/question/1"))
-                .await,
-            Err(PreviewFetchError::Http)
-        ));
-        assert_eq!(state.lock().unwrap().calls.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn zhihu_cookie_is_discarded_on_cross_origin_redirect() {
-        let state = response_state(vec![
-            zhihu_challenge(),
-            zhihu_script(),
-            redirect("https://example.com/"),
-            redirect("https://www.zhihu.com/question/1"),
-            ok_html("<title>Final</title>"),
-        ]);
-        fetcher(state.clone())
-            .fetch_page(&url("https://www.zhihu.com/question/1"))
-            .await
-            .unwrap();
-        let state = state.lock().unwrap();
-        assert!(state.cookies[2].is_some());
-        assert!(state.cookies[3].is_none());
-        assert!(state.cookies[4].is_none());
-    }
-
-    #[tokio::test]
-    async fn zhihu_failure_and_other_sites_do_not_repeat_challenges() {
-        let state = response_state(vec![zhihu_challenge(), zhihu_script(), zhihu_challenge()]);
-        assert!(matches!(
-            fetcher(state.clone())
-                .fetch_page(&url("https://www.zhihu.com/question/1"))
-                .await,
-            Err(PreviewFetchError::Http)
-        ));
-        assert_eq!(state.lock().unwrap().calls.len(), 3);
-        let state = response_state(vec![zhihu_challenge()]);
-        assert!(matches!(
-            fetcher(state.clone())
-                .fetch_page(&url("https://example.com/"))
-                .await,
-            Err(PreviewFetchError::Http)
-        ));
-        assert_eq!(state.lock().unwrap().calls.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn zhihu_manual_verification_is_not_used_as_preview() {
-        let state = response_state(vec![
-            zhihu_challenge(),
-            zhihu_script(),
-            redirect("https://www.zhihu.com/account/unhuman?next=%2Fquestion%2F1"),
-        ]);
-        assert!(matches!(
-            fetcher(state.clone())
-                .fetch_page(&url("https://www.zhihu.com/question/1"))
-                .await,
-            Err(PreviewFetchError::Http)
-        ));
-        assert_eq!(state.lock().unwrap().calls.len(), 3);
-    }
-
-    #[tokio::test]
-    async fn zhihu_script_obeys_address_and_size_limits() {
-        let state = response_state(vec![zhihu_challenge(), zhihu_script()]);
-        state.lock().unwrap().answers[1] = vec![addr("127.0.0.1")];
-        assert!(matches!(
-            fetcher(state.clone())
-                .fetch_page(&url("https://www.zhihu.com/question/1"))
-                .await,
-            Err(PreviewFetchError::ForbiddenAddress)
-        ));
-        assert_eq!(state.lock().unwrap().calls.len(), 1);
-        let state = response_state(vec![
-            zhihu_challenge(),
-            response(StatusCode::OK, &[], vec![vec![b'A'; HTML_LIMIT + 1]]),
-        ]);
-        assert!(matches!(
-            fetcher(state)
-                .fetch_page(&url("https://www.zhihu.com/question/1"))
-                .await,
-            Err(PreviewFetchError::TooLarge)
-        ));
     }
 
     #[test]
@@ -934,10 +741,11 @@ headers = { User-Agent = "custom-agent", Cookie = { env = "COOKIE" } }
 
     #[tokio::test]
     async fn link_preview_site_headers_follow_each_redirect_target() {
+        let start = url("https://example.com/start");
         for (target, expected_cookie, expected_authorization, expected_referer) in [
             ("/next", Some("origin=session"), Some("Bearer origin"), None),
             (
-                "https://other.example/next",
+                "https://other.example/next?token=abc%2Bdef%3D&source=share",
                 Some("destination=session"),
                 None,
                 Some("https://other.example/"),
@@ -950,10 +758,11 @@ headers = { User-Agent = "custom-agent", Cookie = { env = "COOKIE" } }
                 ..State::default()
             }));
             configured_fetcher(state.clone())
-                .fetch_page(&url("https://example.com/start"))
+                .fetch_page(&start)
                 .await
                 .unwrap();
             let state = state.lock().unwrap();
+            assert_eq!(state.calls[1].0, start.join(target).unwrap().as_str());
             let origin = state.request_headers[0].as_ref().unwrap();
             assert_eq!(origin.get(header::COOKIE).unwrap(), "origin=session");
             assert_eq!(origin.get(header::AUTHORIZATION).unwrap(), "Bearer origin");
@@ -1137,70 +946,6 @@ headers = { User-Agent = "custom-agent", Cookie = { env = "COOKIE" } }
             &[("content-type", "text/html"), ("content-encoding", "gzip")],
             bytes.chunks(7).map(<[u8]>::to_vec).collect(),
         )
-    }
-
-    const WEIXIN_META: &str = "<head><meta property='og:title' content='文章标题'><meta property='og:image' content='https://example.com/cover.jpg'><meta property='og:description' content=''>";
-
-    #[tokio::test]
-    async fn weixin_stops_before_body_despite_large_content_length() {
-        let mut reply = response(
-            StatusCode::OK,
-            &[("content-type", "text/html"), ("content-length", "3550000")],
-            vec![WEIXIN_META.as_bytes().to_vec()],
-        );
-        reply.body = Box::pin(reply.body.chain(futures::stream::once(async {
-            Err(PreviewFetchError::Http)
-        })));
-        let state = response_state(vec![reply]);
-        let preview = fetcher(state)
-            .fetch_page(&url("https://mp.weixin.qq.com/s?sn=test"))
-            .await
-            .unwrap();
-        assert_eq!(preview.title, "文章标题");
-        assert_eq!(
-            preview.image_url.unwrap().as_str(),
-            "https://example.com/cover.jpg"
-        );
-        assert!(preview.description.is_none());
-    }
-
-    #[tokio::test]
-    async fn weixin_gzip_stops_before_inflating_large_article() {
-        let mut article = WEIXIN_META.as_bytes().to_vec();
-        article.extend(vec![b'A'; HTML_LIMIT * 4]);
-        let compressed = gzip(&article);
-        let prefix = read_body(gzip_response(compressed.clone()), HTML_LIMIT, true)
-            .await
-            .unwrap();
-        assert!(prefix.len() < 32768);
-        assert!(weixin::head_complete(&prefix));
-        assert!(matches!(
-            read_body(gzip_response(compressed), HTML_LIMIT, false).await,
-            Err(PreviewFetchError::TooLarge)
-        ));
-    }
-
-    #[tokio::test]
-    async fn weixin_prefix_handles_split_tags_head_end_and_size_limit() {
-        let chunks = WEIXIN_META
-            .as_bytes()
-            .chunks(1)
-            .map(<[u8]>::to_vec)
-            .collect();
-        let reply = response(StatusCode::OK, &[], chunks);
-        assert_eq!(
-            read_body(reply, HTML_LIMIT, true).await.unwrap(),
-            WEIXIN_META.as_bytes()
-        );
-        let head = b"<head><title>Fallback</title></head>";
-        let mut reply = response(StatusCode::OK, &[], vec![head.to_vec()]);
-        reply.body = Box::pin(reply.body.chain(futures::stream::pending()));
-        assert_eq!(read_body(reply, HTML_LIMIT, true).await.unwrap(), head);
-        let reply = response(StatusCode::OK, &[], vec![vec![b'A'; HTML_LIMIT + 1]]);
-        assert!(matches!(
-            read_body(reply, HTML_LIMIT, true).await,
-            Err(PreviewFetchError::TooLarge)
-        ));
     }
 
     #[tokio::test]

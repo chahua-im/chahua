@@ -1,13 +1,31 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::Deserialize;
 use url::Host;
 
-/// Immutable request headers indexed by canonical URL hostname.
+// Protocol allowlist shared by startup validation and the runtime challenge handler.
+pub(crate) const ZHIHU_CHALLENGE_HOSTS: [&str; 2] = ["www.zhihu.com", "zhuanlan.zhihu.com"];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum LinkPreviewHandler {
+    Generic,
+    Xiaohongshu,
+    Weixin,
+    Zhihu,
+}
+
+#[derive(Debug)]
+struct Site {
+    headers: HeaderMap,
+    handler: Option<LinkPreviewHandler>,
+}
+
+/// Immutable site rules indexed by canonical URL hostname.
 #[derive(Debug, Default)]
 pub struct LinkPreviewConfig {
-    sites: HashMap<String, HeaderMap>,
+    sites: HashMap<String, Site>,
 }
 
 #[derive(Default, Deserialize)]
@@ -19,7 +37,9 @@ pub struct LinkPreviewSettings {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SiteSettings {
-    host: String,
+    host: Option<String>,
+    hosts: Option<Vec<String>>,
+    handler: Option<LinkPreviewHandler>,
     #[serde(default)]
     headers: HashMap<String, HeaderSetting>,
 }
@@ -38,79 +58,120 @@ struct EnvironmentReference {
 }
 
 impl LinkPreviewConfig {
-    /// Resolve and validate site headers without exposing values in errors.
+    /// Resolve deployment rules and secret headers at startup.
     pub fn from_settings(
         settings: LinkPreviewSettings,
         env: impl Fn(&str) -> Option<String>,
     ) -> Result<Self, String> {
-        let mut sites = HashMap::with_capacity(settings.sites.len());
-        for site in settings.sites {
-            let host = canonical_host(&site.host)?;
-            let mut headers = HeaderMap::with_capacity(site.headers.len());
-            for (name, value) in site.headers {
-                let name = HeaderName::from_bytes(name.as_bytes())
-                    .map_err(|_| "invalid link preview header name".to_owned())?;
-                if matches!(
-                    name.as_str(),
-                    "host"
-                        | "accept-encoding"
-                        | "content-length"
-                        | "transfer-encoding"
-                        | "connection"
-                        | "keep-alive"
-                        | "proxy-connection"
-                        | "proxy-authorization"
-                        | "proxy-authenticate"
-                        | "te"
-                        | "trailer"
-                        | "upgrade"
-                ) {
-                    return Err("reserved link preview header".to_owned());
+        let mut sites = HashMap::new();
+        let mut seen = HashSet::new();
+        for (index, site) in settings.sites.into_iter().enumerate() {
+            let site_number = index + 1;
+            let hosts = match (site.host, site.hosts) {
+                (Some(host), None) => vec![host],
+                (None, Some(hosts)) if !hosts.is_empty() => hosts,
+                _ => {
+                    return Err(format!(
+                        "site #{site_number} requires host or non-empty hosts"
+                    ))
                 }
-                let value = match value {
-                    HeaderSetting::Literal(value) => {
-                        if matches!(name.as_str(), "cookie" | "authorization") {
-                            return Err(
-                                "secret link preview headers require environment references"
-                                    .to_owned(),
-                            );
-                        }
-                        value
-                    }
-                    HeaderSetting::Environment(reference) => {
-                        if !valid_env_name(&reference.env) {
-                            return Err("invalid link preview environment reference".to_owned());
-                        }
-                        env(&reference.env).ok_or_else(|| {
-                            "missing link preview environment reference".to_owned()
-                        })?
-                    }
-                };
-                let mut value = HeaderValue::from_str(&value)
-                    .map_err(|_| "invalid link preview header value".to_owned())?;
-                value.set_sensitive(true);
-                if headers.insert(name, value).is_some() {
-                    return Err("duplicate link preview header name".to_owned());
+            };
+            let mut canonical_hosts = Vec::with_capacity(hosts.len());
+            for (index, host) in hosts.into_iter().enumerate() {
+                let host = canonical_host(&host).ok_or_else(|| {
+                    format!("site #{site_number}, host #{}: invalid hostname", index + 1)
+                })?;
+                if !seen.insert(host.clone()) {
+                    return Err(format!(
+                        "site #{site_number}: duplicate link preview host {host:?}"
+                    ));
                 }
+                if site.handler == Some(LinkPreviewHandler::Zhihu)
+                    && !ZHIHU_CHALLENGE_HOSTS.contains(&host.as_str())
+                {
+                    return Err(format!(
+                        "site #{site_number}, host {host:?}: handler 'zhihu' supports only {}",
+                        ZHIHU_CHALLENGE_HOSTS.join(", ")
+                    ));
+                }
+                canonical_hosts.push(host);
             }
-            if sites.insert(host, headers).is_some() {
-                return Err("duplicate link preview host".to_owned());
+            let headers = resolve_headers(site.headers, &canonical_hosts, &env)?;
+            let handler = site
+                .handler
+                .filter(|handler| *handler != LinkPreviewHandler::Generic);
+            for host in canonical_hosts {
+                sites.insert(
+                    host,
+                    Site {
+                        headers: headers.clone(),
+                        handler,
+                    },
+                );
             }
         }
         Ok(Self { sites })
     }
 
-    pub(crate) fn sites(&self) -> impl Iterator<Item = (&str, &HeaderMap)> {
-        self.sites
-            .iter()
-            .map(|(host, headers)| (host.as_str(), headers))
+    /// Look up the canonical hostname of a validated request URL, exactly.
+    pub(crate) fn headers_for(&self, host: &str) -> Option<&HeaderMap> {
+        self.sites.get(host).map(|site| &site.headers)
     }
 
-    /// Look up the canonical hostname of a validated request URL, exactly.
-    #[cfg(test)]
-    pub fn headers_for(&self, host: &str) -> Option<&HeaderMap> {
-        self.sites.get(host)
+    pub(crate) fn handler_for(&self, host: &str) -> Option<LinkPreviewHandler> {
+        self.sites.get(host).and_then(|site| site.handler)
     }
+}
+
+fn resolve_headers(
+    settings: HashMap<String, HeaderSetting>,
+    hosts: &[String],
+    env: &impl Fn(&str) -> Option<String>,
+) -> Result<HeaderMap, String> {
+    let mut headers = HeaderMap::with_capacity(settings.len());
+    for (raw_name, value) in settings {
+        // Quote untrusted names to keep diagnostics on one line. Never log header values.
+        let error = |reason| format!("site hosts {hosts:?}, header {raw_name:?}: {reason}");
+        let name = HeaderName::from_bytes(raw_name.as_bytes())
+            .map_err(|_| error("invalid header name"))?;
+        if matches!(
+            name.as_str(),
+            "host"
+                | "accept-encoding"
+                | "content-length"
+                | "transfer-encoding"
+                | "connection"
+                | "keep-alive"
+                | "proxy-connection"
+                | "proxy-authorization"
+                | "proxy-authenticate"
+                | "te"
+                | "trailer"
+                | "upgrade"
+        ) {
+            return Err(error("reserved header"));
+        }
+        let value = match value {
+            HeaderSetting::Literal(value) => {
+                if matches!(name.as_str(), "cookie" | "authorization") {
+                    return Err(error("secret headers require environment references"));
+                }
+                value
+            }
+            HeaderSetting::Environment(reference) => {
+                if !valid_env_name(&reference.env) {
+                    return Err(error("invalid environment reference"));
+                }
+                env(&reference.env).ok_or_else(|| error("missing environment reference"))?
+            }
+        };
+        let mut value = HeaderValue::from_str(&value).map_err(|_| error("invalid header value"))?;
+        value.set_sensitive(true);
+        if headers.insert(name, value).is_some() {
+            return Err(error("duplicate header name"));
+        }
+    }
+    Ok(headers)
 }
 
 fn valid_env_name(name: &str) -> bool {
@@ -119,7 +180,7 @@ fn valid_env_name(name: &str) -> bool {
         && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
-fn canonical_host(host: &str) -> Result<String, String> {
+fn canonical_host(host: &str) -> Option<String> {
     // Host::parse performs the same IDNA and case normalization as URL parsing,
     // but accepts only the host itself, not URL authority or path syntax.
     if host.is_empty()
@@ -127,11 +188,11 @@ fn canonical_host(host: &str) -> Result<String, String> {
             c.is_whitespace() || matches!(c, '/' | '\\' | ':' | '@' | '?' | '#' | '[' | ']')
         })
     {
-        return Err("invalid link preview host".to_owned());
+        return None;
     }
     match Host::parse(host) {
-        Ok(Host::Domain(domain)) if !domain.is_empty() && !domain.contains('*') => Ok(domain),
-        _ => Err("invalid link preview host".to_owned()),
+        Ok(Host::Domain(domain)) if !domain.is_empty() && !domain.contains('*') => Some(domain),
+        _ => None,
     }
 }
 
@@ -193,11 +254,56 @@ mod tests {
         assert!(LinkPreviewConfig::default()
             .headers_for("example.com")
             .is_none());
-        assert!(resolve("[[sites]]\nhost = 'example.com'", |_| None)
-            .unwrap()
-            .headers_for("example.com")
-            .unwrap()
-            .is_empty());
+        for source in [
+            "[[sites]]\nhost = 'example.com'",
+            "[[sites]]\nhost = 'example.com'\nhandler = 'generic'",
+        ] {
+            let config = resolve(source, |_| None).unwrap();
+            assert_eq!(config.handler_for("example.com"), None);
+            assert!(config.headers_for("example.com").unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn grouped_hosts_share_headers_without_matching_subdomains() {
+        let config = resolve(
+            r#"
+[[sites]]
+hosts = ["NOTES.example", "other.example"]
+headers = { User-Agent = "mobile-agent", Cookie = { env = "COOKIE" } }
+"#,
+            |_| Some("session=secret".into()),
+        )
+        .unwrap();
+        for host in ["notes.example", "other.example"] {
+            let headers = config.headers_for(host).unwrap();
+            assert_eq!(headers["user-agent"], "mobile-agent");
+            assert_eq!(headers["cookie"], "session=secret");
+            assert!(headers["cookie"].is_sensitive());
+        }
+        assert!(config.headers_for("sub.notes.example").is_none());
+        assert!(config.headers_for("notes.example.evil.test").is_none());
+        assert!(!format!("{config:?}").contains("session=secret"));
+    }
+
+    #[test]
+    fn rejects_ambiguous_empty_and_overlapping_host_groups() {
+        for source in [
+            "[[sites]]\nhosts=[]",
+            "[[sites]]\nhost='example.com'\nhosts=[]",
+            "[[sites]]\nhost='example.com'\nhosts=['other.example']",
+            "[[sites]]\nhosts=['EXAMPLE.com','example.com']",
+            "[[sites]]\nhosts=['example.com','*.example.com']",
+            "[[sites]]\nhost='example.com'\nhandler='unknown'",
+        ] {
+            assert!(resolve(source, |_| None).is_err(), "accepted {source}");
+        }
+        let overlap =
+            "[[sites]]\nhosts=['first.example','example.com']\n[[sites]]\nhost='EXAMPLE.com'";
+        assert_eq!(
+            resolve(overlap, |_| None).unwrap_err(),
+            "site #2: duplicate link preview host \"example.com\""
+        );
     }
 
     #[test]
@@ -253,7 +359,9 @@ mod tests {
         ] {
             let source =
                 format!("[[sites]]\nhost='example.com'\n[sites.headers]\n\"{name}\" = \"value\"");
-            assert!(resolve(&source, |_| None).is_err(), "accepted {name}");
+            let error = resolve(&source, |_| None).unwrap_err();
+            assert!(error.contains("example.com"));
+            assert!(error.contains(&format!("header {name:?}")));
         }
         assert!(resolve(
             "[[sites]]\nhost='example.com'\n[sites.headers]\nX-Test = \"bad\\nvalue\"",
@@ -272,9 +380,10 @@ mod tests {
         for name in ["Cookie", "cOoKiE", "Authorization", "AUTHORIZATION"] {
             let source =
                 format!("[[sites]]\nhost='example.com'\n[sites.headers]\n{name} = 'secret-value'");
-            assert!(!resolve(&source, |_| None)
-                .unwrap_err()
-                .contains("secret-value"));
+            let error = resolve(&source, |_| None).unwrap_err();
+            assert!(error.contains("example.com"));
+            assert!(error.contains(&format!("header {name:?}")));
+            assert!(!error.contains("secret-value"));
         }
         for name in ["", "1BAD", "BAD-NAME", "BAD=NAME"] {
             let source = format!(
@@ -284,10 +393,12 @@ mod tests {
         }
         let source = "[[sites]]\nhost='example.com'\n[sites.headers]\nCookie = { env = 'MISSING' }";
         assert!(resolve(source, |_| None).is_err());
-        let source = "[[sites]]\nhost='example.com'\n[sites.headers]\nX-Custom = { env = 'VALUE' }";
-        assert!(!resolve(source, |_| Some("secret-value\n".into()))
-            .unwrap_err()
-            .contains("secret-value"));
+        let source = "[[sites]]\nhosts=['example.com','other.example']\n[sites.headers]\nX-Custom = { env = 'VALUE' }";
+        let error = resolve(source, |_| Some("secret-value\n".into())).unwrap_err();
+        assert_eq!(
+            error,
+            "site hosts [\"example.com\", \"other.example\"], header \"X-Custom\": invalid header value"
+        );
         let config = resolve(source, |_| Some("secret-value".into())).unwrap();
         assert!(config.headers_for("example.com").unwrap()["x-custom"].is_sensitive());
     }

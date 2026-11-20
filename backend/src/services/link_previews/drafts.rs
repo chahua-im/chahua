@@ -40,12 +40,12 @@ struct DraftPreview {
 #[cfg(test)]
 impl Default for DraftPreviews {
     fn default() -> Self {
-        Self::new(Arc::new(super::sites::LinkPreviewConfig::default()))
+        Self::new(Arc::new(crate::config::LinkPreviewConfig::default()))
     }
 }
 
 impl DraftPreviews {
-    pub(super) fn new(config: Arc<super::sites::LinkPreviewConfig>) -> Self {
+    pub(super) fn new(config: Arc<crate::config::LinkPreviewConfig>) -> Self {
         Self {
             entries: Mutex::new(HashMap::new()),
             slots: Semaphore::new(CONCURRENCY),

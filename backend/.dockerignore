@@ -2,6 +2,7 @@
 target/
 .env
 .env.*
+/config.local.toml
 
 # Git and editor
 .git

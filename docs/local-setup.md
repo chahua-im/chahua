@@ -113,19 +113,30 @@ supplied by runspace or the container image. Settings are loaded once; restart t
 A missing selected file emits a warning and falls back to environment variables and
 defaults. Other read errors, malformed TOML, and unknown fields fail startup.
 
-Start from [`backend/config.example.toml`](../backend/config.example.toml):
+[`backend/config.example.toml`](../backend/config.example.toml) is the Git-tracked
+template with commented examples for application settings, including link preview
+rules. Create the Git-ignored `backend/config.local.toml` when it does not already
+exist, then select it for local development:
 
 ```bash
-cp backend/config.example.toml backend/config.local.toml
+test -e backend/config.local.toml || cp backend/config.example.toml backend/config.local.toml
 CHAHUA_CONFIG_PATH="$PWD/backend/config.local.toml" node runspace/dev.mjs dev
 ```
 
-The file covers server binds/CORS, logging, the Discuz schema (`[discuz]`), media settings and region, development
-authentication, avatars, message search, public push/APNs metadata, node IDs, and link-preview request headers.
-Runspace's generated bind/storage environment still wins,
-preserving worktree isolation. The Docker image defaults to `/config/config.toml`;
-if it is absent, the backend warns and uses environment variables and defaults.
-Mount custom TOML read-only at that path, for example with
+Edit `backend/config.local.toml` with the settings you want to test. Runspace's generated
+bind and storage environment variables still take precedence to keep worktrees isolated.
+Set `schema` under `[discuz]` if the Discuz user and usergroup tables are in a PostgreSQL
+schema other than `discuz`.
+
+For a deployment without Docker, provide a `config.toml` with the production
+settings to the server maintainer outside Git. The server uses the same file format.
+Install it at a path such as `/etc/chahua/config.toml` and set
+`CHAHUA_CONFIG_PATH=/etc/chahua/config.toml` in the backend process environment or
+`Environment=CHAHUA_CONFIG_PATH=/etc/chahua/config.toml` in the systemd service.
+Restart the backend after changing the file.
+
+The Docker image selects `/config/config.toml`. Mount your deployment file read-only
+at that path with
 `--mount type=bind,src=/absolute/path/config.toml,dst=/config/config.toml,readonly`.
 Set `CHAHUA_CONFIG_PATH` to override the container path. Do not bake environment-specific
 configuration or credentials into the image.
@@ -135,11 +146,18 @@ configuration or credentials into the image.
 not TOML values. Keep actual private key files protected as before. Public metadata such
 as `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`, APNs key/team IDs and topic may be in TOML.
 
-Each `[[link_previews.sites]]` entry has a required `host` and an optional `headers`
-map. Hosts match exact canonical hostnames, not wildcards or inherited subdomain rules.
+Each `[[link_previews.sites]]` entry requires either `host` or a non-empty `hosts`
+list, plus optional `handler` and `headers` fields. A group shares its handler and headers,
+but each hostname still matches exactly, without wildcards or inherited subdomain rules.
+Duplicate canonical hosts within the deployment rules, including overlapping groups, fail startup.
 Literal non-secret headers are allowed; secrets use explicit environment references:
 
 ```toml
+[[link_previews.sites]]
+hosts = ["example.net", "www.example.net"]
+handler = "generic"
+headers = { Accept-Language = "en-US,en;q=0.9" }
+
 [[link_previews.sites]]
 host = "example.com"
 headers = {
@@ -163,10 +181,14 @@ host implicitly. Host/connection/framing headers and `Accept-Encoding` cannot be
 overridden. HTTPS, TLS validation, DNS/IP restrictions, address pinning, deadlines and
 response limits remain enforced.
 
-Built-in website profiles and special handlers remain in Rust. TOML headers override
-individual headers on the exact host, preserving other built-in headers and handlers.
-An empty or absent sites list keeps all built-in profiles; it does not disable them.
-TOML cannot select a handler or enable inherited subdomain matching.
+The file selected by `CHAHUA_CONFIG_PATH` supplies the site rules. Set `handler`
+to `xiaohongshu`, `weixin`, or `zhihu` to enable the corresponding Rust handler
+for a hostname. The `zhihu` handler accepts only `www.zhihu.com` and
+`zhuanlan.zhihu.com`. Assigning it to another hostname fails startup.
+A host uses generic previews when it has no rule, omits `handler`, or sets
+`handler = "generic"`. A rule can configure request headers for generic previews.
+An empty or absent sites list uses generic previews for every host. Restart the
+backend after changing deployment rules.
 
 ## Port overrides and LAN HTTPS
 

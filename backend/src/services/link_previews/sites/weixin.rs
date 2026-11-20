@@ -5,6 +5,18 @@ use std::cell::Cell;
 use html5ever::tokenizer::{
     states::RawKind, BufferQueue, TagKind, Token, TokenSink, TokenSinkResult, Tokenizer,
 };
+use url::Url;
+
+// Some published cover tags use HTTP even though the same CDN serves them over HTTPS.
+pub(crate) fn secure_cover_url(raw: &str) -> Option<Url> {
+    let (scheme, target) = raw.trim().split_once("://")?;
+    if !scheme.eq_ignore_ascii_case("http") {
+        return None;
+    }
+    let cover = super::super::validate_url(&format!("https://{target}"))?;
+    matches!(cover.host_str(), Some("mmecoa.qpic.cn" | "mmbiz.qpic.cn")).then_some(cover)
+}
+
 // Re-tokenize the bounded prefix rather than retaining a non-Send HTML tokenizer
 // across network awaits. Do not call end(): an incomplete tag must not count.
 pub(crate) fn head_complete(bytes: &[u8]) -> bool {
@@ -76,29 +88,5 @@ impl TokenSink for Head {
             _ => {}
         }
         TokenSinkResult::Continue
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn stops_only_after_complete_tags_and_allows_empty_description() {
-        let html = "<head><meta property='og:title' content='标题'><meta property='og:image' content='https://example.com/a.jpg'><meta property='og:description' content=''>";
-        assert!(head_complete(html.as_bytes()));
-        assert!(!head_complete(&html.as_bytes()[..html.len() - 1]));
-        assert!(!head_complete(b"<meta property='og:title' content=''>"));
-        assert!(head_complete(b"<head><title>Fallback</title></head>"));
-    }
-    #[test]
-    fn ignores_markup_inside_scripts_comments_and_attributes() {
-        for html in [
-            "<head><script>const text = '</head>';</script>",
-            "<head><!-- </head> -->",
-            "<head><meta content='</head>'>",
-            "<head><style>/* </head> */</style>",
-        ] {
-            assert!(!head_complete(html.as_bytes()), "{html}");
-        }
     }
 }

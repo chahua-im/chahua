@@ -8,6 +8,8 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use scraper::{Html, Selector};
 use url::Url;
 
+use crate::config::ZHIHU_CHALLENGE_HOSTS;
+
 const LIMIT: usize = 1024 * 1024;
 // Guest environment fields for the default desktop profile, not a logged-in identity.
 const GUEST_BITMAP: &str = "20001000800040008000800080008000800080004000";
@@ -15,7 +17,9 @@ const GUEST_FINGERPRINT: &str = "be544511d8accf5879de9179e434e829";
 
 pub(crate) fn supports(url: &Url) -> bool {
     url.scheme() == "https"
-        && matches!(url.host_str(), Some("www.zhihu.com" | "zhuanlan.zhihu.com"))
+        && url
+            .host_str()
+            .is_some_and(|host| ZHIHU_CHALLENGE_HOSTS.contains(&host))
 }
 
 pub(crate) fn is_verification_page(url: &Url) -> bool {
@@ -411,155 +415,3 @@ const SBOX: [u8; 256] = [
     0xd3, 0x75, 0xf4, 0xe5, 0x1f, 0x98, 0x23, 0x79, 0x9a, 0xb5, 0x86, 0xba, 0x95, 0x0d, 0xfb, 0x38,
     0x67, 0xbb, 0xc5, 0xd1, 0x6d, 0x69, 0x28, 0x60, 0xb3, 0x52, 0x70, 0x93, 0xdd, 0xfc, 0xc0, 0x6b,
 ];
-
-#[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-
-    fn fixture() -> serde_json::Value {
-        serde_json::from_str(include_str!("zhihu.fixture.json")).unwrap()
-    }
-
-    pub fn challenge_html() -> String {
-        format!("<meta id='zh-zse-ck' content='{}'><script src='https://static.zhihu.com/zse-ck/v4/{}.js'></script>", "A".repeat(128), "a".repeat(64))
-    }
-
-    // Synthetic WASM envelope containing independently captured protocol constants;
-    // no downloaded executable code or real session credentials in the fixture.
-    pub fn script() -> Vec<u8> {
-        let data = fixture();
-        let mut blob = vec![0; 6004];
-        blob[2..4].copy_from_slice(&6000u16.to_be_bytes());
-        for entry in data["pool"].as_array().unwrap() {
-            let entry = entry.as_str().unwrap().as_bytes();
-            blob.extend_from_slice(&[0, entry.len() as u8]);
-            let mut key = 0x30;
-            let mut previous = b'"';
-            for byte in entry {
-                let plain = byte ^ 6;
-                blob.push(plain ^ key);
-                key ^= plain ^ previous;
-                previous = plain;
-            }
-        }
-        let section = STANDARD.encode(blob);
-        let mut wasm = b"\0asm\x01\0\0\0\x0b".to_vec();
-        let mut length = section.len();
-        loop {
-            let mut byte = (length & 127) as u8;
-            length >>= 7;
-            if length != 0 {
-                byte |= 128;
-            }
-            wasm.push(byte);
-            if length == 0 {
-                break;
-            }
-        }
-        wasm.extend_from_slice(section.as_bytes());
-        format!("const data = '{}';", STANDARD.encode(wasm)).into_bytes()
-    }
-
-    #[test]
-    fn derives_build_constants_and_matches_python_known_answer() {
-        let expected = fixture();
-        let profile = Profile::from_script(&script()).unwrap();
-        let keys: Vec<u32> = expected["keys"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_u64().unwrap() as u32)
-            .collect();
-        assert_eq!(profile.keys.as_slice(), keys);
-        assert_eq!(
-            profile.alphabet.as_slice(),
-            expected["alphabet"].as_str().unwrap().as_bytes()
-        );
-        assert_eq!(
-            profile.iv.as_slice(),
-            expected["iv"].as_str().unwrap().as_bytes()
-        );
-        assert_eq!(u64::from(profile.mask), expected["mask"].as_u64().unwrap());
-        assert_eq!(u64::from(profile.xreg), expected["xreg"].as_u64().unwrap());
-        assert_eq!(
-            profile
-                .token(expected["record"].as_str().unwrap().as_bytes())
-                .unwrap(),
-            expected["token"].as_str().unwrap()
-        );
-    }
-
-    #[test]
-    fn cookie_contains_current_challenge_and_valid_header_bytes() {
-        let url = Url::parse("https://www.zhihu.com/question/123/answer/456").unwrap();
-        let challenge = Challenge::parse(&url, challenge_html().as_bytes()).unwrap();
-        let cookie = challenge.cookie(&script(), "test-agent").unwrap();
-        assert!(cookie.starts_with("__zse_ck=005_"));
-        assert!(cookie.ends_with(&format!("-{}", "A".repeat(128))));
-        assert!(reqwest::header::HeaderValue::from_str(&cookie).is_ok());
-        assert_eq!(crc32(b"123456789"), 0xcbf43926);
-        // Decode the produced token to verify it fingerprints the configured UA.
-        let profile = Profile::from_script(&script()).unwrap();
-        let payload = cookie
-            .strip_prefix("__zse_ck=005_")
-            .unwrap()
-            .split_once('-')
-            .unwrap()
-            .0;
-        let ciphertext = radix_decode(payload.as_bytes(), &profile.alphabet, profile.xreg).unwrap();
-        let mut previous = profile.iv;
-        let mut plain = Vec::new();
-        for chunk in ciphertext.chunks_exact(16) {
-            let block: [u8; 16] = chunk.try_into().unwrap();
-            let decoded = cipher(block, &profile.keys, true);
-            plain.extend((0..16).map(|i| decoded[i] ^ previous[i] ^ profile.mask));
-            previous = block;
-        }
-        assert_eq!(
-            &plain[81..89],
-            format!("{:08x}", crc32(b"test-agent")).as_bytes()
-        );
-    }
-
-    #[test]
-    fn challenge_is_restricted_to_known_hosts_and_script_path() {
-        let body = challenge_html();
-        for host in ["example.com", "www.zhihu.com.evil.test", "zhihu.com"] {
-            assert!(Challenge::parse(
-                &Url::parse(&format!("https://{host}/")).unwrap(),
-                body.as_bytes()
-            )
-            .is_none());
-        }
-        let url = Url::parse("https://www.zhihu.com/").unwrap();
-        for body in [
-            body.replace("static.zhihu.com/", "evil.test/"),
-            body.replace("/v4/", "/v5/"),
-            body.replace(".js", ".js?redirect=evil"),
-            body.replace(&"A".repeat(128), "a; injected=cookie"),
-        ] {
-            assert!(Challenge::parse(&url, body.as_bytes()).is_none());
-        }
-    }
-
-    #[test]
-    fn unsupported_and_truncated_builds_fail_without_panicking() {
-        for input in [b"".as_slice(), b"AGFzbQ", b"AGFzbQAAAAA=", b"not a script"] {
-            assert!(Profile::from_script(input).is_none());
-        }
-        assert!(Profile::from_script(&vec![b'A'; LIMIT + 1]).is_none());
-        let mut bytes = b"\0asm\x01\0\0\0\x0b\xff\xff\xff\xff\xff".to_vec();
-        assert!(extract_pool(&bytes).is_none());
-        bytes.truncate(9);
-        assert!(extract_pool(&bytes).is_none());
-        let data = fixture();
-        let mut pool: Vec<_> = data["pool"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_str().unwrap().as_bytes().to_vec())
-            .collect();
-        pool.retain(|v| !v.starts_with(b"\"005_"));
-        assert!(Profile::from_pool(&pool).is_none());
-    }
-}

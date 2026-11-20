@@ -136,7 +136,7 @@ fn selector(value: &str) -> Selector {
     Selector::parse(value).expect("static metadata selector")
 }
 
-fn normalize(value: &str) -> Option<String> {
+pub(super) fn normalize(value: &str) -> Option<String> {
     let value = value.split_whitespace().collect::<Vec<_>>().join(" ");
     (!value.is_empty()).then(|| value.chars().take(512).collect())
 }
@@ -180,18 +180,34 @@ pub(super) fn extract_preview(
     base: &Url,
     bytes: &[u8],
 ) -> Result<FetchedLinkPreview, PreviewFetchError> {
+    extract_preview_with_image_fallback(base, bytes, None)
+}
+
+pub(super) fn extract_preview_with_image_fallback(
+    base: &Url,
+    bytes: &[u8],
+    image_fallback: Option<fn(&str) -> Option<Url>>,
+) -> Result<FetchedLinkPreview, PreviewFetchError> {
     let document = Html::parse_document(&String::from_utf8_lossy(bytes));
-    let metadata = Metadata::from_document(&document);
+    extract_document_preview(base, &document, image_fallback)
+}
+
+pub(super) fn extract_document_preview(
+    base: &Url,
+    document: &Html,
+    image_fallback: Option<fn(&str) -> Option<Url>>,
+) -> Result<FetchedLinkPreview, PreviewFetchError> {
+    let metadata = Metadata::from_document(document);
     let objects = metadata.objects();
     let title = metadata
         .meta(TITLE_META)
         .find_map(normalize)
-        .or_else(|| element_text(&document, "title"))
+        .or_else(|| element_text(document, "title"))
         .or_else(|| metadata.item("headline").find_map(normalize))
         .or_else(|| json_text(&objects, &["headline", "name"]))
-        .or_else(|| element_text(&document, ".post-title"))
-        .or_else(|| element_text(&document, ".entry-title"))
-        .or_else(|| element_text(&document, "h1[class*=title i]"))
+        .or_else(|| element_text(document, ".post-title"))
+        .or_else(|| element_text(document, ".entry-title"))
+        .or_else(|| element_text(document, "h1[class*=title i]"))
         .ok_or(PreviewFetchError::MissingTitle)?;
     // Prefer an explicit summary to a potentially long articleBody.
     let description = metadata
@@ -214,7 +230,8 @@ pub(super) fn extract_preview(
                 .select(&selector("link[rel~=image_src i][href]"))
                 .filter_map(|element| element.value().attr("href"))
                 .find_map(|raw| resolve_reference(base, raw))
-        });
+        })
+        .or_else(|| metadata.meta(IMAGE_META).find_map(image_fallback?));
     Ok(FetchedLinkPreview {
         title,
         description,

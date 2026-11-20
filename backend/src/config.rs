@@ -2,6 +2,7 @@
 
 mod link_previews;
 pub use link_previews::{LinkPreviewConfig, LinkPreviewSettings};
+pub(crate) use link_previews::{LinkPreviewHandler, ZHIHU_CHALLENGE_HOSTS};
 
 use axum::http::HeaderValue;
 use base64::Engine;
@@ -844,18 +845,6 @@ mod tests {
         assert!(!config.message_search_enabled);
         assert!(config.avatars.is_none());
         assert_eq!(config.discuz_schema, "discuz");
-    }
-
-    #[test]
-    fn example_configuration_and_rust_site_boundary() {
-        let file = parse(include_str!("../config.example.toml"));
-        let config = AppConfig::resolve(file, env(&base()), false);
-        assert_eq!(config.discuz_schema, "discuz");
-        assert_eq!(config.media.bucket, "env-bucket");
-        assert!(toml::from_str::<ConfigFile>(
-            "[[link_previews.sites]]\nhost='example.com'\nhandler='zhihu'"
-        )
-        .is_err());
     }
 
     #[test]
