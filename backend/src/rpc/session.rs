@@ -3,6 +3,16 @@
 //! The WebSocket adapter owns framing, upgrade negotiation and protocol
 //! ping/pong. This module receives and emits complete JSON strings so the same
 //! engine can be used by an in-memory or future stream transport.
+//!
+//! Reads and mutations share process-wide admission, with at most 16 running
+//! calls per connection and per account, and 128 per process. Waiting calls
+//! are served round-robin by account, with at most 256 waiting per process,
+//! 64 per account, and a five-second wait. Full or expired queues return
+//! Overloaded without dispatch. Closing a connection cancels its waiting calls,
+//! but already running operations retain their slots until they finish.
+//! Session and control calls use their separate bounded, serial lane.
+
+mod admission;
 
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -74,12 +84,14 @@ const ANONYMOUS_SESSION_TIMEOUT: Duration = Duration::from_secs(30);
 const REVOCATION_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 const PRESENCE_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
 
-static GLOBAL_ADMISSION: LazyLock<Arc<Semaphore>> =
-    LazyLock::new(|| Arc::new(Semaphore::new(MAX_GLOBAL_IN_FLIGHT)));
-
-fn global_admission() -> Arc<Semaphore> {
-    GLOBAL_ADMISSION.clone()
-}
+static GLOBAL_ADMISSION: LazyLock<Arc<admission::Admission>> = LazyLock::new(|| {
+    admission::Admission::new(
+        MAX_GLOBAL_IN_FLIGHT,
+        admission::MAX_ACCOUNT_IN_FLIGHT,
+        admission::MAX_WAITING,
+        admission::MAX_ACCOUNT_WAITING,
+    )
+});
 
 // The executor outlives individual sessions and owns every admitted task.
 // Reap completed handles on submission rather than tying a background reaper
@@ -439,6 +451,7 @@ pub struct RpcSessionTransport {
 /// type leaks into the engine.
 pub struct RpcSessionDeps {
     services: RpcServices,
+    ordinary_admission: Arc<admission::Admission>,
     input_permits: mpsc::Receiver<(InputLease, Instant)>,
     output_permits: mpsc::Sender<RpcFrameLease>,
     output_pair_lock: Arc<Mutex<()>>,
@@ -468,6 +481,7 @@ pub fn rpc_session_channels(
     let metrics = services.metrics.api.clone();
     let deps = RpcSessionDeps {
         services,
+        ordinary_admission: GLOBAL_ADMISSION.clone(),
         input_permits: input_permit_rx,
         output_permits: output_permit_tx,
         output_pair_lock,
@@ -1792,20 +1806,6 @@ struct SessionAdmission {
     controls: Arc<Semaphore>,
 }
 
-struct AdmissionPermits {
-    _connection: OwnedSemaphorePermit,
-    _global: Option<OwnedSemaphorePermit>,
-}
-
-fn admit(connection: &Arc<Semaphore>) -> Option<AdmissionPermits> {
-    let connection_permit = connection.clone().try_acquire_owned().ok()?;
-    let global_permit = global_admission().try_acquire_owned().ok()?;
-    Some(AdmissionPermits {
-        _connection: connection_permit,
-        _global: Some(global_permit),
-    })
-}
-
 #[derive(Clone, Copy)]
 enum ResultDestination {
     Single,
@@ -1872,6 +1872,7 @@ struct SessionExecution<'a> {
     guard_failures: &'a mpsc::UnboundedSender<RpcLifecycleFailure>,
     results: &'a mpsc::Sender<WorkResult>,
     admission: &'a SessionAdmission,
+    ordinary_admission: &'a Arc<admission::Admission>,
     budget: &'a RpcByteBudget,
     next_sync_seq: u64,
 }
@@ -1910,55 +1911,6 @@ async fn schedule_call(
         }
     }
     let class = methods::method_class(&call.method);
-    let permits = match class {
-        Some(ExecutionClass::Read | ExecutionClass::Mutation) => match admit(&admission.ordinary) {
-            Some(permits) => Some(permits),
-            None => {
-                if let Some(id) = &id {
-                    if matches!(destination, ResultDestination::Single) {
-                        outstanding.remove(id);
-                    }
-                }
-                let response =
-                    id.map(|id| RpcResponse::error(id, RpcError::new(RpcErrorCode::Overloaded)));
-                return match record_rejection(
-                    &services,
-                    api,
-                    started,
-                    response,
-                    RpcErrorCode::Overloaded,
-                    &budget,
-                ) {
-                    Ok(response) => ScheduledCall::Immediate(response),
-                    Err(_) => {
-                        shared.transport.close();
-                        ScheduledCall::Immediate(None)
-                    }
-                };
-            }
-        },
-        Some(ExecutionClass::Session | ExecutionClass::Control) => {
-            match admission.controls.clone().try_acquire_owned() {
-                Ok(permit) => Some(AdmissionPermits {
-                    _connection: permit,
-                    _global: None,
-                }),
-                Err(_) => {
-                    let _ = record_rejection(
-                        &services,
-                        api,
-                        started,
-                        None,
-                        RpcErrorCode::Overloaded,
-                        &budget,
-                    );
-                    shared.transport.close();
-                    return ScheduledCall::Immediate(None);
-                }
-            }
-        }
-        None => None,
-    };
     let Some(mut context) = shared
         .call_context(controls, id.clone(), guard_failures)
         .await
@@ -1997,6 +1949,62 @@ async fn schedule_call(
             }
         };
     }
+    let deadline = Instant::now() + admission::MAX_WAIT;
+    let mut ordinary_request = None;
+    let control_permit = match class {
+        Some(ExecutionClass::Read | ExecutionClass::Mutation) => {
+            if let Some(session) = &context.session {
+                ordinary_request = execution.ordinary_admission.request(
+                    session.uid,
+                    &admission.ordinary,
+                    deadline,
+                    &services.metrics.rpc_admission,
+                );
+                if ordinary_request.is_none() {
+                    if let Some(id) = &id {
+                        if matches!(destination, ResultDestination::Single) {
+                            outstanding.remove(id);
+                        }
+                    }
+                    let response = id
+                        .map(|id| RpcResponse::error(id, RpcError::new(RpcErrorCode::Overloaded)));
+                    return match record_rejection(
+                        &services,
+                        api,
+                        started,
+                        response,
+                        RpcErrorCode::Overloaded,
+                        &budget,
+                    ) {
+                        Ok(response) => ScheduledCall::Immediate(response),
+                        Err(_) => {
+                            shared.transport.close();
+                            ScheduledCall::Immediate(None)
+                        }
+                    };
+                }
+            }
+            None
+        }
+        Some(ExecutionClass::Session | ExecutionClass::Control) => {
+            match admission.controls.clone().try_acquire_owned() {
+                Ok(permit) => Some(permit),
+                Err(_) => {
+                    let _ = record_rejection(
+                        &services,
+                        api,
+                        started,
+                        None,
+                        RpcErrorCode::Overloaded,
+                        &budget,
+                    );
+                    shared.transport.close();
+                    return ScheduledCall::Immediate(None);
+                }
+            }
+        }
+        None => None,
+    };
     let method = call.method.clone();
     let activate_after_success =
         matches!(method.as_str(), "session.open" | "auth.createDevSession");
@@ -2025,8 +2033,57 @@ async fn schedule_call(
     supervise(
         async move {
             let _input_lease = input_lease;
-            let _permits = permits;
-            let (response, error) =
+            let _control_permit = control_permit;
+            let mut admission_error = None;
+            let _ordinary_permit = if let Some(request) = ordinary_request {
+                let was_waiting = request.is_waiting();
+                let result = if was_waiting {
+                    let mut close = shared.transport.close_subscription();
+                    // Wait outside the session loop so results, controls, and
+                    // disconnects keep moving while ordinary capacity is full.
+                    tokio::select! {
+                        biased;
+                        _ = shared.transport.wait_closed(&mut close) => return,
+                        result = time::timeout_at(deadline, request.wait()) => result,
+                    }
+                } else {
+                    Ok(request.wait().await)
+                };
+                match result {
+                    Ok(permit) => {
+                        if was_waiting {
+                            let Some(current) = shared
+                                .call_context(
+                                    context.controls.clone(),
+                                    id.clone(),
+                                    context
+                                        .guard_failures
+                                        .clone()
+                                        .expect("session guard sender"),
+                                )
+                                .await
+                            else {
+                                return;
+                            };
+                            context = current;
+                        }
+                        Some(permit)
+                    }
+                    Err(_) => {
+                        admission_error = Some(RpcError::new(RpcErrorCode::Overloaded));
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+            let (response, error) = if let Some(error) = admission_error {
+                let code = error.code;
+                (
+                    id.clone().map(|id| RpcResponse::error(id, error)),
+                    Some(code),
+                )
+            } else {
                 match AssertUnwindSafe(methods::dispatch_call(&context, call, &services))
                     .catch_unwind()
                     .await
@@ -2045,7 +2102,8 @@ async fn schedule_call(
                         shared.transport.close();
                         return;
                     }
-                };
+                }
+            };
             let message_sync_enabled = context.message_sync_enabled;
             drop(context);
             let response = match prepare_recorded(&services, api, started, response, error, &budget)
@@ -2234,6 +2292,7 @@ pub async fn serve_rpc_session(
         guard_failures: &guard_tx,
         results: &results_tx,
         admission: &admission,
+        ordinary_admission: &dependencies.ordinary_admission,
         budget: &dependencies.budget,
         next_sync_seq: 0,
     };
@@ -3006,6 +3065,8 @@ mod tests {
     mod protocol_tests;
 
     mod batch_id_tests;
+
+    mod admission_tests;
 }
 
 #[cfg(test)]

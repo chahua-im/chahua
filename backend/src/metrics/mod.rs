@@ -2,8 +2,10 @@ mod api;
 mod http;
 mod pool;
 pub mod queries;
+mod rpc_admission;
 
 pub use api::{ApiMetrics, ApiStages};
+pub use rpc_admission::RpcAdmissionMetrics;
 
 use axum::extract::State;
 use axum::http::{header, HeaderValue, StatusCode};
@@ -27,6 +29,7 @@ pub use http::track_http_metrics;
 pub struct Metrics {
     registry: Registry,
     pub api: Arc<ApiMetrics>,
+    pub rpc_admission: Arc<RpcAdmissionMetrics>,
     pub chat: Arc<ChatMetrics>,
     pub ws: Arc<WsMetrics>,
     pub presence: Arc<PresenceMetrics>,
@@ -50,6 +53,7 @@ impl Metrics {
             .expect("process collector registration should succeed");
         Self {
             api: Arc::new(ApiMetrics::new(&registry)),
+            rpc_admission: Arc::new(RpcAdmissionMetrics::new(&registry)),
             chat: Arc::new(ChatMetrics::new(&registry)),
             ws: Arc::new(WsMetrics::new(&registry)),
             presence: Arc::new(PresenceMetrics::new(&registry)),
