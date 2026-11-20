@@ -77,33 +77,53 @@ async fn completed_batch_member_id_stays_outstanding_until_the_aggregate_is_queu
 }
 
 #[tokio::test]
-async fn immediately_rejected_batch_member_id_is_reserved_until_the_other_members_finish() {
+async fn queued_batch_member_id_is_reserved_until_the_aggregate_is_queued() {
     let Some(services) = crate::rpc::test_support::services().await else {
         return;
     };
-    let token = services
-        .auth_token_service
-        .issue_session(1, "rejected-batch-id", 0)
-        .unwrap();
-    let (input, mut output, task) = open_authenticated(services.clone(), token).await;
-    let held = services.db.get().unwrap();
-    let mut calls = (0..MAX_IN_FLIGHT)
-        .map(|index| {
-            json!({
-                "jsonrpc":"2.0","id":format!("blocked-{index}"),"method":"users.getMe",
-            })
-        })
-        .collect::<Vec<_>>();
-    calls.push(json!({"jsonrpc":"2.0","id":"rejected-but-buffered","method":"users.getMe"}));
-    input.send(Value::Array(calls).to_string()).await.unwrap();
+    let admission = admission::Admission::new(1, 1, 256, 64);
+    let (input, mut output, task) = super::admission_tests::open_with_admission(
+        services.clone(),
+        admission.clone(),
+        "queued-batch-id",
+    )
+    .await;
+    let held = super::admission_tests::hold_capacity(&admission).await;
+    input.send(json!([
+        {"jsonrpc":"2.0","id":"queued-read","method":"users.getMe"},
+        {"jsonrpc":"2.0","id":"batch-ping","method":"session.ping","params":{"state":"inactive"}}
+    ]).to_string()).await.unwrap();
     barrier(&input, &mut output).await;
-    input.send(json!({"jsonrpc":"2.0","id":"rejected-but-buffered","method":"groups.create","params":{"name":"must not execute"}}).to_string()).await.unwrap();
+    drop(held);
+    let aggregate = receive_json(&mut output).await;
+    let members = aggregate
+        .as_array()
+        .expect("batch response is an aggregate");
+    assert_eq!(members.len(), 2);
+    for id in ["queued-read", "batch-ping"] {
+        let member = members
+            .iter()
+            .find(|member| member["id"] == id)
+            .expect("batch member");
+        assert!(member.get("result").is_some(), "{member}");
+        assert!(member.get("error").is_none(), "{member}");
+    }
+    let held = super::admission_tests::hold_capacity(&admission).await;
+    input.send(json!([
+        {"jsonrpc":"2.0","id":"queued-duplicate","method":"users.getMe"},
+        {"jsonrpc":"2.0","id":"second-ping","method":"session.ping","params":{"state":"inactive"}}
+    ]).to_string()).await.unwrap();
+    barrier(&input, &mut output).await;
+    input.send(json!({"jsonrpc":"2.0","id":"queued-duplicate","method":"groups.create","params":{"name":"queued duplicate must not execute"}}).to_string()).await.unwrap();
     let duplicate = receive_json(&mut output).await;
     assert_eq!(duplicate["id"], Value::Null);
-    assert_eq!(
-        duplicate["error"]["code"], -32600,
-        "even an immediate overload response still belongs to its unemitted batch"
-    );
+    assert_eq!(duplicate["error"]["code"], -32600);
     drop(held);
     close_session(input, output, task).await;
+    let created = crate::schema::groups::table
+        .filter(crate::schema::groups::name.eq("queued duplicate must not execute"))
+        .count()
+        .get_result::<i64>(&mut services.db.get().unwrap())
+        .unwrap();
+    assert_eq!(created, 0);
 }
