@@ -673,6 +673,51 @@ pub struct ThreadListRow {
     pub last_read_message_id: Option<i64>,
 }
 
+// Shared projection for the ordered inbox and the native key batch. Each
+// caller supplies its own authorization and pagination predicates.
+const THREAD_LIST_SELECT: &str = "SELECT
+    ts.chat_id,
+    g.kind AS chat_kind,
+    g.dm_uid1,
+    g.dm_uid2,
+    ts.thread_root_id,
+    g.name AS chat_name,
+    avatar_media.storage_key AS chat_avatar_key,
+    COALESCE(tm.reply_count, 0)::bigint AS reply_count,
+    COALESCE(tm.last_reply_at, ts.subscribed_at) AS last_reply_at,
+    ts.subscribed_at,
+    ts.archived,
+    ts.last_read_message_id
+    FROM thread_user_states ts
+    LEFT JOIN thread_meta tm ON tm.chat_id = ts.chat_id AND tm.thread_root_id = ts.thread_root_id
+    JOIN groups g ON g.id = ts.chat_id
+    LEFT JOIN media avatar_media ON g.avatar_image_id = avatar_media.id AND avatar_media.deleted_at IS NULL
+    JOIN messages root_msg ON root_msg.id = ts.thread_root_id";
+
+pub(crate) fn load_thread_rows_by_roots(
+    conn: &mut PgConnection,
+    uid: i32,
+    root_ids: &[i64],
+) -> QueryResult<Vec<ThreadListRow>> {
+    if root_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    // The supplied roots bound this query, while membership prevents stale
+    // subscriptions from exposing a chat after the viewer leaves it.
+    let sql = format!("{THREAD_LIST_SELECT}
+        JOIN group_membership membership ON membership.chat_id = ts.chat_id AND membership.uid = ts.uid
+        WHERE ts.uid = $1 AND ts.subscribed = TRUE
+          AND ts.thread_root_id = ANY($2)
+          AND root_msg.chat_id = ts.chat_id
+          AND root_msg.reply_root_id IS NULL
+          AND root_msg.has_thread = TRUE
+          AND root_msg.is_published = TRUE");
+    sql_query(sql)
+        .bind::<diesel::sql_types::Integer, _>(uid)
+        .bind::<diesel::sql_types::Array<diesel::sql_types::BigInt>, _>(root_ids)
+        .load(conn)
+}
+
 /// List threads the user is subscribed to, ordered by most recent reply.
 pub fn get_user_threads(
     conn: &mut PgConnection,
@@ -689,24 +734,7 @@ pub fn get_user_threads(
         ""
     };
     let sql = format!(
-        "SELECT
-            ts.chat_id,
-            g.kind AS chat_kind,
-            g.dm_uid1,
-            g.dm_uid2,
-            ts.thread_root_id,
-            g.name AS chat_name,
-            avatar_media.storage_key AS chat_avatar_key,
-            COALESCE(tm.reply_count, 0)::bigint AS reply_count,
-            COALESCE(tm.last_reply_at, ts.subscribed_at) AS last_reply_at,
-            ts.subscribed_at,
-            ts.archived,
-            ts.last_read_message_id
-        FROM thread_user_states ts
-        LEFT JOIN thread_meta tm ON tm.chat_id = ts.chat_id AND tm.thread_root_id = ts.thread_root_id
-        JOIN groups g ON g.id = ts.chat_id
-        LEFT JOIN media avatar_media ON g.avatar_image_id = avatar_media.id AND avatar_media.deleted_at IS NULL
-        JOIN messages root_msg ON root_msg.id = ts.thread_root_id
+        "{THREAD_LIST_SELECT}
         WHERE ts.uid = $1
           AND ts.archived = $2
           AND ts.subscribed = TRUE
@@ -890,15 +918,13 @@ pub fn enrich_thread_list(
                AND m.deleted_at IS NULL
                AND m.is_published = TRUE
                AND m.id > COALESCE(ts.last_read_message_id, 0)
-             LIMIT $4
+             LIMIT $3
          ) AS unread_messages ON TRUE
          WHERE ts.uid = $1
-           AND ts.archived = $2
-           AND ts.thread_root_id = ANY($3)
+           AND ts.thread_root_id = ANY($2)
          GROUP BY ts.thread_root_id",
     )
     .bind::<diesel::sql_types::Integer, _>(uid)
-    .bind::<diesel::sql_types::Bool, _>(rows.first().map(|row| row.archived).unwrap_or(false))
     .bind::<diesel::sql_types::Array<diesel::sql_types::BigInt>, _>(&root_ids)
     .bind::<diesel::sql_types::BigInt, _>(MAX_UNREAD_COUNT)
     .load(conn)?;
@@ -1462,20 +1488,20 @@ mod tests {
             "BEGIN;
              INSERT INTO groups(id, name) VALUES (76200, 'forward-thread-test'), (76300, 'source');
              INSERT INTO discuz.common_member(uid, username, loginname)
-             VALUES (76200, 'forwarder', 'forwarder'), (76201, 'root author', 'root-author'),
-                    (76202, 'reply author', 'reply-author');
-             INSERT INTO group_membership(chat_id, uid) VALUES (76200, 76200);
+             VALUES (987676200, 'forwarder', 'forwarder'), (987676201, 'root author', 'root-author'),
+                    (987676202, 'reply author', 'reply-author');
+             INSERT INTO group_membership(chat_id, uid) VALUES (76200, 987676200);
              INSERT INTO messages(id, chat_id, sender_uid, message_type, message,
                                   client_generated_id, created_at)
-             VALUES (76301, 76300, 76201, 'text', 'root', 'thread-origin-root', NOW()),
-                    (76302, 76300, 76202, 'text', 'reply', 'thread-origin-reply', NOW());
+             VALUES (76301, 76300, 987676201, 'text', 'root', 'thread-origin-root', NOW()),
+                    (76302, 76300, 987676202, 'text', 'reply', 'thread-origin-reply', NOW());
              INSERT INTO messages(id, chat_id, sender_uid, message_type, message,
                                   client_generated_id, created_at, forwarded_from_message_id,
                                   reply_root_id, has_thread)
-             VALUES (76201, 76200, 76200, 'text', 'root', 'thread-copy-root', NOW(), 76301, NULL, true),
-                    (76202, 76200, 76200, 'text', 'reply', 'thread-copy-reply', NOW(), 76302, 76201, false);
+             VALUES (76201, 76200, 987676200, 'text', 'root', 'thread-copy-root', NOW(), 76301, NULL, true),
+                    (76202, 76200, 987676200, 'text', 'reply', 'thread-copy-reply', NOW(), 76302, 76201, false);
              INSERT INTO thread_user_states(chat_id, thread_root_id, uid, subscribed)
-             VALUES (76200, 76201, 76200, true);",
+             VALUES (76200, 76201, 987676200, true);",
         ).unwrap();
         let media = MediaStore::new(
             aws_sdk_s3::Client::from_conf(
@@ -1502,8 +1528,8 @@ mod tests {
                 .select(Message::as_select())
                 .load(conn)
                 .unwrap();
-            let rows = get_user_threads(conn, 76200, 20, None, false, None).unwrap();
-            enrich_thread_list(conn, rows, false, roots, 76200, &media, &avatars)
+            let rows = get_user_threads(conn, 987676200, 20, None, false, None).unwrap();
+            enrich_thread_list(conn, rows, false, roots, 987676200, &media, &avatars)
                 .unwrap()
                 .threads
                 .remove(0)
@@ -1524,12 +1550,12 @@ mod tests {
 
         // The DM peer is the other chat member even if they never authored a thread message.
         conn.batch_execute(
-            "UPDATE groups SET kind = 'dm', dm_uid1 = 76200, dm_uid2 = 76201 WHERE id = 76200;",
+            "UPDATE groups SET kind = 'dm', dm_uid1 = 987676200, dm_uid2 = 987676201 WHERE id = 76200;",
         )
         .unwrap();
         let thread = load(&mut conn);
         let peer = thread.peer.unwrap();
-        assert_eq!(peer.uid, 76201);
+        assert_eq!(peer.uid, 987676201);
         assert_eq!(peer.username.as_deref(), Some("root author"));
         conn.batch_execute(
             "UPDATE groups SET kind = 'group', dm_uid1 = NULL, dm_uid2 = NULL WHERE id = 76200;",
@@ -1540,7 +1566,7 @@ mod tests {
         conn.batch_execute("UPDATE messages SET deleted_at = NOW() WHERE chat_id = 76300;")
             .unwrap();
         let thread = load(&mut conn);
-        assert_eq!(thread.thread_root_message.sender.uid, 76200);
+        assert_eq!(thread.thread_root_message.sender.uid, 987676200);
         assert_eq!(
             thread.thread_root_message.forwarded_from_name.as_deref(),
             Some("root author")
@@ -1555,7 +1581,7 @@ mod tests {
             "UPDATE messages SET deleted_at = NOW() WHERE id = 76201;
              INSERT INTO messages(id, chat_id, sender_uid, message_type, message,
                                   client_generated_id, created_at, reply_root_id)
-             VALUES (76203, 76200, 76200, 'text', 'ordinary reply', 'thread-ordinary-reply', NOW(), 76201);",
+             VALUES (76203, 76200, 987676200, 'text', 'ordinary reply', 'thread-ordinary-reply', NOW(), 76201);",
         ).unwrap();
         let thread = load(&mut conn);
         assert!(thread.thread_root_message.is_deleted);
@@ -1563,6 +1589,53 @@ mod tests {
         let reply = thread.last_reply.unwrap();
         assert_eq!(reply.id, 76203);
         assert!(reply.forwarded_from_name.is_none());
+        conn.batch_execute(
+            "INSERT INTO messages(id, chat_id, sender_uid, message_type, message,
+                                  client_generated_id, created_at, reply_root_id, has_thread)
+             VALUES (76204, 76200, 987676200, 'text', 'archived root', 'thread-archived-root', NOW(), NULL, TRUE),
+                    (76205, 76200, 987676200, 'text', 'archived reply', 'thread-archived-reply', NOW(), 76204, FALSE);
+             INSERT INTO thread_user_states(chat_id, thread_root_id, uid, subscribed, archived)
+             VALUES (76200, 76204, 987676200, TRUE, TRUE);",
+        ).unwrap();
+        let roots = messages::table
+            .filter(messages::id.eq_any([76201_i64, 76204]))
+            .select(Message::as_select())
+            .load::<Message>(&mut conn)
+            .unwrap();
+        for reverse in [false, true] {
+            let mut rows =
+                load_thread_rows_by_roots(&mut conn, 987676200, &[76201, 76204]).unwrap();
+            assert_eq!(rows.len(), 2);
+            rows.sort_by_key(|row| row.archived);
+            if reverse {
+                rows.reverse();
+            }
+            let items = enrich_thread_list(
+                &mut conn,
+                rows,
+                false,
+                roots.clone(),
+                987676200,
+                &media,
+                &avatars,
+            )
+            .unwrap()
+            .threads;
+            assert_eq!(items.len(), 2);
+            assert!(items.iter().all(|item| item.unread_count > 0));
+        }
+        conn.batch_execute(
+            "DELETE FROM group_membership WHERE chat_id = 76200 AND uid = 987676200;",
+        )
+        .unwrap();
+        assert!(
+            load_thread_rows_by_roots(&mut conn, 987676200, &[76201, 76204])
+                .unwrap()
+                .is_empty()
+        );
+        assert!(load_thread_rows_by_roots(&mut conn, 987676200, &[])
+            .unwrap()
+            .is_empty());
         conn.batch_execute("ROLLBACK").unwrap();
     }
 }

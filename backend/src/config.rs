@@ -68,6 +68,7 @@ pub struct AppConfig {
     pub message_search_enabled: bool,
     pub message_search: Option<crate::services::message_search::MessageSearchConfig>,
     pub message_sync_retention_hours: u32,
+    pub list_sync_retention_days: u32,
     pub push: Option<Arc<PushConfig>>,
 }
 
@@ -82,6 +83,7 @@ pub struct ConfigFile {
     avatars: AvatarSettings,
     message_search: SearchSettings,
     message_sync: MessageSyncSettings,
+    list_sync: ListSyncSettings,
     push: PushSettings,
     ids: IdSettings,
     logging: LoggingSettings,
@@ -128,6 +130,11 @@ struct SearchSettings {
 #[serde(default, deny_unknown_fields)]
 struct MessageSyncSettings {
     retention_hours: Option<toml::Value>,
+}
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct ListSyncSettings {
+    retention_days: Option<toml::Value>,
 }
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -217,6 +224,9 @@ impl AppConfig {
                 {
                     panic!("MESSAGE_SYNC_RETENTION_HOURS must be an integer from 1 to 2160")
                 }
+                Err(std::env::VarError::NotUnicode(_)) if name == "LIST_SYNC_RETENTION_DAYS" => {
+                    panic!("LIST_SYNC_RETENTION_DAYS must be an integer from 1 to 365")
+                }
                 Err(_) => None,
             },
             cfg!(debug_assertions),
@@ -231,6 +241,7 @@ impl AppConfig {
             avatars,
             message_search,
             message_sync,
+            list_sync,
             push,
             ids,
             logging: _,
@@ -374,6 +385,16 @@ impl AppConfig {
         .filter(|hours| (1..=2160).contains(hours))
         .unwrap_or_else(|| panic!("MESSAGE_SYNC_RETENTION_HOURS must be an integer from 1 to 2160"))
             as u32;
+        let list_sync_retention_days = match env("LIST_SYNC_RETENTION_DAYS") {
+            Some(value) => value.parse::<i64>().ok(),
+            None => match list_sync.retention_days {
+                Some(value) => value.as_integer(),
+                None => Some(30),
+            },
+        }
+        .filter(|days| (1..=365).contains(days))
+        .unwrap_or_else(|| panic!("LIST_SYNC_RETENTION_DAYS must be an integer from 1 to 365"))
+            as u32;
         Self {
             server: ServerConfig {
                 app_addr: socket(
@@ -416,6 +437,7 @@ impl AppConfig {
             message_search_enabled: enabled,
             message_search: search,
             message_sync_retention_hours,
+            list_sync_retention_days,
             push: {
                 let public_key = env("VAPID_PUBLIC_KEY").or(push.vapid_public_key);
                 let private_key = env("VAPID_PRIVATE_KEY");
@@ -562,6 +584,54 @@ mod tests {
         }
         for value in ["0", "2161", "1.5", "'72'"] {
             let file = parse(&format!("[message_sync]\nretention_hours = {value}\n"));
+            let error = std::panic::catch_unwind(|| AppConfig::resolve(file, env(&base()), false))
+                .err()
+                .unwrap();
+            assert_eq!(error.downcast_ref::<&str>(), Some(&MESSAGE));
+        }
+    }
+
+    #[test]
+    fn list_sync_retention_uses_environment_then_file_then_default() {
+        let values = base();
+        assert_eq!(
+            AppConfig::resolve(ConfigFile::default(), env(&values), false).list_sync_retention_days,
+            30
+        );
+        let file = || parse("[list_sync]\nretention_days = 15\n");
+        assert_eq!(
+            AppConfig::resolve(file(), env(&values), false).list_sync_retention_days,
+            15
+        );
+        let mut values = values;
+        values.push(("LIST_SYNC_RETENTION_DAYS", "365"));
+        assert_eq!(
+            AppConfig::resolve(file(), env(&values), false).list_sync_retention_days,
+            365
+        );
+        // Only the selected source is validated.
+        let file = parse("[list_sync]\nretention_days = 'invalid'\n");
+        assert_eq!(
+            AppConfig::resolve(file, env(&values), false).list_sync_retention_days,
+            365
+        );
+    }
+
+    #[test]
+    fn list_sync_retention_rejects_invalid_environment_and_file_values() {
+        const MESSAGE: &str = "LIST_SYNC_RETENTION_DAYS must be an integer from 1 to 365";
+        for value in ["", "0", "-1", "366", "1.5", "invalid"] {
+            let mut values = base();
+            values.push(("LIST_SYNC_RETENTION_DAYS", value));
+            let error = std::panic::catch_unwind(|| {
+                AppConfig::resolve(ConfigFile::default(), env(&values), false)
+            })
+            .err()
+            .unwrap();
+            assert_eq!(error.downcast_ref::<&str>(), Some(&MESSAGE));
+        }
+        for value in ["0", "-1", "366", "1.5", "'30'", "true", "[]", "{}"] {
+            let file = parse(&format!("[list_sync]\nretention_days = {value}\n"));
             let error = std::panic::catch_unwind(|| AppConfig::resolve(file, env(&base()), false))
                 .err()
                 .unwrap();

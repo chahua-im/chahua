@@ -1,7 +1,7 @@
 [print_schema]
 file = "src/schema/primary.rs"
-# Trigger-private staging table has no primary key or Diesel model.
-filter = { except_tables = ["^message_sync_pending$"] }
+# Trigger-private staging tables have no primary key or Diesel model.
+filter = { except_tables = ["^message_sync_pending$", "^list_sync_pending$"] }
 custom_type_derives = ["diesel::query_builder::QueryId"]
 # Bundle child IDs are always non-null; retain the existing Rust Vec<i64> contract.
 patch_file = "src/schema/primary.patch"

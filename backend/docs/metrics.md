@@ -197,7 +197,8 @@ histogram_quantile(0.95,
   method names, IDs, tokens, request bodies and error text are not labels.
 - HTTP-only labels are `sessions.createWebSocketTicket`, `users.getAuthToken`,
   `stickers.uploadToPack`, `external.createInvite`, `external.getRelationships`,
-  `external.getSessionGeneration`, and `external.revokeSessions`.
+  `external.getSessionGeneration`, `external.revokeSessions`, and GET-only
+  `chats.difference` (HEAD is classified as `unknown`).
   `users.getAuthToken` is legacy signing, distinct from the shared `auth.refresh`
   operation. Other equivalent HTTP and RPC operations use the same API label.
 - `status` is the numeric HTTP status for HTTP, or the HTTP-equivalent status
@@ -271,6 +272,12 @@ The authentication and activity stages can themselves include database waits.
 HTTP `chats.list` also records `blocking_queue`; its authentication/activity
 middleware is outside these stages. Database-backed stages include SQL execution
 and lock waits, not just database CPU time.
+
+HTTP `chats.difference` records `blocking_queue`, `pool_acquire`, `settings`
+(preferences and checkpoint-state lookup), `keys` (bounded key discovery and
+whole-position selection), and `projection` (list rows and latest-message
+sidecars). When chats are returned, it also records the shared chat enrichment
+stages above. The route has no RPC equivalent.
 
 Timers record on scope exit, including errors and unwinding. A cancelled queued
 task can record elapsed queue time without executing; stages not reached have no

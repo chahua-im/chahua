@@ -19,10 +19,10 @@ use crate::{
     errors::AppError,
     rpc::session::MAX_FRAME_BYTES,
     schema::group_membership,
-    services::api::chats::messages::get_messages,
+    services::{api::chats::messages::get_messages, sync_projection::check_projection},
 };
 
-use super::{replay::check_projection, Advance, ReplayService, SyncSubscription};
+use super::{Advance, ReplayService, SyncSubscription};
 
 const CHUNK_LIMIT: usize = 128;
 

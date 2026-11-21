@@ -94,6 +94,7 @@ const SNOWFLAKE_COMPONENT_FIELDS: &[(&str, &[&str])] = &[
         &["id", "lastReadMessageId", "peerLastReadMessageId"],
     ),
     ("ListChatsResponse", &["nextCursor"]),
+    ("ListSyncRemoval", &["chatId", "threadId"]),
     ("MarkChatReadStateResponse", &["lastReadMessageId"]),
     ("UnreadMentionIdsResponse", &["messageIds"]),
     ("UnreadReactionIdsResponse", &["messageIds"]),
@@ -322,6 +323,25 @@ mod tests {
 
     fn api_document() -> Value {
         serde_json::to_value(document()).unwrap()
+    }
+
+    #[test]
+    fn list_sync_openapi_contract() {
+        let document = api_document();
+        let operation = &document["paths"]["/chats/difference"]["get"];
+        assert!(operation.is_object());
+        assert_eq!(
+            operation["security"][0]["bearer_jwt"],
+            serde_json::json!([])
+        );
+        let removal = &document["components"]["schemas"]["ListSyncRemoval"];
+        for field in ["chatId", "threadId"] {
+            assert_eq!(removal["properties"][field]["x-snowflake-id"], true);
+        }
+        assert!(!removal["required"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("threadId")));
     }
 
     #[test]

@@ -12,6 +12,9 @@ pub mod forwarding;
 pub mod image_processing;
 pub mod invites;
 pub mod link_previews;
+pub(crate) mod list_sync;
+#[cfg(test)]
+mod list_sync_capture_tests;
 pub mod media;
 pub mod message_deletion;
 pub mod message_search;
@@ -32,9 +35,14 @@ pub mod speaking;
 pub mod sticker_discovery;
 pub mod sticker_order;
 pub mod stickers;
+pub(crate) mod sync_cursor;
+pub(crate) mod sync_projection;
 pub mod system_messages;
 pub mod threads;
 pub mod token_generation;
 pub mod unread;
 pub mod user;
 pub mod ws_registry;
+
+#[cfg(test)]
+pub(crate) mod sync_test_support;

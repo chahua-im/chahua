@@ -1,9 +1,6 @@
 use std::sync::Arc;
 
-use diesel::{
-    prelude::*,
-    sql_types::{Bool, Integer},
-};
+use diesel::{prelude::*, sql_types::Bool};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -13,12 +10,13 @@ use crate::{
     schema::{message_sync_change as change, message_sync_head as head, message_sync_meta as meta},
     services::{
         avatars::AvatarService, media::MediaStore, message_visibility::MessageVisibility,
-        messages::attach_metadata, user::load_chat_viewer,
+        messages::attach_metadata, sync_cursor::CursorKey, sync_projection::check_projection,
+        user::load_chat_viewer,
     },
     state::DbPool,
 };
 
-use super::cursor::{CursorKey, Position};
+use super::cursor::Position;
 
 const REPLAY_LIMIT: i64 = 1024;
 
@@ -54,7 +52,7 @@ impl ReplayService {
             pool,
             media,
             avatars,
-            key: CursorKey::new(jwt_signing_key),
+            key: CursorKey::new(jwt_signing_key, b"chahua.message-sync.cursor.v1"),
         }
     }
 
@@ -211,7 +209,7 @@ fn check_position(
     cursor: Option<&str>,
 ) -> Result<i64, ResetReason> {
     let token = cursor.ok_or(ResetReason::NoBaseline)?;
-    let from = key.decode(token).ok_or(ResetReason::InvalidCursor)?;
+    let from: Position = key.decode(token).ok_or(ResetReason::InvalidCursor)?;
     if from.e != now.e {
         return Err(ResetReason::EpochChanged);
     }
@@ -228,11 +226,4 @@ fn check_position(
         return Err(ResetReason::TooLarge);
     }
     Ok(from.h)
-}
-
-pub(super) fn check_projection(conn: &mut PgConnection) -> QueryResult<()> {
-    // Legacy projection can swallow query errors. A failed transaction must
-    // never produce a checkpoint, even when the projection returned a value.
-    diesel::select(diesel::dsl::sql::<Integer>("1")).get_result::<i32>(conn)?;
-    Ok(())
 }

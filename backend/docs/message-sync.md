@@ -114,12 +114,98 @@ unattached or inaccessible chat. If the server discovers that a membership
 was lost, `Revoked` precedes the null result. RPC controls return `{}` after
 all events for the call have been enqueued.
 
+## Native conversation list
+
+Authenticated native clients use `GET /chats/difference?cursor=…` for one
+account-level checkpoint over active and archived chats and subscribed threads.
+The existing chat/thread lists, JSON-RPC calls, PWA behavior, and per-chat message
+checkpoints are unchanged. Deploy the list-sync migration before clients use
+the route.
+
+Every response contains `cursor`, `complete`, `reset`, `chatSettings`,
+`notificationSettings`, `chats`, `threads`, `latestMessages`, and `removed`.
+Arrays are always present. A removal has a decimal-string `chatId` and, for a
+thread only, a decimal-string `threadId`. Removing a chat also removes its cached
+threads. Returned rows are current, viewer-specific projections, not a history
+of intermediate changes.
+
+With no cursor, the server returns `reset: "noBaseline"`, empty arrays, and a
+baseline start token. **Follow that token**, rather than making another
+cursorless request. Baseline pages traverse immutable `(chatId, threadRootId)`
+keys, with root `0` for the main chat, regardless of archive state. Each page
+contains at most 100 keys. The original starting head remains in every baseline
+token. The last baseline page still has `complete: false`: follow its delta
+token to repair changes made during enumeration. Only `complete: true` proves
+that enumeration and catch-up have finished.
+
+Delta pages coalesce changed keys and preserve whole commit positions. They
+normally contain at most 100 keys. A first position with 101–1,000 keys is
+returned intact; a first position above 1,000 keys returns `tooLarge` before
+projection. A large backlog spread across small positions does not itself
+require a reset. SQL key discovery transfers at most 1,001 candidates; this
+does not bound every database index probe. An unchanged account can still
+require probes when another account advances the shared head.
+
+Each response uses one read-only, repeatable-read PostgreSQL snapshot. No
+transaction or lock spans requests. Retrying an old cursor can return the same
+keys again; it does not consume them. After installing a completed cursor,
+an unchanged account receives empty arrays and `complete: true`.
+
+`reset` is null or `noBaseline`, `invalidCursor`, `epochChanged`, `expired`,
+`accountChanged`, or `tooLarge`. Each reset returns empty arrays,
+`complete: false`, and a new baseline start token at the current head. A
+membership-message preference or account mute-default change invalidates both
+baseline and delta tokens. A change only to unread-count display does not.
+Both settings objects are returned even when no rows change.
+
+For a chat of the corresponding kind, compute mute state as:
+`(mutedUntil > now) || (muteOverride ?? accountDefaultForKind)`.
+A timed mute expiring is not a database write. Do not infer the inherited mute
+state from `mutedUntil` alone.
+
+`latestMessages` contains history-quality data for each returned chat's selected
+visible latest-message ID, if any. It neither advances a message checkpoint nor
+forms another message history protocol. Nested message-only changes, sticker
+favorite status, provider display names, group tags, and user-avatar lookups do
+not alone invalidate list rows. They refresh when a row is next projected or
+the client requests a manual baseline.
+
+Personal removal stamps are retained for 30 days by default. Set
+`[list_sync].retention_days` or override it with `LIST_SYNC_RETENTION_DAYS`
+(integer 1–365). The hourly worker prunes expired removals and atomically raises
+a global retention floor. A removal pruned for another account can therefore
+require an old client to rebuild. Live stamps and account invalidations remain;
+shared stamps are removed by chat ID at group deletion. Historical thread
+stamps in existing chats remain available to report disappearance. Cursor age
+alone does not cause expiry; a token at the retention floor is still valid.
+
+### Native client storage
+
+- Run one in-flight pass per account. Apply a response only if its request
+  cursor still matches. Keep accounts separate and respect live revocations.
+- On reset, use an empty staging list. Apply each page, settings, and its next
+  token atomically. Replace the installed list atomically only when catch-up
+  first returns `complete: true`; do not merge a full baseline into an old list.
+- Resume an interrupted scan only with its matching staging rows and token,
+  or start again. Never pair an old list with a new cursor.
+- For ordinary delta pages, atomically upsert rows by key, move archive buckets
+  in place, clear absent latest pointers, apply removals, and save the cursor.
+  A sidecar must not overwrite newer history just because its response arrives
+  later.
+- Coalesce connect, network restoration, and invalidation signals for 250 ms.
+  Remember invalidations during a pass and run once more. Pull-to-refresh starts
+  a new native baseline.
+- Only an authenticated **404** means the route is unsupported. Fall back to
+  the four legacy scans as best effort in that case. Authentication, server,
+  and transport errors do not mean unsupported and must not install a cursor.
+
 ## Database restore
 
 After restoring a database backup, run the following **before accepting clients**:
 
 ```sql
 UPDATE message_sync_meta SET epoch = gen_random_uuid();
+UPDATE list_sync_meta SET epoch = gen_random_uuid();
 ```
 
 The epoch change prevents a pre-restore checkpoint from being accepted against

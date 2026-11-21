@@ -37,6 +37,10 @@ index_uid = "messages_v1"
 # Keep committed timeline changes for reconnect (1–2160 hours).
 retention_hours = 72
 
+[list_sync]
+# Keep native-list removal stamps (1–365 days).
+retention_days = 30
+
 [push]
 vapid_subject = "mailto:admin@example.com"
 # vapid_public_key = "..." # Public metadata; VAPID_PRIVATE_KEY stays in env.

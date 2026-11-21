@@ -53,6 +53,13 @@ pub async fn track_http_metrics(
 // arbitrary methods into labels. Nested routers can expose a trailing slash.
 fn canonical_api(method: &Method, path: Option<&str>) -> &'static str {
     let path = path.unwrap_or("").trim_end_matches('/');
+    if path == "/chats/difference" {
+        return if *method == Method::GET {
+            "chats.difference"
+        } else {
+            "unknown"
+        };
+    }
     let method = if *method == Method::HEAD {
         &Method::GET
     } else {
@@ -256,6 +263,18 @@ mod tests {
 
     #[test]
     fn operation_mapping_is_method_sensitive_and_bounded() {
+        assert_eq!(
+            canonical_api(&Method::GET, Some("/chats/difference")),
+            "chats.difference"
+        );
+        assert_eq!(
+            canonical_api(&Method::HEAD, Some("/chats/difference")),
+            "unknown"
+        );
+        assert_eq!(
+            canonical_api(&Method::POST, Some("/chats/difference")),
+            "unknown"
+        );
         assert_eq!(
             canonical_api(&Method::GET, Some("/chats/{chat_id}/messages/")),
             "messages.list"

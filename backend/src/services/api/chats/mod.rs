@@ -63,7 +63,44 @@ pub async fn get_chats(
     )?;
     drop(phase);
     let has_more = rows.len() as i64 > limit;
-    let mut items_to_process: Vec<_> = rows.into_iter().take(limit as usize).collect();
+    let items_to_process: Vec<_> = rows.into_iter().take(limit as usize).collect();
+    let chats = build_chat_list_items(
+        items_to_process,
+        uid,
+        chat_settings,
+        defaults,
+        now,
+        conn,
+        unread_service,
+        media,
+        avatars,
+        stages,
+    )?;
+    let next_cursor = has_more.then(|| chats.last().map(|chat| chat.id)).flatten();
+
+    Ok(ListChatsResponse {
+        chats,
+        next_cursor,
+        chat_settings,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_chat_list_items(
+    mut items_to_process: Vec<crate::services::chat_list::ChatListRow>,
+    uid: i32,
+    chat_settings: crate::dto::users::ChatSettings,
+    defaults: crate::services::notification_preferences::NotificationDefaults,
+    now: chrono::DateTime<Utc>,
+    conn: &mut PgConnection,
+    unread_service: &UnreadService,
+    media: &MediaStore,
+    avatars: &AvatarService,
+    stages: crate::metrics::ApiStages<'_>,
+) -> Result<Vec<ChatListItem>, AppError> {
+    if items_to_process.is_empty() {
+        return Ok(Vec::new());
+    }
 
     let memberships = items_to_process
         .iter()
@@ -184,13 +221,7 @@ pub async fn get_chats(
         )
         .collect();
 
-    let next_cursor = has_more.then(|| chats.last().map(|chat| chat.id)).flatten();
-
-    Ok(ListChatsResponse {
-        chats,
-        next_cursor,
-        chat_settings,
-    })
+    Ok(chats)
 }
 
 pub fn mark_as_read(

@@ -255,6 +255,42 @@ diesel::table! {
 }
 
 diesel::table! {
+    list_sync_account (uid) {
+        uid -> Int4,
+        seq -> Int8,
+    }
+}
+
+diesel::table! {
+    list_sync_meta (singleton) {
+        singleton -> Bool,
+        epoch -> Uuid,
+        head -> Int8,
+        retained_after -> Int8,
+    }
+}
+
+diesel::table! {
+    list_sync_personal (uid, chat_id, thread_root_id) {
+        uid -> Int4,
+        chat_id -> Int8,
+        thread_root_id -> Int8,
+        seq -> Int8,
+        removed -> Bool,
+        recorded_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    list_sync_shared (chat_id, thread_root_id) {
+        chat_id -> Int8,
+        thread_root_id -> Int8,
+        seq -> Int8,
+        identity_seq -> Int8,
+    }
+}
+
+diesel::table! {
     use diesel::sql_types::*;
     use super::sql_types::MediaPurpose;
 
@@ -616,6 +652,10 @@ diesel::allow_tables_to_appear_in_same_query!(
     group_membership,
     groups,
     invites,
+    list_sync_account,
+    list_sync_meta,
+    list_sync_personal,
+    list_sync_shared,
     media,
     message_mentions,
     message_reactions,

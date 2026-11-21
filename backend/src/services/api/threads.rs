@@ -33,6 +33,17 @@ pub fn get_threads(
 
     let has_more = rows.len() as i64 > limit;
     let rows: Vec<_> = rows.into_iter().take(limit as usize).collect();
+    build_thread_list_items(conn, rows, has_more, uid, media, avatars)
+}
+
+pub(crate) fn build_thread_list_items(
+    conn: &mut PgConnection,
+    rows: Vec<thread_svc::ThreadListRow>,
+    has_more: bool,
+    uid: i32,
+    media: &MediaStore,
+    avatars: &AvatarService,
+) -> Result<ListThreadsResponse, AppError> {
     let root_ids: Vec<i64> = rows.iter().map(|row| row.thread_root_id).collect();
 
     if root_ids.is_empty() {

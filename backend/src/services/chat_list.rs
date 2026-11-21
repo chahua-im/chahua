@@ -35,49 +35,24 @@ pub(crate) struct ChatListRow {
     pub membership_allowed: bool,
 }
 
-/// Resolve the visible message before ordering or limiting the chat page. The
-/// correlated LIMIT 1 uses the top-level index per joined chat, rather than
-/// scanning message histories with DISTINCT ON. Diesel cannot express this
-/// correlated join target directly; the remaining query uses its typed DSL.
-pub(crate) fn load_chat_page(
-    conn: &mut PgConnection,
-    uid: i32,
-    archived: bool,
-    chat_id: Option<i64>,
-    after: Option<i64>,
-    limit: i64,
-    hide_membership_messages: bool,
-) -> QueryResult<Vec<ChatListRow>> {
-    let last_id = format!(
-        "CASE WHEN groups.kind = 'group' AND ({} OR NOT {}) THEN (
-           SELECT id FROM messages WHERE chat_id = groups.id
-             AND is_published = true AND reply_root_id IS NULL
-             AND deleted_at IS NULL AND {}
-           ORDER BY id DESC LIMIT 1
-         ) ELSE groups.last_message_id END",
-        hide_membership_messages,
-        super::system_messages::MEMBERSHIP_ALLOWED_PREDICATE,
-        super::system_messages::NON_MEMBERSHIP_PREDICATE,
-    );
-    macro_rules! base_query {
-        () => {
-            groups::table
-                .inner_join(group_membership::table)
-                .left_join(
-                    messages::table.on(messages::id.nullable().eq(diesel::dsl::sql::<
-                        diesel::sql_types::Nullable<diesel::sql_types::BigInt>,
-                    >(&last_id))),
-                )
-                .filter(group_membership::uid.eq(uid))
-        };
-    }
-    let mut query = base_query!()
-        .filter(group_membership::archived.eq(archived))
-        .select((
+macro_rules! chat_base_query {
+    ($uid:expr, $last_id:expr) => {
+        groups::table
+            .inner_join(group_membership::table)
+            .left_join(
+                messages::table.on(messages::id.nullable().eq(diesel::dsl::sql::<
+                    diesel::sql_types::Nullable<diesel::sql_types::BigInt>,
+                >($last_id))),
+            )
+            .filter(group_membership::uid.eq($uid))
+    };
+}
+
+macro_rules! chat_projection {
+    ($query:expr) => {
+        $query.select((
             groups::id,
             groups::name,
-            // Resolve avatar keys after pagination, not by joining media across
-            // every membership when a sparse-message page is underestimated.
             media::table
                 .select(media::storage_key)
                 .filter(media::id.nullable().eq(groups::avatar_image_id))
@@ -97,12 +72,60 @@ pub(crate) fn load_chat_page(
             groups::membership_message_visibility,
             super::system_messages::membership_allowed(),
         ))
+    };
+}
+
+fn visible_last_message_id(hide_membership_messages: bool) -> String {
+    format!(
+        "CASE WHEN groups.kind = 'group' AND ({} OR NOT {}) THEN (
+           SELECT id FROM messages WHERE chat_id = groups.id
+             AND is_published = true AND reply_root_id IS NULL
+             AND deleted_at IS NULL AND {}
+           ORDER BY id DESC LIMIT 1
+         ) ELSE groups.last_message_id END",
+        hide_membership_messages,
+        super::system_messages::MEMBERSHIP_ALLOWED_PREDICATE,
+        super::system_messages::NON_MEMBERSHIP_PREDICATE,
+    )
+}
+
+pub(crate) fn load_chat_rows_by_ids(
+    conn: &mut PgConnection,
+    uid: i32,
+    chat_ids: &[i64],
+    hide_membership_messages: bool,
+) -> QueryResult<Vec<ChatListRow>> {
+    if chat_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let last_id = visible_last_message_id(hide_membership_messages);
+    chat_projection!(chat_base_query!(uid, &last_id))
+        .filter(groups::id.eq_any(chat_ids))
+        .load(conn)
+}
+
+/// Resolve the visible message before ordering or limiting the chat page. The
+/// correlated LIMIT 1 uses the top-level index per joined chat, rather than
+/// scanning message histories with DISTINCT ON. Diesel cannot express this
+/// correlated join target directly; the remaining query uses its typed DSL.
+pub(crate) fn load_chat_page(
+    conn: &mut PgConnection,
+    uid: i32,
+    archived: bool,
+    chat_id: Option<i64>,
+    after: Option<i64>,
+    limit: i64,
+    hide_membership_messages: bool,
+) -> QueryResult<Vec<ChatListRow>> {
+    let last_id = visible_last_message_id(hide_membership_messages);
+    let mut query = chat_projection!(chat_base_query!(uid, &last_id))
+        .filter(group_membership::archived.eq(archived))
         .into_boxed();
     if let Some(id) = chat_id {
         query = query.filter(groups::id.eq(id));
     }
     if let Some(id) = after {
-        let cursor = base_query!()
+        let cursor = chat_base_query!(uid, &last_id)
             .filter(groups::id.eq(id))
             .select(messages::created_at.nullable())
             .first::<Option<DateTime<Utc>>>(conn)
@@ -366,6 +389,12 @@ mod tests {
             let archived = load_chat_page(conn, uid, true, None, None, 10, true)?;
             assert_eq!(archived.len(), 1);
             assert_eq!(archived[0].chat_id, 987665206);
+            let selected = load_chat_rows_by_ids(conn, uid, &[987665201, 987665206, 987665207], true)?;
+            assert_eq!(selected.len(), 2);
+            let active = selected.iter().find(|row| row.chat_id == 987665201).unwrap();
+            assert_eq!(active.last_message.as_ref().unwrap().id, 987665301);
+            assert!(selected.iter().find(|row| row.chat_id == 987665206).unwrap().archived);
+            assert!(load_chat_rows_by_ids(conn, uid, &[], true)?.is_empty());
             let unfiltered = load_chat_page(conn, uid, false, None, None, 10, false)?;
             assert_eq!(unfiltered[0].chat_id, 987665203);
             assert_eq!(unfiltered[1].chat_id, 987665201);

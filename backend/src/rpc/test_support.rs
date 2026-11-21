@@ -59,9 +59,10 @@ impl diesel::r2d2::CustomizeConnection<PgConnection, diesel::r2d2::Error> for Is
                     format(' ON pg_temp.%I', c.relname)) AS name \
              FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid \
              JOIN pg_namespace n ON n.oid = c.relnamespace \
-             WHERE n.nspname = current_schema() AND t.tgname IN \
-                   ('messages_sync_insert', 'messages_sync_update', \
-                    'message_reactions_sync_insert', 'message_reactions_sync_delete', 'message_sync_flush')",
+             WHERE n.nspname = current_schema() AND \
+                   (t.tgname LIKE 'list_sync_%' OR t.tgname IN \
+                    ('messages_sync_insert', 'messages_sync_update', \
+                     'message_reactions_sync_insert', 'message_reactions_sync_delete', 'message_sync_flush'))",
         )
         .load::<TriggerDefinition>(connection)
         .map_err(diesel::r2d2::Error::QueryError)?;

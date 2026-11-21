@@ -54,8 +54,8 @@ fn setup(conn: &mut PgConnection) -> QueryResult<()> {
 // production writer would commit.
 fn flush(conn: &mut PgConnection) -> QueryResult<()> {
     conn.batch_execute(
-        "SET CONSTRAINTS message_sync_flush IMMEDIATE;
-                        SET CONSTRAINTS message_sync_flush DEFERRED;",
+        "SET CONSTRAINTS message_sync_flush, list_sync_flush IMMEDIATE;
+                        SET CONSTRAINTS message_sync_flush, list_sync_flush DEFERRED;",
     )
 }
 
@@ -143,14 +143,14 @@ async fn replay_distinguishes_cursor_fences_and_retention_boundaries() {
         *last = if *last == b'A' { b'B' } else { b'A' };
         let tampered = String::from_utf8(tampered).unwrap();
         assert_eq!(expect_reset(service.advance_in_snapshot(conn, VIEWER, CHAT, Some(&tampered))?, ResetReason::InvalidCursor), cursor);
-        let mut position = service.key.decode(&cursor).unwrap();
+        let mut position: super::cursor::Position = service.key.decode(&cursor).unwrap();
         position.h = 1;
         expect_reset(service.advance_in_snapshot(conn, VIEWER, CHAT, Some(&service.key.encode(&position)))?, ResetReason::InvalidCursor);
         position.e = Uuid::new_v4();
         position.c = CHAT + 1;
         expect_reset(service.advance_in_snapshot(conn, VIEWER, CHAT, Some(&service.key.encode(&position)))?, ResetReason::EpochChanged);
-        let other_key = super::cursor::CursorKey::new(b"rotated jwt signing key");
-        assert!(other_key.decode(&cursor).is_none());
+        let other_key = crate::services::sync_cursor::CursorKey::new(b"rotated jwt signing key", b"chahua.message-sync.cursor.v1");
+        assert!(other_key.decode::<super::cursor::Position>(&cursor).is_none());
 
         conn.batch_execute("DELETE FROM group_membership WHERE chat_id = 9876750000 AND uid = 4000306;")?;
         assert!(matches!(service.advance_in_snapshot(conn, VIEWER, CHAT, Some(&tampered))?, Advance::Revoked));

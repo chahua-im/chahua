@@ -8,6 +8,7 @@ pub mod friends;
 pub mod groups;
 pub mod invites;
 pub mod link_previews;
+pub mod list_sync;
 pub mod members;
 pub mod message_sync;
 pub mod messages;

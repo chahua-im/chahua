@@ -1,14 +1,5 @@
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
 use uuid::Uuid;
-
-type HmacSha256 = Hmac<Sha256>;
-const DOMAIN: &[u8] = b"chahua.message-sync.cursor.v1";
-
-#[derive(Clone)]
-pub(super) struct CursorKey([u8; 32]);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct Position {
@@ -19,42 +10,30 @@ pub(super) struct Position {
     pub f: [u8; 16],
 }
 
-impl CursorKey {
-    pub fn new(jwt_signing_key: &[u8]) -> Self {
-        let mut mac =
-            HmacSha256::new_from_slice(jwt_signing_key).expect("HMAC accepts any key size");
-        mac.update(DOMAIN);
-        Self(mac.finalize().into_bytes().into())
-    }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::sync_cursor::CursorKey;
 
-    pub fn encode(&self, position: &Position) -> String {
-        let payload = serde_json::to_vec(position).expect("cursor position is serializable");
-        let mut token = String::with_capacity(3 + payload.len().div_ceil(3) * 4 + 44);
-        token.push_str("v1.");
-        URL_SAFE_NO_PAD.encode_string(payload, &mut token);
-        let mut mac = self.mac();
-        mac.update(token.as_bytes());
-        token.push('.');
-        URL_SAFE_NO_PAD.encode_string(mac.finalize().into_bytes(), &mut token);
-        token
-    }
-
-    pub fn decode(&self, token: &str) -> Option<Position> {
-        // The fixed v1 payload fits comfortably in this bound, including i64 IDs.
-        if token.len() > 512 {
-            return None;
-        }
-        let (signed, tag) = token.rsplit_once('.')?;
-        let payload = signed.strip_prefix("v1.")?;
-        let mut signature = [0; 32];
-        let len = URL_SAFE_NO_PAD.decode_slice(tag, &mut signature).ok()?;
-        let mut mac = self.mac();
-        mac.update(signed.as_bytes());
-        mac.verify_slice(&signature[..len]).ok()?;
-        serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload).ok()?).ok()
-    }
-
-    fn mac(&self) -> HmacSha256 {
-        HmacSha256::new_from_slice(&self.0).expect("HMAC accepts any key size")
+    #[test]
+    fn message_sync_cursor_preserves_fixed_v1_token_and_domain() {
+        const TOKEN: &str = "v1.eyJlIjoiMTIzNDU2NzgtMTIzNC01Njc4LTEyMzQtNTY3ODEyMzQ1Njc4IiwidSI6NDIsImMiOjkwMDcxOTkyNTQ3NDA5OTMsImgiOjcsImYiOlswLDEsMiwzLDQsNSw2LDcsOCw5LDEwLDExLDEyLDEzLDE0LDE1XX0.Foc3kQS7SgcT9QYQ5CErFRhs6jQRAbXnLX9YJ2ipQkU";
+        let key = CursorKey::new(
+            b"cursor-compatibility-key",
+            b"chahua.message-sync.cursor.v1",
+        );
+        let position: Position = key.decode(TOKEN).unwrap();
+        assert_eq!(position.u, 42);
+        assert_eq!(position.c, 9_007_199_254_740_993);
+        assert_eq!(position.h, 7);
+        assert_eq!(key.encode(&position), TOKEN);
+        let list_key = CursorKey::new(b"cursor-compatibility-key", b"chahua.list-sync.cursor.v1");
+        assert!(list_key.decode::<Position>(TOKEN).is_none());
+        assert!(key.decode::<Position>(&"a".repeat(513)).is_none());
+        let mut changed = TOKEN.as_bytes().to_vec();
+        changed[10] = b'A';
+        assert!(key
+            .decode::<Position>(std::str::from_utf8(&changed).unwrap())
+            .is_none());
     }
 }

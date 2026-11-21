@@ -122,7 +122,7 @@ fn pruner_waits_for_writer_and_leaves_whole_new_sequence() {
     // Flush at a controlled point so the pruner can be observed waiting on the head.
     conn.batch_execute(
         "BEGIN; UPDATE messages SET updated_at = now() WHERE chat_id = 9876840000;
-        SET CONSTRAINTS message_sync_flush IMMEDIATE;",
+        SET CONSTRAINTS message_sync_flush, list_sync_flush IMMEDIATE;",
     )
     .unwrap();
     let (started, reader) = mpsc::channel();

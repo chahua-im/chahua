@@ -205,6 +205,7 @@ async fn main() {
     });
 
     services::audio_transcode::start(state.clone());
+    services::list_sync::start_pruning(pool.clone(), config.list_sync_retention_days);
     services::message_sync::start_pruning(pool, config.message_sync_retention_hours);
 
     let registry = state.ws_registry.clone();

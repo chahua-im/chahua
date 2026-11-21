@@ -18,6 +18,7 @@ use crate::{
         UnreadMentionIdsResponse, UnreadMentionsQuery, UnreadReactionIdsResponse,
         UnreadReactionsAckResponse, UnreadReactionsQuery,
     },
+    dto::list_sync::{ListSyncQuery, ListSyncResponse},
     dto::read_receipts::ReadReceiptResponse,
     errors::AppError,
     extractors::DbConn,
@@ -93,6 +94,54 @@ async fn get_chats(
         AppError::Internal("Chat list task failed")
     })??;
 
+    Ok(Json(response))
+}
+
+/// GET /chats/difference — Synchronize the current user's conversation list.
+#[utoipa::path(
+    get,
+    path = "/difference",
+    tag = "chats",
+    params(("cursor" = Option<String>, Query, description = "List sync checkpoint")),
+    responses(
+        (status = 200, description = "Conversation list synchronization page", body = ListSyncResponse),
+        (status = 401, description = "Authentication required"),
+    ),
+    security(("bearer_jwt" = [])),
+)]
+async fn get_difference(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    Query(query): Query<ListSyncQuery>,
+) -> Result<Json<ListSyncResponse>, AppError> {
+    let queue = state
+        .metrics
+        .api
+        .start_stage("http", "chats.difference", "blocking_queue");
+    let response = tokio::task::spawn_blocking(move || -> Result<_, AppError> {
+        drop(queue);
+        let stages = state.metrics.api.stages("http", "chats.difference");
+        let pool = stages.start("pool_acquire");
+        let mut conn = state.db.get()?;
+        drop(pool);
+        let key = crate::services::sync_cursor::CursorKey::new(
+            &state.config.auth.jwt_signing_key,
+            b"chahua.list-sync.cursor.v1",
+        );
+        crate::services::list_sync::Reader {
+            key: &key,
+            unread: state.unread_service.as_ref(),
+            media: &state.media,
+            avatars: state.avatars.as_ref(),
+            stages,
+        }
+        .difference(&mut conn, uid, query.cursor.as_deref())
+    })
+    .await
+    .map_err(|error| {
+        tracing::error!(?error, "chat difference task failed");
+        AppError::Internal("Chat difference task failed")
+    })??;
     Ok(Json(response))
 }
 
@@ -468,6 +517,7 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
     OpenApiRouter::new()
         .routes(utoipa_axum::routes!(get_chats))
         .routes(utoipa_axum::routes!(get_unread_count))
+        .routes(utoipa_axum::routes!(get_difference))
         .nest(
             "/{chat_id}",
             OpenApiRouter::new()
@@ -490,4 +540,89 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
                 .nest("/saved-messages", self::saved_messages::router())
                 .nest("/pins", super::pins::router()),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        Router,
+    };
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn difference_is_authenticated_static_route_and_old_router_returns_404() {
+        let Some(services) = crate::rpc::test_support::services().await else {
+            return;
+        };
+        let state = AppState::new(crate::state::AppInner {
+            db: services.db.clone(),
+            id_gen: services.id_gen.clone(),
+            metrics: services.metrics.clone(),
+            config: services.config.clone(),
+            media: services.media.clone(),
+            avatars: services.avatars.clone(),
+            link_previews: services.link_previews.clone(),
+            authz_service: services.authz_service.clone(),
+            ws_registry: services.ws_registry.clone(),
+            presence_service: services.presence_service.clone(),
+            push_service: services.push_service.clone(),
+            unread_service: services.unread_service.clone(),
+            client_tracking: services.client_tracking.clone(),
+            background_service: services.background_service.clone(),
+            message_search: services.message_search.clone(),
+            auth_token_service: services.auth_token_service.clone(),
+            token_generation: services.token_generation.clone(),
+        });
+        let app = Router::new()
+            .nest("/chats", router().split_for_parts().0)
+            .with_state(state.clone());
+        let request = || {
+            Request::builder()
+                .uri("/chats/difference")
+                .body(Body::empty())
+                .unwrap()
+        };
+        assert_eq!(
+            app.clone().oneshot(request()).await.unwrap().status(),
+            StatusCode::UNAUTHORIZED
+        );
+
+        let token = services
+            .auth_token_service
+            .issue_session(1, "list-sync-test", 0)
+            .unwrap();
+        let authenticated = || {
+            Request::builder()
+                .uri("/chats/difference")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap()
+        };
+        let response = app.oneshot(authenticated()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["reset"], "noBaseline");
+
+        // Model the pre-feature route tree, including the dynamic chat subtree.
+        let old_chats = OpenApiRouter::new()
+            .routes(utoipa_axum::routes!(get_chats))
+            .routes(utoipa_axum::routes!(get_unread_count))
+            .nest(
+                "/{chat_id}",
+                OpenApiRouter::new().routes(utoipa_axum::routes!(get_chat_unread_count)),
+            );
+        let old_app = Router::new()
+            .nest("/chats", old_chats.split_for_parts().0)
+            .with_state(state);
+        assert_eq!(
+            old_app.oneshot(authenticated()).await.unwrap().status(),
+            StatusCode::NOT_FOUND
+        );
+    }
 }
