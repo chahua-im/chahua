@@ -70,6 +70,7 @@
 </ion-content>
 <app-message-menu
   [messages]="messages()"
+  [pinnedView]="true"
   [chatId]="id()"
   [threadId]="threadId()"
   (reply)="replyTo($event)"
