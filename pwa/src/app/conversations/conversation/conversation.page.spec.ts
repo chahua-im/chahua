@@ -2024,7 +2024,7 @@ describe('ConversationPage', () => {
     else pinMessage('201');
     await fixture.whenStable();
     expect(fixture.nativeElement.querySelector('.pinned-bar')).toBe(bar);
-    if (shown) pinMessage('201');
+    if (shown) pinMessage('202');
     else unpinMessage('201');
     await fixture.whenStable();
     component['scrolling'].scrollEnd();
@@ -2058,7 +2058,10 @@ describe('ConversationPage', () => {
     await fixture.whenStable();
     const bar: HTMLElement = fixture.nativeElement.querySelector('.pinned-bar');
     component['scrolling'].scrollStart();
-    pinMessage('201', { ...testMessage, message: '修改后的置顶内容' });
+    events.next({
+      type: ServerWsMessageType.messageUpdated,
+      payload: { ...testMessage, message: '修改后的置顶内容', isEdited: true },
+    });
     await fixture.whenStable();
     expect(fixture.nativeElement.querySelector('.pinned-bar')).toBe(bar);
     expect(bar.textContent).toContain('修改后的置顶内容');

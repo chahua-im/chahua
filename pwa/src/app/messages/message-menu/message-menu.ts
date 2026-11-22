@@ -14,6 +14,7 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { createAnimation, IonAlert, IonIcon, IonModal, IonToast } from '@ionic/angular';
 import {
@@ -138,13 +139,15 @@ export class MessageMenu {
   readonly editQueued = output<OutgoingMessage>();
   readonly openThread = output<SnowflakeID>();
   readonly messages = input.required<readonly MessageResponse[]>();
+  readonly pinnedView = input(false);
   protected readonly pins = computed(() => this.chatInfo.pins(this.chatId(), this.threadId()));
   private readonly chatInfo = inject(ChatStore);
   private readonly session = inject(SessionStore);
   private readonly messageActions = inject(MessageActions);
   private readonly savedMessages = inject(SavedMessageStore);
   private readonly favoriteStickers = inject(StickerFavorites);
-  private readonly stickers = inject(RpcApi);
+  private readonly api = inject(RpcApi);
+  private readonly destroyRef = inject(DestroyRef);
   private readonly outbox = inject(MessageOutbox);
   private readonly document = inject(DOCUMENT);
   private readonly modal = viewChild(IonModal);
@@ -351,7 +354,7 @@ export class MessageMenu {
   protected readonly slots = computed(() => pageSlots(this.menuActions(), this.page()));
 
   constructor() {
-    inject(DestroyRef).onDestroy(() => this.reset());
+    this.destroyRef.onDestroy(() => this.reset());
     effect(() => {
       if (this.queued() || !this.serverMessage()) return;
       untracked(() => {
@@ -715,18 +718,47 @@ export class MessageMenu {
 
   async reactTo(message: MessageResponse, emoji: string) {
     if (this.queued() || this.busy() || message.isDeleted) return;
-    if (exceedsReactionLimit(message, emoji)) {
+    const needsOwnership = this.pinnedView() && this.needsReactionOwnership(message);
+    if (!needsOwnership && exceedsReactionLimit(message, emoji)) {
       this.notice.set(MessageNotice.ReactionLimit);
       return;
     }
     const version = this.version;
+    const uid = this.session.user()?.uid;
     void this.close();
     // The server refuses reactions in a read-only DM, so the tap only dismisses the menu.
     if (this.readOnly()) return;
-    await this.perform(async () => {
-      await this.messageActions.toggleReaction(message, emoji);
-      if (version === this.version) this.preferences.rememberReaction(emoji);
-    });
+    let limited = false;
+    await this.perform(
+      async () => {
+        const target = needsOwnership ? await this.readPinnedReactionTarget(message.id) : message;
+        if (!target || target.isDeleted || version !== this.version || uid !== this.session.user()?.uid) return;
+        if (needsOwnership && (!this.pins().get(message.id) || this.readOnly())) return;
+        if (needsOwnership && exceedsReactionLimit(target, emoji)) {
+          limited = true;
+          return;
+        }
+        await this.messageActions.toggleReaction(target, emoji);
+        if (version === this.version) this.preferences.rememberReaction(emoji);
+      },
+      undefined,
+      needsOwnership ? message.id : undefined,
+    );
+    if (limited && version === this.version) this.notice.set(MessageNotice.ReactionLimit);
+  }
+
+  private needsReactionOwnership(message: MessageResponse) {
+    return message.reactions.some((reaction) => reaction.reactedByMe == null);
+  }
+
+  private async readPinnedReactionTarget(messageId: SnowflakeID) {
+    const pins = this.pins();
+    if (pins.loading()) await pins.ensure();
+    const message = pins.get(messageId)?.message;
+    if (!message || message.isDeleted || !this.needsReactionOwnership(message)) return message;
+    return firstValueFrom(
+      this.api.messages.get({ chatId: pins.chatId, messageId }).pipe(takeUntilDestroyed(this.destroyRef)),
+    );
   }
 
   private canRecallMessage(message: MessageResponse) {
@@ -742,7 +774,7 @@ export class MessageMenu {
     this.actingOn.set(message.id);
     this.notice.set(undefined);
     try {
-      const { packs } = await firstValueFrom(this.stickers.stickers.listOwnedPacks().pipe(timeout(30000)));
+      const { packs } = await firstValueFrom(this.api.stickers.listOwnedPacks().pipe(timeout(30000)));
       if (!active()) return;
       this.stickerSource.set({ message, packs });
     } catch {

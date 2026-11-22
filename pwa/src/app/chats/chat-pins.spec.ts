@@ -64,10 +64,10 @@ describe('ChatStore pins', () => {
     }
   });
 
-  function added() {
+  function added(entry = pin) {
     events.next({
       type: ServerWsMessageType.pinAdded,
-      payload: { chatId: testChat.id, messageId: testMessage.id, pinId: pin.id, pin },
+      payload: { chatId: testChat.id, messageId: testMessage.id, pinId: entry.id, pin: entry },
     });
   }
 
@@ -78,20 +78,27 @@ describe('ChatStore pins', () => {
     });
   }
 
-  async function loadPins(pins: (typeof wirePin)[] = []) {
+  async function loadPins(pins: object[] = []) {
     const loading = conversation.ensure();
     peer.expect('pins.list', { chatId: decodeId(testChat.id) }).flush({ pins: structuredClone(pins) });
     await loading;
   }
 
-  it('deduplicates a create response with its WebSocket echo and unpins by pin ID', async () => {
+  it.each([false, true])('deduplicates pin creation and its echo (echo first: %s)', async (echoFirst) => {
     await loadPins();
     const creating = conversation.set(testMessage, true);
     await settle();
     const request = peer.expect('pins.create', { chatId: decodeId(testChat.id), messageId: decodeId(testMessage.id) });
-    added();
+    if (echoFirst) added();
+    else {
+      events.next({
+        type: ServerWsMessageType.reactionUpdated,
+        payload: { chatId: testChat.id, messageId: encodeId('333'), reactions: [] },
+      });
+    }
     request.flush(structuredClone(wirePin));
     await creating;
+    if (!echoFirst) added();
     expect(conversation.items()).toEqual([pin]);
     peer.expectNone('pins.list');
 
@@ -110,9 +117,10 @@ describe('ChatStore pins', () => {
     expect(conversation.items()).toEqual([]);
     peer.expectNone('pins.delete');
 
-    added();
+    const replacement = { ...pin, id: encodeId('9007199254741011') };
+    added(replacement);
     await conversation.set(testMessage, true);
-    expect(conversation.items()).toEqual([pin]);
+    expect(conversation.items()).toEqual([replacement]);
     peer.expectNone('pins.create');
   });
 
@@ -124,11 +132,9 @@ describe('ChatStore pins', () => {
     added();
     removed();
     request.flush(structuredClone(wirePin));
-    await settle();
-    expect(conversation.items()).toEqual([]);
-    peer.expect('pins.list', { chatId: decodeId(testChat.id) }).flush({ pins: [] });
     await creating;
     expect(conversation.items()).toEqual([]);
+    peer.expectNone('pins.list');
   });
 
   it('keeps chat and thread pin scopes separate and applies all thread pin mutations', async () => {
@@ -211,16 +217,113 @@ describe('ChatStore pins', () => {
     expect(conversation.items()).toEqual([]);
   });
 
-  it('revalidates a pin list when a WebSocket event arrives during its request', async () => {
+  it('replays additions and removals received while the pin list is loading', async () => {
     const pending = conversation.ensure();
     const stale = peer.expect('pins.list', { chatId: decodeId(testChat.id) });
     added();
-    stale.flush({ pins: [] });
-    await settle();
     expect(conversation.items()).toEqual([pin]);
-    peer.expect('pins.list', { chatId: decodeId(testChat.id) }).flush({ pins: [structuredClone(wirePin)] });
+    removed();
+    added();
+    expect(conversation.items()).toEqual([]);
+    stale.flush({ pins: [structuredClone(wirePin)] });
     await pending;
-    expect(conversation.items()).toEqual([pin]);
+    expect(conversation.items()).toEqual([]);
+    peer.expectNone('pins.list');
+  });
+
+  it.each([false, true])(
+    'only revalidates a conflicting edit during a pin list read (already included: %s)',
+    async (included) => {
+      await loadPins([wirePin]);
+      conversation.invalidate();
+      const pending = conversation.ensure();
+      const held = peer.expect('pins.list', { chatId: decodeId(testChat.id) });
+      events.next({
+        type: ServerWsMessageType.messageUpdated,
+        payload: { ...testMessage, message: '第二版', isEdited: true },
+      });
+      expect(conversation.get(testMessage.id)?.message.message).toBe('第二版');
+      const expected = included ? '第二版' : '第三版';
+      const latest = { ...wirePin, message: { ...wireMessage, message: expected, isEdited: true } };
+      held.flush({ pins: [latest] });
+      if (!included) {
+        const refresh = await peer.expectAsync('pins.list', { chatId: decodeId(testChat.id) });
+        expect(conversation.get(testMessage.id)?.message.message).toBe('第二版');
+        refresh.flush({ pins: [latest] });
+      }
+      await pending;
+      expect(conversation.get(testMessage.id)?.message.message).toBe(expected);
+      peer.expectNone('pins.list');
+    },
+  );
+
+  it('keeps the account reaction state from the list when a remote pin echo is also received', async () => {
+    const pending = conversation.ensure();
+    const held = peer.expect('pins.list', { chatId: decodeId(testChat.id) });
+    const reaction = { emoji: '👍', count: 1 };
+    events.next({
+      type: ServerWsMessageType.pinAdded,
+      payload: {
+        chatId: testChat.id,
+        messageId: testMessage.id,
+        pinId: pin.id,
+        pin: {
+          ...pin,
+          pinnedBy: 2,
+          message: {
+            ...testMessage,
+            reactions: [{ ...reaction, reactedByMe: true, reactors: [{ uid: 2 }] }],
+          },
+        },
+      },
+    });
+    expect(conversation.get(testMessage.id)?.message.reactions[0].reactedByMe).toBe(false);
+    held.flush({
+      pins: [
+        {
+          ...wirePin,
+          pinnedBy: 2,
+          message: {
+            ...wireMessage,
+            reactions: [{ ...reaction, reactedByMe: true, reactors: [{ uid: testUser.uid }] }],
+          },
+        },
+      ],
+    });
+    await pending;
+    expect(conversation.get(testMessage.id)?.message.reactions[0].reactedByMe).toBe(true);
+    peer.expectNone('pins.list');
+  });
+
+  it.each([false, true])('redacts pinned replies without refetching for a recall (in flight: %s)', async (loading) => {
+    const quoteId = '9007199254741001';
+    const replyPin = { ...wirePin, message: { ...wireMessage, replyToMessage: { ...wireMessage, id: quoteId } } };
+    if (!loading) await loadPins([replyPin]);
+    const pending = conversation.ensure();
+    const request = loading ? peer.expect('pins.list', { chatId: decodeId(testChat.id) }) : undefined;
+    events.next({
+      type: ServerWsMessageType.reactionUpdated,
+      payload: { chatId: testChat.id, messageId: encodeId('333'), reactions: [] },
+    });
+    if (loading) {
+      events.next({
+        type: ServerWsMessageType.messagesBulkDeleted,
+        payload: { chatId: testChat.id, messageIds: [encodeId(quoteId)] },
+      });
+    } else {
+      events.next({
+        type: ServerWsMessageType.messageDeleted,
+        payload: { ...testMessage, id: encodeId(quoteId), isDeleted: true },
+      });
+    }
+    request?.flush({ pins: [replyPin] });
+    await pending;
+    expect(conversation.get(testMessage.id)?.message.replyToMessage).toMatchObject({
+      id: encodeId(quoteId),
+      isDeleted: true,
+      message: undefined,
+    });
+    peer.expectNone('pins.list');
   });
 
   it('does not let an earlier context reply replace or clear the new context loading state', async () => {

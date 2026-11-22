@@ -6,7 +6,7 @@ import { GroupRole, MessageType, ServerWsMessageType, type MessageResponse } fro
 import { Connection } from '../../api/connection';
 import { RpcTestPeer, provideRpcTesting } from '../../api/rpc-testing';
 import { encodeId } from '../../api/snowflake-id';
-import { testUser, wireChat, wireMessage } from '../../api/testing';
+import { testMessage, testUser, wireChat, wireMessage } from '../../api/testing';
 import { MessageAction } from '../../messages/message-menu/message-menu';
 import { MessageNotice } from '../../messages/message-notice';
 import { SessionStore } from '../../session/session-store';
@@ -123,6 +123,68 @@ describe('PinnedMessagesPage', () => {
     peer.expectNone('chats.getUnreadCount');
     peer.expectNone('threads.getReadState');
   });
+
+  it.each([false, true])(
+    'resolves incomplete reaction ownership before acting on a remote pin (list pending: %s)',
+    async (listPending) => {
+      fixture.componentRef.setInput('id', wireChat.id);
+      fixture.detectChanges();
+      peer.expect('groups.get', { chatId: wireChat.id }).flush({ ...wireChat, myRole: GroupRole.admin });
+      const pending = peer.expect('pins.list', { chatId: wireChat.id });
+      if (!listPending) {
+        pending.flush({ pins: [] });
+        await fixture.whenStable();
+      }
+      const reaction = {
+        emoji: '👍',
+        count: 8,
+        reactors: [{ uid: 2 }, { uid: 3 }, { uid: 4 }, { uid: 5 }, { uid: 6 }],
+      };
+      const pinId = '200';
+      TestBed.inject(Connection).acceptPin({
+        type: ServerWsMessageType.pinAdded,
+        payload: {
+          chatId: testMessage.chatId,
+          messageId: testMessage.id,
+          pinId: encodeId(pinId),
+          pin: {
+            id: encodeId(pinId),
+            chatId: testMessage.chatId,
+            pinnedAt: wireMessage.createdAt,
+            pinnedBy: 2,
+            message: { ...testMessage, reactions: [{ ...reaction, reactedByMe: false }] },
+          },
+        },
+      });
+      fixture.detectChanges();
+      const message = page['messages']()[0];
+      expect(message.reactions[0].reactedByMe).toBeUndefined();
+      peer.expectNone('messages.get');
+      const acting = page['menu']()!.reactTo(message, reaction.emoji);
+      const authoritative = { ...wireMessage, reactions: [{ ...reaction, reactedByMe: true }] };
+      if (listPending) {
+        pending.flush({
+          pins: [
+            { id: pinId, chatId: wireChat.id, pinnedAt: wireMessage.createdAt, pinnedBy: 2, message: authoritative },
+          ],
+        });
+      } else {
+        const lookup = await peer.expectAsync('messages.get', { chatId: wireChat.id, messageId: wireMessage.id });
+        lookup.flush(authoritative);
+      }
+      const removing = await peer.expectAsync('reactions.remove', {
+        chatId: wireChat.id,
+        messageId: wireMessage.id,
+        emoji: reaction.emoji,
+      });
+      removing.flush(null);
+      await acting;
+      expect(page['messages']()[0].reactions[0].reactedByMe).toBe(false);
+      peer.expectNone('reactions.add');
+      peer.expectNone('messages.get');
+      peer.expectNone('pins.list');
+    },
+  );
 
   it.each([false, true])(
     'omits recalled pins from messages and date groups, including initial loading: %s',

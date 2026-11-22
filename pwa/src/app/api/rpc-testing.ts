@@ -1,5 +1,6 @@
 import { InjectionToken, Injector, Service, inject, type Provider } from '@angular/core';
 import { vi } from 'vitest';
+import { jsonEquals } from './json-equals';
 import { RPC_WEBSOCKET_FACTORY, RpcTransport, type RpcWebSocketFactory } from './rpc-transport';
 
 export interface RpcTestingOptions {
@@ -15,25 +16,6 @@ interface CapturedRequest {
   readonly id: string;
   readonly method: string;
   readonly params?: Record<string, unknown>;
-}
-
-function sameJson(left: unknown, right: unknown): boolean {
-  if (Object.is(left, right)) return true;
-  if (typeof left !== 'object' || left === null || typeof right !== 'object' || right === null) return false;
-  if (Array.isArray(left) || Array.isArray(right))
-    return (
-      Array.isArray(left) &&
-      Array.isArray(right) &&
-      left.length === right.length &&
-      left.every((item, index) => sameJson(item, right[index]))
-    );
-  const leftObject = left as Record<string, unknown>;
-  const rightObject = right as Record<string, unknown>;
-  const leftKeys = Object.keys(leftObject);
-  return (
-    leftKeys.length === Object.keys(rightObject).length &&
-    leftKeys.every((key) => Object.hasOwn(rightObject, key) && sameJson(leftObject[key], rightObject[key]))
-  );
 }
 
 export class RpcTestSocket {
@@ -173,7 +155,9 @@ export class RpcTestPeer {
       if (request.method !== method) return false;
       if (!paramsOrPredicate) return true;
       const params = request.params ?? {};
-      return typeof paramsOrPredicate === 'function' ? paramsOrPredicate(params) : sameJson(params, paramsOrPredicate);
+      return typeof paramsOrPredicate === 'function'
+        ? paramsOrPredicate(params)
+        : jsonEquals(params, paramsOrPredicate);
     });
     if (index < 0) throw new Error(`Expected RPC request ${method}`);
     return this.claim(this.captured.splice(index, 1)[0]);

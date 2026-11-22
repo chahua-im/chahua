@@ -687,7 +687,9 @@ export class ChatStore {
         case ServerWsMessageType.threadPinRemoved: {
           const { chatId, threadRootId, pinId, pin } = event.payload;
           const pins = this.pinScopes.get(threadRootId ?? chatId);
-          if (pins?.chatId === chatId) pins.apply(pinId, pin);
+          const removed =
+            event.type === ServerWsMessageType.pinRemoved || event.type === ServerWsMessageType.threadPinRemoved;
+          if (pins?.chatId === chatId && (removed || pin)) pins.apply(pinId, removed ? undefined : pin);
           break;
         }
       }
@@ -772,8 +774,14 @@ export class ChatStore {
     const key = threadId ?? chatId;
     let pins = this.pinScopes.get(key);
     if (!pins) {
-      pins = new ChatPins(chatId, threadId, this.rpc.pins, this.realtime, this.destroyRef, () =>
-        this.isAccessible(chatId, threadId),
+      pins = new ChatPins(
+        chatId,
+        threadId,
+        this.rpc.pins,
+        this.realtime,
+        this.destroyRef,
+        () => this.isAccessible(chatId, threadId),
+        () => this.session.user()?.uid,
       );
       this.pinScopes.set(key, pins);
     }
