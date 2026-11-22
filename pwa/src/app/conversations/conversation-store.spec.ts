@@ -9,7 +9,8 @@ import {
   SystemMessageKind,
   type ThreadListItem,
 } from '../../generated/models';
-import { ChatStore } from '../chats/chat-store';
+import { ChatChangeKind, ChatStore } from '../chats/chat-store';
+import { ChatListStore } from '../chats/chat-list-store';
 import { Connection } from '../api/connection';
 import { RpcErrorCode } from '../api/rpc-error';
 import { RpcTransport } from '../api/rpc-transport';
@@ -1649,6 +1650,17 @@ describe('ConversationStore with message sync', () => {
     request.flush({});
   }
 
+  async function loadChatList(latestId: string, chatSettings = settings) {
+    const list = TestBed.inject(ChatListStore).chats(false);
+    const release = list.activate();
+    (await peer.expectAsync('chats.list', { limit: 50 })).flush({
+      chats: [{ ...wireChat, lastMessage: wire(latestId) }],
+      chatSettings,
+    });
+    await vi.waitFor(() => expect(list.items()[0]?.lastMessage?.id).toBe(encodeId(latestId)));
+    return { list, release };
+  }
+
   const upsert = (id: string, message: string, appeared = false) => ({
     kind: 'upsert',
     appeared,
@@ -1780,6 +1792,192 @@ describe('ConversationStore with message sync', () => {
     },
   );
 
+  it.each([true, false])(
+    'uses the loaded predecessor for a recalled thread root (show membership: %s)',
+    async (show) => {
+      const chatSettings = { ...settings, showMembershipMessages: show };
+      TestBed.inject(SessionStore).user.set({ ...testUser, showMembershipMessages: show });
+      const previous = { ...wire('10'), createdAt: '2026-09-04T12:00:00Z' };
+      const threadInfo = { replyCount: 1 };
+      const opened = timeline.open(undefined, false, !show);
+      page(await peer.expectAsync('messageSync.page'), [previous, { ...wire('20'), threadInfo }], { chatSettings });
+      await opened;
+      const chats = TestBed.inject(ChatStore);
+      const root = { ...timeline.items()[1], mentions: [] };
+      chats.acceptChats([{ ...testChat, lastMessage: root, lastMessageAt: root.createdAt }], chats.snapshot());
+      const changes: ChatChangeKind[] = [];
+      chats.changes$.subscribe(({ kind }) => changes.push(kind));
+
+      batch('root-recalled', [
+        { kind: 'upsert', appeared: false, message: { ...wire('20'), isDeleted: true, message: null, threadInfo } },
+      ]);
+      await Promise.resolve();
+
+      const visible = timeline.items().filter(isVisibleMessage);
+      expect(visible.map(({ id }) => decodeId(id))).toEqual(['10', '20']);
+      expect(chats.chat(testChat.id)).toMatchObject({
+        lastMessage: { id: encodeId('10'), isDeleted: false },
+        lastMessageAt: previous.createdAt,
+      });
+      expect(changes).not.toContain(ChatChangeKind.PreviewRecalled);
+      peer.expectNone('chats.list');
+    },
+  );
+
+  it('redacts a stale first list response and loads its recalled preview once', async () => {
+    const list = TestBed.inject(ChatListStore).chats(false);
+    const release = list.activate();
+    const first = await peer.expectAsync('chats.list', { limit: 50 });
+    const threadInfo = { replyCount: 1 };
+    batch('root-recalled-before-list', [
+      { kind: 'upsert', appeared: false, message: { ...wire('20'), isDeleted: true, message: null, threadInfo } },
+    ]);
+    first.flush({ chats: [{ ...wireChat, lastMessage: wire('20') }], chatSettings: settings });
+
+    const row = await peer.expectAsync('chats.list', { chatId, limit: 1, archived: false });
+    expect(list.items()[0].lastMessage).toMatchObject({ id: encodeId('20'), isDeleted: true, message: undefined });
+    row.flush({ chats: [{ ...wireChat, lastMessage: wire('10') }], chatSettings: settings });
+    await vi.waitFor(() => expect(list.items()[0].lastMessage?.id).toBe(encodeId('10')));
+    release();
+    for (const request of peer.match('conversations.watchStates')) request.flush({});
+    peer.expectNone('chats.list');
+  });
+
+  it('rechecks a preview recalled while its targeted list row was in flight', async () => {
+    const { list, release } = await loadChatList('30');
+    const recalledRoot = (id: string) => ({
+      kind: 'upsert',
+      appeared: false,
+      message: { ...wire(id), isDeleted: true, message: null, threadInfo: { replyCount: 1 } },
+    });
+    batch('latest-recalled', [recalledRoot('30')]);
+    const params = { chatId, limit: 1, archived: false };
+    const row = await peer.expectAsync('chats.list', params);
+    batch('previous-recalled', [recalledRoot('20')]);
+    row.flush({ chats: [{ ...wireChat, lastMessage: wire('20') }], chatSettings: settings });
+
+    const followup = await peer.expectAsync('chats.list', params);
+    expect(list.items()[0].lastMessage).toMatchObject({ id: encodeId('20'), isDeleted: true, message: undefined });
+    followup.flush({ chats: [{ ...wireChat, lastMessage: wire('10') }], chatSettings: settings });
+    await vi.waitFor(() => expect(list.items()[0].lastMessage?.id).toBe(encodeId('10')));
+    release();
+    for (const request of peer.match('conversations.watchStates')) request.flush({});
+    peer.expectNone('chats.list');
+  });
+
+  it('calibrates a recalled chat preview without using the expired conversation range', async () => {
+    const chatSettings = { ...settings, showMembershipMessages: false };
+    TestBed.inject(SessionStore).user.set({ ...testUser, showMembershipMessages: false });
+    const threadInfo = { replyCount: 1 };
+    const opened = timeline.open(undefined, false, true);
+    page(await peer.expectAsync('messageSync.page'), [wire('5'), wire('10'), { ...wire('20'), threadInfo }], {
+      chatSettings,
+    });
+    await opened;
+    const { list, release } = await loadChatList('20', chatSettings);
+    timeline.retainRecent(undefined, true);
+    timeline.reset(testChat.id);
+    expect(timeline.takeRecent(true)).toBeDefined();
+    reset('expired', 'expired');
+    batch('root-recalled', [
+      { kind: 'upsert', appeared: false, message: { ...wire('20'), isDeleted: true, message: null, threadInfo } },
+    ]);
+    const row = await peer.expectAsync('chats.list', { chatId, limit: 1, archived: false });
+    expect(list.items()[0].lastMessage).toMatchObject({ id: encodeId('20'), isDeleted: true, message: null });
+    row.flush({ chats: [{ ...wireChat, lastMessage: wire('5') }], chatSettings });
+    await vi.waitFor(() => expect(list.items()[0].lastMessage?.id).toBe(encodeId('5')));
+    release();
+    for (const request of peer.match('conversations.watchStates')) request.flush({});
+    peer.expectNone('chats.list');
+  });
+
+  it('redacts a stale first thread list response and reconciles only the recalled reply', async () => {
+    const list = TestBed.inject(ChatListStore).threads(false);
+    const release = list.activate();
+    const first = await peer.expectAsync('threads.list', { limit: 20, archived: false });
+    const threadInfo = { replyCount: 1 };
+    const root = { ...wire('20'), isDeleted: true, message: null, threadInfo, mentions: [] };
+    batch('recalls-before-thread-list', [
+      { kind: 'upsert', appeared: false, message: root },
+      { kind: 'delete', messageId: '25', threadRootId: '20' },
+    ]);
+    const thread = {
+      archived: false,
+      chatId,
+      chatKind: testChat.kind,
+      chatName: '测试群',
+      threadRootMessage: { ...wire('20'), mentions: [] },
+      lastReply: { ...wire('25'), mentions: [] },
+      replyCount: 2,
+      unreadCount: 0,
+      unreadMentions: 0,
+      unreadReactions: 0,
+      lastReplyAt: wireMessage.createdAt,
+      subscribedAt: wireMessage.createdAt,
+    };
+    first.flush({ threads: [thread] });
+
+    const row = await peer.expectAsync('threads.list', { rootId: '20', limit: 1, archived: false });
+    expect(list.items()[0]).toMatchObject({
+      threadRootMessage: { id: encodeId('20'), isDeleted: true, message: undefined },
+      lastReply: { id: encodeId('25'), isDeleted: true, message: undefined },
+    });
+    row.flush({
+      threads: [
+        {
+          ...thread,
+          threadRootMessage: root,
+          lastReply: { ...wire('24'), mentions: [] },
+          replyCount: 1,
+        },
+      ],
+    });
+    await vi.waitFor(() => expect(list.items()[0].lastReply?.id).toBe(encodeId('24')));
+    release();
+    for (const request of peer.match('conversations.watchStates')) request.flush({});
+    peer.expectNone('threads.list');
+  });
+
+  it.each([true, false])(
+    'skips the parent chat row for reply-only recalls (RPC returns first: %s)',
+    async (rpcFirst) => {
+      const { release } = await loadChatList('30');
+      const recalling = TestBed.inject(MessageActions).recallMany(testChat.id, [
+        { id: encodeId('25'), replyRootId: encodeId('20') },
+      ]);
+      const confirmation = peer.expect('messages.deleteMany', { chatId, messageIds: ['25'] });
+      const acknowledge = async () => {
+        confirmation.flush({ chatId, messageIds: ['25'], complete: true, threadRootIds: ['20'] });
+        await recalling;
+      };
+      if (rpcFirst) await acknowledge();
+      batch('thread-reply-recalled', [
+        { kind: 'upsert', appeared: false, message: { ...wire('20'), threadInfo: { replyCount: 1 } } },
+        { kind: 'delete', messageId: '25', threadRootId: '20' },
+      ]);
+      if (!rpcFirst) await acknowledge();
+      await Promise.resolve();
+      peer.expectNone('chats.list');
+      release();
+      for (const request of peer.match('conversations.watchStates')) request.flush({});
+    },
+  );
+
+  it('reconciles the parent chat row for a batch recalling both main messages and replies', async () => {
+    const { list, release } = await loadChatList('30');
+    batch('mixed-recall', [
+      { kind: 'delete', messageId: '26', threadRootId: '20' },
+      { kind: 'delete', messageId: '30', threadRootId: null },
+    ]);
+    (await peer.expectAsync('chats.list', { chatId, limit: 1, archived: false })).flush({
+      chats: [{ ...wireChat, lastMessage: wire('20') }],
+      chatSettings: settings,
+    });
+    await vi.waitFor(() => expect(list.items()[0].lastMessage?.id).toBe(encodeId('20')));
+    release();
+    for (const request of peer.match('conversations.watchStates')) request.flush({});
+  });
+
   it('patches a loaded page once for an entire bulk recall and retains unchanged rows', async () => {
     const opened = timeline.open();
     page(
@@ -1799,6 +1997,33 @@ describe('ConversationStore with message sync', () => {
     );
     expect(updates).toHaveBeenCalledOnce();
     expect(timeline.page()).toBe(previousPage);
+  });
+
+  it('applies a sync recall echo without restarting the list read started by the local confirmation', async () => {
+    const list = TestBed.inject(ChatListStore).chats(false);
+    const release = list.activate();
+    (await peer.expectAsync('chats.list', { limit: 50 })).flush({
+      chats: [{ ...wireChat, lastMessage: wire('20') }],
+      chatSettings: settings,
+    });
+    await vi.waitFor(() => expect(list.items()[0]?.lastMessage?.id).toBe(encodeId('20')));
+    const recall = TestBed.inject(MessageActions).recall(message('20'));
+    peer.expect('messages.delete', { chatId, messageId: '20' }).flush(null);
+    await recall;
+    const row = await peer.expectAsync('chats.list', { chatId, limit: 1, archived: false });
+    batch('recall-echo', [{ kind: 'delete', messageId: '20', threadRootId: null }]);
+    row.flush({ chats: [{ ...wireChat, lastMessage: wire('10') }], chatSettings: settings });
+    await vi.waitFor(() => expect(list.items()[0].lastMessage?.id).toBe(encodeId('10')));
+    peer.expectNone('chats.list');
+
+    batch('another-recall', [{ kind: 'delete', messageId: '10', threadRootId: null }]);
+    (await peer.expectAsync('chats.list', { chatId, limit: 1, archived: false })).flush({
+      chats: [wireChat],
+      chatSettings: settings,
+    });
+    await vi.waitFor(() => expect(list.items()[0].lastMessage).toBeUndefined());
+    release();
+    for (const request of peer.match('conversations.watchStates')) request.flush({});
   });
 
   it.each([false, true])(

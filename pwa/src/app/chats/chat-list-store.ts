@@ -41,6 +41,7 @@ export enum ChatListError {
   Unread,
   Recent,
   More,
+  Row,
 }
 export interface ChatQuery {
   readonly items: Signal<ChatListItem[]>;
@@ -79,7 +80,8 @@ interface QueryState {
   /** Chats whose unread changed while no list was visible; refreshed by id on activation. */
   pendingUnread: Set<SnowflakeID>;
   pendingRows: Map<SnowflakeID, number>;
-  rowRequests: Set<SnowflakeID>;
+  rowRequests: Map<SnowflakeID, Promise<void>>;
+  rowErrors: WritableSignal<ReadonlySet<SnowflakeID>>;
   /** A message arrived for a chat outside the loaded ids; only the head page can place it. */
   headStale: boolean;
 }
@@ -106,7 +108,8 @@ function createThreadQuery(archived: boolean) {
     headBoundary: -Infinity,
     pendingReads: new Set<SnowflakeID>(),
     pendingRows: new Map<SnowflakeID, number>(),
-    rowRequests: new Set<SnowflakeID>(),
+    rowRequests: new Map<SnowflakeID, Promise<void>>(),
+    rowErrors: signal<ReadonlySet<SnowflakeID>>(new Set()),
     request: undefined as QueryRequest | undefined,
   };
 }
@@ -122,6 +125,7 @@ export class ChatListStore {
   private readonly queries = new Map<boolean, { state: QueryState; handle: ChatQuery }>();
   private readonly resolvedRequests = new Map<SnowflakeID, number>();
   private readonly membershipStates = new Map<SnowflakeID, string>();
+  private rowRevision = 0;
   private threadRefreshPending?: Promise<void>;
   private readonly threadMessages = new Set<SnowflakeID>();
   private readonly friendsApi = this.rpc.friends;
@@ -242,6 +246,7 @@ export class ChatListStore {
           if (kind === ChatChangeKind.Removed && !threadId) {
             state.ids.update((ids) => ids.filter((id) => id !== chatId));
             state.pendingRows.delete(chatId);
+            this.clearRowError(state, chatId);
             state.pendingUnread.delete(chatId);
           }
           if (kind === ChatChangeKind.MessagePurge) this.invalidateQuery(state);
@@ -250,6 +255,7 @@ export class ChatListStore {
           state.ids.update((ids) => ids.filter((id) => !removedThreads.has(id)));
           for (const id of removedThreads) {
             state.pendingRows.delete(id);
+            this.clearRowError(state, id);
             state.pendingReads.delete(id);
           }
           if (kind === ChatChangeKind.MessagePurge) {
@@ -269,6 +275,10 @@ export class ChatListStore {
         else this.queueUnread(chatId);
         return;
       }
+      if (kind === ChatChangeKind.PreviewRecalled) {
+        this.queueRow(chatId, threadId, { supersede: false });
+        return;
+      }
       if (threadId) {
         if (kind === ChatChangeKind.Membership) this.membershipChanged(chatId, threadId);
       } else {
@@ -276,7 +286,7 @@ export class ChatListStore {
       }
     });
     this.realtime.events$.pipe(takeUntilDestroyed()).subscribe((event) => {
-      if (isMessageChange(event)) {
+      if (isMessageChange(event) && !('recallEcho' in event && event.recallEcho)) {
         this.receiveChange(event);
         this.receiveThreadChange(event);
       }
@@ -308,10 +318,13 @@ export class ChatListStore {
           )
             this.refreshChats();
           break;
-        case ServerWsMessageType.threadUpdate:
-          this.chatInfo.invalidateThreadReads([event.payload.threadRootId]);
-          this.refreshThreadRead(event.payload.threadRootId);
+        case ServerWsMessageType.threadUpdate: {
+          const { chatId, threadRootId } = event.payload;
+          if (this.chatInfo.threadUpdateNeedsRow(event.payload))
+            this.queueRow(chatId, threadRootId, { supersede: false, listedOnly: true });
+          else if (this.chatInfo.threadUpdateNeedsRead(event.payload)) this.refreshThreadRead(threadRootId);
           break;
+        }
         case ServerWsMessageType.threadMembershipChanged:
           if (event.payload.status) this.membershipChanged(event.payload.chatId, event.payload.threadRootId);
           else void this.invalidateThreads();
@@ -379,9 +392,11 @@ export class ChatListStore {
       requests: new Map(),
       pendingUnread: new Set(),
       pendingRows: new Map(),
-      rowRequests: new Set(),
+      rowRequests: new Map(),
+      rowErrors: signal<ReadonlySet<SnowflakeID>>(new Set()),
       headStale: false,
     };
+    const listError = computed(() => state.listError() ?? (state.rowErrors().size ? ChatListError.Row : undefined));
     const handle: ChatQuery = {
       items: computed(() =>
         state
@@ -394,12 +409,12 @@ export class ChatListStore {
       loading: state.loading.asReadonly(),
       error: computed(
         () =>
-          state.listError() ??
+          listError() ??
           (state.unreadErrors().size && state.ids().some((id) => state.unreadErrors().has(id))
             ? ChatListError.Unread
             : undefined),
       ),
-      listError: state.listError.asReadonly(),
+      listError,
       hasMore: computed(() => !state.dirty() && !!state.cursor()),
       loadingMore: state.loadingMore.asReadonly(),
       loadedThrough: state.loadedThrough.asReadonly(),
@@ -421,12 +436,14 @@ export class ChatListStore {
         this.invalidateQuery(state);
       },
       retry: () =>
-        this.fetchQuery(
-          state,
-          state.listError() === ChatListError.More && !state.dirty() && state.cursor()
-            ? ListFetch.More
-            : ListFetch.Load,
-        ),
+        listError() === ChatListError.Row && !state.dirty()
+          ? this.retryRows(state)
+          : this.fetchQuery(
+              state,
+              state.listError() === ChatListError.More && !state.dirty() && state.cursor()
+                ? ListFetch.More
+                : ListFetch.Load,
+            ),
       loadMore: () => {
         if (!state.consumers.size || state.dirty() || state.loading() || !state.cursor()) return Promise.resolve();
         return this.fetchQuery(state, ListFetch.More);
@@ -486,13 +503,10 @@ export class ChatListStore {
           } else if (mode === ListFetch.Recent) {
             if (!(await this.readRecent(query, generation))) return;
           } else {
-            const { page, version, policyGeneration } = await this.readPage(query, after);
+            const result = await this.readPage(query, after);
             if (this.destroyRef.destroyed || generation !== query.generation) return;
-            this.chatInfo.acceptChats(page.chats, version, policyGeneration);
-            this.clearUnreadErrors(
-              query,
-              page.chats.map((chat) => chat.id),
-            );
+            const { page, version } = result;
+            this.acceptChatPage(query, result);
             query.ids.update((ids) => [
               ...new Set([
                 ...ids,
@@ -542,6 +556,7 @@ export class ChatListStore {
   private readPage(query: QueryState, cursor?: SnowflakeID, show = query.showMembershipMessages) {
     // Snapshot before the request so live previews received meanwhile keep their version.
     const version = this.chatInfo.snapshot();
+    const rowRevision = this.rowRevision;
     const policyGeneration = this.chatInfo.membershipPolicyRequestGeneration();
     const user = this.session.user();
     return firstValueFrom(
@@ -559,8 +574,25 @@ export class ChatListStore {
         policyGeneration !== this.chatInfo.membershipPolicyRequestGeneration()
       )
         throw new ChatSettingsChanged();
-      return { page, version, policyGeneration };
+      return { page, version, policyGeneration, rowRevision };
     });
+  }
+
+  private acceptChatPage(query: QueryState, result: Awaited<ReturnType<ChatListStore['readPage']>>) {
+    const { page, version, policyGeneration, rowRevision } = result;
+    this.chatInfo.acceptChats(page.chats, version, policyGeneration);
+    // A whole-page read can clear rows already pending when it started, but not later invalidations.
+    for (const { id } of page.chats)
+      if (
+        (query.pendingRows.get(id) ?? Infinity) <= rowRevision &&
+        this.chatInfo.acceptsSnapshot(id, version) &&
+        !this.chatInfo.chat(id).lastMessage?.isDeleted
+      )
+        this.finishRow(query, id);
+    this.clearUnreadErrors(
+      query,
+      page.chats.map(({ id }) => id),
+    );
   }
 
   /** Applies each page before reading the next, up to the depth already loaded or the tail. */
@@ -570,12 +602,9 @@ export class ChatListStore {
     const filterChanged = query.showMembershipMessages !== show;
     const pages: Awaited<ReturnType<ChatListStore['readPage']>>[] = [];
     const read = new Map<SnowflakeID, number>();
-    const apply = ({ page, version, policyGeneration }: Awaited<ReturnType<ChatListStore['readPage']>>) => {
-      this.chatInfo.acceptChats(page.chats, version, policyGeneration);
-      this.clearUnreadErrors(
-        query,
-        page.chats.map((chat) => chat.id),
-      );
+    const apply = (result: Awaited<ReturnType<ChatListStore['readPage']>>) => {
+      const { page, version } = result;
+      this.acceptChatPage(query, result);
       query.ids.update((ids) => [
         ...new Set([
           ...ids,
@@ -606,13 +635,10 @@ export class ChatListStore {
     const boundary = query.loadedThrough();
     let cursor: SnowflakeID | undefined;
     do {
-      const { page, version, policyGeneration } = await this.readPage(query, cursor);
+      const result = await this.readPage(query, cursor);
       if (this.destroyRef.destroyed || generation !== query.generation) return false;
-      this.chatInfo.acceptChats(page.chats, version, policyGeneration);
-      this.clearUnreadErrors(
-        query,
-        page.chats.map((chat) => chat.id),
-      );
+      const { page, version } = result;
+      this.acceptChatPage(query, result);
       query.ids.update((ids) => [
         ...new Set([
           ...ids,
@@ -699,7 +725,11 @@ export class ChatListStore {
 
   private receiveChange(change: MessageChange) {
     if (change.type === ServerWsMessageType.reactionUpdated) return;
-    if (change.type === ServerWsMessageType.messagesBulkDeleted && change.payload.complete === false) return;
+    if (
+      change.type === ServerWsMessageType.messagesBulkDeleted &&
+      (change.payload.complete === false || change.threadRepliesOnly)
+    )
+      return;
     if (change.type !== ServerWsMessageType.messagesBulkDeleted && change.payload.replyRootId) return;
     // Edits are already applied to the shared preview; they never change list membership or order.
     if (change.type === ServerWsMessageType.messageUpdated) return;
@@ -736,15 +766,40 @@ export class ChatListStore {
     this.queueRow(chatId, threadId);
   }
 
-  private queueRow(chatId: SnowflakeID, threadId?: SnowflakeID) {
+  private queueRow(
+    chatId: SnowflakeID,
+    threadId?: SnowflakeID,
+    { supersede = true, listedOnly = false }: { supersede?: boolean; listedOnly?: boolean } = {},
+  ) {
     const id = threadId ?? chatId;
     const queries = threadId
       ? [this.activeThreads.state, this.archivedThreads.state]
       : [...this.queries.values()].map(({ state }) => state);
     for (const query of queries) {
-      query.pendingRows.set(id, (query.pendingRows.get(id) ?? 0) + 1);
+      if (listedOnly && !query.ids().includes(id)) continue;
+      if (!supersede && query.pendingRows.has(id)) continue;
+      query.pendingRows.set(id, ++this.rowRevision);
       this.flushRows(query);
     }
+  }
+
+  private async retryRows(query: QueryState | ThreadQuery) {
+    this.flushRows(query);
+    await Promise.all(query.rowRequests.values());
+  }
+
+  private finishRow(query: QueryState | ThreadQuery, id: SnowflakeID) {
+    query.pendingRows.delete(id);
+    this.clearRowError(query, id);
+  }
+
+  private clearRowError(query: QueryState | ThreadQuery, id: SnowflakeID) {
+    query.rowErrors.update((errors) => {
+      if (!errors.has(id)) return errors;
+      const remaining = new Set(errors);
+      remaining.delete(id);
+      return remaining;
+    });
   }
 
   /** Reconcile one row without touching the loaded page boundary or other rows. */
@@ -754,11 +809,11 @@ export class ChatListStore {
     if (!visible() || dirty()) return;
     for (const id of query.pendingRows.keys()) {
       if (query.rowRequests.has(id)) continue;
-      query.rowRequests.add(id);
-      void (async () => {
+      let revision: number | undefined;
+      const request = (async () => {
         await Promise.resolve();
         while (!this.destroyRef.destroyed && visible() && query.pendingRows.has(id)) {
-          const revision = query.pendingRows.get(id);
+          revision = query.pendingRows.get(id);
           const version = this.chatInfo.snapshot();
           const policyGeneration = this.chatInfo.membershipPolicyRequestGeneration();
           const subscriptionVersion = this.chatInfo.subscriptionSnapshot();
@@ -798,6 +853,7 @@ export class ChatListStore {
               ]),
             ]);
           } else {
+            const lastReplyId = this.chatInfo.threadSummary(id)?.lastReply?.id;
             const page = await this.response(this.threadsApi.list({ limit: 1, rootId: id, archived: query.archived }));
             if (
               query.pendingRows.get(id) !== revision ||
@@ -805,7 +861,12 @@ export class ChatListStore {
             )
               continue;
             if (dirty()) return;
-            this.chatInfo.acceptThreads(page.threads, version, subscriptionVersion);
+            if (!page.threads.length) {
+              // A reply received during the read can make an empty snapshot obsolete.
+              if (this.hasNewThreadReply(query, id, lastReplyId)) continue;
+              query.pendingReads.delete(id);
+            }
+            this.chatInfo.acceptThreads(page.threads, version, subscriptionVersion, id);
             this.clearUnreadErrors(
               query,
               page.threads.map((thread) => thread.threadRootMessage.id),
@@ -819,12 +880,33 @@ export class ChatListStore {
               ]),
             ]);
           }
-          query.pendingRows.delete(id);
+          this.finishRow(query, id);
         }
       })()
-        .catch(() => query.listError.set(ChatListError.Recent))
-        .finally(() => query.rowRequests.delete(id));
+        .catch(() => {
+          if (!this.destroyRef.destroyed && revision != null && query.pendingRows.get(id) === revision)
+            query.rowErrors.update((errors) => new Set(errors).add(id));
+        })
+        .finally(() => {
+          query.rowRequests.delete(id);
+          const pending = query.pendingRows.get(id);
+          // Accepting a stale preview can queue a new revision before this request settles.
+          if (pending != null && pending !== revision) this.flushRows(query);
+        });
+      query.rowRequests.set(id, request);
+      this.chatInfo.shareListRowRead(id, request, 'generation' in query ? 'chat' : 'thread');
     }
+  }
+
+  private hasNewThreadReply(query: ThreadQuery, id: SnowflakeID, lastReplyId?: SnowflakeID) {
+    const thread = this.chatInfo.thread(id);
+    const reply = thread?.lastReply;
+    return (
+      thread?.archived === query.archived &&
+      reply &&
+      !reply.isDeleted &&
+      (lastReplyId == null || reply.id > lastReplyId)
+    );
   }
 
   private queueUnread(chatId: SnowflakeID) {
@@ -854,14 +936,15 @@ export class ChatListStore {
         state.pendingReads.delete(id);
         continue;
       }
+      const isNeeded = () => !!state.consumers && !document.hidden && state.pendingReads.has(id);
       void this.chatInfo
-        .getThreadReadState(thread.chatId, id)
+        .getThreadReadState(thread.chatId, id, { isNeeded })
         .then(() => {
           state.pendingReads.delete(id);
           this.clearUnreadErrors(state, [id]);
         })
         .catch(() => {
-          if (!this.chatInfo.threadReadState(thread.chatId, id))
+          if (isNeeded() && !this.chatInfo.threadReadState(thread.chatId, id))
             state.unreadErrors.update((ids) => new Set(ids).add(id));
         });
     }
@@ -945,6 +1028,7 @@ export class ChatListStore {
 
   private threadCache(archived: boolean) {
     const state = createThreadQuery(archived);
+    const listError = computed(() => state.listError() ?? (state.rowErrors().size ? ChatListError.Row : undefined));
     return {
       state,
       view: {
@@ -958,12 +1042,12 @@ export class ChatListStore {
         loading: state.loading.asReadonly(),
         error: computed(
           () =>
-            state.listError() ??
+            listError() ??
             (state.unreadErrors().size && state.ids().some((id) => state.unreadErrors().has(id))
               ? ChatListError.Unread
               : undefined),
         ),
-        listError: state.listError.asReadonly(),
+        listError,
         hasMore: computed(() => !!state.cursor()),
         loadingMore: state.loadingMore.asReadonly(),
         activate: () => this.activateThreadQuery(state),
@@ -972,10 +1056,12 @@ export class ChatListStore {
           return this.loadThreads(state);
         },
         retry: () =>
-          this.loadThreads(
-            state,
-            state.listError() === ChatListError.More && !state.dirty ? state.cursor() : undefined,
-          ),
+          listError() === ChatListError.Row && !state.dirty
+            ? this.retryRows(state)
+            : this.loadThreads(
+                state,
+                state.listError() === ChatListError.More && !state.dirty ? state.cursor() : undefined,
+              ),
         loadMore: () => {
           const cursor = state.cursor();
           return (
@@ -1066,7 +1152,12 @@ export class ChatListStore {
       while (!this.destroyRef.destroyed && current.request === operation) {
         const version = current.version;
         const headOnly = current.headOnly && !before;
+        const previousReplies =
+          !before && !headOnly
+            ? new Map(current.ids().map((id) => [id, this.chatInfo.threadSummary(id)?.lastReply?.id]))
+            : undefined;
         const readVersion = this.chatInfo.snapshot();
+        const rowRevision = this.rowRevision;
         const subscriptionVersion = this.chatInfo.subscriptionSnapshot();
         try {
           const read = async (cursor?: string) => {
@@ -1101,20 +1192,36 @@ export class ChatListStore {
           if (this.destroyRef.destroyed || current.request !== operation) return;
           if (version === current.version) {
             this.chatInfo.acceptThreads(page.threads, readVersion, subscriptionVersion);
+            for (const {
+              chatId,
+              threadRootMessage: { id },
+            } of page.threads)
+              if (
+                (current.pendingRows.get(id) ?? Infinity) <= rowRevision &&
+                this.chatInfo.acceptsSnapshot(chatId, readVersion, id) &&
+                !this.chatInfo.thread(id)?.lastReply?.isDeleted
+              )
+                this.finishRow(current, id);
             this.clearUnreadErrors(
               current,
               page.threads.map((thread) => thread.threadRootMessage.id),
             );
-            current.ids.update((ids) => [
-              ...new Set([
-                ...(before || headOnly ? ids : []),
-                ...page.threads
-                  .filter((thread) =>
-                    this.chatInfo.acceptsSnapshot(thread.chatId, readVersion, thread.threadRootMessage.id),
-                  )
-                  .map((thread) => thread.threadRootMessage.id),
-              ]),
-            ]);
+            const returned = new Set(
+              page.threads
+                .filter((thread) =>
+                  this.chatInfo.acceptsSnapshot(thread.chatId, readVersion, thread.threadRootMessage.id),
+                )
+                .map((thread) => thread.threadRootMessage.id),
+            );
+            const retained = previousReplies
+              ? current
+                  .ids()
+                  .filter((id) => !returned.has(id) && this.hasNewThreadReply(current, id, previousReplies.get(id)))
+              : current.ids();
+            if (previousReplies)
+              for (const id of retained)
+                if (!current.pendingRows.has(id)) current.pendingRows.set(id, ++this.rowRevision);
+            current.ids.set([...new Set([...retained, ...returned])]);
             current.cursor.set(page.nextCursor);
             if (!before && page.threads.length) current.headBoundary = Date.parse(page.threads[0].lastReplyAt);
             if (!headOnly) current.loadedThrough.set(page.nextCursor ? Date.parse(page.nextCursor) : -Infinity);

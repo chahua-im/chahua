@@ -550,9 +550,21 @@ export class ConversationStore {
   }
 
   private restoreChatPreview(deletedIds: ReadonlySet<SnowflakeID>) {
-    if (!this.context || !this.atLatest() || this.pageHidesMembershipMessages) return;
+    if (!this.context || this.provisional() || this.needsWindow || this.needsResync || !this.atLatest()) return;
     const { chatId, threadId } = this.context;
     const page = this.page()!;
+    const listHidesMembership = this.hidesMembershipMessages({
+      chatSettings: {
+        ...page.chatSettings,
+        showMembershipMessages: this.session.user()?.showMembershipMessages ?? page.chatSettings.showMembershipMessages,
+      },
+      membershipMessagePolicy: this.chatInfo.membershipPolicy(chatId) ?? page.membershipMessagePolicy,
+    });
+    if (
+      listHidesMembership !== this.pageHidesMembershipMessages ||
+      listHidesMembership !== this.hidesMembershipMessages(page)
+    )
+      return;
     const previous = page.messages
       .filter((message) => !message.isDeleted && (threadId ? message.replyRootId === threadId : !message.replyRootId))
       .at(-1);

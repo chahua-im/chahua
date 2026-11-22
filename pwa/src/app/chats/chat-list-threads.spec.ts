@@ -138,13 +138,214 @@ describe('ChatListStore threads and friend requests', () => {
     await settle();
   }
 
-  async function startThreads() {
+  async function startThreads(row: object = wireThread) {
     await showThreads();
-    peer
-      .expect('threads.list', listThreadsParams())
-      .flush(structuredClone({ threads: [wireThread], nextCursor: 'older' }));
+    peer.expect('threads.list', listThreadsParams()).flush(structuredClone({ threads: [row], nextCursor: 'older' }));
     await settle();
   }
+
+  it.each(['early success', 'in-flight success', 'newer update', 'failed'])(
+    'shares the recalled thread row with its unread refresh (%s)',
+    async (result) => {
+      vi.useFakeTimers();
+      const previous = { ...wireMessage, id: '101', createdAt: '2026-09-05T11:00:00Z', mentions: [] };
+      const latest = { ...wireMessage, id: '102', mentions: [] };
+      await startThreads({ ...wireThread, lastReply: latest });
+      events.next({
+        type: ServerWsMessageType.messageDeleted,
+        payload: { ...testMessage, id: encodeId(latest.id), replyRootId: rootId, isDeleted: true, message: undefined },
+      });
+      const newer = result === 'newer update';
+      const update = {
+        type: ServerWsMessageType.threadUpdate,
+        payload: {
+          chatId: testChat.id,
+          threadRootId: rootId,
+          replyCount: newer ? 2 : 1,
+          lastReplyAt: newer ? latest.createdAt : previous.createdAt,
+        },
+      } as const;
+      const duringRead = result === 'in-flight success' || newer;
+      if (!duringRead) events.next(update);
+      await settle();
+      const row = peer.expect('threads.list', listThreadsParams(false, undefined, '100'));
+      if (duringRead) events.next(update);
+      if (result === 'in-flight success')
+        events.next({
+          type: ServerWsMessageType.messageUpdated,
+          payload: { ...testMessage, id: rootId, message: '更新后的话题根', threadInfo: { replyCount: 1 } },
+        });
+      if (result !== 'early success') {
+        await flushReads();
+        peer.expectNone('threads.getReadState');
+      }
+      if (result === 'failed') {
+        row.error(RpcErrorCode.Unavailable);
+      } else {
+        row.flush({
+          threads: [
+            { ...wireThread, lastReply: previous, lastReplyAt: previous.createdAt, replyCount: 1, unreadCount: 1 },
+          ],
+        });
+      }
+      await settle();
+      if (result === 'failed' || newer) peer.expect('threads.getReadState', threadParams()).flush({ unreadCount: 1 });
+      await flushReads();
+      expect(threads.items()[0].unreadCount).toBe(1);
+      if (result !== 'failed') expect(threads.items()[0].lastReply?.id).toBe(encodeId(newer ? latest.id : previous.id));
+      if (result === 'in-flight success') expect(threads.items()[0].threadRootMessage.message).toBe('更新后的话题根');
+      peer.expectNone('threads.getReadState');
+    },
+  );
+
+  it.each([true, false])(
+    'reuses read state only for a late thread update covered by the recalled row (matches: %s)',
+    async (matches) => {
+      vi.useFakeTimers();
+      await startThreads();
+      events.next({
+        type: ServerWsMessageType.messageDeleted,
+        payload: { ...testMessage, replyRootId: rootId, isDeleted: true, message: undefined },
+      });
+      await settle();
+      peer.expect('threads.list', listThreadsParams(false, undefined, '100')).flush({
+        threads: [{ ...wireThread, replyCount: 1, unreadCount: 1 }],
+      });
+      await settle();
+      expect(threads.items()[0].unreadCount).toBe(1);
+
+      events.next({
+        type: ServerWsMessageType.threadUpdate,
+        payload: {
+          chatId: testChat.id,
+          threadRootId: rootId,
+          replyCount: matches ? 1 : 2,
+          lastReplyAt: testMessage.createdAt,
+        },
+      });
+      await flushReads();
+      if (!matches) {
+        peer.expect('threads.getReadState', threadParams()).flush({ unreadCount: 2 });
+        await settle();
+      }
+      expect(threads.items()[0].unreadCount).toBe(matches ? 1 : 2);
+      peer.expectNone('threads.getReadState');
+    },
+  );
+
+  it.each([true, false])(
+    'keeps a live reply visible until a conflicting zero-count update is checked (reply survives: %s)',
+    async (survives) => {
+      vi.useFakeTimers();
+      const previous = { ...wireMessage, id: '101', mentions: [] };
+      const latest = { ...wireMessage, id: '103', createdAt: '2026-09-10T12:00:00Z', mentions: [] };
+      const current = { ...wireThread, lastReply: latest, lastReplyAt: latest.createdAt, replyCount: 1 };
+      await startThreads({ ...wireThread, lastReply: previous, replyCount: 1 });
+      events.next({
+        type: ServerWsMessageType.messageDeleted,
+        payload: {
+          ...testMessage,
+          id: encodeId(previous.id),
+          replyRootId: rootId,
+          isDeleted: true,
+          message: undefined,
+        },
+      });
+      await settle();
+      peer.expect('threads.list', listThreadsParams(false, undefined, '100')).flush({ threads: [current] });
+      await settle();
+
+      const zero = {
+        type: ServerWsMessageType.threadUpdate,
+        payload: { chatId: testChat.id, threadRootId: rootId, replyCount: 0, lastReplyAt: testMessage.createdAt },
+      } as const;
+      events.next(zero);
+      await settle();
+      const row = peer.expect('threads.list', listThreadsParams(false, undefined, '100'));
+      expect(threads.items()[0].lastReply?.id).toBe(encodeId(latest.id));
+      events.next(zero);
+      row.flush({ threads: survives ? [current] : [] });
+      await flushReads();
+
+      expect(threads.items().map((item) => item.lastReply?.id)).toEqual(survives ? [encodeId(latest.id)] : []);
+      peer.expectNone('threads.list');
+      peer.expectNone('threads.getReadState');
+    },
+  );
+
+  it('keeps a new live reply visible when a full thread refresh omits its row', async () => {
+    vi.useFakeTimers();
+    await startThreads({ ...wireThread, lastReply: { ...wireMessage, id: '101', mentions: [] }, replyCount: 1 });
+    const refresh = threads.refresh();
+    await settle();
+    const page = peer.expect('threads.list', listThreadsParams());
+    const latest = { ...testMessage, id: encodeId('103'), replyRootId: rootId, createdAt: '2026-09-10T12:00:00Z' };
+    events.next({ type: ServerWsMessageType.message, payload: latest });
+    events.next({
+      type: ServerWsMessageType.threadUpdate,
+      payload: { chatId: testChat.id, threadRootId: rootId, replyCount: 1, lastReplyAt: latest.createdAt },
+    });
+    page.flush({ threads: [] });
+    await refresh;
+    await settle();
+    expect(threads.items()[0]?.lastReply?.id).toBe(latest.id);
+    peer.expect('threads.list', listThreadsParams(false, undefined, '100')).flush({
+      threads: [
+        {
+          ...wireThread,
+          lastReply: { ...wireMessage, id: '103', createdAt: latest.createdAt, mentions: [] },
+          lastReplyAt: latest.createdAt,
+          replyCount: 1,
+          unreadCount: 1,
+        },
+      ],
+    });
+    await flushReads();
+    expect(threads.items()[0]).toMatchObject({ lastReply: { id: latest.id }, unreadCount: 1 });
+    peer.expectNone('threads.list');
+    peer.expectNone('threads.getReadState');
+  });
+
+  it('keeps a new live reply visible when an earlier thread row returns empty', async () => {
+    vi.useFakeTimers();
+    await startThreads({ ...wireThread, lastReply: { ...wireMessage, id: '101', mentions: [] }, replyCount: 1 });
+    events.next({
+      type: ServerWsMessageType.threadUpdate,
+      payload: { chatId: testChat.id, threadRootId: rootId, replyCount: 0, lastReplyAt: testMessage.createdAt },
+    });
+    await settle();
+    const params = listThreadsParams(false, undefined, '100');
+    const row = peer.expect('threads.list', params);
+    const latest = {
+      ...testMessage,
+      id: encodeId('103'),
+      replyRootId: rootId,
+      createdAt: '2026-09-10T12:00:00Z',
+    };
+    events.next({ type: ServerWsMessageType.message, payload: latest });
+    events.next({
+      type: ServerWsMessageType.threadUpdate,
+      payload: { chatId: testChat.id, threadRootId: rootId, replyCount: 1, lastReplyAt: latest.createdAt },
+    });
+    row.flush({ threads: [] });
+    await settle();
+    expect(threads.items()[0]?.lastReply?.id).toBe(latest.id);
+    peer.expect('threads.list', params).flush({
+      threads: [
+        {
+          ...wireThread,
+          lastReply: { ...wireMessage, id: '103', createdAt: latest.createdAt, mentions: [] },
+          lastReplyAt: latest.createdAt,
+          replyCount: 1,
+          unreadCount: 1,
+        },
+      ],
+    });
+    await flushReads();
+    expect(threads.items()[0]).toMatchObject({ lastReply: { id: latest.id }, unreadCount: 1 });
+    peer.expectNone('threads.list');
+    peer.expectNone('threads.getReadState');
+  });
 
   it.each([true, false])(
     'recovers thread unread errors from accepted WS state (RPC fails first: %s)',

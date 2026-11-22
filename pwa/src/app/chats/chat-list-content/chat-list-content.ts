@@ -527,6 +527,15 @@ export class ChatListContent {
     if (this.showRequests()) void this.friendRequests().refresh();
   }
 
+  protected retryList() {
+    const queries = [this.showChats() ? this.chatQuery() : undefined, this.showThreads() ? this.threads() : undefined];
+    if (!queries.some((query) => query?.error() === ChatListError.Row)) {
+      this.refresh();
+      return;
+    }
+    for (const query of queries) if (query?.error()) void query.retry();
+  }
+
   protected async loadMore(event: InfiniteScrollCustomEvent) {
     try {
       await Promise.all([

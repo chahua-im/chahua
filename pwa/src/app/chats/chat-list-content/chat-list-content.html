@@ -232,9 +232,9 @@
         }
         @let combinedError = showThreads() && threads().error() && showChats() && chatQuery().error();
         @if (combinedError) {
-          <app-load-error compact [message]="'chats.content.combinedLoadFailed' | transloco" (retry)="refresh()" />
+          <app-load-error compact [message]="'chats.content.combinedLoadFailed' | transloco" (retry)="retryList()" />
         } @else if (showThreads() && threads().error()) {
-          <app-load-error compact [message]="'chats.content.threadsLoadFailed' | transloco" (retry)="refresh()" />
+          <app-load-error compact [message]="'chats.content.threadsLoadFailed' | transloco" (retry)="retryList()" />
         }
         @if (showChats() && !combinedError) {
           @if (chatQuery().error(); as error) {
@@ -245,11 +245,11 @@
                   ? ('chats.content.chatsLoadFailed' | transloco)
                   : error === ChatListError.Unread
                     ? ('chats.content.unreadLoadFailed' | transloco)
-                    : error === ChatListError.Recent
+                    : error === ChatListError.Recent || error === ChatListError.Row
                       ? ('chats.content.recentLoadFailed' | transloco)
                       : ('chats.content.moreLoadFailed' | transloco)
               "
-              (retry)="refresh()" />
+              (retry)="retryList()" />
           }
         }
       }
