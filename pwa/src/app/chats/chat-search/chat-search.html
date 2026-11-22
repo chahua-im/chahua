@@ -25,17 +25,23 @@
     <div (click)="locate(message)"><app-message [message]="message" [own]="false" [interactive]="false" inert /></div>
   }
   @if (cursor() != null && !error()) {
-    <ion-infinite-scroll threshold="100px" (ionInfinite)="more($event)">
+    <ion-infinite-scroll
+      threshold="100px"
+      [class.ion-hide]="loading() && !messages().length"
+      (ionInfinite)="more($event)">
       <ion-infinite-scroll-content />
     </ion-infinite-scroll>
   }
   @if (queryLength() === 1) {
     <p class="ion-padding ion-text-center">{{ 'chats.search.tooShort' | transloco }}</p>
-  } @else if (loading() && cursor() == null) {
+  } @else if (loading() && !messages().length) {
     <div class="page-loading"><ion-spinner /></div>
   } @else if (error()) {
-    <app-load-error [compact]="!!messages().length" [message]="'chats.search.failed' | transloco" (retry)="load()" />
-  } @else if (query().trim() && !messages().length) {
+    <app-load-error
+      [compact]="!!messages().length"
+      [message]="'chats.search.failed' | transloco"
+      (retry)="load(cursor() != null)" />
+  } @else if (query().trim() && !messages().length && cursor() == null) {
     <p class="ion-padding ion-text-center">{{ 'chats.search.noResults' | transloco }}</p>
   }
 </ion-content>

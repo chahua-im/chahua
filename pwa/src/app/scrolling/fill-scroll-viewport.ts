@@ -6,11 +6,13 @@ export function fillScrollViewport(
   error: Signal<boolean>,
   cursor: Signal<unknown>,
   more: () => Promise<void>,
+  itemCount?: Signal<number>,
 ) {
   const host = inject<ElementRef<HTMLElement>>(ElementRef);
   const destroy = inject(DestroyRef);
   afterRenderEffect((onCleanup) => {
     if (loading() || error() || cursor() == null) return;
+    itemCount?.();
     const content = host.nativeElement.closest('ion-content') ?? host.nativeElement.querySelector('ion-content');
     if (!content) return;
     let current = true;
