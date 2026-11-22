@@ -32,6 +32,7 @@ import type { SnowflakeID } from '../api/snowflake-id';
 import { SessionStore } from '../session/session-store';
 import type { Composition } from './message-composer/message-composer';
 import { forwardPreview, showsForwardOrigin } from './forwarding';
+import { recallConfirmation, recalledMessageIds, redactRecalledReply } from './message-change';
 import { MessageDelivery } from './message-delivery';
 import type { MessageContent } from './message/message';
 import { UploadStatus, type AttachmentUpload } from './upload';
@@ -113,27 +114,31 @@ export class MessageOutbox {
       if (item) this.created(item, message, true);
     });
     this.connection.changes$.pipe(takeUntilDestroyed()).subscribe((event) => {
+      const ids = recalledMessageIds(event);
+      const recalled = ids && new Set(ids);
       for (const item of this.pending()) {
         if (item.chatId !== event.payload.chatId) continue;
-        const id = item.editId ?? item.confirmed()?.id;
+        const confirmed = item.confirmed();
+        const id = item.editId ?? confirmed?.id;
         const task = this.tasks.get(item)!;
+        if (recalled) {
+          if (id != null && recalled.has(id)) {
+            this.markRecalled(item, task);
+            this.pump();
+            continue;
+          }
+          const intent = task.intent();
+          const local = redactRecalledReply(intent.local, recalled);
+          if (local !== intent.local) task.intent.set({ ...intent, local });
+          if (confirmed) item.confirmed.set(redactRecalledReply(confirmed, recalled));
+          continue;
+        }
         if (event.type === ServerWsMessageType.messageUpdated && event.payload.id === id) {
           if (task.patch && matchesBody(event.payload, task.patch.body)) {
             this.acknowledge(item, event.payload, task.patch, true);
             this.pump();
           }
           if (item.cancelled()) void this.delete(item);
-        } else if (
-          (event.type === ServerWsMessageType.messageDeleted && event.payload.id === id) ||
-          (event.type === ServerWsMessageType.messagesBulkDeleted &&
-            id != null &&
-            event.payload.messageIds.includes(id))
-        ) {
-          task.cancelled.set(true);
-          task.deleted = true;
-          task.changed.next();
-          this.cleanUploads(item);
-          this.pump();
         }
       }
     });
@@ -172,6 +177,7 @@ export class MessageOutbox {
     composition: Composition,
     replyTo?: MessageResponse,
     replyToId = replyTo?.id,
+    recalledReply = false,
   ) {
     return this.add(chatId, threadId, {
       body: {
@@ -192,6 +198,7 @@ export class MessageOutbox {
         messageType: composition.messageType,
         mentions: composition.mentions,
         metadata: composition.previewMetadata,
+        recalledReply: recalledReply && !replyTo ? true : undefined,
         replyToMessage: replyTo && {
           ...replyTo,
           forwardedFromName: replyTo.forwardedFrom?.sender.name,
@@ -725,13 +732,22 @@ export class MessageOutbox {
     const task = this.tasks.get(item)!;
     if (submission.revision < task.acknowledged() || (submission.revision === task.acknowledged() && item.published()))
       return false;
-    item.confirmed.set(item.cancelled() ? tombstone(message) : message);
+    const response = this.connection.redactKnownRecalls(message);
+    if (response.isDeleted) this.markRecalled(item, task);
+    item.confirmed.set(item.cancelled() ? tombstone(response) : response);
     task.acknowledged.set(submission.revision);
     if (published) item.published.set(true);
     if (!this.needsSend(item)) item.delivery.set(MessageDelivery.Sent);
     else item.delivery.set(MessageDelivery.Sending);
     if (!item.cancelled()) clearTimeout(task.timer);
     return true;
+  }
+
+  private markRecalled(item: OutgoingMessage, task: Task) {
+    task.cancelled.set(true);
+    task.deleted = true;
+    task.changed.next();
+    this.cleanUploads(item);
   }
 
   private delete(item: OutgoingMessage): Promise<void> {
@@ -759,19 +775,7 @@ export class MessageOutbox {
       if (item.disposed) return;
       task.deleted = true;
       item.delivery.set(MessageDelivery.Sent);
-      this.connection.acceptChange({
-        type: ServerWsMessageType.messageDeleted,
-        payload: {
-          ...message,
-          isDeleted: true,
-          message: undefined,
-          metadata: undefined,
-          attachments: [],
-          hasAttachments: false,
-          sticker: undefined,
-          reactions: [],
-        },
-      });
+      this.connection.acceptChange(recallConfirmation(message));
     })().finally(() => {
       task.deletion = undefined;
     });

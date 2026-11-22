@@ -71,13 +71,11 @@
         @if (origin(); as origin) {
           <app-forwarded-label class="forward-origin" [name]="origin.sender.name" />
           @if (origin.originalReplyTo; as originalReply) {
-            @if (!originalReply.isDeleted) {
-              <div
-                appMessageReplyPreview
-                class="original-reply"
-                [message]="originalReply"
-                [name]="originalReply.sender.name ?? originalReply.sender.uid"></div>
-            }
+            <div
+              appMessageReplyPreview
+              class="original-reply"
+              [message]="originalReply"
+              [name]="originalReply.sender.name ?? originalReply.sender.uid"></div>
           }
         }
         @if (quoted(); as quote) {
@@ -85,10 +83,12 @@
             appMessageReplyPreview
             type="button"
             [message]="quote"
-            [name]="quoteName()"
+            [name]="quote.sender.name ?? quote.sender.uid"
             [attr.inert]="preview() ? '' : null"
-            [disabled]="jumpDisabled() || !canInteract()"
+            [disabled]="quote.isDeleted || jumpDisabled() || !canInteract()"
             (click)="jump.emit(quote.id)"></button>
+        } @else if (message().recalledReply && !message().isDeleted) {
+          <div appMessageReplyPreview></div>
         }
         @if (hasMedia()) {
           <div class="media-content" [attr.inert]="preview() ? '' : null" (click)="sticker($event)">

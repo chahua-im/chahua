@@ -1,20 +1,27 @@
 import { userColors } from '../user-colors';
 import { Component, computed, input } from '@angular/core';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { type MessagePreview as Quote } from '../../../generated/models';
 import { ForwardedLabel } from '../forwarded-label';
 import { MessagePreview } from '../message-preview/message-preview';
 
 @Component({
   selector: 'button[appMessageReplyPreview], div[appMessageReplyPreview]',
-  imports: [ForwardedLabel, MessagePreview],
+  imports: [ForwardedLabel, MessagePreview, TranslocoPipe],
   template: `
     <span class="reply-content">
-      @if (message().forwardedFromName; as name) {
+      @if (message()?.forwardedFromName; as name) {
         <app-forwarded-label [name]="name" />
       } @else {
         <span class="reply-name">{{ name() }}</span>
       }
-      <span class="reply-text"><app-message-preview [message]="message()" /></span>
+      <span class="reply-text">
+        @if (message(); as preview) {
+          <app-message-preview [message]="preview" />
+        } @else {
+          {{ 'messages.preview.deleted' | transloco }}
+        }
+      </span>
     </span>
   `,
   styles: `
@@ -65,7 +72,7 @@ import { MessagePreview } from '../message-preview/message-preview';
   },
 })
 export class MessageReplyPreview {
-  readonly message = input.required<Omit<Quote, 'clientGeneratedId'>>();
-  readonly name = input.required<string | number>();
+  readonly message = input<Omit<Quote, 'clientGeneratedId'>>();
+  readonly name = input<string | number>('');
   protected readonly colors = computed(() => userColors(String(this.name())));
 }

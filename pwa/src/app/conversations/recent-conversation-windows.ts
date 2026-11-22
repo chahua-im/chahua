@@ -1,24 +1,15 @@
 import { effect, inject, Service } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { GroupKind, ServerWsMessageType, type MessagePreview, type MessageResponse } from '../../generated/models';
+import { GroupKind, ServerWsMessageType, type MessageResponse } from '../../generated/models';
 import { Connection, ResyncReason } from '../api/connection';
 import type { SnowflakeID } from '../api/snowflake-id';
 import { ChatChangeKind, ChatStore } from '../chats/chat-store';
-import type { MessageChange } from '../messages/message-change';
-import { mergeMessageArrivals } from '../messages/message-merge';
+import { messageChangePatch, redactRemovedMessage } from '../messages/message-change';
+import { mergeMessageArrivals, patchMessages } from '../messages/message-merge';
 import { MessageSync, requiresMessagePurge } from '../messages/message-sync';
-import { preserveReactionOwnership } from '../messages/reaction-state';
 import { isMembershipMessage } from '../messages/system-message';
 import { SessionStore } from '../session/session-store';
-import {
-  acceptsConversationMessage,
-  redactDeletedMessage,
-  replaceEditedMessage,
-  replaceMessageCitation,
-  toMessagePreview,
-  type ConversationContext,
-  type MessageRange,
-} from './conversation-window';
+import { acceptsConversationMessage, type ConversationContext, type MessageRange } from './conversation-window';
 
 const MAX_WINDOWS = 8;
 const MAX_MESSAGES = 50;
@@ -75,7 +66,12 @@ export class RecentConversationWindows {
 
   constructor() {
     this.realtime.messages$.pipe(takeUntilDestroyed()).subscribe((message) => this.receive(message));
-    this.realtime.changes$.pipe(takeUntilDestroyed()).subscribe((event) => this.applyChange(event));
+    this.realtime.changes$.pipe(takeUntilDestroyed()).subscribe((event) => {
+      if (!this.entries.size) return;
+      const removed = event.type === ServerWsMessageType.messagesBulkDeleted && event.removeFromTimeline;
+      this.patch(event.payload.chatId, messageChangePatch(event, removed ? redactRemovedMessage : undefined));
+      if (event.type === ServerWsMessageType.messageUpdated && event.restoreToTimeline) this.receive(event.payload);
+    });
     this.realtime.events$.pipe(takeUntilDestroyed()).subscribe((event) => {
       if (event.type !== ServerWsMessageType.threadUpdate || this.sync.active()) return;
       const { chatId, threadRootId, replyCount } = event.payload;
@@ -183,52 +179,17 @@ export class RecentConversationWindows {
       if (isMembershipMessage(message) && (window.hideMembershipMessages || !this.matchesFilter(scope, window)))
         continue;
       const { range } = window;
+      if (message.isDeleted && range.messages.some(({ id }) => id === message.id)) continue;
       // The generation may be old while a verified cursor chain is replayed before Ready.
       // A reset severs that chain; a bare Ready never aligns a legacy or reset window.
-      const atLatest = range.newerCursor == null && window.alignedGeneration != null && this.sync.active();
-      const messages = mergeMessageArrivals(range.messages, [message], atLatest);
+      const aligned = window.alignedGeneration != null && this.sync.active();
+      const messages = mergeMessageArrivals(
+        range.messages,
+        [message],
+        aligned && range.newerCursor == null,
+        message.isDeleted && aligned && range.olderCursor == null,
+      );
       if (messages !== range.messages) entry.window = trim({ ...window, range: { ...range, messages } });
-    }
-  }
-
-  private applyChange(event: MessageChange) {
-    if (!this.entries.size) return;
-    switch (event.type) {
-      case ServerWsMessageType.messageUpdated:
-      case ServerWsMessageType.messageDeleted: {
-        const next = event.payload;
-        const deleted = event.type === ServerWsMessageType.messageDeleted || next.isDeleted;
-        let replacement: MessageResponse | undefined;
-        let preview: MessagePreview | undefined;
-        this.patch(next.chatId, (message) => {
-          if (message.id === next.id) {
-            replacement ??= deleted ? redactDeletedMessage(next) : next;
-            return replaceEditedMessage(message, replacement);
-          }
-          if (message.replyToMessage?.id !== next.id) return message;
-          return replaceMessageCitation(message, next.id, deleted ? null : (preview ??= toMessagePreview(next)));
-        });
-        break;
-      }
-      case ServerWsMessageType.messagesBulkDeleted: {
-        const { chatId, messageIds } = event.payload;
-        const ids = new Set(messageIds);
-        this.patch(chatId, (message) => {
-          if (ids.has(message.id)) return redactDeletedMessage(message);
-          const quotedId = message.replyToMessage?.id;
-          return quotedId != null && ids.has(quotedId) ? replaceMessageCitation(message, quotedId, null) : message;
-        });
-        break;
-      }
-      case ServerWsMessageType.reactionUpdated: {
-        const { chatId, messageId, reactions } = event.payload;
-        this.patch(chatId, (message) =>
-          message.id === messageId
-            ? { ...message, reactions: preserveReactionOwnership(message.reactions, reactions) }
-            : message,
-        );
-        break;
-      }
     }
   }
 
@@ -236,12 +197,8 @@ export class RecentConversationWindows {
     for (const { scope, window } of this.entries.values()) {
       if (scope.chatId !== chatId) continue;
       const current = window.range.messages;
-      let messages: MessageResponse[] | undefined;
-      for (let i = 0; i < current.length; i++) {
-        const updated = update(current[i]);
-        if (updated !== current[i]) (messages ??= current.slice())[i] = updated;
-      }
-      if (messages) window.range = { ...window.range, messages };
+      const messages = patchMessages(current, update);
+      if (messages !== current) window.range = { ...window.range, messages };
     }
   }
 }

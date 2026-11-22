@@ -81,7 +81,7 @@ import {
   searchOutline,
   trashOutline,
 } from 'ionicons/icons';
-import { firstValueFrom, forkJoin, of, Subject, takeUntil, timer } from 'rxjs';
+import { finalize, firstValueFrom, forkJoin, of, shareReplay, Subject, takeUntil, timer, type Observable } from 'rxjs';
 import { RpcApi } from '../../../generated/rpc-api';
 import {
   GroupKind,
@@ -98,6 +98,7 @@ import {
   type ThreadUpdatePayload,
 } from '../../../generated/models';
 import { Connection, ResyncReason } from '../../api/connection';
+import { RpcError, RpcErrorCode } from '../../api/rpc-error';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { ChatAvatar, conversationAvatar } from '../../chats/chat-avatar/chat-avatar';
 import { ChatMute } from '../../chats/chat-mute/chat-mute';
@@ -114,6 +115,7 @@ import {
   type ForwardSourcesResult,
 } from '../../messages/forwarding';
 import { MessageActions } from '../../messages/message-actions';
+import { isMessageChange, recalledMessageIds, redactDeletedMessage } from '../../messages/message-change';
 import { MessageComposer, type Composition } from '../../messages/message-composer/message-composer';
 import { AvatarMention } from '../../messages/avatar-mention';
 import { MessageDatePipe } from '../../messages/message-date.pipe';
@@ -142,6 +144,7 @@ import {
   type ForwardDraftLocation,
 } from '../conversation-navigation';
 import { ConversationError, ConversationStore, PageDirection } from '../conversation-store';
+import type { MessageRange } from '../conversation-window';
 import { ConversationViewportHeader } from '../conversation-viewport-header';
 import { ReactionVisibility } from '../reaction-visibility';
 import { DraftStore } from '../draft-store';
@@ -726,7 +729,7 @@ export class ConversationPage {
       try {
         const result = await this.messageActions.recallMany(
           entry.chatId,
-          batch.map(({ message }) => message.id),
+          batch.map(({ message }) => message),
         );
         if (!current()) return;
         const deleted = new Set(result.messageIds);
@@ -806,6 +809,7 @@ export class ConversationPage {
   });
   private threadRootUpdate?: ThreadUpdatePayload;
   private threadRootVersion = 0;
+  private threadRootRead?: { entry: ConversationEntry; request: Observable<MessageResponse> };
   protected readonly threadRoot = computed(() => {
     if (!this.accessible()) return undefined;
     const rootId = this.threadId();
@@ -877,9 +881,7 @@ export class ConversationPage {
     const version = this.threadRootVersion;
     try {
       const root = await firstValueFrom(
-        this.api.messages
-          .get({ chatId: entry.chatId, messageId: entry.threadId })
-          .pipe(takeUntilDestroyed(this.destroyRef)),
+        this.readMessage(entry, entry.threadId).pipe(takeUntilDestroyed(this.destroyRef)),
       );
       if (
         version === this.threadRootVersion &&
@@ -897,6 +899,19 @@ export class ConversationPage {
     } catch {
       /* The conversation can remain usable when the root is unavailable. */
     }
+  }
+
+  private readMessage(entry: ConversationEntry, messageId: SnowflakeID) {
+    if (messageId !== entry.threadId) return this.api.messages.get({ chatId: entry.chatId, messageId });
+    if (this.threadRootRead?.entry === entry) return this.threadRootRead.request;
+    const request = this.api.messages.get({ chatId: entry.chatId, messageId }).pipe(
+      finalize(() => {
+        if (this.threadRootRead?.request === request) this.threadRootRead = undefined;
+      }),
+      shareReplay({ bufferSize: 1, refCount: true }),
+    );
+    this.threadRootRead = { entry, request };
+    return request;
   }
   private readonly nav = inject(NavController);
   private readonly outlet = inject(IonRouterOutlet, { optional: true });
@@ -1061,9 +1076,11 @@ export class ConversationPage {
       [];
     for (const message of messages) {
       if (!isVisibleMessage(message) || (hideMembershipMessages && isMembershipMessage(message))) continue;
-      const outgoing = this.outgoing().find(
-        (item) => item.editId === message.id || item.clientGeneratedId === message.clientGeneratedId,
-      );
+      const outgoing = message.isDeleted
+        ? undefined
+        : this.outgoing().find(
+            (item) => item.editId === message.id || item.clientGeneratedId === message.clientGeneratedId,
+          );
       if (outgoing?.cancelled()) continue;
       const preview = outgoing?.message();
       entries.push({
@@ -1210,6 +1227,11 @@ export class ConversationPage {
     source: this.entryVersion,
     computation: (): SnowflakeID | undefined => undefined,
   });
+  protected readonly savedReplyDeleted = linkedSignal({ source: this.entryVersion, computation: () => false });
+  private replyLookup?: Subject<void>;
+  /** The current or completed quote lookup can be reused until the checkpoint or connection changes. */
+  private replyLookupGeneration?: number;
+  private replyNeedsRefresh = false;
   // Route cleanup saves the previous input before activate advances entryVersion.
   protected readonly draft = linkedSignal({ source: this.entryVersion, computation: () => '' });
   protected readonly editText = linkedSignal({ source: this.entryVersion, computation: () => '' });
@@ -1328,8 +1350,14 @@ export class ConversationPage {
         },
       };
     });
+    this.conversation.replacedWindows$.pipe(takeUntilDestroyed()).subscribe((page) => {
+      if (this.isCurrent()) this.refreshReplyFromWindow(page);
+    });
     this.messageSync.resets$.pipe(takeUntilDestroyed()).subscribe(({ chatId, reason }) => {
-      if (chatId === this.id() && requiresMessagePurge(reason)) this.clearMessagePreviews();
+      if (chatId !== this.id()) return;
+      this.threadRootRead = undefined;
+      this.replyLookupGeneration = undefined;
+      if (requiresMessagePurge(reason)) this.clearMessagePreviews();
     });
     registerEscape(() => (this.active() ? this.escapeComposer() : false));
     this.chatInfo.receiptPrivacyChanges$.pipe(takeUntilDestroyed()).subscribe((peerUid) => {
@@ -1447,27 +1475,28 @@ export class ConversationPage {
         }
       }
       if ('chatId' in event.payload && event.payload.chatId === this.id()) {
-        if (
-          event.type === ServerWsMessageType.messageDeleted ||
-          event.type === ServerWsMessageType.messagesBulkDeleted
-        ) {
-          const ids = event.type === ServerWsMessageType.messageDeleted ? [event.payload.id] : event.payload.messageIds;
-          this.selectedMessages.update(
-            (selected) =>
-              new Map(
-                [...selected].filter(([, item]) => {
-                  const message = 'delivery' in item ? item.confirmed() : item;
-                  return !message || !ids.includes(message.id);
-                }),
-              ),
-          );
+        const recalled = isMessageChange(event) ? recalledMessageIds(event) : undefined;
+        if (recalled?.length) {
+          const ids = new Set(recalled);
+          const replyId = this.replyTo()?.id ?? this.savedReplyId();
+          if (replyId != null && ids.has(replyId)) this.markReplyDeleted();
+          if (this.selectedMessages().size) {
+            this.selectedMessages.update(
+              (selected) =>
+                new Map(
+                  [...selected].filter(([, item]) => {
+                    const message = 'delivery' in item ? item.confirmed() : item;
+                    return !message || !ids.has(message.id);
+                  }),
+                ),
+            );
+          }
+          this.dismissMentions(recalled);
         } else if (event.type === ServerWsMessageType.messageUpdated) {
           const key = this.selectionKey(event.payload);
           if (this.selectedMessages().has(key))
             this.selectedMessages.update((selected) => new Map(selected).set(key, event.payload));
         }
-        if (event.type === ServerWsMessageType.messageDeleted) this.dismissMentions([event.payload.id]);
-        if (event.type === ServerWsMessageType.messagesBulkDeleted) this.dismissMentions(event.payload.messageIds);
         if (
           event.type === ServerWsMessageType.notification &&
           event.payload.notificationType !== NotificationType.reaction &&
@@ -1517,6 +1546,10 @@ export class ConversationPage {
       }
     });
     this.realtime.resync$.pipe(takeUntilDestroyed()).subscribe((reason) => {
+      if (reason === ResyncReason.Connected && !this.messageSync.active()) {
+        this.stopReplyLookup();
+        this.replyNeedsRefresh = true;
+      }
       if (reason !== ResyncReason.Foreground) {
         // Missed notifications can add new reactions to previously visited messages.
         this.visitedReactions.clear();
@@ -1529,6 +1562,7 @@ export class ConversationPage {
       }
       if (this.isCurrent()) {
         const entry = this.entryKey();
+        if (this.replyNeedsRefresh) void this.restoreReply();
         void this.enterReactionSession();
         void this.enterMentionSession();
         if (reason === ResyncReason.Foreground && this.realtime.connected()) {
@@ -1639,6 +1673,8 @@ export class ConversationPage {
   }
 
   private activate(id: SnowflakeID, threadId?: SnowflakeID) {
+    this.stopReplyLookup();
+    this.replyNeedsRefresh = false;
     this.retainConversation();
     this.viewportPosition = undefined;
     this.contentGeometry = undefined;
@@ -1687,6 +1723,7 @@ export class ConversationPage {
     }
     this.active.set(true);
     this.messageSync.setPriority(this.id(), this);
+    if (this.replyNeedsRefresh) void this.restoreReply();
     if (this.conversation.provisional()) this.restoreConversation();
     else void this.conversation.reconnect();
     void this.loadPins();
@@ -1747,6 +1784,7 @@ export class ConversationPage {
     const data = this.router.routerState.snapshot.root.firstChild?.data;
     const retainComposer = retainRange && (data?.['modal'] || data?.['preserveConversation']);
     this.saveDraft();
+    this.stopReplyLookup();
     this.linkPreviewOpen.set(false);
     this.scrolling.reset();
     this.active.set(false);
@@ -1886,6 +1924,7 @@ export class ConversationPage {
 
   private clearMessagePreviews() {
     this.threadRootVersion++;
+    this.threadRootRead = undefined;
     this.threadRootUpdate = undefined;
     this.loadedThreadRoot.set(undefined);
     this.navigationVersion++;
@@ -2260,7 +2299,7 @@ export class ConversationPage {
   }
 
   protected retry() {
-    this.retryAction();
+    if (!this.conversation.retrySyncWindow()) this.retryAction();
   }
 
   private restoreConversation() {
@@ -2269,7 +2308,7 @@ export class ConversationPage {
     if (this.conversation.provisional() || error === ConversationError.Open) {
       // Keep the entry's navigation and positioning rather than racing it with reconnect paging.
       if (error !== ConversationError.Missing && !this.pendingNavigation() && !this.conversation.loading())
-        this.retryAction();
+        this.retry();
       return;
     }
     void this.conversation.reconnect();
@@ -2703,8 +2742,11 @@ export class ConversationPage {
   }
 
   protected cancelReply() {
+    this.stopReplyLookup();
+    this.replyNeedsRefresh = false;
     this.replyTo.set(undefined);
     this.savedReplyId.set(undefined);
+    this.savedReplyDeleted.set(false);
   }
 
   protected cancelForward() {
@@ -2730,21 +2772,74 @@ export class ConversationPage {
     if (!this.conversation.atLatest()) void this.goTo({ type: ConversationTargetKind.Latest });
   }
 
-  private async restoreReply(messageId: SnowflakeID) {
+  private markReplyDeleted() {
+    this.replyNeedsRefresh = false;
+    const reply = this.replyTo();
+    if (!reply) this.savedReplyDeleted.set(true);
+    else if (!reply.isDeleted) this.replyTo.set(redactDeletedMessage(reply));
+  }
+
+  private refreshReplyFromWindow(page: MessageRange) {
+    const reply = this.replyTo();
+    const messageId = reply?.id ?? this.savedReplyId();
+    if (messageId == null || reply?.isDeleted || this.savedReplyDeleted()) return;
+    const message = page.messages.find(({ id }) => id === messageId);
+    if (message) {
+      this.stopReplyLookup();
+      this.replyNeedsRefresh = false;
+      this.replyTo.set(message);
+      return;
+    }
+    const first = page.messages[0]?.id;
+    const last = page.messages.at(-1)?.id;
+    const coversReply =
+      (!page.olderCursor || (first != null && first <= messageId)) &&
+      (!page.newerCursor || (last != null && messageId <= last));
+    if (coversReply) {
+      this.stopReplyLookup();
+      this.markReplyDeleted();
+    } else if (this.replyLookupGeneration !== this.messageSync.connectionGeneration) {
+      this.stopReplyLookup();
+      void this.restoreReply(messageId);
+    }
+  }
+
+  private stopReplyLookup() {
+    this.replyLookup?.next();
+    this.replyLookup = undefined;
+    this.replyLookupGeneration = undefined;
+  }
+
+  private async restoreReply(messageId = this.replyTo()?.id ?? this.savedReplyId()) {
+    if (messageId == null || this.replyTo()?.isDeleted || this.savedReplyDeleted()) {
+      this.replyNeedsRefresh = false;
+      return;
+    }
     const entry = this.entryKey();
+    if (this.replyLookup || !this.active() || !this.accessible()) return;
+    const lookup = (this.replyLookup = new Subject<void>());
+    this.replyLookupGeneration = this.messageSync.connectionGeneration;
+    this.replyNeedsRefresh = true;
+    const isRestoring = () => this.replyLookup === lookup && this.isCurrent(entry);
     try {
       const message = await firstValueFrom(
-        this.api.messages.get({ chatId: entry.chatId, messageId }).pipe(takeUntilDestroyed(this.destroyRef)),
+        this.readMessage(entry, messageId).pipe(takeUntil(lookup), takeUntilDestroyed(this.destroyRef)),
       );
-      if (this.isCurrent(entry) && this.savedReplyId() === messageId && !this.replyTo()) {
-        if (message.isDeleted) {
-          this.cancelReply();
-        } else {
-          this.replyTo.set(message);
-        }
+      if (isRestoring()) {
+        const result =
+          this.savedReplyDeleted() || this.replyTo()?.isDeleted
+            ? redactDeletedMessage(message)
+            : this.realtime.redactKnownRecalls(message);
+        this.replyTo.set(result);
+        this.replyNeedsRefresh = false;
       }
-    } catch {
-      // Keep the text usable if the original reply is no longer available.
+    } catch (error) {
+      if (isRestoring() && error instanceof RpcError && error.code === RpcErrorCode.NotFound) this.markReplyDeleted();
+    } finally {
+      if (this.replyLookup === lookup) {
+        this.replyLookup = undefined;
+        if (this.replyNeedsRefresh) this.replyLookupGeneration = undefined;
+      }
     }
   }
 
@@ -2791,6 +2886,7 @@ export class ConversationPage {
       composition,
       this.replyTo(),
       this.replyTo()?.id ?? this.savedReplyId(),
+      this.savedReplyDeleted(),
     );
     if (composition.messageType === MessageType.text) {
       this.draft.set('');
@@ -2875,9 +2971,12 @@ export class ConversationPage {
 
   protected startReply(message: MessageResponse) {
     if (!this.canSendMessage()) return;
+    this.stopReplyLookup();
+    this.replyNeedsRefresh = false;
     this.cancelForward();
-    this.replyTo.set(message);
+    this.replyTo.set(this.realtime.redactKnownRecalls(message));
     this.savedReplyId.set(undefined);
+    this.savedReplyDeleted.set(false);
     if (this.atBottom()) this.position.set({ type: PositionKind.Bottom });
     void this.composer()?.setFocus();
   }

@@ -2,9 +2,22 @@ import { DestroyRef, inject, Service, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { filter, map, Subject, type Subscription } from 'rxjs';
 import { rpcEvents, rpcMethods, rpcSchemas } from '../../generated/rpc-codecs';
-import type { ConversationRef, ConversationView, MessageResponse, ServerWsMessage } from '../../generated/models';
+import type {
+  ConversationRef,
+  ConversationView,
+  MessagePreview,
+  MessageResponse,
+  ServerWsMessage,
+} from '../../generated/models';
 import { ServerWsMessageType } from '../../generated/models';
-import { isMessageChange, type MessageChange, type PinChange } from '../messages/message-change';
+import {
+  isMessageChange,
+  redactDeletedMessage,
+  redactRecalledCitations,
+  redactRecalledPreview,
+  type MessageChange,
+  type PinChange,
+} from '../messages/message-change';
 import { MessageSync } from '../messages/message-sync';
 import { decodeJsonIds, encodeJsonIds } from './json-ids';
 import { RpcConnectionState, RpcTransport, type RpcNotification } from './rpc-transport';
@@ -41,15 +54,16 @@ export class Connection {
   readonly changes$ = this.events$.pipe(filter(isMessageChange));
   readonly resync$ = this.resync.asObservable();
   private readonly acceptedIds = new Set<SnowflakeID>();
-  private readonly recalledIds = new Set<SnowflakeID>();
+  /** True once a completed deletion event has been delivered for list reconciliation. */
+  private readonly recalledIds = new Map<SnowflakeID, boolean>();
   private readonly watches = new Map<WatchMethod, WatchRequest>();
 
   /** RPC confirmations and their notification echoes share one delivery path. */
   accept(message: MessageResponse) {
-    if (this.acceptedIds.has(message.id)) return;
+    if (message.isDeleted || this.recalledIds.has(message.id) || this.acceptedIds.has(message.id)) return;
     this.acceptedIds.add(message.id);
     if (this.acceptedIds.size > 256) this.acceptedIds.delete(this.acceptedIds.values().next().value!);
-    this.events.next({ type: ServerWsMessageType.message, payload: message });
+    this.events.next({ type: ServerWsMessageType.message, payload: this.redactKnownRecalls(message) });
   }
 
   acceptPin(event: PinChange) {
@@ -58,19 +72,48 @@ export class Connection {
 
   acceptChange(event: MessageChange) {
     switch (event.type) {
-      case ServerWsMessageType.messageUpdated:
+      case ServerWsMessageType.messageUpdated: {
         // An edit RPC or a hydrated preview may arrive after the recall notification.
-        if (event.payload.isDeleted) this.recalledIds.add(event.payload.id);
+        if (event.payload.isDeleted) this.recordRecalls([event.payload.id], false);
         else if (this.recalledIds.has(event.payload.id)) return;
-        break;
+        const payload = this.redactKnownRecalls(event.payload);
+        this.events.next(payload === event.payload ? event : { ...event, payload });
+        return;
+      }
       case ServerWsMessageType.messageDeleted:
-        this.recalledIds.add(event.payload.id);
+        // The delete RPC acknowledges the operation and the local snapshot can predate a sync update.
+        if (event.fromRecallRpc && this.recalledIds.has(event.payload.id)) return;
+        if (this.recordRecalls([event.payload.id], true)) event = { ...event, recallEcho: true };
         break;
       case ServerWsMessageType.messagesBulkDeleted:
-        for (const id of event.payload.messageIds) this.recalledIds.add(id);
+        if (this.recordRecalls(event.payload.messageIds, event.payload.complete !== false))
+          event = { ...event, recallEcho: true };
         break;
     }
     this.events.next(event);
+  }
+
+  private recordRecalls(ids: readonly SnowflakeID[], complete: boolean) {
+    let repeated = complete && ids.length > 0;
+    for (const id of ids) {
+      if (this.recalledIds.get(id)) continue;
+      this.recalledIds.set(id, complete);
+      repeated = false;
+    }
+    return repeated;
+  }
+
+  redactKnownRecallPreview(preview: MessagePreview): MessagePreview;
+  redactKnownRecallPreview(preview: MessagePreview | undefined): MessagePreview | undefined;
+  redactKnownRecallPreview(preview: MessagePreview | undefined): MessagePreview | undefined {
+    return redactRecalledPreview(preview, this.recalledIds);
+  }
+
+  /** Reconcile a delayed snapshot with recalls already confirmed for this account. */
+  redactKnownRecalls(message: MessageResponse): MessageResponse {
+    return !message.isDeleted && this.recalledIds.has(message.id)
+      ? redactDeletedMessage(message)
+      : redactRecalledCitations(message, this.recalledIds);
   }
 
   /** Replaces this connection's server-side presence watch scope when authenticated. */

@@ -5,7 +5,7 @@ import { RpcApi } from '../../generated/rpc-api';
 import { ServerWsMessageType, type MessageResponse } from '../../generated/models';
 import { Connection } from '../api/connection';
 import { SessionStore } from '../session/session-store';
-import type { SnowflakeID } from '../api/snowflake-id';
+import { recallConfirmation } from './message-change';
 @Injectable()
 export class MessageActions {
   private readonly api = inject(RpcApi);
@@ -17,23 +17,22 @@ export class MessageActions {
 
   async recall(message: MessageResponse) {
     await this.response(this.api.messages.delete({ chatId: message.chatId, messageId: message.id }));
-    this.realtime.acceptChange({
-      type: ServerWsMessageType.messageDeleted,
-      payload: {
-        ...message,
-        isDeleted: true,
-        message: undefined,
-        attachments: [],
-        hasAttachments: false,
-        sticker: undefined,
-        reactions: [],
-      },
-    });
+    this.realtime.acceptChange(recallConfirmation(message));
   }
 
-  async recallMany(chatId: SnowflakeID, messageIds: SnowflakeID[]) {
+  async recallMany(
+    chatId: MessageResponse['chatId'],
+    messages: readonly Pick<MessageResponse, 'id' | 'replyRootId'>[],
+  ) {
+    const messageIds = messages.map(({ id }) => id);
     const payload = await this.response(this.api.messages.deleteMany({ chatId, messageIds }));
-    this.realtime.acceptChange({ type: ServerWsMessageType.messagesBulkDeleted, payload });
+    const replyIds = new Set(messages.filter(({ replyRootId }) => replyRootId != null).map(({ id }) => id));
+    const threadRepliesOnly = payload.messageIds.length > 0 && payload.messageIds.every((id) => replyIds.has(id));
+    this.realtime.acceptChange({
+      type: ServerWsMessageType.messagesBulkDeleted,
+      ...(threadRepliesOnly ? { threadRepliesOnly: true } : {}),
+      payload,
+    });
     return payload;
   }
 

@@ -267,25 +267,21 @@ fn validate_reply_target(
     let reply_msg = messages_schema::table
         .filter(messages_schema::id.eq(reply_to_id))
         .filter(messages_schema::chat_id.eq(chat_id))
-        .filter(messages_schema::deleted_at.is_null())
         .filter(messages_schema::is_published.eq(true))
-        .select(Message::as_select())
-        .first::<Message>(conn)
+        .select((messages_schema::reply_root_id, messages_schema::system_kind))
+        .first::<(Option<i64>, Option<crate::models::SystemMessageKind>)>(conn)
         .optional()?;
 
-    let Some(reply_msg) = reply_msg else {
+    let Some((reply_root_id, system_kind)) = reply_msg else {
         return Err(AppError::NotFound("Reply target message not found"));
     };
 
-    if reply_msg
-        .system_kind
-        .is_some_and(|kind| kind.is_membership())
-    {
+    if system_kind.is_some_and(|kind| kind.is_membership()) {
         return Err(AppError::BadRequest("Cannot reply to membership messages"));
     }
     let matches_thread_context = match thread_id {
-        Some(thread_id) => reply_msg.id == thread_id || reply_msg.reply_root_id == Some(thread_id),
-        None => reply_msg.reply_root_id.is_none(),
+        Some(thread_id) => reply_to_id == thread_id || reply_root_id == Some(thread_id),
+        None => reply_root_id.is_none(),
     };
 
     if !matches_thread_context {
@@ -2810,6 +2806,48 @@ mod tests {
         collections::{HashMap, HashSet},
         sync::Arc,
     };
+
+    #[test]
+    fn reply_validation_accepts_recalled_targets_in_the_same_conversation() {
+        use diesel::{connection::SimpleConnection, Connection};
+
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        let mut conn = diesel::PgConnection::establish(&url).expect("connect to test database");
+        conn.batch_execute(
+            "CREATE TEMP TABLE messages (
+                 id bigint PRIMARY KEY, chat_id bigint NOT NULL, reply_root_id bigint,
+                 system_kind system_message_kind, is_published boolean NOT NULL, deleted_at timestamptz
+             );
+             INSERT INTO messages VALUES
+                 (10, 1, NULL, NULL, TRUE, now()),
+                 (11, 1, 10, NULL, TRUE, now()),
+                 (12, 1, NULL, NULL, FALSE, NULL),
+                 (13, 1, NULL, 'member_joined', TRUE, NULL);",
+        )
+        .unwrap();
+
+        for (thread_id, target) in [(None, 10), (Some(10), 10), (Some(10), 11)] {
+            super::validate_reply_target(&mut conn, 1, thread_id, target).unwrap();
+        }
+        for (chat_id, thread_id, target) in [
+            (1, None, 11),
+            (1, Some(20), 11),
+            (2, None, 10),
+            (1, None, 12),
+        ] {
+            assert!(matches!(
+                super::validate_reply_target(&mut conn, chat_id, thread_id, target),
+                Err(AppError::NotFound(_))
+            ));
+        }
+        assert!(matches!(
+            super::validate_reply_target(&mut conn, 1, None, 13),
+            Err(AppError::BadRequest(_))
+        ));
+    }
 
     #[test]
     fn reaction_details_bound_samples_preserve_counts_and_own_flags() {

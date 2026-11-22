@@ -16,6 +16,7 @@ import { RpcTransportError } from '../api/rpc-error';
 import { RpcTransport } from '../api/rpc-transport';
 import type { SnowflakeID } from '../api/snowflake-id';
 import type { MessageChange } from './message-change';
+import { isVisibleMessage } from './message-visibility';
 
 const CHUNK_SIZE = 128;
 const PAGE_TIMEOUT_MS = 15_000;
@@ -229,18 +230,26 @@ export class MessageSync {
     }
     const messageIds: SnowflakeID[] = [];
     const threadRootIds = new Set<SnowflakeID>();
+    let threadRepliesOnly = true;
     for (const change of changes) {
       if (change.kind === 'upsert') {
-        if (change.appeared) receiver.accept(change.message);
-        receiver.acceptChange({ type: ServerWsMessageType.messageUpdated, payload: change.message });
+        const { appeared, message } = change;
+        const event: MessageChange = { type: ServerWsMessageType.messageUpdated, payload: message };
+        // A previously hidden root can become visible when an existing audio reply finishes transcoding.
+        if (message.isDeleted && isVisibleMessage(message)) event.restoreToTimeline = true;
+        else if (appeared && !message.isDeleted) receiver.accept(message);
+        receiver.acceptChange(event);
       } else {
         messageIds.push(change.messageId);
         if (change.threadRootId != null) threadRootIds.add(change.threadRootId);
+        else threadRepliesOnly = false;
       }
     }
     if (messageIds.length)
       receiver.acceptChange({
         type: ServerWsMessageType.messagesBulkDeleted,
+        removeFromTimeline: true,
+        ...(threadRepliesOnly ? { threadRepliesOnly: true } : {}),
         payload: { chatId, messageIds, threadRootIds: [...threadRootIds] },
       });
     this.cursors.set(chatId, to);

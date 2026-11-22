@@ -16,6 +16,8 @@ import { RpcTransport } from '../api/rpc-transport';
 import { RpcTestPeer, provideRpcTesting, type RpcTestRequest } from '../api/rpc-testing';
 import { decodeId, encodeId } from '../api/snowflake-id';
 import { mockRealtime, testUser, testChat, testMessage, wireChat, wireMessage } from '../api/testing';
+import { MessageActions } from '../messages/message-actions';
+import { isVisibleMessage } from '../messages/message-visibility';
 import { ConversationError, ConversationStore, PageDirection } from './conversation-store';
 import { RecentConversationWindows } from './recent-conversation-windows';
 
@@ -1400,14 +1402,26 @@ describe('ConversationStore', () => {
     expect(await timeline.open(encodeId('100'), true)).toBe(true);
   });
 
-  it('drops the recalled body and the quote snapshots that reference it', async () => {
+  it('redacts the recalled body and the quote snapshots that reference it', async () => {
     const opening = timeline.open(encodeId('100'));
+    const quote = {
+      ...wire('100'),
+      forwardedFromName: '原作者',
+      metadata: {
+        linkPreviews: [{ url: 'https://example.com/', status: LinkPreviewStatus.ready, title: '链接标题' }],
+      },
+      mentions: [],
+    };
     messages({ around: '100' }).flush({
       chatSettings: { showMembershipMessages: true },
-      messages: [wire('100'), { ...wire('101'), replyToMessage: { ...wire('100'), mentions: [] } }],
+      messages: [wire('100'), { ...wire('101'), replyToMessage: quote }],
     });
     await opening;
-    expect(timeline.items()[1].replyToMessage?.message).toBe('测试消息');
+    expect(timeline.items()[1].replyToMessage).toMatchObject({
+      message: quote.message,
+      forwardedFromName: quote.forwardedFromName,
+      metadata: quote.metadata,
+    });
     TestBed.inject(Connection).acceptChange({
       type: ServerWsMessageType.messagesBulkDeleted,
       payload: { chatId: testChat.id, messageIds: [encodeId('100')] },
@@ -1422,6 +1436,8 @@ describe('ConversationStore', () => {
     expect(timeline.items()[1].replyToMessage).toMatchObject({
       isDeleted: true,
       message: undefined,
+      forwardedFromName: undefined,
+      metadata: undefined,
       attachments: [],
       mentions: [],
       sticker: undefined,
@@ -1438,6 +1454,31 @@ describe('ConversationStore', () => {
     await opening;
     expect(timeline.items()[1].replyToMessage?.isDeleted).toBe(true);
     expect(timeline.items()[1].replyToMessage?.message).toBeUndefined();
+  });
+
+  it('keeps a recalled quote through unrelated reactions and a delayed edit of its reply', async () => {
+    const opening = timeline.open();
+    messages().flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [wire('100'), { ...wire('101'), replyToMessage: { ...wire('100'), mentions: [] } }, wire('102')],
+    });
+    await opening;
+    const connection = TestBed.inject(Connection);
+    const reply = timeline.items()[1];
+    connection.acceptChange({
+      type: ServerWsMessageType.messageDeleted,
+      payload: { ...message('100'), isDeleted: true, message: undefined },
+    });
+    const recalled = timeline.items()[1];
+    expect(recalled.replyToMessage?.isDeleted).toBe(true);
+    timeline.updateReactions(encodeId('102'), []);
+    expect(timeline.items()[1]).toBe(recalled);
+    connection.acceptChange({
+      type: ServerWsMessageType.messageUpdated,
+      payload: { ...reply, message: '编辑后的回复' },
+    });
+    expect(timeline.items()[1].message).toBe('编辑后的回复');
+    expect(timeline.items()[1].replyToMessage).toBe(recalled.replyToMessage);
   });
 
   it('refreshes quote snapshots when the cited message is edited', async () => {
@@ -1615,7 +1656,7 @@ describe('ConversationStore with message sync', () => {
   });
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [ConversationStore, provideRpcTesting()] });
+    TestBed.configureTestingModule({ providers: [ConversationStore, MessageActions, provideRpcTesting()] });
     peer = TestBed.inject(RpcTestPeer);
     TestBed.inject(Connection);
     const resume = authenticate();
@@ -1653,6 +1694,139 @@ describe('ConversationStore with message sync', () => {
       ['40', 'later create', false],
     ]);
   });
+
+  it.each(['open', 'opening', 'inactive'])(
+    'shows a thread root first seen after recall without delivering a new message (%s window)',
+    async (state) => {
+      const arrivals = vi.fn();
+      TestBed.inject(Connection).messages$.subscribe(arrivals);
+      const opened = timeline.open();
+      page(await peer.expectAsync('messageSync.page'), [wire('10')]);
+      if (state !== 'opening') await opened;
+      if (state === 'inactive') {
+        timeline.retainRecent(undefined, true);
+        timeline.reset(encodeId('321'));
+      }
+
+      const threadInfo = { replyCount: 1 };
+      batch('recalled-root', [
+        { kind: 'upsert', appeared: true, message: { ...wire('20'), isDeleted: true, message: null, threadInfo } },
+      ]);
+
+      expect(await opened).toBe(true);
+      if (state === 'inactive') {
+        timeline.reset(testChat.id);
+        expect(timeline.takeRecent(false)).toBeDefined();
+      }
+      const visible = timeline.items().filter(isVisibleMessage);
+      expect(visible.map(({ id }) => decodeId(id))).toEqual(['10', '20']);
+      expect(visible[1]).toMatchObject({ isDeleted: true, message: null, threadInfo });
+      expect(arrivals).not.toHaveBeenCalled();
+      peer.expectNone('messageSync.page');
+    },
+  );
+
+  it.each(['open', 'opening', 'inactive'])(
+    'removes a recalled root after its last reply (%s window)',
+    async (state) => {
+      const root = { ...wire('20'), isDeleted: true, message: null, threadInfo: { replyCount: 1 } };
+      const opened = timeline.open();
+      page(await peer.expectAsync('messageSync.page'), [wire('10'), root, wire('30')]);
+      if (state !== 'opening') await opened;
+      if (state === 'inactive') {
+        timeline.retainRecent(undefined, true);
+        timeline.reset(encodeId('321'));
+      }
+      batch('last-reply-deleted', [
+        { kind: 'delete', messageId: '20', threadRootId: null },
+        { kind: 'delete', messageId: '25', threadRootId: '20' },
+      ]);
+      expect(await opened).toBe(true);
+      if (state === 'inactive') {
+        timeline.reset(testChat.id);
+        expect(timeline.takeRecent(false)).toBeDefined();
+      }
+      const visible = timeline.items().filter(isVisibleMessage);
+      expect(visible.map(({ id }) => decodeId(id))).toEqual(['10', '30']);
+      peer.expectNone('messageSync.page');
+    },
+  );
+
+  it.each([false, true])(
+    'keeps a thread removed by sync when the local recall is acknowledged (root already recalled: %s)',
+    async (recallAlreadySynced) => {
+      const opened = timeline.open();
+      page(await peer.expectAsync('messageSync.page'), [wire('10'), { ...wire('20'), threadInfo: { replyCount: 1 } }]);
+      await opened;
+      const changes = vi.fn();
+      TestBed.inject(Connection).changes$.subscribe(changes);
+      const recall = TestBed.inject(MessageActions).recall(timeline.items()[1]);
+      const request = peer.expect('messages.delete', { chatId, messageId: '20' });
+      batch('last-reply-deleted', [
+        recallAlreadySynced
+          ? { kind: 'delete', messageId: '20', threadRootId: null }
+          : upsert('20', wireMessage.message!),
+        { kind: 'delete', messageId: '25', threadRootId: '20' },
+      ]);
+      changes.mockClear();
+
+      request.flush(null);
+      await recall;
+
+      const visible = timeline.items().filter(isVisibleMessage);
+      expect(visible.map(({ id }) => decodeId(id))).toEqual(['10']);
+      if (recallAlreadySynced) expect(changes).not.toHaveBeenCalled();
+      else expect(changes).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ fromRecallRpc: true }));
+    },
+  );
+
+  it('patches a loaded page once for an entire bulk recall and retains unchanged rows', async () => {
+    const opened = timeline.open();
+    page(
+      await peer.expectAsync('messageSync.page'),
+      Array.from({ length: 50 }, (_, index) => wire(String(1000 + index))),
+    );
+    await opened;
+    const previousPage = timeline.page();
+    const updates = vi.spyOn(timeline['currentPage'], 'update');
+    batch(
+      'bulk-recall',
+      Array.from({ length: 100 }, (_, index) => ({
+        kind: 'delete',
+        messageId: String(1 + index),
+        threadRootId: null,
+      })),
+    );
+    expect(updates).toHaveBeenCalledOnce();
+    expect(timeline.page()).toBe(previousPage);
+  });
+
+  it.each([false, true])(
+    'restores an older recalled root after an audio reply is published (older page: %s)',
+    async (hasOlderPage) => {
+      const arrivals = vi.fn();
+      TestBed.inject(Connection).messages$.subscribe(arrivals);
+      const opened = timeline.open();
+      page(await peer.expectAsync('messageSync.page'), [wire('30')], { olderCursor: hasOlderPage ? '30' : null });
+      await opened;
+
+      const root = { ...wire('20'), isDeleted: true, message: null, threadInfo: { replyCount: 1 } };
+      batch('audio-published', [
+        { kind: 'upsert', appeared: false, message: root },
+        {
+          kind: 'upsert',
+          appeared: true,
+          message: { ...wire('25'), replyRootId: '20', messageType: MessageType.audio },
+        },
+      ]);
+
+      const visible = timeline.items().filter(isVisibleMessage);
+      expect(visible.map(({ id }) => decodeId(id))).toEqual(hasOlderPage ? ['30'] : ['20', '30']);
+      if (!hasOlderPage) expect(visible[0].threadInfo).toEqual(root.threadInfo);
+      expect(arrivals).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: encodeId('25') }));
+      peer.expectNone('messageSync.page');
+    },
+  );
 
   it.each([false, true])('inserts a delayed arrival inside a historical interval (buffered: %s)', async (buffered) => {
     const opened = timeline.open(encodeId('20'));
