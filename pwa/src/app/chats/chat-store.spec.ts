@@ -21,6 +21,26 @@ import { MessageSync } from '../messages/message-sync';
 import { SessionStore } from '../session/session-store';
 import { ChatChangeKind, ChatStore } from './chat-store';
 
+it('keeps the previous chat preview when the send confirmation for a recalled message arrives late', () => {
+  TestBed.configureTestingModule({ providers: [provideRpcTesting()] });
+  const peer = TestBed.inject(RpcTestPeer);
+  peer.authenticate();
+  TestBed.inject(SessionStore).user.set(testUser);
+  const store = TestBed.inject(ChatStore);
+  const previous = { ...testMessage, id: encodeId('9007199254741002'), mentions: [] };
+  store.acceptChats([{ ...testChat, lastMessage: previous, lastMessageAt: previous.createdAt }], store.snapshot());
+  const connection = TestBed.inject(Connection);
+  connection.acceptChange({
+    type: ServerWsMessageType.messagesBulkDeleted,
+    payload: { chatId: testChat.id, messageIds: [testMessage.id] },
+  });
+
+  connection.accept(testMessage);
+
+  expect(store.chat(testChat.id).lastMessage?.id).toBe(previous.id);
+  peer.verify();
+});
+
 describe('ChatStore', () => {
   let store: ChatStore;
   let peer: RpcTestPeer;

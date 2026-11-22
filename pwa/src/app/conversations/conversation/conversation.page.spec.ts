@@ -1682,14 +1682,10 @@ describe('ConversationPage', () => {
 
   async function reenter() {
     component.ionViewWillEnter();
-    if (component.threadId())
-      for (const req of peer.match('messages.get')) req.flush({ ...wireMessage, id: decodeId(component.threadId()!) });
     const threadId = component.threadId();
     if (threadId) {
       for (const req of peer.match('messages.get')) req.flush({ ...wireMessage, id: decodeId(threadId) });
-      peer
-        .expect('threads.getReadState', { chatId: wireChat.id, threadRootId: decodeId(threadId) })
-        .flush({ lastReadMessageId: '101' });
+      peer.expectNone('threads.getReadState');
     }
     const request = await peer.expectAsync(
       'messages.list',
@@ -5648,6 +5644,131 @@ describe('ConversationPage', () => {
     expect(open).toHaveBeenCalledWith(undefined, false, false);
   });
 
+  async function loadThreadList() {
+    await settleMetadata();
+    const list = TestBed.inject(ChatListStore).threads(false);
+    const release = list.activate();
+    const thread = {
+      chatId: wireChat.id,
+      chatKind: testChat.kind,
+      threadRootMessage: { ...wireMessage, id: '100', mentions: [] },
+      archived: false,
+      replyCount: 2,
+      subscribedAt: wireMessage.createdAt,
+      lastReplyAt: wireMessage.createdAt,
+      unreadCount: 2,
+      unreadMentions: 0,
+      unreadReactions: 0,
+    };
+    (await peer.expectAsync('threads.list', { limit: 20, archived: false })).flush({ threads: [thread] });
+    await vi.waitFor(() => expect(list.items()).toHaveLength(1));
+    return { list, release, thread };
+  }
+
+  it('restores the topic position using an in-flight list row', async () => {
+    const watch = vi.spyOn(TestBed.inject(Connection), 'watchConversationStates');
+    await enterThread();
+    const rootId = encodeId('100');
+    const { release, thread } = await loadThreadList();
+    events.next({
+      type: ServerWsMessageType.conversationStates,
+      payload: {
+        requestId: watch.mock.calls.at(-1)![0],
+        full: true,
+        states: [
+          {
+            chatId: testChat.id,
+            threadId: rootId,
+            accessible: true,
+            lastReadMessageId: encodeId('101'),
+            unreadCount: 2,
+            unreadMentions: 0,
+            unreadReactions: 0,
+          },
+        ],
+      },
+    });
+    events.next({
+      type: ServerWsMessageType.messageDeleted,
+      payload: { ...testMessage, id: encodeId('102'), replyRootId: rootId, isDeleted: true, message: undefined },
+    });
+    events.next({
+      type: ServerWsMessageType.threadUpdate,
+      payload: { chatId: testChat.id, threadRootId: rootId, replyCount: 1, lastReplyAt: testMessage.createdAt },
+    });
+    const row = await peer.expectAsync('threads.list', { limit: 1, archived: false, rootId: '100' });
+    const opening = component['goTo']({ type: ConversationTargetKind.Resume });
+    peer.expectNone('threads.getReadState');
+    peer.expectNone('messages.list');
+    row.flush({ threads: [{ ...thread, replyCount: 1, unreadCount: 1, lastReadMessageId: '100' }] });
+    (await peer.expectAsync('messages.list', { chatId: wireChat.id, max: 50, around: '100', threadId: '100' })).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [{ ...wireMessage, id: '100' }],
+    });
+    await opening;
+    expect(component['entryReadId']()).toBe(rootId);
+    peer.expectNone('threads.getReadState');
+    release();
+    await settleMetadata();
+  });
+
+  it.each([false, true])('checks unread state after leaving only if the topic list is active (%s)', async (active) => {
+    await enterThread();
+    const rootId = encodeId('100');
+    const { list, release } = await loadThreadList();
+    events.next({
+      type: ServerWsMessageType.messageDeleted,
+      payload: { ...testMessage, id: encodeId('102'), replyRootId: rootId, isDeleted: true, message: undefined },
+    });
+    const row = await peer.expectAsync('threads.list', { limit: 1, archived: false, rootId: '100' });
+    events.next({
+      type: ServerWsMessageType.threadUpdate,
+      payload: { chatId: testChat.id, threadRootId: rootId, replyCount: 1, lastReplyAt: testMessage.createdAt },
+    });
+    const opening = component['goTo']({ type: ConversationTargetKind.Resume });
+    peer.expectNone('threads.getReadState');
+    if (!active) release();
+    component.ionViewDidLeave();
+    row.error(RpcErrorCode.Unavailable);
+    if (active)
+      (await peer.expectAsync('threads.getReadState', { chatId: wireChat.id, threadRootId: '100' })).flush({
+        unreadCount: 1,
+      });
+    await opening;
+    if (active) {
+      expect(list.items()[0].unreadCount).toBe(1);
+      release();
+    }
+    peer.expectNone('threads.getReadState');
+    peer.expectNone('messages.list');
+    await settleMetadata();
+  });
+
+  it('skips the old topic history once the route has switched during the exit animation', async () => {
+    await enterThread();
+    const rootId = encodeId('100');
+    const { release } = await loadThreadList();
+    events.next({
+      type: ServerWsMessageType.messageDeleted,
+      payload: { ...testMessage, id: encodeId('102'), replyRootId: rootId, isDeleted: true, message: undefined },
+    });
+    const row = await peer.expectAsync('threads.list', { limit: 1, archived: false, rootId: '100' });
+    events.next({
+      type: ServerWsMessageType.threadUpdate,
+      payload: { chatId: testChat.id, threadRootId: rootId, replyCount: 1, lastReplyAt: testMessage.createdAt },
+    });
+    const opening = component['goTo']({ type: ConversationTargetKind.Resume });
+    release();
+    vi.mocked(TestBed.inject(Router).isActive).mockReturnValue(false);
+    component.ionViewWillLeave();
+    row.error(RpcErrorCode.Unavailable);
+    await opening;
+    peer.expectNone('threads.getReadState');
+    peer.expectNone('messages.list');
+    component.ionViewDidLeave();
+    await settleMetadata();
+  });
+
   it('shares the topic title lookup with a saved draft quoting the root', async () => {
     const rootId = encodeId('100');
     TestBed.inject(DraftStore).save(testChat.id, rootId, '正在回复话题根', rootId);
@@ -5668,6 +5789,93 @@ describe('ConversationPage', () => {
     expect(component['threadRoot']()?.message).toBe('话题标题');
     expect(component['replyTo']()).toMatchObject({ id: rootId, message: '话题标题' });
     peer.expectNone('messages.get');
+  });
+
+  it('opens history as soon as the topic read boundary arrives over WebSocket', async () => {
+    const watch = vi.spyOn(TestBed.inject(Connection), 'watchConversationStates');
+    await enterThread();
+    const rootId = encodeId('100');
+    const { release, thread } = await loadThreadList();
+    events.next({
+      type: ServerWsMessageType.messageDeleted,
+      payload: { ...testMessage, id: encodeId('102'), replyRootId: rootId, isDeleted: true, message: undefined },
+    });
+    const row = await peer.expectAsync('threads.list', { limit: 1, archived: false, rootId: '100' });
+    events.next({
+      type: ServerWsMessageType.threadUpdate,
+      payload: { chatId: testChat.id, threadRootId: rootId, replyCount: 1, lastReplyAt: testMessage.createdAt },
+    });
+    const opening = component['goTo']({ type: ConversationTargetKind.Resume });
+    peer.expectNone('messages.list');
+    events.next({
+      type: ServerWsMessageType.conversationStates,
+      payload: {
+        requestId: watch.mock.calls.at(-1)![0],
+        full: true,
+        states: [
+          {
+            chatId: testChat.id,
+            threadId: rootId,
+            accessible: true,
+            lastReadMessageId: rootId,
+            unreadCount: 1,
+            unreadMentions: 0,
+            unreadReactions: 0,
+          },
+        ],
+      },
+    });
+    (await peer.expectAsync('messages.list', { chatId: wireChat.id, max: 50, around: '100', threadId: '100' })).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [{ ...wireMessage, id: '100' }],
+    });
+    await opening;
+    row.flush({ threads: [{ ...thread, replyCount: 1, unreadCount: 1, lastReadMessageId: '101' }] });
+    expect(component['entryReadId']()).toBe(rootId);
+    peer.expectNone('threads.getReadState');
+    release();
+    await settleMetadata();
+  });
+
+  it('fetches the topic read boundary once its cached list snapshot is stale', async () => {
+    const readState = vi.mocked(TestBed.inject(ChatStore).threadReadState);
+    readState.mockReturnValue({ lastReadMessageId: encodeId('100') });
+    fixture.componentRef.setInput('threadId', '100');
+    fixture.detectChanges();
+    peer.match('messages.get').forEach((req) => req.flush({ ...wireMessage, id: '100' }));
+    peer.expectNone('threads.getReadState');
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '100', threadId: '100' }).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [
+        { ...wireMessage, id: '100' },
+        { ...wireMessage, id: '101', replyRootId: '100', sender: otherSender },
+      ],
+    });
+    await settleMetadata();
+    await fixture.whenStable();
+    expect(component['entryReadId']()).toBe(encodeId('100'));
+    component.ionViewDidLeave();
+    readState.mockReturnValue(undefined);
+    component.ionViewWillEnter();
+    if (component.threadId())
+      peer.match('messages.get').forEach((req) => req.flush({ ...wireMessage, id: decodeId(component.threadId()!) }));
+    peer.expect('threads.getReadState', { chatId: wireChat.id, threadRootId: '100' }).flush({
+      lastReadMessageId: '101',
+      unreadCount: 1,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '101', threadId: '100' }).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [
+        { ...wireMessage, id: '101', replyRootId: '100', sender: otherSender },
+        { ...wireMessage, id: '102', replyRootId: '100', sender: otherSender },
+      ],
+    });
+    await settleMetadata();
+    await fixture.whenStable();
+    expect(readState).toHaveBeenLastCalledWith(testChat.id, encodeId('100'));
+    expect(component['entryReadId']()).toBe(encodeId('101'));
+    expect(component['firstUnreadId']()).toBe(encodeId('102'));
   });
 
   it('publishes accepted topic replies without turning the sender’s own message into an unread divider', async () => {

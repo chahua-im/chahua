@@ -115,6 +115,7 @@ describe('ChatListContent', () => {
     error: signal<ChatListError | undefined>(undefined),
     activate: vi.fn(() => vi.fn()),
     refresh: vi.fn(),
+    retry: vi.fn().mockResolvedValue(undefined),
     loadMore: vi.fn().mockResolvedValue(undefined),
   };
   const data = {
@@ -203,6 +204,17 @@ describe('ChatListContent', () => {
     errors = fixture.nativeElement.querySelectorAll('app-load-error');
     expect(errors).toHaveLength(1);
     expect(errors[0].textContent).toContain('话题加载失败');
+  });
+
+  it('retries a failed row without refreshing the other visible lists', async () => {
+    preferences.showThreadsInMessages.set(true);
+    await selectRoute('/chats/messages');
+    chats.error.set(ChatListError.Row);
+    fixture.detectChanges();
+    fixture.nativeElement.querySelector('app-load-error ion-button').click();
+    expect(chats.retry).toHaveBeenCalledOnce();
+    expect(chats.refresh).not.toHaveBeenCalled();
+    expect(threads.refresh).not.toHaveBeenCalled();
   });
 
   let originalPlatforms: ReturnType<typeof getPlatforms>;

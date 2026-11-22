@@ -1,6 +1,6 @@
 import { computed, DestroyRef, effect, inject, linkedSignal, Service, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { firstValueFrom, Subject, takeUntil, timer, type Observable } from 'rxjs';
+import { EmptyError, filter, firstValueFrom, from, race, Subject, takeUntil, timer, type Observable } from 'rxjs';
 import { RpcApi } from '../../generated/rpc-api';
 import { notificationMuted } from './notification-setting';
 import { allowsSpeaking, effectiveSpeakingMode, SpeakingAction } from './speaking';
@@ -27,6 +27,7 @@ import {
   type MessagePreview,
   type MessageResponse,
   type ThreadListItem,
+  type ThreadUpdatePayload,
   MessageSyncResetReason,
   type ThreadSubscriptionStatusResponse,
 } from '../../generated/models';
@@ -36,7 +37,7 @@ import { conversationStates } from './conversation-states';
 import type { ConversationRef, ConversationState } from '../../generated/models';
 import { activeQuery } from '../api/query';
 import type { SnowflakeID } from '../api/snowflake-id';
-import { isMessageChange, type MessageChange } from '../messages/message-change';
+import { isMessageChange, toMessagePreview, type MessageChange } from '../messages/message-change';
 import { isMembershipMessage } from '../messages/system-message';
 import { MessageSync, requiresMessagePurge } from '../messages/message-sync';
 import { ChatPins } from './chat-pins';
@@ -56,6 +57,17 @@ type ThreadSummary = Omit<
   ThreadListItem,
   'unreadCount' | 'unreadMentions' | 'unreadReactions' | 'lastReadMessageId' | 'archived'
 >;
+type ThreadRead = { state: MarkThreadReadResponse; version: number; dirty: boolean };
+type ThreadReadRefresh = {
+  promise: Promise<MarkThreadReadResponse>;
+  consumers: Set<(() => boolean) | undefined>;
+};
+type ThreadActivity = Pick<ThreadUpdatePayload, 'chatId' | 'replyCount' | 'lastReplyAt'>;
+type ThreadActivityUpdate = { activity?: ThreadActivity; previousVersion: number };
+
+function sameThreadActivity(left: ThreadActivity, right: ThreadActivity) {
+  return left.chatId === right.chatId && left.replyCount === right.replyCount && left.lastReplyAt === right.lastReplyAt;
+}
 interface ChatReadOperation {
   version: number;
   refresh?: Promise<MarkChatReadStateResponse>;
@@ -71,6 +83,7 @@ export enum ChatChangeKind {
   MessagePurge,
   Restored,
   Removed,
+  PreviewRecalled,
 }
 
 @Service()
@@ -222,7 +235,9 @@ export class ChatStore {
   }
   private readonly knownMentions = new Map<SnowflakeID, { mentioned: boolean; version: number }>();
   private readonly scheduledReads = new Map<SnowflakeID, Promise<MarkChatReadStateResponse>>();
-  private readonly threadReadRefreshes = new Map<SnowflakeID, Promise<MarkThreadReadResponse>>();
+  private readonly chatRowReads = new Map<SnowflakeID, Promise<void>>();
+  private readonly threadRowReads = new Map<SnowflakeID, Promise<void>>();
+  private readonly threadReadRefreshes = new Map<SnowflakeID, ThreadReadRefresh>();
   private readonly entries = linkedSignal(() => {
     this.mentionAccount();
     return new Map<SnowflakeID, ChatInfo>();
@@ -248,9 +263,9 @@ export class ChatStore {
   private readonly receiptPrivacyVersions = new Map<SnowflakeID, number>();
   private readonly readOperations = new Map<SnowflakeID, ChatReadOperation>();
   private readonly threadSummaries = signal(new Map<SnowflakeID, { value: ThreadSummary; version: number }>());
-  private readonly threadReads = signal(
-    new Map<SnowflakeID, { state: MarkThreadReadResponse; version: number; dirty: boolean }>(),
-  );
+  private readonly threadReads = signal(new Map<SnowflakeID, ThreadRead>());
+  private readonly threadRowActivity = new WeakMap<ThreadRead, ThreadActivity>();
+  private readonly threadActivityUpdates = new WeakMap<{ version: number }, ThreadActivityUpdate>();
   private readonly subscriptions = signal(new Map<SnowflakeID, Subscription>());
   private subscriptionVersion = 0;
   private readonly subscriptionRequests = new Map<SnowflakeID, Promise<void>>();
@@ -635,13 +650,11 @@ export class ChatStore {
         case ServerWsMessageType.threadUpdate: {
           const { threadRootId, replyCount, lastReplyAt } = event.payload;
           const current = this.threadSummaries().get(threadRootId);
-          if (current)
-            this.threadSummaries.update((entries) =>
-              new Map(entries).set(threadRootId, {
-                value: { ...current.value, replyCount, lastReplyAt },
-                version: ++this.version,
-              }),
-            );
+          if (current && !this.threadUpdateNeedsRow(event.payload)) {
+            const next = { value: { ...current.value, replyCount, lastReplyAt }, version: ++this.version };
+            this.recordThreadActivity(current, next, event.payload);
+            this.threadSummaries.update((entries) => new Map(entries).set(threadRootId, next));
+          }
           break;
         }
         case ServerWsMessageType.threadMembershipChanged:
@@ -922,27 +935,32 @@ export class ChatStore {
   acceptChats(chats: readonly ChatListItem[], version: number, policyGeneration = this.revision) {
     chats = chats.filter((chat) => this.isAccessible(chat.id) && (this.accessVersions().get(chat.id) ?? 0) <= version);
     if (policyGeneration !== this.revision) return;
-    this.rememberMentions(
-      chats.flatMap((chat) => (chat.lastMessage ? [chat.lastMessage] : [])),
-      version,
-    );
     const summaries = new Map(this.summaries());
     const reads = new Map(this.readStates());
     for (const chat of chats) {
       const current = summaries.get(chat.id);
+      const lastMessage = this.realtime.redactKnownRecallPreview(chat.lastMessage);
+      if (lastMessage) this.rememberMentions([lastMessage], version);
       // A newer arrival only wins if it is still visible under this response's policy.
       const previewRevoked =
         chat.membershipMessagePolicy?.canView === false &&
         current?.value.lastMessage &&
         isMembershipMessage(current.value.lastMessage);
+      const acceptPreview = !current || current.previewVersion <= version || previewRevoked;
+      let previewVersion = Math.max(current?.previewVersion ?? 0, version);
+      if (acceptPreview && lastMessage && lastMessage !== chat.lastMessage) {
+        const known = current?.value.lastMessage;
+        if (known?.id !== lastMessage.id || !known.isDeleted) {
+          previewVersion = ++this.version;
+          this.checkRecalledPreview(chat.id, lastMessage.id);
+        }
+      }
       summaries.set(chat.id, {
         value: {
           ...(current?.value ?? {}),
-          ...(!current || current.previewVersion <= version || previewRevoked
-            ? { lastMessage: chat.lastMessage, lastMessageAt: chat.lastMessageAt }
-            : {}),
+          ...(acceptPreview ? { lastMessage, lastMessageAt: chat.lastMessageAt } : {}),
         },
-        previewVersion: Math.max(current?.previewVersion ?? 0, version),
+        previewVersion,
         stateVersion: Math.max(current?.stateVersion ?? 0, version),
       });
       if ((reads.get(chat.id)?.version ?? 0) <= version)
@@ -997,7 +1015,7 @@ export class ChatStore {
       (previous && previous.id > message.id && this.isChatMessageVisible({ ...previous, chatId: message.chatId }))
     )
       return;
-    const preview = messagePreview(message);
+    const preview = toMessagePreview(message);
     this.updatePreview(message.chatId, preview);
   }
 
@@ -1010,7 +1028,7 @@ export class ChatStore {
       new Map(summaries).set(rootId, {
         value: {
           ...current.value,
-          lastReply: messagePreview(message),
+          lastReply: toMessagePreview(message),
           lastReplyAt: message.createdAt,
           replyCount:
             message.messageType === MessageType.system
@@ -1056,7 +1074,7 @@ export class ChatStore {
         ...current,
         value: {
           ...current.value,
-          lastMessage: previous && messagePreview(previous),
+          lastMessage: previous && toMessagePreview(previous),
           lastMessageAt: previous?.createdAt,
         },
         previewVersion: ++this.version,
@@ -1077,7 +1095,7 @@ export class ChatStore {
       new Map(summaries).set(rootId, {
         value: {
           ...current.value,
-          lastReply: previous && messagePreview(previous),
+          lastReply: previous && toMessagePreview(previous),
           lastReplyAt: previous?.createdAt ?? current.value.subscribedAt,
           // Only a complete range can prove there are no remaining replies.
           replyCount: previous ? current.value.replyCount : 0,
@@ -1098,24 +1116,50 @@ export class ChatStore {
         : message.id === change.payload.id
           ? { ...change.payload, mentions: change.payload.mentions ?? [] }
           : message;
-    const latest = this.summaries().get(change.payload.chatId)?.value.lastMessage;
+    const { chatId } = change.payload;
+    const latest = this.summaries().get(chatId)?.value.lastMessage;
     if (latest && (change.type === ServerWsMessageType.messagesBulkDeleted || !change.payload.replyRootId)) {
       const next = update(latest);
-      if (next !== latest) this.updatePreview(change.payload.chatId, { ...next, mentions: next.mentions ?? [] });
+      if (next !== latest && !(latest.isDeleted && next.isDeleted)) {
+        this.updatePreview(chatId, { ...next, mentions: next.mentions ?? [] });
+        if (change.type === ServerWsMessageType.messageUpdated && next.isDeleted)
+          this.checkRecalledPreview(chatId, next.id);
+      }
     }
     this.threadSummaries.update(
       (entries) =>
         new Map(
           [...entries].map(([id, entry]) => {
-            if (entry.value.chatId !== change.payload.chatId) return [id, entry];
+            if (entry.value.chatId !== chatId) return [id, entry];
             const root = update(entry.value.threadRootMessage) as MessagePreview;
             const last = entry.value.lastReply && (update(entry.value.lastReply) as MessagePreview);
-            return root === entry.value.threadRootMessage && last === entry.value.lastReply
-              ? [id, entry]
-              : [id, { value: { ...entry.value, threadRootMessage: root, lastReply: last }, version: ++this.version }];
+            if (root === entry.value.threadRootMessage && last === entry.value.lastReply) return [id, entry];
+            const next = {
+              value: { ...entry.value, threadRootMessage: root, lastReply: last },
+              version: ++this.version,
+            };
+            // A separate root update must not invalidate matching reply metadata.
+            if (last === entry.value.lastReply)
+              this.threadActivityUpdates.set(
+                next,
+                this.threadActivityUpdates.get(entry) ?? { previousVersion: entry.version },
+              );
+            return [id, next];
           }),
         ),
     );
+  }
+
+  private checkRecalledPreview(chatId: SnowflakeID, messageId: SnowflakeID, threadId?: SnowflakeID) {
+    // Let the current list snapshot commit and the loaded timeline restore any known predecessor first.
+    queueMicrotask(() => {
+      if (this.destroyRef.destroyed) return;
+      const preview = threadId
+        ? this.threadSummaries().get(threadId)?.value.lastReply
+        : this.summaries().get(chatId)?.value.lastMessage;
+      if (preview?.id === messageId && preview.isDeleted)
+        this.changed(ChatChangeKind.PreviewRecalled, chatId, threadId);
+    });
   }
 
   rememberMentions(
@@ -1138,13 +1182,56 @@ export class ChatStore {
     }
   }
 
+  /** A targeted list read can satisfy an unread refresh with the same row's read state. */
+  shareListRowRead(id: SnowflakeID, request: Promise<void>, kind: 'chat' | 'thread') {
+    const rows = kind === 'thread' ? this.threadRowReads : this.chatRowReads;
+    const shared = Promise.allSettled([rows.get(id), request]).then(() => {
+      if (rows.get(id) === shared) rows.delete(id);
+    });
+    rows.set(id, shared);
+  }
+
+  private async readAfterListRow<T>(scope: ConversationRef, uid: number | undefined, cached: () => T | undefined) {
+    const { chatId, threadId } = scope;
+    const rows = threadId == null ? this.chatRowReads : this.threadRowReads;
+    const id = threadId ?? chatId;
+    let row = rows.get(id);
+    this.requireReadScope(scope, uid);
+    if (!row) return;
+    const changed = this.changes$.pipe(
+      filter((change) => {
+        if (change.chatId !== chatId) return false;
+        return change.kind === ChatChangeKind.Removed
+          ? change.threadId == null || change.threadId === threadId
+          : change.kind === ChatChangeKind.Read && (change.threadId ?? undefined) === threadId && cached() != null;
+      }),
+    );
+    while (true) {
+      const read = cached();
+      if (read != null || !row) return read;
+      await this.response(race(from(row), changed));
+      this.requireReadScope(scope, uid);
+      row = rows.get(id);
+    }
+  }
+
+  private requireReadScope({ chatId, threadId }: ConversationRef, uid: number | undefined) {
+    if (this.destroyRef.destroyed || uid !== this.session.user()?.uid || !this.isAccessible(chatId, threadId))
+      throw new EmptyError();
+  }
+
   scheduleReadState(chatId: SnowflakeID): Promise<MarkChatReadStateResponse> {
     const cached = this.readStates().get(chatId);
     if (cached && this.stateWatch.ready({ chatId })) return Promise.resolve(cached.state);
     const pending = this.scheduledReads.get(chatId);
     if (pending) return pending;
+    const uid = this.session.user()?.uid;
     const request = this.response(timer(100))
-      .then(() => this.getReadState(chatId))
+      .then(
+        async () =>
+          (await this.readAfterListRow({ chatId }, uid, () => this.cachedReadState(chatId))) ??
+          this.getReadState(chatId),
+      )
       .finally(() => this.scheduledReads.delete(chatId));
     this.scheduledReads.set(chatId, request);
     return request;
@@ -1516,7 +1603,12 @@ export class ChatStore {
     };
   }
 
-  acceptThreads(threads: readonly ThreadListItem[], version: number, subscriptionVersion: number) {
+  acceptThreads(
+    threads: readonly ThreadListItem[],
+    version: number,
+    subscriptionVersion: number,
+    refreshedRoot?: SnowflakeID,
+  ) {
     threads = threads.filter((thread) => {
       const rootId = thread.threadRootMessage.id;
       return (
@@ -1524,27 +1616,46 @@ export class ChatStore {
         Math.max(this.accessVersions().get(thread.chatId) ?? 0, this.accessVersions().get(rootId) ?? 0) <= version
       );
     });
-    this.rememberMentions(
-      threads.flatMap((thread) => [thread.threadRootMessage, ...(thread.lastReply ? [thread.lastReply] : [])]),
-      version,
-    );
     const summaries = new Map(this.threadSummaries());
     const reads = new Map(this.threadReads());
     for (const thread of threads) {
       const { archived, unreadCount, unreadMentions, unreadReactions, lastReadMessageId, ...summary } = thread;
       const rootId = summary.threadRootMessage.id;
-      if ((summaries.get(rootId)?.version ?? 0) <= version) summaries.set(rootId, { value: summary, version });
-      if ((reads.get(rootId)?.version ?? 0) <= version)
-        reads.set(rootId, {
+      const threadRootMessage = this.realtime.redactKnownRecallPreview(summary.threadRootMessage);
+      const lastReply = this.realtime.redactKnownRecallPreview(summary.lastReply);
+      this.rememberMentions(lastReply ? [threadRootMessage, lastReply] : [threadRootMessage], version);
+      const current = summaries.get(rootId);
+      const rowActivity = rootId === refreshedRoot && lastReply === summary.lastReply ? summary : undefined;
+      let summaryVersion = this.threadSnapshotVersion(current, version, rowActivity);
+      if (summaryVersion != null) {
+        if (lastReply && lastReply !== summary.lastReply) {
+          const known = current?.value.lastReply;
+          if (known?.id !== lastReply.id || !known.isDeleted) {
+            summaryVersion = ++this.version;
+            this.checkRecalledPreview(thread.chatId, lastReply.id, rootId);
+          }
+        }
+        const root = current && current.version > version ? current.value.threadRootMessage : threadRootMessage;
+        summaries.set(rootId, { value: { ...summary, threadRootMessage: root, lastReply }, version: summaryVersion });
+      }
+      const readVersion = this.threadSnapshotVersion(reads.get(rootId), version, rowActivity);
+      if (readVersion != null) {
+        const read: ThreadRead = {
           state: {
             lastReadMessageId,
             unreadCount,
             unreadMentions: unreadMentions ?? 0,
             unreadReactions: unreadReactions ?? 0,
           },
-          version,
+          version: readVersion,
           dirty: false,
-        });
+        };
+        reads.set(rootId, read);
+        if (rowActivity && readVersion === version) {
+          const { chatId, replyCount, lastReplyAt } = rowActivity;
+          this.threadRowActivity.set(read, { chatId, replyCount, lastReplyAt });
+        }
+      }
       if ((this.subscriptions().get(rootId)?.version ?? 0) <= subscriptionVersion)
         this.setSubscription(thread.chatId, rootId, { subscribed: true, archived }, subscriptionVersion);
     }
@@ -1566,6 +1677,50 @@ export class ChatStore {
     });
   }
 
+  private recordThreadActivity(current: { version: number }, next: { version: number }, activity: ThreadActivity) {
+    const previous = this.threadActivityUpdates.get(current);
+    this.threadActivityUpdates.set(next, {
+      activity,
+      previousVersion:
+        previous && (!previous.activity || sameThreadActivity(previous.activity, activity))
+          ? previous.previousVersion
+          : current.version,
+    });
+  }
+
+  private threadSnapshotVersion(current: { version: number } | undefined, version: number, row?: ThreadActivity) {
+    if (!current || current.version <= version) return version;
+    // An in-flight row can already include the notification that advanced the version.
+    // Any other update keeps its version fence.
+    const update = this.threadActivityUpdates.get(current);
+    if (row && update?.activity && update.previousVersion <= version && sameThreadActivity(update.activity, row))
+      return current.version;
+    return undefined;
+  }
+
+  threadUpdateNeedsRow({ chatId, threadRootId, replyCount }: ThreadUpdatePayload) {
+    if (replyCount !== 0) return false;
+    const summary = this.threadSummary(threadRootId);
+    // A zero-count notification can arrive after a row that already contains a newer reply.
+    return summary?.chatId === chatId && !!summary.lastReply && !summary.lastReply.isDeleted;
+  }
+
+  threadUpdateNeedsRead(update: ThreadUpdatePayload) {
+    // A row already carries the read state for its activity. Only reuse it for a
+    // matching notification while that exact read state is still current.
+    const { threadRootId } = update;
+    const read = this.threadReads().get(threadRootId);
+    const version = ++this.version;
+    if (!read) return true;
+    const activity = this.threadRowActivity.get(read);
+    this.threadRowActivity.delete(read);
+    if (!read.dirty && activity && sameThreadActivity(activity, update)) return false;
+    const next = { ...read, dirty: true, version };
+    this.recordThreadActivity(read, next, update);
+    this.threadReads.update((reads) => new Map(reads).set(threadRootId, next));
+    return true;
+  }
+
   invalidateThreadReads(rootIds?: readonly SnowflakeID[]) {
     const version = ++this.version;
     this.threadReads.update(
@@ -1578,15 +1733,35 @@ export class ChatStore {
     );
   }
 
-  getThreadReadState(chatId: SnowflakeID, rootId: SnowflakeID): Promise<MarkThreadReadResponse> {
+  getThreadReadState(
+    chatId: SnowflakeID,
+    rootId: SnowflakeID,
+    { immediate = false, isNeeded }: { immediate?: boolean; isNeeded?: () => boolean } = {},
+  ): Promise<MarkThreadReadResponse> {
     const pending = this.threadReadRefreshes.get(rootId);
-    if (pending) return pending;
-    const cached = this.threadReads().get(rootId);
-    if (cached && (!cached.dirty || this.stateWatch.ready({ chatId, threadId: rootId })))
-      return Promise.resolve(cached.state);
-    const request = (async () => {
+    if (pending) {
+      pending.consumers.add(isNeeded);
+      return pending.promise;
+    }
+    const scope = { chatId, threadId: rootId };
+    const readCache = () => {
+      const cached = this.threadReads().get(rootId);
+      return cached && (!cached.dirty || (!immediate && this.stateWatch.ready(scope))) ? cached.state : undefined;
+    };
+    const cached = readCache();
+    if (cached) return Promise.resolve(cached);
+    const uid = this.session.user()?.uid;
+    const consumers = new Set([isNeeded]);
+    const promise = (async () => {
+      let delay = !immediate;
       while (true) {
-        await this.response(timer(100));
+        if (delay) await this.response(timer(100));
+        delay = true;
+        this.requireReadScope(scope, uid);
+        const shared = this.threadRowReads.has(rootId) ? await this.readAfterListRow(scope, uid, readCache) : undefined;
+        const read = shared ?? readCache();
+        if (read) return read;
+        if (![...consumers].some((needsRead) => !needsRead || needsRead())) throw new EmptyError();
         const version = this.version;
         const state = await this.response(this.threadsApi.getReadState({ chatId, threadRootId: rootId }));
         const current = this.threadReads().get(rootId);
@@ -1600,8 +1775,8 @@ export class ChatStore {
         return state;
       }
     })().finally(() => this.threadReadRefreshes.delete(rootId));
-    this.threadReadRefreshes.set(rootId, request);
-    return request;
+    this.threadReadRefreshes.set(rootId, { promise, consumers });
+    return promise;
   }
 
   threadReadState(chatId: SnowflakeID, rootId: SnowflakeID) {
@@ -1765,23 +1940,4 @@ export class ChatStore {
   private response<T>(source: Observable<T>) {
     return firstValueFrom(source.pipe(takeUntilDestroyed(this.destroyRef)));
   }
-}
-
-function messagePreview(message: MessageResponse): MessagePreview {
-  return {
-    metadata: message.metadata,
-    id: message.id,
-    clientGeneratedId: message.clientGeneratedId,
-    forwardedFromName: message.forwardedFrom?.sender.name,
-    createdAt: message.createdAt,
-    sender: message.sender,
-    message: message.message,
-    messageType: message.messageType,
-    systemKind: message.systemKind,
-    systemLinks: message.systemLinks,
-    isDeleted: message.isDeleted,
-    attachments: message.attachments.map(({ kind }) => ({ kind })),
-    mentions: message.mentions ?? [],
-    sticker: message.sticker ? { emoji: message.sticker.emoji } : message.sticker,
-  };
 }

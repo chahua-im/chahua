@@ -1829,6 +1829,7 @@ export class ConversationPage {
   protected async goTo(target: ConversationTarget, replying = false, fromId?: SnowflakeID) {
     const entry = this.entryKey();
     const version = ++this.navigationVersion;
+    const isNavigating = () => version === this.navigationVersion && this.isCurrent(entry);
     this.reactionVisibility?.watch(new Map());
     this.selectionDirection.set(undefined);
     this.pendingNavigation.set(target);
@@ -1850,18 +1851,19 @@ export class ConversationPage {
         if (threadId) {
           const read =
             this.chatInfo.threadReadState(chatId, threadId) ??
-            (await firstValueFrom(
-              this.api.threads
-                .getReadState({ chatId, threadRootId: threadId })
-                .pipe(takeUntilDestroyed(this.destroyRef)),
-            ).catch(() => undefined));
+            (await this.chatInfo
+              .getThreadReadState(chatId, threadId, {
+                immediate: true,
+                isNeeded: isNavigating,
+              })
+              .catch(() => undefined));
           around = read?.lastReadMessageId ?? threadId;
         } else {
           const read =
             this.chatInfo.cachedReadState(chatId) ?? (await this.chatInfo.getReadState(chatId).catch(() => undefined));
           around = read?.unreadCount ? read.lastReadMessageId : undefined;
         }
-        if (entry !== this.entryKey() || version !== this.navigationVersion) return;
+        if (!isNavigating()) return;
         this.entryReadId.set(around);
         // Choose the request anchor after replay too, in case browsing started during resume.
         if (provisional && this.messageSync.active()) {
@@ -1870,7 +1872,7 @@ export class ConversationPage {
           } catch {
             return;
           }
-          if (entry !== this.entryKey() || version !== this.navigationVersion) return;
+          if (!isNavigating()) return;
         }
         // Read state can arrive after the user has started browsing the restored rows.
         if (provisional && scrollVersion !== this.provisionalScrollVersion) {
@@ -1885,7 +1887,7 @@ export class ConversationPage {
         target.type === ConversationTargetKind.Message,
         this.hideMembershipMessages(),
       );
-      if (!loaded || entry !== this.entryKey() || version !== this.navigationVersion) return;
+      if (!loaded || !isNavigating()) return;
       if (target.type === ConversationTargetKind.Latest) this.returnMessageIds.set([]);
       else if (target.type === ConversationTargetKind.Message && fromId && fromId > target.messageId) {
         this.returnMessageIds.update((ids) => (ids.at(-1) === fromId ? ids : [...ids, fromId]));

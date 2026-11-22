@@ -1076,6 +1076,110 @@ describe('ChatListStore', () => {
     expect(query.items()[0].lastMessage?.message).toBe(edited.message);
   });
 
+  it('reads one list row when a recalled thread root has no loaded predecessor', async () => {
+    expectChats().flush({
+      chatSettings: { showMembershipMessages: true },
+      chats: [{ ...wireChat, lastMessage: wireMessage, lastMessageAt: wireMessage.createdAt }],
+    });
+    await settle();
+
+    const root = { ...testMessage, isDeleted: true, message: undefined, threadInfo: { replyCount: 1 } };
+    messages.acceptChange({ type: ServerWsMessageType.messageUpdated, payload: root });
+    await settle();
+    const recalibration = expectChats({ limit: 1, chatId: wireChat.id, archived: false });
+    messages.acceptChange({
+      type: ServerWsMessageType.messageUpdated,
+      payload: { ...root, threadInfo: { replyCount: 2 } },
+    });
+    const previous = { ...wireMessage, id: '100', createdAt: '2026-09-04T12:00:00Z' };
+    recalibration.flush({
+      chatSettings: { showMembershipMessages: true },
+      chats: [{ ...wireChat, lastMessage: previous, lastMessageAt: previous.createdAt }],
+    });
+    await settle();
+
+    expect(query.items()[0]).toMatchObject({
+      lastMessage: { id: encodeId('100'), isDeleted: false },
+      lastMessageAt: previous.createdAt,
+    });
+    peer.expectNone('chats.list');
+  });
+
+  it.each(['retry', 'refresh'])('does not duplicate a failed recall row read on %s', async (action) => {
+    const chatSettings = { showMembershipMessages: true };
+    expectChats().flush({
+      chatSettings,
+      chats: [{ ...wireChat, lastMessage: wireMessage }],
+      nextCursor: wireChat.id,
+    });
+    await settle();
+    messages.acceptChange({
+      type: ServerWsMessageType.messageUpdated,
+      payload: { ...testMessage, isDeleted: true, message: undefined, threadInfo: { replyCount: 1 } },
+    });
+    await settle();
+    const params = { limit: 1, chatId: wireChat.id, archived: false };
+    expectChats(params).error(RpcErrorCode.Internal);
+    await settle();
+    expect(query.error()).toBe(ChatListError.Row);
+
+    const refreshed = {
+      chatSettings,
+      chats: [{ ...wireChat, lastMessage: { ...wireMessage, id: '100' } }],
+      nextCursor: wireChat.id,
+    };
+    if (action === 'retry') {
+      const retry = query.retry();
+      const repeatedRetry = query.retry();
+      (await peer.expectAsync('chats.list', params)).flush(refreshed);
+      await Promise.all([retry, repeatedRetry]);
+    } else {
+      query.refresh();
+      expectChats().flush(refreshed);
+      await settle();
+    }
+    expect(query.items()[0].lastMessage?.id).toBe(encodeId('100'));
+    expect(query.error()).toBeUndefined();
+    expect(query.hasMore()).toBe(true);
+    peer.expectNone('chats.list');
+  });
+
+  it.each([false, true])('shares the row read for a recalled mention (row read fails: %s)', async (fails) => {
+    TestBed.inject(SessionStore).user.set(testUser);
+    expectChats().flush({
+      chatSettings: { showMembershipMessages: true },
+      chats: [
+        {
+          ...wireChat,
+          lastMessage: { ...wireMessage, sender: { ...wireMessage.sender, uid: 2 }, mentions: [{ uid: 1, gender: 0 }] },
+          unreadMentions: 1,
+        },
+      ],
+    });
+    await settle();
+    messages.acceptChange({
+      type: ServerWsMessageType.messageUpdated,
+      payload: { ...testMessage, isDeleted: true, message: undefined, mentions: [], threadInfo: { replyCount: 1 } },
+    });
+    await settle();
+    const row = expectChats({ limit: 1, chatId: wireChat.id, archived: false });
+    await flushReads();
+    peer.expectNone('chats.getUnreadCount');
+
+    if (fails) {
+      row.error(RpcErrorCode.Internal);
+      (await peer.expectAsync('chats.getUnreadCount', { chatId: wireChat.id })).flush({
+        unreadCount: 0,
+        unreadMentions: 0,
+      });
+    } else {
+      row.flush({ chatSettings: { showMembershipMessages: true }, chats: [{ ...wireChat, unreadMentions: 0 }] });
+    }
+    await settle();
+    expect(query.items()[0].unreadMentions).toBe(0);
+    peer.expectNone('chats.getUnreadCount');
+  });
+
   it('withdraws a live preview immediately and retires it after the authoritative tombstone arrives', async () => {
     expectChats().flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
