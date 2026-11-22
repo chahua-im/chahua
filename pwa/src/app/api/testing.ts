@@ -1,6 +1,6 @@
 import { signal } from '@angular/core';
 import { filter, map, merge, Subject, type Observable } from 'rxjs';
-import type { ChatListItem, MeResponse, MessageResponse } from '../../generated/models';
+import type { ChatListItem, MeResponse, MessagePreview, MessageResponse } from '../../generated/models';
 import {
   MembershipMessageVisibility,
   GroupKind,
@@ -83,6 +83,8 @@ export function mockRealtime({
     accept: (message: MessageResponse) => events$.next({ type: ServerWsMessageType.message, payload: message }),
     acceptPin: (event: PinChange) => events$.next(event),
     acceptChange: (event: MessageChange) => events$.next(event),
+    redactKnownRecalls: (message: MessageResponse) => message,
+    redactKnownRecallPreview: (preview: MessagePreview | undefined) => preview,
     watchPresence: () => {},
     watchConversationUnread: () => {},
   };

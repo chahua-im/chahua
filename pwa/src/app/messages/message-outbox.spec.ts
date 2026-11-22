@@ -102,6 +102,22 @@ describe('MessageOutbox', () => {
     };
   }
 
+  it('redacts a pending reply when its quoted message is recalled and the send subsequently fails', async () => {
+    const reply = outbox.enqueue(testChat.id, undefined, '回复正文', text, testMessage);
+    const request = await peer.expectAsync('messages.send', (params) => params['replyToId'] === wireMessage.id);
+    expect(reply.message().replyToMessage?.message).toBe(testMessage.message);
+    events.next({
+      type: ServerWsMessageType.messageDeleted,
+      payload: { ...testMessage, message: undefined, isDeleted: true },
+    });
+    const quote = reply.message().replyToMessage;
+    expect(quote).toMatchObject({ isDeleted: true, message: undefined });
+    request.error(RpcErrorCode.NotFound);
+    await vi.waitFor(() => expect(reply.delivery()).toBe(MessageDelivery.Failed));
+    expect(reply.message().replyToMessage).toBe(quote);
+    expect(reply.message().message).toBe('回复正文');
+  });
+
   it('sends link choices in creates and metadata-only edits', async () => {
     const url = 'https://example.com/';
     const metadata = { linkPreviews: [{ url, status: LinkPreviewInputStatus.disabled }] };

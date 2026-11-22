@@ -5648,45 +5648,26 @@ describe('ConversationPage', () => {
     expect(open).toHaveBeenCalledWith(undefined, false, false);
   });
 
-  it('fetches the topic read boundary once its cached list snapshot is stale', async () => {
-    const readState = vi.mocked(TestBed.inject(ChatStore).threadReadState);
-    readState.mockReturnValue({ lastReadMessageId: encodeId('100') });
+  it('shares the topic title lookup with a saved draft quoting the root', async () => {
+    const rootId = encodeId('100');
+    TestBed.inject(DraftStore).save(testChat.id, rootId, '正在回复话题根', rootId);
     fixture.componentRef.setInput('threadId', '100');
     fixture.detectChanges();
-    peer.match('messages.get').forEach((req) => req.flush({ ...wireMessage, id: '100' }));
-    peer.expectNone('threads.getReadState');
-    peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '100', threadId: '100' }).flush({
+    const params = { chatId: wireChat.id, messageId: '100' };
+    peer.expect('messages.get', params).flush({ ...wireMessage, id: '100', message: '话题标题' });
+    peer.expectNone('messages.get');
+    peer
+      .expect('threads.getReadState', { chatId: wireChat.id, threadRootId: '100' })
+      .flush({ lastReadMessageId: '101' });
+    (await peer.expectAsync('messages.list', { chatId: wireChat.id, max: 50, around: '101', threadId: '100' })).flush({
       chatSettings: { showMembershipMessages: true },
-      messages: [
-        { ...wireMessage, id: '100' },
-        { ...wireMessage, id: '101', replyRootId: '100', sender: otherSender },
-      ],
+      messages: [],
     });
     await settleMetadata();
     await fixture.whenStable();
-    expect(component['entryReadId']()).toBe(encodeId('100'));
-    component.ionViewDidLeave();
-    readState.mockReturnValue(undefined);
-    component.ionViewWillEnter();
-    if (component.threadId())
-      peer.match('messages.get').forEach((req) => req.flush({ ...wireMessage, id: decodeId(component.threadId()!) }));
-    peer.expect('threads.getReadState', { chatId: wireChat.id, threadRootId: '100' }).flush({
-      lastReadMessageId: '101',
-      unreadCount: 1,
-    });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    peer.expect('messages.list', { chatId: wireChat.id, max: 50, around: '101', threadId: '100' }).flush({
-      chatSettings: { showMembershipMessages: true },
-      messages: [
-        { ...wireMessage, id: '101', replyRootId: '100', sender: otherSender },
-        { ...wireMessage, id: '102', replyRootId: '100', sender: otherSender },
-      ],
-    });
-    await settleMetadata();
-    await fixture.whenStable();
-    expect(readState).toHaveBeenLastCalledWith(testChat.id, encodeId('100'));
-    expect(component['entryReadId']()).toBe(encodeId('101'));
-    expect(component['firstUnreadId']()).toBe(encodeId('102'));
+    expect(component['threadRoot']()?.message).toBe('话题标题');
+    expect(component['replyTo']()).toMatchObject({ id: rootId, message: '话题标题' });
+    peer.expectNone('messages.get');
   });
 
   it('publishes accepted topic replies without turning the sender’s own message into an unread divider', async () => {
@@ -6161,6 +6142,245 @@ describe('ConversationPage', () => {
     expect(fixture.nativeElement.querySelector('.message-list').textContent).not.toContain('消息已删除');
   });
 
+  it.each(['removed', 'updated', 'outside window', 'retried'])(
+    'refreshes the draft quote after its message sync checkpoint expires (%s)',
+    async (result) => {
+      if (result === 'retried') {
+        const paging = component['loadPage'](PageDirection.Older);
+        (await peer.expectAsync('messages.list', { chatId: wireChat.id, max: 50, before: wireMessage.id })).flush({
+          chatSettings: { showMembershipMessages: true },
+          messages: [{ ...wireMessage, id: '100', clientGeneratedId: 'older' }],
+          olderCursor: '100',
+        });
+        await paging;
+        expect(component['conversation'].items()).toHaveLength(2);
+      }
+      component['startReply'](testMessage);
+      component['updateDraft']('要保留的草稿');
+      const sync = TestBed.inject(MessageSync);
+      const connection = TestBed.inject(Connection);
+      vi.spyOn(sync, 'active').mockReturnValue(true);
+      sync.receive(
+        {
+          type: ServerWsMessageType.messageSyncReset,
+          payload: { chatId: testChat.id, cursor: 'after-offline-recall', reason: MessageSyncResetReason.expired },
+        },
+        connection,
+      );
+      let requestId = 1;
+      let replacement = await peer.expectAsync('messageSync.page', { chatId: wireChat.id, requestId, max: 50 });
+      if (result === 'retried') {
+        replacement.error(RpcErrorCode.Unavailable);
+        await vi.waitFor(() => expect(component['conversation'].error()).toBe(ConversationError.Open));
+        expect(component['replyTo']()?.message).toBe(testMessage.message);
+        component['retry']();
+        requestId++;
+        replacement = await peer.expectAsync('messageSync.page', { chatId: wireChat.id, requestId, max: 50 });
+      }
+      const other = { ...testMessage, id: encodeId('9007199254741101'), clientGeneratedId: 'later' };
+      sync.receive(
+        {
+          type: ServerWsMessageType.messageSyncPageResult,
+          payload: {
+            chatId: testChat.id,
+            requestId,
+            at: 'after-offline-recall',
+            page: {
+              chatSettings: { showMembershipMessages: true, showUnreadMessageCount: false },
+              membershipMessagePolicy: testChat.membershipMessagePolicy,
+              messages:
+                result === 'removed' || result === 'retried'
+                  ? []
+                  : result === 'updated'
+                    ? [{ ...testMessage, message: '更新后的原文' }]
+                    : [other],
+              olderCursor: result === 'outside window' ? other.id : undefined,
+            },
+          },
+        },
+        connection,
+      );
+      replacement.flush({});
+      if (result === 'outside window') {
+        (await peer.expectAsync('messages.get', { chatId: wireChat.id, messageId: wireMessage.id })).error(
+          RpcErrorCode.NotFound,
+        );
+      }
+      await settleMetadata();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      expect(component['draft']()).toBe('要保留的草稿');
+      expect(component['replyTo']()?.id).toBe(testMessage.id);
+      expect(fixture.nativeElement.querySelector('.reply-context').textContent).toContain(
+        result === 'updated' ? '更新后的原文' : '消息已删除',
+      );
+      peer.expectNone('messages.get');
+    },
+  );
+
+  it.each(['pending', 'completed', 'before reset'])(
+    'reuses only a current draft quote lookup outside the replacement window (%s)',
+    async (lookupState) => {
+      component['startReply'](testMessage);
+      component['updateDraft']('要保留的草稿');
+      component.ionViewDidLeave();
+      const sync = TestBed.inject(MessageSync);
+      const connection = TestBed.inject(Connection);
+      vi.spyOn(sync, 'active').mockReturnValue(true);
+      const reset = () =>
+        sync.receive(
+          {
+            type: ServerWsMessageType.messageSyncReset,
+            payload: { chatId: testChat.id, cursor: 'expired', reason: MessageSyncResetReason.expired },
+          },
+          connection,
+        );
+      if (lookupState !== 'before reset') reset();
+      component.ionViewWillEnter();
+      const params = { chatId: wireChat.id, messageId: wireMessage.id };
+      const lookup = await peer.expectAsync('messages.get', params);
+      if (lookupState === 'before reset') reset();
+      const quote = { ...wireMessage, message: '重新取得的引用' };
+      if (lookupState === 'completed') lookup.flush(quote);
+      const replacement = await peer.expectAsync('messageSync.page', { chatId: wireChat.id, requestId: 1, max: 50 });
+      const other = { ...testMessage, id: encodeId('9007199254741101'), clientGeneratedId: 'later' };
+      sync.receive(
+        {
+          type: ServerWsMessageType.messageSyncPageResult,
+          payload: {
+            chatId: testChat.id,
+            requestId: 1,
+            at: 'expired',
+            page: {
+              chatSettings: { showMembershipMessages: true, showUnreadMessageCount: false },
+              membershipMessagePolicy: testChat.membershipMessagePolicy,
+              messages: [other],
+              olderCursor: other.id,
+            },
+          },
+        },
+        connection,
+      );
+      replacement.flush({});
+      if (lookupState === 'before reset') {
+        (await peer.expectAsync('messages.get', params)).flush(quote);
+        lookup.flush(wireMessage);
+      } else {
+        await fixture.whenStable();
+        if (lookupState === 'pending') lookup.flush(quote);
+      }
+      peer.expectNone('messages.get');
+      await fixture.whenStable();
+      await settleMetadata();
+      expect(component['replyTo']()).toMatchObject({ id: testMessage.id, message: quote.message });
+      expect(component['draft']()).toBe('要保留的草稿');
+    },
+  );
+
+  it('removes a recalled thread root from the selection and keeps the remaining batch actionable', () => {
+    component['beginSelection'](testMessage);
+    const remaining = { ...testMessage, id: encodeId('9007199254741101'), clientGeneratedId: 'another' };
+    component['toggleSelection'](remaining);
+    events.next({
+      type: ServerWsMessageType.messageUpdated,
+      payload: { ...testMessage, isDeleted: true, message: undefined, threadInfo: { replyCount: 1 } },
+    });
+    expect([...component['selectedMessages']().values()]).toEqual([remaining]);
+    expect(component['canRecallSelection']()).toBe(true);
+  });
+
+  it('sends a draft with its original quote after the target is recalled', async () => {
+    component['startReply'](testMessage);
+    component['updateDraft']('仍要发送的回复');
+    events.next({
+      type: ServerWsMessageType.messageUpdated,
+      payload: { ...testMessage, isDeleted: true, message: undefined, threadInfo: { replyCount: 1 } },
+    });
+    fixture.detectChanges();
+    const preview = fixture.nativeElement.querySelector('.reply-context button.reply-description') as HTMLButtonElement;
+    expect(preview.textContent).toContain('消息已删除');
+    expect(preview.disabled).toBe(true);
+
+    const sending = component['sendMessage']();
+    const request = await peer.expectAsync(
+      'messages.send',
+      (params) => params['message'] === '仍要发送的回复' && params['replyToId'] === wireMessage.id,
+    );
+    expect(component['outbox'].items()[0].message().replyToMessage).toMatchObject({
+      id: testMessage.id,
+      isDeleted: true,
+      message: undefined,
+    });
+    request.flush({
+      ...wireMessage,
+      id: '9007199254741101',
+      clientGeneratedId: request.params?.['clientGeneratedId'],
+      message: '仍要发送的回复',
+      replyToMessage: { ...wireMessage, message: null, isDeleted: true, mentions: [], attachments: [] },
+    });
+    await sending;
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-message .reply-preview').textContent).toContain('消息已删除');
+  });
+
+  it.each(['not found', 'late snapshot'])(
+    'restores a saved draft after its quote was recalled (%s)',
+    async (result) => {
+      component['savedReplyId'].set(testMessage.id);
+      component['updateDraft']('保留的草稿');
+      const restoring = component['restoreReply'](testMessage.id);
+      const request = peer.expect('messages.get', { chatId: wireChat.id, messageId: wireMessage.id });
+      if (result === 'not found') request.error(RpcErrorCode.NotFound);
+      else {
+        events.next({
+          type: ServerWsMessageType.messagesBulkDeleted,
+          payload: { chatId: testChat.id, messageIds: [testMessage.id] },
+        });
+        request.flush(wireMessage);
+      }
+      await restoring;
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('.reply-context').textContent).toContain('消息已删除');
+      expect(component['savedReplyId']()).toBe(testMessage.id);
+      expect(component['draft']()).toBe('保留的草稿');
+      if (result === 'not found') {
+        const sending = component['sendMessage']();
+        const send = await peer.expectAsync('messages.send', (params) => params['replyToId'] === wireMessage.id);
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('app-message .reply-preview').textContent).toContain('消息已删除');
+        send.flush({
+          ...wireMessage,
+          id: '9007199254741101',
+          clientGeneratedId: send.params?.['clientGeneratedId'],
+          message: '保留的草稿',
+          replyToMessage: { ...wireMessage, message: null, isDeleted: true, mentions: [], attachments: [] },
+        });
+        await sending;
+      }
+    },
+  );
+
+  it('keeps the reply preview when the quoted message is recalled through the change stream', () => {
+    const reply = {
+      ...testMessage,
+      id: encodeId('9007199254741101'),
+      clientGeneratedId: 'reply',
+      message: '回复正文',
+      replyToMessage: { ...testMessage, mentions: [] },
+    };
+    incoming.next(reply);
+    fixture.detectChanges();
+    const list = fixture.nativeElement.querySelector('.message-list') as HTMLElement;
+    const preview = list.querySelector('.reply-preview');
+    events.next({ type: ServerWsMessageType.messageDeleted, payload: { ...testMessage, isDeleted: true } });
+    fixture.detectChanges();
+
+    expect(list.querySelectorAll('app-message')).toHaveLength(1);
+    expect(list.querySelector('.message-text')?.textContent).toBe(reply.message);
+    expect(list.querySelector('.reply-preview')).toBe(preview);
+    expect(preview?.querySelector('.reply-text')?.textContent).toBe('消息已删除');
+  });
+
   it('omits deleted history and paging-time recalls before grouping dates and avatars', async () => {
     const loading = component['conversation'].load(PageDirection.Older);
     events.next({
@@ -6252,6 +6472,40 @@ describe('ConversationPage', () => {
     expect(fixture.nativeElement.querySelectorAll('.thread-entry')).toHaveLength(1);
     // A tombstone is row content, not a read boundary.
     expect(component['firstUnreadId']()).toBeUndefined();
+  });
+
+  it('keeps the topic entry when sync recalls a root with a pending local edit', async () => {
+    const root = {
+      ...testMessage,
+      id: encodeId('9007199254741101'),
+      clientGeneratedId: 'pending-root-edit',
+      threadInfo: { replyCount: 1 },
+    };
+    incoming.next(root);
+    const edit = TestBed.inject(MessageOutbox).enqueueEdit(root, undefined, '尚未确认的编辑', {
+      messageType: MessageType.text,
+      attachmentIds: [],
+    });
+    const request = await peer.expectAsync('messages.edit');
+    fixture.detectChanges();
+    const list = fixture.nativeElement.querySelector('.message-list') as HTMLElement;
+    const entry = list.querySelector('.thread-entry');
+    expect(entry).not.toBeNull();
+    expect(list.textContent).toContain('尚未确认的编辑');
+
+    events.next({
+      type: ServerWsMessageType.messageUpdated,
+      payload: { ...root, isDeleted: true, message: undefined },
+    });
+    request.error(RpcErrorCode.NotFound);
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(edit.cancelled()).toBe(true);
+    expect(list.querySelector('.thread-entry')).toBe(entry);
+    expect(list.textContent).toContain('消息已删除');
+    expect(list.textContent).not.toContain('尚未确认的编辑');
+    peer.expectNone('messages.delete');
   });
 
   it('keeps a recalled pin while its topic is still reachable and drops one without a topic', async () => {

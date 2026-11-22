@@ -480,7 +480,7 @@
         <button
           type="button"
           class="reply-description"
-          [disabled]="!!pendingNavigation()"
+          [disabled]="message.isDeleted || !!pendingNavigation()"
           (click)="navigateReply(message.id)">
           <strong>
             @if (message.forwardedFrom; as origin) {
@@ -500,6 +500,9 @@
         <ng-container [ngTemplateOutlet]="linkContextIcon" />
         <div class="reply-description">
           <strong>{{ 'conversation.reply' | transloco }}</strong>
+          @if (savedReplyDeleted()) {
+            <span>{{ 'messages.preview.deleted' | transloco }}</span>
+          }
         </div>
         <button type="button" class="reply-close" (click)="cancelReply()">
           <ion-icon [icon]="closeIcon" />

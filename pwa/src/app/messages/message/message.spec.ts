@@ -238,8 +238,16 @@ describe('Message', () => {
     fixture.componentRef.setInput('message', { ...testMessage, forwardedFrom });
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.forward-origin').textContent).toContain('Original');
-    expect(fixture.nativeElement.querySelector('.original-reply').tagName).toBe('DIV');
-    expect(fixture.nativeElement.querySelector('.original-reply button')).toBeNull();
+    const originalReply = fixture.nativeElement.querySelector('.original-reply') as HTMLDivElement;
+    expect(originalReply.tagName).toBe('DIV');
+    expect(originalReply.querySelector('button')).toBeNull();
+    fixture.componentRef.setInput('message', {
+      ...testMessage,
+      forwardedFrom: { ...forwardedFrom, originalReplyTo: { ...forwardedFrom.originalReplyTo, isDeleted: true } },
+    });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.original-reply')).toBe(originalReply);
+    expect(originalReply.querySelector('.reply-text')?.textContent).toBe('消息已删除');
     fixture.componentRef.setInput('message', {
       ...testMessage,
       messageType: MessageType.forwarded,
@@ -406,7 +414,7 @@ describe('Message', () => {
     expect(getComputedStyle(image).visibility).toBe('visible');
   });
 
-  it('renders a quote, emits reply selection, and hides deleted quotes', async () => {
+  it('renders a quote, emits reply selection, and replaces a deleted quote with a disabled preview', async () => {
     const fixture = await render();
     const quote: MessagePreview = {
       ...testMessage,
@@ -421,7 +429,8 @@ describe('Message', () => {
     expect(element.querySelector('.reply-text')?.textContent).toBe('原来的消息');
     const jumped = vi.fn();
     fixture.componentInstance.jump.subscribe(jumped);
-    element.querySelector<HTMLButtonElement>('.reply-preview')?.click();
+    const preview = element.querySelector<HTMLButtonElement>('.reply-preview')!;
+    preview.click();
     expect(jumped).toHaveBeenCalledWith(quote.id);
     const selected = vi.fn();
     fixture.componentInstance.reply.subscribe(selected);
@@ -429,6 +438,15 @@ describe('Message', () => {
     expect(selected).toHaveBeenCalledWith(expect.objectContaining({ id: testMessage.id }));
 
     fixture.componentRef.setInput('message', { ...testMessage, replyToMessage: { ...quote, isDeleted: true } });
+    fixture.detectChanges();
+    expect(element.querySelector('.reply-preview')).toBe(preview);
+    expect(preview.querySelector('.reply-name')?.textContent).toBe('小花');
+    expect(preview.querySelector('.reply-text')?.textContent).toBe('消息已删除');
+    expect(preview.disabled).toBe(true);
+    preview.click();
+    expect(jumped).toHaveBeenCalledTimes(1);
+
+    fixture.componentRef.setInput('message', { ...testMessage, replyToMessage: quote, isDeleted: true });
     fixture.detectChanges();
     expect(element.querySelector('.reply-preview')).toBeNull();
   });

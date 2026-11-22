@@ -46,7 +46,7 @@ export type MessageContent = MessageAttachmentSource &
       | 'replyRootId'
       | 'threadInfo'
     >
-  > & { replyToMessage?: Omit<Quote, 'clientGeneratedId'> };
+  > & { replyToMessage?: Omit<Quote, 'clientGeneratedId'>; recalledReply?: true };
 
 export interface MessageMenuSelection {
   messageId?: SnowflakeID;
@@ -272,11 +272,7 @@ export class Message<T extends MessageContent = MessageResponse> {
   });
   protected readonly quoted = computed(() => {
     const message = this.message();
-    return message.isDeleted || message.replyToMessage?.isDeleted ? undefined : message.replyToMessage;
-  });
-  protected readonly quoteName = computed(() => {
-    const sender = this.quoted()?.sender ?? this.origin()?.originalReplyTo?.sender;
-    return sender ? (sender.name ?? String(sender.uid)) : '';
+    return message.isDeleted ? undefined : message.replyToMessage;
   });
   protected readonly replyIcon = arrowUndoOutline;
   protected readonly retryIcon = alertCircleOutline;
