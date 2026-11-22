@@ -4,12 +4,17 @@ import { AlertController } from '@ionic/angular';
 import { EMPTY, firstValueFrom, takeUntil } from 'rxjs';
 import { vi } from 'vitest';
 import { RpcApi } from '../../generated/rpc-api';
-import { FriendPresenceOverride, GroupRole, type FriendRelationshipResponse } from '../../generated/models';
+import {
+  FriendPresenceOverride,
+  GroupRole,
+  ServerWsMessageType,
+  type FriendRelationshipResponse,
+} from '../../generated/models';
 import { Connection } from '../api/connection';
 import { RpcErrorCode } from '../api/rpc-error';
 import { RpcTestPeer, provideRpcTesting } from '../api/rpc-testing';
 import { activeQuery } from '../api/query';
-import { mockRealtime, testChat, testUser, wireChat } from '../api/testing';
+import { mockRealtime, testChat, testMessage, testUser, wireChat, wireMessage } from '../api/testing';
 import { SessionStore } from '../session/session-store';
 import { ChatDetails } from './chat-details/chat-details';
 import { ChatSearch } from './chat-search/chat-search';
@@ -308,4 +313,143 @@ describe('Chat feature requests', () => {
     peer.expectNone('groups.list');
     peer.expectNone('users.search');
   });
+});
+
+it('updates search results after a recall and redacts references in a delayed search page', async () => {
+  TestBed.configureTestingModule({ providers: [provideRpcTesting()] });
+  const peer = TestBed.inject(RpcTestPeer);
+  peer.authenticate();
+  const fixture = TestBed.createComponent(ChatSearch);
+  const search = fixture.componentInstance;
+  const reply = {
+    ...wireMessage,
+    id: '9007199254741004',
+    message: '引用回复',
+    replyToMessage: { ...wireMessage, mentions: [] },
+  };
+  fixture.componentRef.setInput('chatId', testChat.id);
+  search['query'].set('消息');
+  fixture.detectChanges();
+  (
+    await peer.expectAsync('messages.search', (params) => params['q'] === '消息' && !Object.hasOwn(params, 'offset'))
+  ).flush({ messages: [wireMessage, reply], nextOffset: 40 });
+  await fixture.whenStable();
+  fixture.detectChanges();
+  const element = fixture.nativeElement as HTMLElement;
+  const preview = element.querySelector('.reply-text');
+  expect(preview?.textContent).toBe(wireMessage.message);
+
+  const loading = search['load'](true);
+  const delayed = await peer.expectAsync('messages.search', (params) => params['offset'] === 40);
+  TestBed.inject(Connection).acceptChange({
+    type: ServerWsMessageType.messagesBulkDeleted,
+    payload: { chatId: testChat.id, messageIds: [testMessage.id] },
+  });
+  fixture.detectChanges();
+  expect(element.querySelectorAll('app-message')).toHaveLength(1);
+  expect(element.querySelector('.reply-text')).toBe(preview);
+  expect(preview?.textContent).toBe('消息已删除');
+
+  delayed.flush({ messages: [wireMessage, { ...reply, id: '9007199254741005' }] });
+  const checked = await peer.expectAsync('messages.search', (params) => params['offset'] === 39);
+  checked.flush({ messages: [reply, { ...reply, id: '9007199254741005' }] });
+  await loading;
+  fixture.detectChanges();
+  expect(element.querySelectorAll('app-message')).toHaveLength(2);
+  expect(Array.from(element.querySelectorAll('.reply-text'), (node) => node.textContent)).toEqual([
+    '消息已删除',
+    '消息已删除',
+  ]);
+  peer.verify();
+});
+
+it.each([false, true])('refills search results after a recall (index already updated: %s)', async (indexUpdated) => {
+  TestBed.configureTestingModule({ providers: [provideRpcTesting()] });
+  const peer = TestBed.inject(RpcTestPeer);
+  peer.authenticate();
+  const fixture = TestBed.createComponent(ChatSearch);
+  const search = fixture.componentInstance;
+  fixture.componentRef.setInput('chatId', testChat.id);
+  fixture.detectChanges();
+  const content = fixture.nativeElement.querySelector('ion-content') as HTMLIonContentElement;
+  const scroll = document.createElement('div');
+  const readHeight = vi.fn(() => 1100);
+  Object.defineProperties(scroll, { clientHeight: { value: 600 }, scrollHeight: { get: readHeight } });
+  vi.spyOn(content, 'getScrollElement').mockResolvedValue(scroll);
+  search['query'].set('消息');
+  fixture.detectChanges();
+  (await peer.expectAsync('messages.search', (params) => params['q'] === '消息')).flush({
+    messages: [wireMessage],
+    nextOffset: 40,
+  });
+  await vi.waitFor(() => {
+    fixture.detectChanges();
+    expect(readHeight).toHaveReturnedWith(1100);
+  });
+  await fixture.whenStable();
+  peer.expectNone('messages.search');
+
+  readHeight.mockReturnValue(600);
+  TestBed.inject(Connection).acceptChange({
+    type: ServerWsMessageType.messagesBulkDeleted,
+    payload: { chatId: testChat.id, messageIds: [testMessage.id] },
+  });
+  fixture.detectChanges();
+  const refill = await vi.waitFor(() => {
+    fixture.detectChanges();
+    return peer.expect('messages.search', (params) => params['offset'] === 39);
+  });
+  const element = fixture.nativeElement as HTMLElement;
+  expect(element.querySelector('.page-loading ion-spinner')).not.toBeNull();
+  const older = { ...wireMessage, id: '9007199254741002', message: '仍可搜索到的旧消息' };
+  refill.flush({ messages: [older], nextOffset: indexUpdated ? null : 79 });
+  if (!indexUpdated) {
+    const later = await vi.waitFor(() => {
+      fixture.detectChanges();
+      return peer.expect('messages.search', (params) => params['offset'] === 78);
+    });
+    later.flush({ messages: [older, { ...older, id: '9007199254741001', message: '下一页的匹配消息' }] });
+  }
+  await fixture.whenStable();
+  fixture.detectChanges();
+  expect(search['messages']().filter(({ message }) => message === older.message)).toHaveLength(1);
+  expect(search['messages']()).toHaveLength(indexUpdated ? 1 : 2);
+  expect(element.querySelector('.page-loading')).toBeNull();
+  peer.verify();
+});
+
+it('continues search past a full page of overlapping hits after a batch recall', async () => {
+  TestBed.configureTestingModule({ providers: [provideRpcTesting()] });
+  const peer = TestBed.inject(RpcTestPeer);
+  peer.authenticate();
+  const fixture = TestBed.createComponent(ChatSearch);
+  const search = fixture.componentInstance;
+  fixture.componentRef.setInput('chatId', testChat.id);
+  search['query'].set('消息');
+  fixture.detectChanges();
+  const hits = Array.from({ length: 81 }, (_, index) => ({ ...wireMessage, id: String(1000 + index) }));
+  const recalled = hits.slice(0, 40);
+  const retained = hits.slice(40, 80);
+  (await peer.expectAsync('messages.search')).flush({ messages: recalled, nextOffset: 40 });
+  await fixture.whenStable();
+
+  const second = search['load'](true);
+  (await peer.expectAsync('messages.search', (params) => params['offset'] === 40)).flush({
+    messages: retained,
+    nextOffset: 80,
+  });
+  await second;
+  peer.notify('events.messagesBulkDeleted', { chatId: wireChat.id, messageIds: recalled.map(({ id }) => id) });
+
+  const more = search['load'](true);
+  // The index still orders the retained hits after the recalled ones.
+  (await peer.expectAsync('messages.search', (params) => params['offset'] === 40)).flush({
+    messages: retained,
+    nextOffset: 80,
+  });
+  (await peer.expectAsync('messages.search', (params) => params['offset'] === 80)).flush({ messages: hits.slice(80) });
+  await more;
+  expect(search['messages']()).toHaveLength(41);
+  expect(search['cursor']()).toBeUndefined();
+  peer.verify();
 });
