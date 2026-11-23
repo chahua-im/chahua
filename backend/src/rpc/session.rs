@@ -1878,6 +1878,134 @@ struct SessionExecution<'a> {
     next_sync_seq: u64,
 }
 
+struct CallMetadata {
+    id: Option<RpcId>,
+    api: &'static str,
+    started: Instant,
+    destination: ResultDestination,
+}
+
+struct CallAdmission {
+    ordinary_request: Option<admission::Request>,
+    control_permit: Option<OwnedSemaphorePermit>,
+    deadline: Instant,
+}
+
+struct ScheduledWork {
+    call: RpcCall,
+    context: RpcCallContext,
+    metadata: CallMetadata,
+    admission: CallAdmission,
+    input_lease: Option<RpcFrameLease>,
+    close_after_error: bool,
+    activate_after_success: bool,
+    sync_control: bool,
+}
+
+impl SessionExecution<'_> {
+    fn reject_call(
+        &self,
+        metadata: CallMetadata,
+        error: RpcError,
+        outstanding: &mut HashSet<RpcId>,
+    ) -> ScheduledCall {
+        let CallMetadata {
+            id,
+            api,
+            started,
+            destination,
+        } = metadata;
+        if let Some(id) = &id {
+            if matches!(destination, ResultDestination::Single) {
+                outstanding.remove(id);
+            }
+        }
+        let code = error.code;
+        let response = id.map(|id| RpcResponse::error(id, error));
+        match record_rejection(self.services, api, started, response, code, self.budget) {
+            Ok(response) => ScheduledCall::Immediate(response),
+            Err(_) => {
+                self.shared.transport.close();
+                ScheduledCall::Immediate(None)
+            }
+        }
+    }
+
+    fn reject_control_overload(&self, metadata: &CallMetadata) -> ScheduledCall {
+        let _ = record_rejection(
+            self.services,
+            metadata.api,
+            metadata.started,
+            None,
+            RpcErrorCode::Overloaded,
+            self.budget,
+        );
+        self.shared.transport.close();
+        ScheduledCall::Immediate(None)
+    }
+
+    fn reserve_call_admission(
+        &self,
+        class: ExecutionClass,
+        context: &RpcCallContext,
+    ) -> Result<CallAdmission, RpcError> {
+        let mut admission = CallAdmission {
+            ordinary_request: None,
+            control_permit: None,
+            deadline: Instant::now() + admission::MAX_WAIT,
+        };
+        match class {
+            ExecutionClass::Read | ExecutionClass::Mutation => {
+                let session = context.session.as_ref().expect("validated ordinary call");
+                admission.ordinary_request = Some(
+                    self.ordinary_admission
+                        .request(
+                            session.uid,
+                            &self.admission.ordinary,
+                            admission.deadline,
+                            &self.services.metrics.rpc_admission,
+                        )
+                        .ok_or_else(|| RpcError::new(RpcErrorCode::Overloaded))?,
+                );
+            }
+            ExecutionClass::Session | ExecutionClass::Control => {
+                admission.control_permit = Some(
+                    self.admission
+                        .controls
+                        .clone()
+                        .try_acquire_owned()
+                        .map_err(|_| RpcError::new(RpcErrorCode::Overloaded))?,
+                );
+            }
+        }
+        Ok(admission)
+    }
+
+    fn reserve_sync_control(&mut self, context: &mut RpcCallContext) -> Result<(), RpcError> {
+        let permit = context
+            .controls
+            .clone()
+            .try_reserve_owned()
+            .map_err(|_| RpcError::new(RpcErrorCode::Overloaded))?;
+        context.sync_control = Some(Arc::new(SyncControlSlot {
+            seq: self.next_sync_seq,
+            permit: std::sync::Mutex::new(Some(permit)),
+        }));
+        self.next_sync_seq += 1;
+        Ok(())
+    }
+}
+
+fn validate_call(method: &str, context: &RpcCallContext) -> Result<ExecutionClass, RpcError> {
+    match (methods::method_class(method), context.session.is_some()) {
+        (None, true) => Err(RpcError::new(RpcErrorCode::MethodNotFound)),
+        (None | Some(ExecutionClass::Read | ExecutionClass::Mutation), false) => Err(
+            RpcError::with_message(RpcErrorCode::Unauthorized, "Authentication required"),
+        ),
+        (Some(class), _) => Ok(class),
+    }
+}
+
 async fn schedule_call(
     call: RpcCall,
     started: Instant,
@@ -1887,261 +2015,236 @@ async fn schedule_call(
     outstanding: &mut HashSet<RpcId>,
     input_lease: Option<RpcFrameLease>,
 ) -> ScheduledCall {
-    let shared = execution.shared.clone();
-    let services = execution.services.clone();
-    let controls = execution.controls.clone();
-    let guard_failures = execution.guard_failures.clone();
-    let results = execution.results.clone();
-    let admission = execution.admission;
-    let budget = execution.budget.clone();
-    let api = methods::registered_name(&call.method);
-    let id = call.id.clone();
-    if let Some(id) = &id {
+    let metadata = CallMetadata {
+        id: call.id.clone(),
+        api: methods::registered_name(&call.method),
+        started,
+        destination,
+    };
+    if let Some(id) = &metadata.id {
         if !outstanding.insert(id.clone()) {
             let response = record_rejection(
-                &services,
-                api,
+                execution.services,
+                metadata.api,
                 started,
                 Some(RpcResponse::invalid_request()),
                 RpcErrorCode::InvalidRequest,
-                &budget,
+                execution.budget,
             )
             .ok()
             .flatten();
             return ScheduledCall::Duplicate(response);
         }
     }
-    let class = methods::method_class(&call.method);
-    let Some(mut context) = shared
-        .call_context(controls, id.clone(), guard_failures)
+    let Some(mut context) = execution
+        .shared
+        .call_context(
+            execution.controls.clone(),
+            metadata.id.clone(),
+            execution.guard_failures.clone(),
+        )
         .await
     else {
-        if let Some(id) = id {
-            outstanding.remove(&id);
+        if let Some(id) = &metadata.id {
+            outstanding.remove(id);
         }
         let _ = record_rejection(
-            &services,
-            api,
+            execution.services,
+            metadata.api,
             started,
             None,
             RpcErrorCode::Unavailable,
-            &budget,
+            execution.budget,
         );
         return ScheduledCall::Immediate(None);
     };
-    if class.is_none()
-        || (context.session.is_none()
-            && matches!(class, Some(ExecutionClass::Read | ExecutionClass::Mutation)))
-    {
-        let error = if context.session.is_some() {
-            RpcError::new(RpcErrorCode::MethodNotFound)
-        } else {
-            RpcError::with_message(RpcErrorCode::Unauthorized, "Authentication required")
-        };
-        let code = error.code;
-        if let Some(id) = &id {
-            if matches!(destination, ResultDestination::Single) {
-                outstanding.remove(id);
-            }
-        }
-        let response = id.map(|id| RpcResponse::error(id, error));
-        return match record_rejection(&services, api, started, response, code, &budget) {
-            Ok(response) => ScheduledCall::Immediate(response),
-            Err(_) => {
-                shared.transport.close();
-                ScheduledCall::Immediate(None)
-            }
-        };
-    }
-    let deadline = Instant::now() + admission::MAX_WAIT;
-    let mut ordinary_request = None;
-    let control_permit = match class {
-        Some(ExecutionClass::Read | ExecutionClass::Mutation) => {
-            if let Some(session) = &context.session {
-                ordinary_request = execution.ordinary_admission.request(
-                    session.uid,
-                    &admission.ordinary,
-                    deadline,
-                    &services.metrics.rpc_admission,
-                );
-                if ordinary_request.is_none() {
-                    if let Some(id) = &id {
-                        if matches!(destination, ResultDestination::Single) {
-                            outstanding.remove(id);
-                        }
-                    }
-                    let response = id
-                        .map(|id| RpcResponse::error(id, RpcError::new(RpcErrorCode::Overloaded)));
-                    return match record_rejection(
-                        &services,
-                        api,
-                        started,
-                        response,
-                        RpcErrorCode::Overloaded,
-                        &budget,
-                    ) {
-                        Ok(response) => ScheduledCall::Immediate(response),
-                        Err(_) => {
-                            shared.transport.close();
-                            ScheduledCall::Immediate(None)
-                        }
-                    };
-                }
-            }
-            None
-        }
-        Some(ExecutionClass::Session | ExecutionClass::Control) => {
-            match admission.controls.clone().try_acquire_owned() {
-                Ok(permit) => Some(permit),
-                Err(_) => {
-                    let _ = record_rejection(
-                        &services,
-                        api,
-                        started,
-                        None,
-                        RpcErrorCode::Overloaded,
-                        &budget,
-                    );
-                    shared.transport.close();
-                    return ScheduledCall::Immediate(None);
-                }
-            }
-        }
-        None => None,
+    let class = match validate_call(&call.method, &context) {
+        Ok(class) => class,
+        Err(error) => return execution.reject_call(metadata, error, outstanding),
     };
-    let method = call.method.clone();
-    let activate_after_success =
-        matches!(method.as_str(), "session.open" | "auth.createDevSession");
-    let sync_control = matches!(method.as_str(), "messageSync.resume" | "messageSync.page");
-    if sync_control && context.message_sync_enabled {
-        let Ok(permit) = context.controls.clone().try_reserve_owned() else {
-            let _ = record_rejection(
-                &services,
-                api,
-                started,
-                None,
-                RpcErrorCode::Overloaded,
-                &budget,
-            );
-            shared.transport.close();
-            return ScheduledCall::Immediate(None);
-        };
-        context.sync_control = Some(Arc::new(SyncControlSlot {
-            seq: execution.next_sync_seq,
-            permit: std::sync::Mutex::new(Some(permit)),
-        }));
-        execution.next_sync_seq += 1;
+    let admission = match execution.reserve_call_admission(class, &context) {
+        Ok(admission) => admission,
+        Err(error) => {
+            return match class {
+                ExecutionClass::Read | ExecutionClass::Mutation => {
+                    execution.reject_call(metadata, error, outstanding)
+                }
+                ExecutionClass::Session | ExecutionClass::Control => {
+                    execution.reject_control_overload(&metadata)
+                }
+            };
+        }
+    };
+    let activate_after_success = matches!(
+        call.method.as_str(),
+        "session.open" | "auth.createDevSession"
+    );
+    let sync_control = matches!(
+        call.method.as_str(),
+        "messageSync.resume" | "messageSync.page"
+    );
+    if sync_control
+        && context.message_sync_enabled
+        && execution.reserve_sync_control(&mut context).is_err()
+    {
+        return execution.reject_control_overload(&metadata);
     }
-    let counts_toward_batch = id.is_some() || activate_after_success || sync_control;
-    let failure_transport = shared.transport.clone();
+    let work = ScheduledWork {
+        call,
+        context,
+        metadata,
+        admission,
+        input_lease,
+        close_after_error,
+        activate_after_success,
+        sync_control,
+    };
     supervise(
-        async move {
-            let _input_lease = input_lease;
-            let _control_permit = control_permit;
-            let mut admission_error = None;
-            let _ordinary_permit = if let Some(request) = ordinary_request {
-                let was_waiting = request.is_waiting();
-                let result = if was_waiting {
-                    let mut close = shared.transport.close_subscription();
-                    // Wait outside the session loop so results, controls, and
-                    // disconnects keep moving while ordinary capacity is full.
-                    tokio::select! {
-                        biased;
-                        _ = shared.transport.wait_closed(&mut close) => return,
-                        result = time::timeout_at(deadline, request.wait()) => result,
-                    }
-                } else {
-                    Ok(request.wait().await)
-                };
-                match result {
-                    Ok(permit) => {
-                        if was_waiting {
-                            let Some(current) = shared
-                                .call_context(
-                                    context.controls.clone(),
-                                    id.clone(),
-                                    context
-                                        .guard_failures
-                                        .clone()
-                                        .expect("session guard sender"),
-                                )
-                                .await
-                            else {
-                                return;
-                            };
-                            context = current;
-                        }
-                        Some(permit)
-                    }
-                    Err(_) => {
-                        admission_error = Some(RpcError::new(RpcErrorCode::Overloaded));
-                        None
-                    }
-                }
-            } else {
+        run_scheduled_call(
+            work,
+            execution.shared.clone(),
+            execution.services.clone(),
+            execution.budget.clone(),
+            execution.results.clone(),
+        ),
+        execution.shared.transport.clone(),
+    );
+    ScheduledCall::Pending
+}
+
+// None means the queued call was cancelled or its session stopped accepting work.
+async fn wait_for_admission(
+    request: admission::Request,
+    deadline: Instant,
+    shared: &Arc<SessionShared>,
+    context: &mut RpcCallContext,
+) -> Result<Option<admission::Permit>, RpcError> {
+    if !request.is_waiting() {
+        return Ok(Some(request.wait().await));
+    }
+    let mut close = shared.transport.close_subscription();
+    // Wait outside the session loop so results, controls, and disconnects keep moving.
+    let permit = tokio::select! {
+        biased;
+        _ = shared.transport.wait_closed(&mut close) => return Ok(None),
+        result = time::timeout_at(deadline, request.wait()) => {
+            result.map_err(|_| RpcError::new(RpcErrorCode::Overloaded))?
+        }
+    };
+    let Some(current) = shared
+        .call_context(
+            context.controls.clone(),
+            context.rpc_id.clone(),
+            context
+                .guard_failures
+                .clone()
+                .expect("session guard sender"),
+        )
+        .await
+    else {
+        return Ok(None);
+    };
+    *context = current;
+    Ok(Some(permit))
+}
+
+async fn run_scheduled_call(
+    work: ScheduledWork,
+    shared: Arc<SessionShared>,
+    services: RpcServices,
+    budget: RpcByteBudget,
+    results: mpsc::Sender<WorkResult>,
+) {
+    let ScheduledWork {
+        call,
+        mut context,
+        metadata,
+        admission,
+        input_lease: _input_lease,
+        close_after_error,
+        activate_after_success,
+        sync_control,
+    } = work;
+    let CallMetadata {
+        id,
+        api,
+        started,
+        destination,
+    } = metadata;
+    let CallAdmission {
+        ordinary_request,
+        control_permit: _control_permit,
+        deadline,
+    } = admission;
+    let counts_toward_batch = id.is_some() || activate_after_success || sync_control;
+    let mut admission_error = None;
+    // Running permits and the input lease stay owned by this task through completion.
+    let _ordinary_permit = if let Some(request) = ordinary_request {
+        match wait_for_admission(request, deadline, &shared, &mut context).await {
+            Ok(Some(permit)) => Some(permit),
+            Ok(None) => return,
+            Err(error) => {
+                admission_error = Some(error);
                 None
-            };
-            let (response, error) = if let Some(error) = admission_error {
-                let code = error.code;
-                (
-                    id.clone().map(|id| RpcResponse::error(id, error)),
-                    Some(code),
-                )
-            } else {
-                match AssertUnwindSafe(methods::dispatch_call(&context, call, &services))
-                    .catch_unwind()
-                    .await
-                {
-                    Ok(result) => result,
-                    Err(_) => {
-                        tracing::error!("RPC supervised operation panicked");
-                        let _ = record_rejection(
-                            &services,
-                            api,
-                            started,
-                            None,
-                            RpcErrorCode::DispatcherInternal,
-                            &budget,
-                        );
-                        shared.transport.close();
-                        return;
-                    }
-                }
-            };
-            let message_sync_enabled = context.message_sync_enabled;
-            drop(context);
-            let response = match prepare_recorded(&services, api, started, response, error, &budget)
-            {
-                Ok(response) => response,
-                Err(_) => {
-                    shared.transport.close();
-                    return;
-                }
-            };
-            if id.is_none()
-                && sync_control
-                && message_sync_enabled
-                && error == Some(RpcErrorCode::InvalidParams)
-            {
+            }
+        }
+    } else {
+        None
+    };
+    let (response, error) = if let Some(error) = admission_error {
+        let code = error.code;
+        (
+            id.clone().map(|id| RpcResponse::error(id, error)),
+            Some(code),
+        )
+    } else {
+        match AssertUnwindSafe(methods::dispatch_call(&context, call, &services))
+            .catch_unwind()
+            .await
+        {
+            Ok(result) => result,
+            Err(_) => {
+                tracing::error!("RPC supervised operation panicked");
+                let _ = record_rejection(
+                    &services,
+                    api,
+                    started,
+                    None,
+                    RpcErrorCode::DispatcherInternal,
+                    &budget,
+                );
                 shared.transport.close();
                 return;
             }
-            let result = WorkResult {
-                id,
-                destination,
-                close_after_error: close_after_error
-                    || (sync_control
-                        && message_sync_enabled
-                        && error == Some(RpcErrorCode::InvalidParams)),
-                response,
-                activate_after_success,
-                counts_toward_batch,
-            };
-            let _ = results.send(result).await;
-        },
-        failure_transport,
-    );
-    ScheduledCall::Pending
+        }
+    };
+    let message_sync_enabled = context.message_sync_enabled;
+    drop(context);
+    let response = match prepare_recorded(&services, api, started, response, error, &budget) {
+        Ok(response) => response,
+        Err(_) => {
+            shared.transport.close();
+            return;
+        }
+    };
+    if id.is_none()
+        && sync_control
+        && message_sync_enabled
+        && error == Some(RpcErrorCode::InvalidParams)
+    {
+        shared.transport.close();
+        return;
+    }
+    let result = WorkResult {
+        id,
+        destination,
+        close_after_error: close_after_error
+            || (sync_control && message_sync_enabled && error == Some(RpcErrorCode::InvalidParams)),
+        response,
+        activate_after_success,
+        counts_toward_batch,
+    };
+    let _ = results.send(result).await;
 }
 
 struct BatchAssembly {
