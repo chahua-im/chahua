@@ -14,9 +14,7 @@
     @if (canFullscreen) {
       <button class="icon-button" type="button" (click)="fullscreen()"><ion-icon [icon]="icons.scanOutline" /></button>
     }
-    <button class="icon-button close" type="button" (click)="panels.back()">
-      <ion-icon [icon]="icons.closeOutline" />
-    </button>
+    <app-modal-button class="close" (pressed)="panels.back()" />
   </div>
 </div>
 <div class="stage">

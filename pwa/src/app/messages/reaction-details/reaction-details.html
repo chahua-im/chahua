@@ -1,8 +1,13 @@
 <ion-header>
   <ion-toolbar>
+    @if (panels.paths().length > 1) {
+      <ion-buttons slot="start">
+        <app-modal-button back (pressed)="panels.back()" />
+      </ion-buttons>
+    }
     <ion-title>{{ 'reactions.title' | transloco }}</ion-title>
     <ion-buttons slot="end">
-      <ion-button (click)="panels.close()">{{ 'common.done' | transloco }}</ion-button>
+      <app-modal-button (pressed)="panels.close()" />
     </ion-buttons>
   </ion-toolbar>
   <ion-segment

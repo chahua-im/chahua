@@ -333,7 +333,7 @@ describe('MessageMenu', () => {
     };
     open();
     const panel = fixture.nativeElement.querySelector('app-emoji-panel');
-    panel.querySelector('.picker-back').click();
+    panel.querySelector('app-modal-button[back] ion-button').click();
     fixture.detectChanges();
     expect(panel.isConnected).toBe(true);
     expect(panel.classList.contains('ion-hide')).toBe(true);
@@ -778,6 +778,45 @@ describe('MessageMenu', () => {
     const preview = fixture.nativeElement.querySelector('.preview') as HTMLElement;
     // 358px complete author row + 22px bubble padding + 44px avatar column.
     expect(parseFloat(preview.style.width)).toBe(424);
+  });
+
+  it('defers resize placement once per frame and cancels it when the menu closes', () => {
+    let resizePreview: (() => void) | undefined;
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(private readonly notify: () => void) {}
+        observe(target: HTMLElement) {
+          if (target.matches('.preview')) resizePreview = this.notify;
+        }
+        disconnect() {}
+      },
+    );
+    let frameId = 0;
+    const requestFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => ++frameId);
+    const cancelFrame = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
+    menu.reset();
+    menu.open(selection());
+    fixture.detectChanges();
+    const preview: HTMLElement = fixture.nativeElement.querySelector('.preview');
+    (fixture.nativeElement.querySelector('.menu-surface') as HTMLElement).style.padding = '0px';
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(276);
+    requestFrame.mockClear();
+
+    resizePreview!();
+    resizePreview!();
+    expect(requestFrame).toHaveBeenCalledOnce();
+    expect(preview.style.width).toBe('');
+    requestFrame.mock.calls[0][0](0);
+    expect(parseFloat(preview.style.width)).toBeGreaterThan(0);
+
+    requestFrame.mockClear();
+    resizePreview!();
+    expect(requestFrame).toHaveBeenCalledOnce();
+    const pendingFrame = requestFrame.mock.results[0].value;
+    menu.reset();
+    fixture.detectChanges();
+    expect(cancelFrame).toHaveBeenCalledWith(pendingFrame);
   });
 
   it('includes the complete author row for a short bubble', () => {

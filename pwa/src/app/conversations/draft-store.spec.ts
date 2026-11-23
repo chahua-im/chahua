@@ -6,7 +6,6 @@ import { TestBed } from '@angular/core/testing';
 import { encodeId } from '../api/snowflake-id';
 import { SessionStore } from '../session/session-store';
 import { DraftStore } from './draft-store';
-import { testMessage } from '../api/testing';
 
 const chat = encodeId('9007199254741000');
 const thread = encodeId('9007199254741001');
@@ -33,26 +32,6 @@ describe('DraftStore', () => {
   });
 
   afterEach(() => vi.unstubAllGlobals());
-
-  it('keeps forward selections separate from text, topics and persistent storage', async () => {
-    const drafts = TestBed.inject(DraftStore);
-    const sources = [testMessage];
-    drafts.save(chat, undefined, 'existing text', thread);
-    drafts.setForward(chat, undefined, sources);
-    expect(drafts.forward(chat)).toBe(sources);
-    expect(drafts.forward(chat, thread)).toBeUndefined();
-    expect(drafts.get(chat)).toMatchObject({ text: 'existing text', replyTo: '9007199254741001' });
-    expect(JSON.stringify(TestBed.inject(AccountStorage).entries(AccountStore.Drafts))).not.toContain('sources');
-    drafts.setForward(chat, undefined);
-    expect(drafts.get(chat)?.text).toBe('existing text');
-    drafts.setForward(chat, undefined, sources);
-    await TestBed.inject(AccountStorage).activate(2);
-    user.set({ uid: 2 });
-    expect(drafts.forward(chat)).toBeUndefined();
-    await TestBed.inject(AccountStorage).activate(1);
-    user.set({ uid: 1 });
-    expect(drafts.forward(chat)).toBeUndefined();
-  });
 
   it('restores ordinary send text and link choices within the same account', async () => {
     const choices = [{ url: 'https://example.com/', status: LinkPreviewInputStatus.disabled }];

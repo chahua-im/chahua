@@ -1,3 +1,4 @@
+import { ModalButton } from '../../ui/modal-button';
 import { DetailView } from './detail-view';
 import { registerEscape } from '../../navigation/escape-navigation';
 import { DiscardChanges } from '../../navigation/discard-changes';
@@ -50,7 +51,6 @@ import {
   cameraOutline,
   chatbubbleOutline,
   checkmarkOutline,
-  chevronBackOutline,
   closeOutline,
   createOutline,
   documentTextOutline,
@@ -139,6 +139,7 @@ export type DetailPage =
   styleUrl: './chat-details.scss',
   // Nested messages and member lists can open these same details again.
   imports: [
+    ModalButton,
     ContentScrollbars,
     FormField,
     LoadError,
@@ -194,7 +195,6 @@ export class ChatDetails {
     createOutline,
     personAddOutline,
     chatbubbleOutline,
-    chevronBackOutline,
     globeOutline,
     banOutline,
     closeOutline,

@@ -38,13 +38,18 @@ pub async fn send(
     services: &RpcServices,
     params: MessagesSendParams,
 ) -> Result<MessageResponse, AppError> {
-    let MessagesSendParams { chat_id, body } = params;
+    let MessagesSendParams {
+        chat_id,
+        mark_read,
+        body,
+    } = params;
     let principal = context.principal()?;
     let mut conn = services.db.get()?;
     api::post_message(
         principal,
         chat_id,
         body,
+        mark_read.unwrap_or(true),
         &mut conn,
         api::PostMessageDeps {
             id_gen: &services.id_gen,
@@ -72,6 +77,29 @@ pub async fn search(
     api::search_messages(
         uid,
         chat_id,
+        query,
+        &mut conn,
+        api::SearchMessagesDeps {
+            media: &services.media,
+            avatars: &services.avatars,
+            metrics: &services.metrics,
+            message_search: &services.message_search,
+        },
+    )
+    .await
+}
+
+pub async fn search_all(
+    context: &RpcCallContext,
+    services: &RpcServices,
+    params: crate::dto::messages::SearchMessagesQuery,
+) -> Result<SearchMessagesResponse, AppError> {
+    let query = params;
+    let uid = context.uid()?;
+    let mut conn = services.db.get()?;
+    api::search_messages_in_scope(
+        uid,
+        None,
         query,
         &mut conn,
         api::SearchMessagesDeps {
@@ -292,6 +320,7 @@ pub async fn send_in_thread(
     let MessagesSendInThreadParams {
         chat_id,
         thread_id,
+        mark_read,
         body,
     } = params;
     let uid = context.uid()?;
@@ -301,6 +330,7 @@ pub async fn send_in_thread(
         chat_id,
         thread_id,
         body,
+        mark_read.unwrap_or(true),
         &mut conn,
         api::PostThreadMessageDeps {
             id_gen: &services.id_gen,
@@ -327,4 +357,28 @@ pub async fn preview_links(
         crate::services::api::members::check_membership(&mut conn, params.chat_id, uid)?;
     }
     services.link_previews.drafts.fetch(uid, params.urls).await
+}
+
+pub async fn send_forward(
+    context: &RpcCallContext,
+    services: &RpcServices,
+    params: crate::dto::rpc::messages::MessagesSendForwardParams,
+) -> Result<crate::dto::rpc::messages::SendForwardResponse, AppError> {
+    let uid = context.uid()?;
+    let mut conn = services.db.get()?;
+    crate::services::forward_send::send(
+        &mut conn,
+        uid,
+        params,
+        api::ForwardMessageDeps {
+            id_gen: &services.id_gen,
+            media: &services.media,
+            avatars: &services.avatars,
+            metrics: &services.metrics,
+            ws_registry: &services.ws_registry,
+            push_service: &services.push_service,
+            message_search: &services.message_search,
+        },
+    )
+    .await
 }

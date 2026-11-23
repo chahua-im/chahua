@@ -6,10 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ForwardedMessagePreviewResponse } from './forwardedMessagePreviewResponse';
+import type { MessagePreview } from './messagePreview';
 import type { SnowflakeID } from './snowflakeID';
 
 export type ForwardedReplyResponse =
   | {
+      externalPreview?: MessagePreview;
       kind: 'redacted';
     }
   | {

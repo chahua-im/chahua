@@ -188,8 +188,7 @@ pub enum MessageType {
     Invite,
     System,
     Forwarded,
-    /// Server-generated forwarding replacement. The message body contains
-    /// `pendingAudio` or `nestedForward`, which clients localize for display.
+    /// Server-generated forwarding replacement with a localizable reason code.
     Placeholder,
 }
 
@@ -231,10 +230,12 @@ impl SystemMessageKind {
 
 /// Reason code stored in `message` only when `message_type` is `placeholder`.
 /// Ordinary text with the same contents remains ordinary text.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub enum ForwardPlaceholder {
     PendingAudio,
     NestedForward,
+    GroupInvite,
 }
 
 impl ForwardPlaceholder {
@@ -242,6 +243,7 @@ impl ForwardPlaceholder {
         match self {
             Self::PendingAudio => "pendingAudio",
             Self::NestedForward => "nestedForward",
+            Self::GroupInvite => "groupInvite",
         }
     }
 
@@ -249,6 +251,7 @@ impl ForwardPlaceholder {
         match code {
             "pendingAudio" => Some(Self::PendingAudio),
             "nestedForward" => Some(Self::NestedForward),
+            "groupInvite" => Some(Self::GroupInvite),
             _ => None,
         }
     }
@@ -259,6 +262,7 @@ impl ForwardPlaceholder {
         match self {
             Self::PendingAudio => "[Pending voice message]",
             Self::NestedForward => "[Chat history]",
+            Self::GroupInvite => "[Group chat invitation]",
         }
     }
 }
@@ -713,7 +717,7 @@ pub struct NewForwardedBundle {
     pub preview: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Queryable, Selectable, Serialize)]
+#[derive(Debug, Clone, Queryable, QueryableByName, Selectable, Serialize)]
 #[diesel(table_name = schema::messages)]
 pub struct Message {
     pub id: i64,
@@ -737,6 +741,16 @@ pub struct Message {
     pub forwarded_from_message_id: Option<i64>,
     pub system_kind: Option<SystemMessageKind>,
     pub metadata: Option<serde_json::Value>,
+}
+
+impl Message {
+    pub fn audio_pending(&self) -> bool {
+        self.message_type == MessageType::Audio
+            && !matches!(
+                self.transcode_status,
+                TranscodeStatus::Done | TranscodeStatus::Failed
+            )
+    }
 }
 
 #[derive(Debug, Clone, Insertable)]

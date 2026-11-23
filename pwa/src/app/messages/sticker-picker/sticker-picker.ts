@@ -1,3 +1,4 @@
+import { ModalButton } from '../../ui/modal-button';
 import { LoadError } from '../../ui/load-error/load-error';
 import { NgTemplateOutlet } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
@@ -40,7 +41,7 @@ import {
   ModalController,
 } from '@ionic/angular';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { addOutline, chevronBackOutline, cubeOutline, heart, settingsOutline } from 'ionicons/icons';
+import { addOutline, cubeOutline, heart, settingsOutline } from 'ionicons/icons';
 import { filter, firstValueFrom, type Observable, takeUntil } from 'rxjs';
 import { CHAHUA_BASE_URL } from '../../../generated/endpoints/chahua.base-url';
 import { RpcApi } from '../../../generated/rpc-api';
@@ -85,6 +86,7 @@ type StickerContent = StickerPackDetailResponse | { stickers: StickerSummary[] }
   templateUrl: './sticker-picker.html',
   styleUrl: './sticker-picker.scss',
   imports: [
+    ModalButton,
     LoadError,
     RouterLink,
     ContentScrollbars,
@@ -116,7 +118,7 @@ export class StickerPicker {
   readonly embedded = input(false);
   readonly grouped = input(false);
   readonly selected = output<StickerSummary>();
-  protected readonly icons = { heart, cubeOutline, addOutline, settingsOutline, chevronBackOutline };
+  protected readonly icons = { heart, cubeOutline, addOutline, settingsOutline };
   protected readonly session = inject(SessionStore);
   private readonly preferences = inject(StickerPreferences);
   private readonly alerts = inject(AlertController);

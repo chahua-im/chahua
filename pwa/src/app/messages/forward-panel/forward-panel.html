@@ -1,0 +1,117 @@
+<ion-header>
+  <ion-toolbar #heading>
+    <ion-buttons slot="start">
+      <app-modal-button back [disabled]="targetChangeDisabled()" (pressed)="backToPicker()" />
+    </ion-buttons>
+    <ion-title>
+      @if (sourceCount() === 1) {
+        {{ 'messages.forward.singleTitle' | transloco }}
+      } @else {
+        {{ 'messages.forward.pendingCount' | transloco: { count: sourceCount() } }}
+      }
+    </ion-title>
+    <ion-buttons slot="end">
+      <app-modal-button [disabled]="sending()" (pressed)="close()" />
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+<div #dialog class="dialog ion-content-scroll-host" appScrollbars>
+  <section class="source">
+    <h3 class="section-label">
+      @if (sourceName(); as name) {
+        {{ 'messages.forward.sourceChat' | transloco: { name } }}
+      } @else {
+        {{ 'messages.forward.content' | transloco }}
+      }
+    </h3>
+    <div #preview class="preview ion-content-scroll-host" appScrollbars>
+      @if (sourceFailure(); as failure) {
+        <app-load-error [message]="failure | transloco: { max: maxMessages }" [retryable]="false" />
+      } @else if (previewMessage(); as message) {
+        <app-message
+          class="compact-preview"
+          [message]="message"
+          [own]="true"
+          [showDetails]="false"
+          [record]="true"
+          [preview]="true"
+          [allowPreviewBundle]="true"
+          [interactive]="false"
+          [canReply]="false"
+          (bundleOpened)="recordsOpen.set(true)" />
+      } @else if (placeholderPending()) {
+        <div class="loading"><ion-spinner /></div>
+      }
+    </div>
+  </section>
+
+  <section>
+    <h3 class="section-label">{{ 'messages.forward.to' | transloco }}</h3>
+    <div class="target">
+      <app-chat-avatar [entry]="target().avatar" [size]="40" />
+      <div class="target-name">
+        <strong>{{ target().name }}</strong>
+        @if (target().preview; as preview) {
+          <app-message-preview [message]="preview" />
+        }
+      </div>
+      <div class="target-actions">
+        <ion-button
+          fill="clear"
+          [title]="'messages.forward.changeTarget' | transloco"
+          [disabled]="targetChangeDisabled()"
+          (click)="requestTargetChange()">
+          <app-forward-target-icon slot="icon-only" />
+        </ion-button>
+        <ion-button
+          [disabled]="unavailable() || !metadata.isAccessible(target().chatId, target().threadId)"
+          fill="clear"
+          [title]="'messages.forward.viewRecent' | transloco"
+          (click)="recentOpen.set(true)">
+          <ion-icon slot="icon-only" [icon]="recentMessagesIcon" />
+        </ion-button>
+      </div>
+    </div>
+    @if (restricted() && !unavailable()) {
+      <p class="restriction">{{ 'messages.forward.restricted' | transloco }}</p>
+    }
+  </section>
+
+  <footer>
+    @if (sendFailed()) {
+      <app-load-error
+        compact
+        [message]="sendFailed()! | transloco"
+        [retryable]="!unavailable() || !!submission()"
+        [disabled]="sending() || (restricted() && !submission())"
+        (retry)="send()" />
+    }
+    @if (sending()) {
+      <div class="sending">
+        <ion-spinner />
+        {{ 'messages.forward.sending' | transloco }}
+      </div>
+    }
+    <div [attr.inert]="composerDisabled() ? '' : null">
+      <app-message-composer
+        [disabled]="composerDisabled()"
+        [placeholder]="'messages.forward.commentPlaceholder' | transloco"
+        [(text)]="comment"
+        [chatId]="target().chatId"
+        [mentionsEnabled]="target().kind === GroupKind.group"
+        [forwarding]="true"
+        (forwardSubmitted)="send($event)" />
+    </div>
+  </footer>
+</div>
+
+@if (recentOpen()) {
+  <app-forward-details [target]="target()" (closed)="recentOpen.set(false)" />
+}
+@if (recordsOpen() && forwardPreview(); as preview) {
+  <app-forward-details
+    [target]="target()"
+    [forwardPreview]="preview"
+    (sourceUnavailable)="invalidateSource()"
+    (closed)="recordsOpen.set(false)" />
+}

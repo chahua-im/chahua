@@ -16,7 +16,6 @@ import { TranslocoPipe } from '@jsverse/transloco';
 import {
   chevronBackOutline,
   chevronForwardOutline,
-  closeOutline,
   contractOutline,
   downloadOutline,
   expandOutline,
@@ -25,6 +24,7 @@ import {
 } from 'ionicons/icons';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { PanelNavigation } from '../../navigation/panel-navigation';
+import { ModalButton } from '../../ui/modal-button';
 import { MediaKind } from '../message-attachments/media-kind';
 
 export interface ViewerMedia {
@@ -37,7 +37,7 @@ export interface ViewerMedia {
   selector: 'app-media-viewer',
   templateUrl: './media-viewer.html',
   styleUrl: './media-viewer.scss',
-  imports: [ContentScrollbars, IonIcon, IonSpinner, TranslocoPipe],
+  imports: [ContentScrollbars, ModalButton, IonIcon, IonSpinner, TranslocoPipe],
   host: { class: 'ion-page', '(document:keydown)': 'key($event)' },
 })
 export class MediaViewer {
@@ -61,7 +61,6 @@ export class MediaViewer {
   protected readonly icons = {
     chevronBackOutline,
     chevronForwardOutline,
-    closeOutline,
     contractOutline,
     downloadOutline,
     expandOutline,

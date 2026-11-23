@@ -10,7 +10,11 @@ import { MessagePreview } from './message-preview/message-preview';
     @if (preview(); as preview) {
       @for (message of preview.messages; track message.originalMessageId) {
         <div class="record">
-          <span>{{ message.sender.name ?? message.sender.uid }}: </span><app-message-preview [message]="message" />
+          <span>{{ message.sender.name ?? message.sender.uid }}: </span>
+          @if (message.forwardedThreadReplyCount != null) {
+            <span>{{ 'messages.forward.topicMarker' | transloco }} </span>
+          }
+          <app-message-preview [message]="message" />
         </div>
       }
     }
@@ -44,7 +48,7 @@ import { MessagePreview } from './message-preview/message-preview';
       display: flex;
       align-items: baseline;
       justify-content: space-between;
-      border-top: 1px solid var(--ion-color-light-shade);
+      border-top: 1px solid color-mix(in srgb, currentColor 25%, transparent);
       margin-top: 6px;
       padding-top: 4px;
     }

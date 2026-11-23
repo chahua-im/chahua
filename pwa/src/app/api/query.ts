@@ -64,6 +64,7 @@ export function activeQuery<T>(destroyRef: DestroyRef, request: (cancel: Observa
         }
       };
     },
+    ensure: start,
     refresh: () => {
       dirty = true;
       version++;

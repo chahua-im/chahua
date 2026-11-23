@@ -187,7 +187,7 @@ describe('MediaViewer', () => {
     expect(dismiss).not.toHaveBeenCalled();
     element.querySelector<HTMLElement>('.canvas')!.click();
     expect(dismiss).toHaveBeenCalledOnce();
-    element.querySelector<HTMLButtonElement>('.close')!.click();
+    element.querySelector<HTMLElement>('.close ion-button')!.click();
     expect(dismiss).toHaveBeenCalledTimes(2);
   });
   it('navigates with arrow keys and leaves Escape to the panel container', () => {

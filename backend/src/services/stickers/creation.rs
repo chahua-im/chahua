@@ -10,7 +10,7 @@ use crate::{
         Attachment, Media, MediaPurpose, Message, MessageType, NewMedia, NewSticker, Sticker,
         StickerPackSticker,
     },
-    schema::{attachments, group_membership, media, messages, sticker_pack_stickers, stickers},
+    schema::{attachments, media, messages, sticker_pack_stickers, stickers},
     services::{
         image_processing::{process_sticker, ProcessedMedia},
         media::{build_storage_key, MediaStore},
@@ -72,12 +72,7 @@ fn load_message_image(
     conn.transaction(|conn| {
         // Membership is checked at read time. Removal after this check may race
         // with a successful copy; do not block membership or read-pointer updates.
-        group_membership::table
-            .find((chat_id, uid))
-            .select(group_membership::uid)
-            .first::<i32>(conn)
-            .optional()?
-            .ok_or(AppError::Forbidden("Not a member of this chat"))?;
+        crate::services::chat_access::require_chat_member(conn, chat_id, uid)?;
         let message = messages::table
             .filter(
                 messages::id

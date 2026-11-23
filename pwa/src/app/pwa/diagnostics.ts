@@ -14,7 +14,7 @@ const STORAGE_KEY = 'chahua.diagnostics';
 const MAX_ENTRIES = 120;
 const MAX_STORAGE = 48 * 1024;
 const detailKeys: Record<string, true> = Object.fromEntries(
-  'operation method requestId epoch state previousState reason errorName errorCode errorKind errorStatus errorMessage stack url route source line column durationMs sent pending queued reconnectAttempt reconnectInMs closeCode wasClean chatId threadId direction controller active waiting installing controllerState activeState waitingState installingState supported cachedIndex driverState driverReason latestManifest hash scope status cache mode destination accept count online visibility appVersion'
+  'operation method requestId epoch state previousState reason errorName errorCode errorKind errorStatus errorMessage stack url route source line column durationMs sent pending queued reconnectAttempt reconnectInMs closeCode wasClean chatId threadId direction controller active waiting installing controllerState activeState waitingState installingState supported cachedIndex driverState driverReason latestManifest hash scope status cache mode destination accept count online visibility appVersion uploadId purpose attempt fileSizeBytes uploadSizeBytes maxFileSizeBytes contentType progress autoRetry canRetry storageCode'
     .split(' ')
     .map((key) => [key, true] as const),
 );

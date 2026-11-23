@@ -2,12 +2,12 @@
   <ion-toolbar>
     @if (panels.paths().length > 1) {
       <ion-buttons slot="start">
-        <ion-button (click)="panels.back()"><ion-icon slot="icon-only" [icon]="backIcon" /></ion-button>
+        <app-modal-button back (pressed)="panels.back()" />
       </ion-buttons>
     }
     <ion-title>{{ 'stickers.discovery.title' | transloco }}</ion-title>
     <ion-buttons slot="end">
-      <ion-button (click)="panels.close()">{{ 'common.done' | transloco }}</ion-button>
+      <app-modal-button (pressed)="panels.close()" />
     </ion-buttons>
   </ion-toolbar>
   <ion-toolbar>

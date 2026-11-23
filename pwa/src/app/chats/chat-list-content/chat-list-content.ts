@@ -35,7 +35,6 @@ import {
 } from '@ionic/angular';
 import {
   archiveOutline,
-  chatbubbles,
   checkmarkDoneOutline,
   checkmarkOutline,
   closeOutline,
@@ -64,6 +63,7 @@ import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { LoadError } from '../../ui/load-error/load-error';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
+import { threadAvatar } from '../chat-avatar/chat-avatar';
 import { ChatListItem, type ChatListEntry } from '../chat-list-item/chat-list-item';
 import { ChatListError, ChatListStore, FriendRequestAction } from '../chat-list-store';
 import { ChatMute } from '../chat-mute/chat-mute';
@@ -186,15 +186,13 @@ export class ChatListContent {
       const preview = pendingPreview?.message ?? last;
       const activityAt = pendingPreview?.message.createdAt ?? last?.createdAt ?? chat.lastMessageAt;
       const draft = this.drafts.get(chat.id);
-      const forward = this.drafts.forward(chat.id);
-      const hasDraft = !!draft || !!forward?.length;
+      const hasDraft = !!draft;
       const muted = this.metadata.isMuted(chat.id);
       return {
         kind: ListRowKind.Chat as const,
         key: chat.id,
         chat,
         draft,
-        forward,
         preview,
         sortTime: Math.max(
           Date.parse(chat.lastMessageAt ?? '') || -Infinity,
@@ -258,21 +256,18 @@ export class ChatListContent {
         const chat = this.metadata.get(thread.chatId);
         const root = thread.threadRootMessage;
         const draft = this.drafts.get(thread.chatId, root.id);
-        const forward = this.drafts.forward(thread.chatId, root.id);
-        const hasDraft = !!draft || !!forward?.length;
+        const hasDraft = !!draft;
         const last = thread.lastReply;
         const pending = this.pendingPreviews().get(root.id);
         const pendingPreview = pending && pending.message.createdAt > thread.lastReplyAt ? pending : undefined;
         const preview = pendingPreview?.message ?? last;
         const latestAt = preview?.createdAt ?? thread.lastReplyAt;
         const isDm = thread.chatKind === GroupKind.dm;
-        const peer = isDm ? thread.peer : undefined;
         return {
           kind: ListRowKind.Thread as const,
           key: root.id,
           thread,
           draft,
-          forward,
           preview,
           sortTime: Math.max(
             Date.parse(thread.lastReplyAt),
@@ -285,13 +280,7 @@ export class ChatListContent {
               pendingPreview,
               isDm ? thread.peerLastReadMessageId : undefined,
             ),
-            avatarName: isDm
-              ? (chat?.peer?.username ?? peer?.username ?? thread.chatName)
-              : (chat?.name ?? thread.chatName),
-            avatar: isDm ? (chat?.peer?.avatarUrl ?? peer?.avatarUrl) : (chat?.avatar ?? thread.chatAvatar),
-            badgeName: !isDm ? (root.sender.name ?? String(root.sender.uid)) : undefined,
-            badgeAvatar: !isDm ? root.sender.avatarUrl : undefined,
-            badgeIcon: isDm ? chatbubbles : undefined,
+            ...threadAvatar(thread, chat),
             sender:
               !hasDraft && !isDm && preview && preview.messageType !== MessageType.system
                 ? (preview.sender.name ?? String(preview.sender.uid))
@@ -510,7 +499,7 @@ export class ChatListContent {
       if (this.active() && !this.ready() && !this.loading()) this.ready.set(true);
     });
     effect(() => {
-      if (!this.loading()) {
+      if (this.refreshing() && !this.loading()) {
         void this.refresher()?.complete();
         this.refreshing.set(false);
       }

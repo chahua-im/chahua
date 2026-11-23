@@ -1,3 +1,4 @@
+import { ModalButton } from '../../ui/modal-button';
 import { HttpClient } from '@angular/common/http';
 import { Component, computed, DestroyRef, effect, inject, input, signal, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -15,7 +16,7 @@ import {
   IonToolbar,
 } from '@ionic/angular';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { chevronBackOutline, createOutline, trashOutline } from 'ionicons/icons';
+import { createOutline, trashOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { RpcApi } from '../../../generated/rpc-api';
 import { CHAHUA_BASE_URL } from '../../../generated/endpoints/chahua.base-url';
@@ -36,6 +37,7 @@ import { StickerPreferences } from '../sticker-preferences';
   templateUrl: './sticker-pack-detail.html',
   styleUrl: '../settings/settings.scss',
   imports: [
+    ModalButton,
     StickerEditor,
     ContentScrollbars,
     LoadError,
@@ -129,7 +131,6 @@ export class StickerPackDetail {
   protected readonly session = inject(SessionStore);
   private readonly preferences = inject(StickerPreferences);
   protected readonly icons = { createOutline, trashOutline };
-  protected readonly backIcon = chevronBackOutline;
   protected readonly pack = signal<StickerPackDetailResponse | undefined>(undefined);
   protected readonly busy = signal(false);
   protected readonly renaming = signal(false);

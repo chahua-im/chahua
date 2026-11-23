@@ -1,8 +1,7 @@
 use crate::dto::rpc::threads::*;
 use crate::dto::threads::{
-    ListChatThreadsResponse, ListThreadParticipantsResponse, ListThreadsResponse,
-    MarkThreadReadResponse, ThreadReadStateResponse, ThreadSubscriptionStatusResponse,
-    UnreadThreadCountResponse,
+    ListChatThreadsResponse, ListThreadsResponse, MarkThreadReadResponse, ThreadReadStateResponse,
+    ThreadSubscriptionStatusResponse, UnreadThreadCountResponse,
 };
 use crate::errors::AppError;
 use crate::rpc::{RpcCallContext, RpcServices};
@@ -55,7 +54,7 @@ pub async fn list_participants(
     context: &RpcCallContext,
     services: &RpcServices,
     params: ThreadsListParticipantsParams,
-) -> Result<ListThreadParticipantsResponse, AppError> {
+) -> Result<crate::dto::chats::ListParticipantsResponse, AppError> {
     let uid = context.uid()?;
     let mut conn = services.db.get()?;
     crate::services::api::threads::get_thread_participants(
@@ -179,4 +178,30 @@ pub async fn unarchive(
         &mut conn,
         &services.ws_registry,
     )
+}
+
+pub async fn list_topic_forward_sources(
+    context: &RpcCallContext,
+    services: &RpcServices,
+    params: crate::dto::rpc::threads::ThreadsListForwardSourcesParams,
+) -> Result<crate::dto::rpc::threads::ThreadsListForwardSourcesResponse, AppError> {
+    let uid = context.uid()?;
+    let mut conn = services.db.get()?;
+    let sources = crate::services::forward_send::load_topic_sources(
+        &mut conn,
+        uid,
+        params.chat_id,
+        params.thread_root_id,
+    )?;
+    let messages = crate::services::messages::hydrate_messages(
+        &mut conn,
+        sources,
+        &services.media,
+        &services.avatars,
+        uid,
+        None,
+        crate::services::messages::HydrationMode::ForwardSources,
+    )
+    .await;
+    Ok(crate::dto::rpc::threads::ThreadsListForwardSourcesResponse { messages })
 }

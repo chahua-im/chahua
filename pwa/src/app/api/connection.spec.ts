@@ -161,22 +161,12 @@ describe('Connection', () => {
     });
   });
 
-  it('deduplicates accepted message confirmations but preserves distinct message changes', () => {
+  it('ignores a send response delivered after the recall notification', () => {
     const messages = vi.fn();
-    const changes = vi.fn();
     connection.messages$.subscribe(messages);
-    connection.changes$.subscribe(changes);
-
-    connection.accept(testMessage);
-    connection.accept(testMessage);
-    connection.acceptChange({
-      type: ServerWsMessageType.messageUpdated,
-      payload: { ...testMessage, message: 'edited' },
-    });
     connection.acceptChange({ type: ServerWsMessageType.messageDeleted, payload: { ...testMessage, isDeleted: true } });
-
-    expect(messages).toHaveBeenCalledOnce();
-    expect(changes).toHaveBeenCalledTimes(2);
+    connection.accept(testMessage);
+    expect(messages).not.toHaveBeenCalled();
   });
 
   it('delivers distinct edited and deleted notifications after the original message echo is deduplicated', () => {

@@ -32,6 +32,10 @@ impl fmt::Display for CurrentUid {
 fn auth_error_rejection(error: AppError) -> (StatusCode, &'static str) {
     match error {
         AppError::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
+        AppError::ForwardPlaceholderRequired(reason) => (
+            StatusCode::BAD_REQUEST,
+            reason.confirmation_required_message(),
+        ),
         AppError::PayloadTooLarge(message) => (StatusCode::PAYLOAD_TOO_LARGE, message),
         AppError::Unauthorized(message) => (StatusCode::UNAUTHORIZED, message),
         AppError::Forbidden(message) => (StatusCode::FORBIDDEN, message),

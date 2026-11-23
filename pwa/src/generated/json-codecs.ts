@@ -131,6 +131,7 @@ export const jsonSchemas: Record<string, JsonCodec> = {
     messages: ['ForwardedMessageResponse'],
   },
   ForwardedReplyResponse: {
+    externalPreview: 'MessagePreview',
     originalMessageId: 1,
     preview: 'ForwardedMessagePreviewResponse',
   },

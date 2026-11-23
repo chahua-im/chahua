@@ -9,9 +9,9 @@ use utoipa_axum::router::OpenApiRouter;
 use crate::{
     dto::{
         messages::{
-            BulkDeleteMessagesBody, CreateMessageBody, ForwardMessageBody, ForwardMessagesBody,
-            ForwardedMessagesResponse, ListMessagesQuery, ListMessagesResponse,
-            MessageIdConflictResponse, MessageResponse, SearchMessagesQuery,
+            BulkDeleteMessagesBody, ChatSearchMessagesQuery, CreateMessageBody, ForwardMessageBody,
+            ForwardMessagesBody, ForwardedMessagesResponse, ListMessagesQuery,
+            ListMessagesResponse, MessageIdConflictResponse, MessageResponse,
             SearchMessagesResponse, UpdateMessageBody,
         },
         ws::BulkDeletedPayload,
@@ -91,11 +91,12 @@ async fn get_messages(
     tag = "chats",
     params(
         ("chat_id" = String, Path, description = "Chat ID"),
-        SearchMessagesQuery,
+        ChatSearchMessagesQuery,
     ),
     responses(
         (status = 200, description = "Search results", body = SearchMessagesResponse),
-        (status = 400, description = "Invalid search query"),
+        (status = 400, description = "Invalid search query or scope/threadId combination"),
+        (status = 404, description = "Thread not found in this chat"),
         (status = 503, description = "Message search unavailable"),
     ),
     security(("bearer_jwt" = [])),
@@ -105,7 +106,7 @@ async fn search_messages(
     State(state): State<AppState>,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
     conn: DbConn,
-    Query(params): Query<SearchMessagesQuery>,
+    Query(params): Query<ChatSearchMessagesQuery>,
 ) -> Result<Json<SearchMessagesResponse>, AppError> {
     conn.run(move |mut conn| async move {
         crate::services::api::chats::messages::search_messages(
@@ -192,6 +193,7 @@ async fn post_message(
             principal,
             chat_id,
             body,
+            true,
             &mut conn,
             crate::services::api::chats::messages::PostMessageDeps {
                 id_gen: &state.id_gen,
@@ -411,6 +413,7 @@ pub(super) async fn post_thread_message(
             chat_id,
             thread_id,
             body,
+            true,
             &mut conn,
             crate::services::api::chats::messages::PostThreadMessageDeps {
                 id_gen: &state.id_gen,
@@ -577,6 +580,21 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn search_scope_documentation_exposes_string_thread_id() {
+        let document = serde_json::to_value(super::router().into_openapi()).unwrap();
+        let params = document["paths"]["/search"]["get"]["parameters"]
+            .as_array()
+            .unwrap();
+        assert!(params.iter().any(|p| p["name"] == "scope"));
+        let thread = params.iter().find(|p| p["name"] == "threadId").unwrap();
+        assert_eq!(
+            thread["schema"]["type"],
+            serde_json::json!(["string", "null"])
+        );
+        assert_eq!(thread["required"], false);
+    }
     #[test]
     fn message_query_documentation_matches_runtime_names_and_preserves_id_precision() {
         let document = serde_json::to_value(super::router().into_openapi()).unwrap();

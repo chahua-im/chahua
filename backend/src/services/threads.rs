@@ -29,6 +29,12 @@ pub(crate) struct ThreadSendState {
     pub subscription_changes: Vec<i32>,
 }
 
+pub(crate) struct ThreadSendOptions {
+    pub publish_immediately: bool,
+    pub subscribe_mentioned_users: bool,
+    pub mark_read: bool,
+}
+
 /// Persist thread state in the same transaction as a newly created message.
 /// Forwards share this path but their quoted mentions are display-only.
 pub(crate) fn record_thread_send(
@@ -36,8 +42,7 @@ pub(crate) fn record_thread_send(
     response: &crate::dto::messages::MessageResponse,
     member_uids: &[i32],
     root: &Message,
-    publish_immediately: bool,
-    notify_mentions: bool,
+    options: ThreadSendOptions,
 ) -> QueryResult<ThreadSendState> {
     let chat_id = response.chat_id;
     let thread_id = root.id;
@@ -46,21 +51,25 @@ pub(crate) fn record_thread_send(
     if ensure_thread_subscription(conn, chat_id, thread_id, uid)? {
         subscription_changes.push(uid);
     }
-    mark_thread_as_read(conn, chat_id, thread_id, uid, response.id)?;
-    let receipt_advanced = crate::services::read_receipts::advance_thread_read_receipt(
-        conn,
-        chat_id,
-        thread_id,
-        uid,
-        response.id,
-    )?;
+    let receipt_advanced = if options.mark_read {
+        mark_thread_as_read(conn, chat_id, thread_id, uid, response.id)?;
+        crate::services::read_receipts::advance_thread_read_receipt(
+            conn,
+            chat_id,
+            thread_id,
+            uid,
+            response.id,
+        )?
+    } else {
+        false
+    };
     if root.sender_uid != uid
         && member_uids.contains(&root.sender_uid)
         && ensure_thread_user_state(conn, chat_id, thread_id, root.sender_uid, true)?
     {
         subscription_changes.push(root.sender_uid);
     }
-    if notify_mentions {
+    if options.subscribe_mentioned_users {
         if let Some(text) = &response.message {
             for mentioned_uid in extract_mention_uids(text) {
                 if mentioned_uid != uid
@@ -72,11 +81,15 @@ pub(crate) fn record_thread_send(
             }
         }
     }
-    if publish_immediately {
+    if options.publish_immediately {
         increment_thread_meta(conn, chat_id, thread_id, response.created_at)?;
-        diesel::update(messages::table.filter(messages::id.eq(thread_id)))
-            .set(messages::has_thread.eq(true))
-            .execute(conn)?;
+        diesel::update(
+            messages::table
+                .find(thread_id)
+                .filter(messages::has_thread.eq(false)),
+        )
+        .set(messages::has_thread.eq(true))
+        .execute(conn)?;
     }
     Ok(ThreadSendState {
         receipt_advanced,
@@ -430,20 +443,14 @@ pub fn get_chat_threads(
 pub fn get_thread_participant_uids(
     conn: &mut PgConnection,
     thread_root_id: i64,
+    q: Option<&str>,
     cursor: Option<i32>,
     limit: i64,
 ) -> QueryResult<Vec<i32>> {
-    let mut replies = messages::table
-        .filter(messages::reply_root_id.eq(thread_root_id))
-        .filter(messages::deleted_at.is_null())
-        .filter(messages::is_published.eq(true))
-        .into_boxed();
-    let mut root = messages::table
-        .filter(messages::id.eq(thread_root_id))
-        .filter(messages::reply_root_id.is_null())
-        .filter(messages::has_thread.eq(true))
-        .filter(messages::is_published.eq(true))
-        .into_boxed();
+    let mut replies =
+        crate::services::user::filter_participant_names(participant_replies(thread_root_id), q);
+    let mut root =
+        crate::services::user::filter_participant_names(participant_root(thread_root_id), q);
     if let Some(cursor) = cursor {
         replies = replies.filter(messages::sender_uid.gt(cursor));
         root = root.filter(messages::sender_uid.gt(cursor));
@@ -457,6 +464,38 @@ pub fn get_thread_participant_uids(
         .positional_order_by(1)
         .limit(limit)
         .load(conn)
+}
+
+fn participant_replies(thread_root_id: i64) -> messages::BoxedQuery<'static, diesel::pg::Pg> {
+    messages::table
+        .filter(messages::reply_root_id.eq(thread_root_id))
+        .filter(messages::deleted_at.is_null())
+        .filter(messages::is_published.eq(true))
+        .into_boxed()
+}
+
+fn participant_root(thread_root_id: i64) -> messages::BoxedQuery<'static, diesel::pg::Pg> {
+    messages::table
+        .filter(messages::id.eq(thread_root_id))
+        .filter(messages::reply_root_id.is_null())
+        .filter(messages::has_thread.eq(true))
+        .filter(messages::is_published.eq(true))
+        .into_boxed()
+}
+
+/// Uses the same root/reply predicates as the participant picker; subscription is irrelevant.
+pub fn is_thread_participant(
+    conn: &mut PgConnection,
+    thread_root_id: i64,
+    uid: i32,
+) -> QueryResult<bool> {
+    diesel::select(
+        diesel::dsl::exists(participant_root(thread_root_id).filter(messages::sender_uid.eq(uid)))
+            .or(diesel::dsl::exists(
+                participant_replies(thread_root_id).filter(messages::sender_uid.eq(uid)),
+            )),
+    )
+    .get_result(conn)
 }
 
 // --- thread_meta maintenance ---
@@ -735,6 +774,7 @@ pub fn get_user_threads(
     };
     let sql = format!(
         "{THREAD_LIST_SELECT}
+        JOIN group_membership membership ON membership.chat_id = ts.chat_id AND membership.uid = ts.uid
         WHERE ts.uid = $1
           AND ts.archived = $2
           AND ts.subscribed = TRUE
@@ -1011,10 +1051,8 @@ pub fn enrich_thread_list(
         .order((messages::reply_root_id.asc(), messages::id.desc()))
         .select(Message::as_select())
         .load::<Message>(conn)?;
-    let forward_origins = crate::services::single_forwarding::ForwardOrigins::load_attribution(
-        conn,
-        root_messages.iter().chain(latest_reply_rows.iter()),
-    )?;
+    let mut forward_origins = crate::services::single_forwarding::ForwardOrigins::default();
+    forward_origins.load_attribution(conn, root_messages.iter().chain(latest_reply_rows.iter()))?;
 
     // Collect preview and DM peer UIDs for one profile/avatar lookup.
     let mut all_uids: Vec<i32> = rows
@@ -1400,16 +1438,23 @@ mod tests {
                 vec![9876730003]
             );
             assert_eq!(
-                get_thread_participant_uids(conn, 9876730001, None, 100)?,
+                get_thread_participant_uids(conn, 9876730001, None, None, 100)?,
                 (1..=100).collect::<Vec<_>>()
             );
             assert_eq!(
-                get_thread_participant_uids(conn, 9876730001, Some(100), 100)?,
+                get_thread_participant_uids(conn, 9876730001, None, Some(100), 100)?,
                 vec![101, 102, 103, 104, 105]
             );
-            assert!(get_thread_participant_uids(conn, 9876730001, Some(105), 100)?.is_empty());
+            assert!(get_thread_participant_uids(conn, 9876730001, None, Some(105), 100)?.is_empty());
+            for uid in 1..=105 {
+                assert!(is_thread_participant(conn, 9876730001, uid)?);
+            }
+            for uid in [106, 107, 108, 109] {
+                assert!(!is_thread_participant(conn, 9876730001, uid)?);
+            }
+            assert!(is_thread_participant(conn, 9876730003, 1)?);
             // Deleted roots retain their author, matching the existing inbox contract.
-            assert_eq!(get_thread_participant_uids(conn, 9876730003, None, 100)?, vec![1]);
+            assert_eq!(get_thread_participant_uids(conn, 9876730003, None, None, 100)?, vec![1]);
             Err(diesel::result::Error::RollbackTransaction)
         });
         assert!(matches!(

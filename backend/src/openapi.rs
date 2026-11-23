@@ -27,6 +27,8 @@ use utoipa::OpenApi;
             ChatAttachmentKindFilter,
             ConversationView,
             MessageSearchSort,
+            crate::dto::messages::ChatSearchScope,
+            crate::dto::chats::ChatParticipantScope,
             crate::dto::stickers::StickerPackSort,
             GroupSearchMode,
             GroupSelectorScope,

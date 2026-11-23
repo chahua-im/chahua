@@ -19,6 +19,7 @@ export interface ForwardedMessageResponse {
   attachments: AttachmentResponse[];
   forwardedBundleId?: SnowflakeID;
   forwardedPreview?: ForwardedMessagesPreviewResponse;
+  forwardedThreadReplyCount?: number;
   mentions?: MentionInfo[];
   message?: string;
   messageType: MessageType;

@@ -4,6 +4,7 @@ import {
   computed,
   DestroyRef,
   effect,
+  ElementRef,
   inject,
   Injector,
   input,
@@ -11,9 +12,11 @@ import {
   model,
   output,
   signal,
+  type TemplateRef,
   untracked,
   viewChild,
 } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
 import { toSignal } from '@angular/core/rxjs-interop';
 import {
   IonButton,
@@ -33,7 +36,6 @@ import {
   type InfiniteScrollCustomEvent,
 } from '@ionic/angular';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { chatbubbles } from 'ionicons/icons';
 import { firstValueFrom, fromEvent, map } from 'rxjs';
 import {
   GroupKind,
@@ -46,9 +48,10 @@ import {
 import { RpcApi } from '../../../generated/rpc-api';
 import { ChatListStore } from '../chat-list-store';
 import { ChatStore } from '../chat-store';
-import { ChatAvatar, conversationAvatar, type ChatAvatarData } from '../chat-avatar/chat-avatar';
+import { ChatAvatar, conversationAvatar, threadAvatar, type ChatAvatarData } from '../chat-avatar/chat-avatar';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { LoadError } from '../../ui/load-error/load-error';
+import { ModalButton } from '../../ui/modal-button';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
 
 export enum ChatPickerScope {
@@ -99,8 +102,10 @@ export type ChooseChat = (target: ChatPickerTarget, available: () => boolean) =>
     TranslocoPipe,
     ContentScrollbars,
     LoadError,
+    ModalButton,
     ChatAvatar,
     MessagePreview,
+    NgTemplateOutlet,
     IonModal,
     IonHeader,
     IonToolbar,
@@ -120,8 +125,13 @@ export type ChooseChat = (target: ChatPickerTarget, available: () => boolean) =>
 export class ChatPicker {
   readonly scope = input.required<ChatPickerScope>();
   readonly title = input.required<string>();
+  readonly backButton = input(false);
+  readonly reselectionTitle = input<string>();
   readonly excludedId = input<SnowflakeID>();
   readonly choose = input<ChooseChat>();
+  readonly selectionContent = input<TemplateRef<unknown>>();
+  readonly selectionHeight = input<number>();
+  readonly showingSelection = signal(false);
   readonly userSelected = output<MemberSummary>();
   readonly submitted = input(false);
   readonly invalid = input(false);
@@ -134,6 +144,8 @@ export class ChatPicker {
   protected readonly Scope = ChatPickerScope;
   protected readonly query = signal('');
   protected readonly resolving = signal(false);
+  protected readonly hasSelection = signal(false);
+  protected readonly returningToSelection = signal(false);
   protected readonly groupRows = signal<ChatPickerTarget[]>([]);
   private readonly groupCursor = signal<{ query: string; after: SnowflakeID } | undefined>(undefined);
   protected readonly groupsLoading = signal(false);
@@ -189,21 +201,18 @@ export class ChatPicker {
         errorKey: 'chats.picker.threadsFailed',
         targets: () =>
           threads.items().map((thread) => {
-            const isDm = thread.chatKind === GroupKind.dm;
             const root = thread.threadRootMessage;
+            const avatar = threadAvatar(
+              thread,
+              thread.chatKind === GroupKind.dm ? metadata.get(thread.chatId) : undefined,
+            );
             return {
               chatId: thread.chatId,
               kind: thread.chatKind,
               threadId: root.id,
-              name: thread.chatName,
+              name: avatar.avatarName,
               preview: root,
-              avatar: {
-                avatar: thread.chatAvatar,
-                avatarName: thread.chatName,
-                badgeName: !isDm ? (root.sender.name ?? String(root.sender.uid)) : undefined,
-                badgeAvatar: !isDm ? root.sender.avatarUrl : undefined,
-                badgeIcon: isDm ? chatbubbles : undefined,
-              },
+              avatar,
               time: Date.parse(thread.lastReplyAt),
             };
           }),
@@ -219,6 +228,10 @@ export class ChatPicker {
     { initialValue: !this.desktop.matches },
   );
   private readonly modal = viewChild(IonModal);
+  private readonly modalElement = viewChild(IonModal, { read: ElementRef<HTMLElement> });
+  private readonly sheetHandleSpace = viewChild<ElementRef<HTMLElement>>('sheetHandleSpace');
+  private readonly sheetPresented = signal(false);
+  private sheetHeightChosen = false;
   private readonly viewport = signal<HTMLElement | undefined>(undefined);
   private content?: HTMLIonContentElement;
   private listSize?: ResizeObserver;
@@ -226,11 +239,20 @@ export class ChatPicker {
   private rows: HTMLElement[] = [];
   private anchors: { element: HTMLElement; offset: number }[] = [];
   private renderedQuery = '';
+  private selectionVersion = 0;
   private pointerRelease?: ReturnType<typeof setTimeout>;
   protected readonly pressed = signal<SnowflakeID | string | undefined>(undefined);
   protected readonly scrolling = signal(false);
   protected readonly selected = signal<SnowflakeID | string | undefined>(undefined);
-  protected readonly canDismiss = (_data?: unknown, role?: string) => !this.submitted() || role === 'navigate';
+  protected readonly canDismiss = (_data?: unknown, role?: string) => {
+    if (role === 'navigate' || role === 'parent-dismissed' || role === 'parent-removed') return true;
+    if (this.submitted()) return false;
+    if (this.open() && this.returningToSelection()) {
+      this.backToSelection();
+      return false;
+    }
+    return true;
+  };
   protected readonly failed = computed(
     () => this.usersError() || this.groupsError() || this.visibleSources().some((source) => !!source.query.listError()),
   );
@@ -313,6 +335,7 @@ export class ChatPicker {
       this.listSize?.disconnect();
     });
     effect((onCleanup) => {
+      if (this.showingSelection()) return;
       const sources = this.sources();
       const releases = untracked(() => sources.map((source) => source.query.activate()));
       onCleanup(() => releases.forEach((release) => release()));
@@ -329,11 +352,29 @@ export class ChatPicker {
       untracked(() => void this.loadUsers());
     });
     effect(() => {
-      // The same sheet instance survives width changes; desktop uses its fully open position.
-      if (!this.mobile() && this.viewport()) void this.modal()?.setCurrentBreakpoint(1);
+      if (this.sheetPresented() && !this.mobile()) void this.modal()?.setCurrentBreakpoint(1);
     });
     afterRenderEffect({
       earlyRead: () => {
+        if (this.sheetHeightChosen || !this.sheetPresented() || !this.open() || !this.showingSelection()) return;
+        const height = this.selectionHeight();
+        if (height == null) return;
+        if (!this.mobile()) return false;
+        const handle = this.sheetHandleSpace()?.nativeElement;
+        const sheet = this.modalElement()?.nativeElement.shadowRoot?.querySelector('[part="content"]');
+        if (!handle || !sheet) return;
+        return height + handle.getBoundingClientRect().height <= sheet.getBoundingClientRect().height / 2;
+      },
+      write: (fit) => {
+        const fitsHalf = fit();
+        if (fitsHalf == null || this.sheetHeightChosen) return;
+        this.sheetHeightChosen = true;
+        if (fitsHalf) void this.modal()?.setCurrentBreakpoint(0.5);
+      },
+    });
+    afterRenderEffect({
+      earlyRead: () => {
+        if (this.showingSelection()) return undefined;
         this.targets();
         this.failure();
         this.initialLoading();
@@ -354,6 +395,7 @@ export class ChatPicker {
         if (change) change.viewport.scrollTop = change.top;
       },
       read: () => {
+        if (this.showingSelection()) return;
         this.targets();
         this.query();
         const list = this.content?.querySelector('ion-list');
@@ -368,12 +410,15 @@ export class ChatPicker {
     });
   }
   protected async presented(event: Event) {
-    this.content = (event.target as HTMLIonModalElement).querySelector('ion-content')!;
+    this.sheetPresented.set(true);
+    this.content = (event.target as HTMLIonModalElement).querySelector('ion-content') ?? undefined;
+    if (!this.content) return;
     const viewport = await this.content.getScrollElement();
     if (this.destroyRef.destroyed || !this.open()) return;
     // Ionic hydrates inserted rows after Angular has rendered; preserve the anchor again
     // when their final height becomes available, without polling or interrupting scrolling.
     this.listSize = new ResizeObserver(() => {
+      if (this.showingSelection()) return;
       const anchor = this.anchors.find((anchor) => anchor.element.isConnected);
       if (anchor && viewport.scrollTop > 0) {
         const offset =
@@ -386,6 +431,7 @@ export class ChatPicker {
     this.rememberPosition();
   }
   protected rememberPosition() {
+    if (this.showingSelection()) return;
     const viewport = this.viewport();
     if (!viewport) return;
     const bounds = viewport.getBoundingClientRect();
@@ -418,15 +464,34 @@ export class ChatPicker {
     this.pointerRelease = setTimeout(() => this.pressed.set(undefined), 0);
   }
   protected expand() {
-    if (this.mobile()) void this.modal()?.setCurrentBreakpoint(1);
+    if (this.mobile() && !this.selectionContent()) void this.modal()?.setCurrentBreakpoint(1);
   }
-  protected close() {
-    if (!this.submitted()) {
-      this.open.set(false);
-      this.closing.emit();
+  protected keepSheetHeight(event: Event) {
+    if (event.target === event.currentTarget && this.mobile() && this.selectionContent()) {
+      this.sheetHeightChosen = true;
     }
   }
+  showList(returnToSelection = false) {
+    this.returningToSelection.set(returnToSelection);
+    this.showingSelection.set(false);
+  }
+  protected close() {
+    if (this.submitted()) return;
+    this.open.set(false);
+    this.closing.emit();
+  }
+  protected backToSelection() {
+    ++this.selectionVersion;
+    this.resolving.set(false);
+    this.selected.set(undefined);
+    this.showSelection();
+  }
+  private showSelection() {
+    this.returningToSelection.set(false);
+    this.showingSelection.set(true);
+  }
   protected dismissing() {
+    this.sheetPresented.set(false);
     this.open.set(false);
     this.closing.emit();
   }
@@ -474,11 +539,15 @@ export class ChatPicker {
     }
   }
   protected async select(target: PickerTarget) {
-    if (this.submitted() || this.invalid() || !this.open() || this.resolving()) return;
+    if (this.submitted() || this.invalid() || !this.open() || this.resolving() || this.showingSelection()) return;
     const id = this.targetId(target);
     if (this.pressed() != null && this.pressed() !== id) return;
+    const version = ++this.selectionVersion;
     const available = () =>
-      !this.destroyRef.destroyed && this.open() && this.allTargets().some((current) => this.targetId(current) === id);
+      version === this.selectionVersion &&
+      !this.destroyRef.destroyed &&
+      this.open() &&
+      this.allTargets().some((current) => this.targetId(current) === id);
     if (!available()) return;
     this.selected.set(id);
     this.resolving.set(true);
@@ -489,10 +558,17 @@ export class ChatPicker {
         return;
       }
       const accepted = await this.choose()?.(target, available);
-      if (accepted && !this.destroyRef.destroyed) this.open.set(false);
+      if (accepted && version === this.selectionVersion && !this.destroyRef.destroyed && this.open()) {
+        if (this.selectionContent()) {
+          this.hasSelection.set(true);
+          this.showSelection();
+        } else this.open.set(false);
+      }
     } finally {
-      this.resolving.set(false);
-      this.selected.set(undefined);
+      if (version === this.selectionVersion) {
+        this.resolving.set(false);
+        this.selected.set(undefined);
+      }
     }
   }
   protected targetId(target: PickerTarget): SnowflakeID | string {

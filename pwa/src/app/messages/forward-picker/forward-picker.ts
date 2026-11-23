@@ -1,73 +1,107 @@
-import { Component, computed, DestroyRef, inject, input, output, signal } from '@angular/core';
+import { Component, computed, DestroyRef, inject, input, output, signal, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ToastController } from '@ionic/angular';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { GroupKind, ServerWsMessageType } from '../../../generated/models';
+import { firstValueFrom, Subject, takeUntil } from 'rxjs';
+import { ServerWsMessageType, type MessageResponse } from '../../../generated/models';
+import { RpcApi } from '../../../generated/rpc-api';
 import { Connection } from '../../api/connection';
+import { RpcError, RpcErrorCode } from '../../api/rpc-error';
 import { ChatStore } from '../../chats/chat-store';
-import { SpeakingAction } from '../../chats/speaking';
-import { ChatPicker, ChatPickerScope, type ChooseChat } from '../../chats/chat-picker/chat-picker';
-import { ConversationNavigation, type ForwardDraftLocation } from '../../conversations/conversation-navigation';
+import {
+  ChatPicker,
+  ChatPickerScope,
+  type ChatPickerTarget,
+  type ChooseChat,
+} from '../../chats/chat-picker/chat-picker';
+import { ForwardPanel } from '../forward-panel/forward-panel';
 import {
   canForward,
+  canForwardTo,
+  loadForwardTarget,
   forwardSourceMessage,
   ForwardSelectionError,
   MAX_FORWARD_MESSAGES,
   type ForwardSource,
-  type ForwardSourcesLoader,
-  type ForwardSourcesResult,
+  type ForwardTopic,
 } from '../forwarding';
 
 @Component({
   selector: 'app-forward-picker',
-  imports: [ChatPicker, TranslocoPipe],
+  imports: [ChatPicker, TranslocoPipe, ForwardPanel],
   template: `
     <app-chat-picker
+      #picker
       [scope]="Scope.ChatsAndThreads"
-      [title]="title() ?? ((moveFrom() ? 'messages.forward.changeTarget' : 'messages.forward.to') | transloco)"
+      [title]="title() ?? ('messages.forward.to' | transloco)"
+      [reselectionTitle]="'messages.forward.changeTo' | transloco"
       [(open)]="open"
       [choose]="select"
-      [submitted]="submitted()"
+      [selectionContent]="confirmation"
+      [selectionHeight]="panel()?.contentHeight()"
+      [submitted]="panel()?.sending() === true"
       [invalid]="invalid()"
-      [failure]="failure() ? (failure()! | transloco: { max: maxForwardMessages }) : undefined"
+      [failure]="pickerFailure() ? (pickerFailure()! | transloco: { max: maxForwardMessages }) : undefined"
       (closing)="dismissing()"
       (closed)="closed.emit()"
     />
+    <ng-template #confirmation>
+      @if (selection(); as selected) {
+        <app-forward-panel
+          [(open)]="open"
+          [visible]="picker.showingSelection()"
+          [initialTarget]="selected.target"
+          [sources]="selected.sources"
+          [(sourceFailure)]="failure"
+          (back)="picker.showList()"
+          (changeTarget)="picker.showList(true)"
+          (sent)="sent.emit()"
+        />
+      }
+    </ng-template>
   `,
 })
 export class ForwardPicker {
   readonly title = input<string>();
   readonly messages = input<readonly ForwardSource[]>([]);
-  readonly moveFrom = input<ForwardDraftLocation>();
-  readonly load = input<ForwardSourcesLoader>();
+  readonly topic = input<ForwardTopic>();
   readonly closed = output<void>();
+  readonly sent = output<void>();
   protected readonly Scope = ChatPickerScope;
+  private readonly api = inject(RpcApi);
   private readonly metadata = inject(ChatStore);
-  private readonly navigation = inject(ConversationNavigation);
+  protected readonly selection = signal<{ target: ChatPickerTarget; sources: readonly MessageResponse[] } | undefined>(
+    undefined,
+  );
+  protected readonly panel = viewChild(ForwardPanel);
   private readonly destroyRef = inject(DestroyRef);
   private readonly toasts = inject(ToastController);
   private readonly i18n = inject(TranslocoService);
   protected readonly maxForwardMessages = MAX_FORWARD_MESSAGES;
   protected readonly failure = signal<ForwardSelectionError | undefined>(undefined);
-  protected readonly invalid = computed(
-    () => this.failure() === ForwardSelectionError.Stale || this.failure() === ForwardSelectionError.Unavailable,
-  );
-  protected readonly submitted = signal(false);
+  protected readonly pickerFailure = computed(() => {
+    const panel = this.panel();
+    return this.failure() ?? panel?.targetFailure();
+  });
+  protected readonly invalid = computed(() => !!this.failure());
   protected readonly open = signal(true);
+  private readonly dismissing$ = new Subject<void>();
+  private readonly recalledWhileChoosing = new Set<MessageResponse['id']>();
   private feedback?: HTMLIonToastElement;
   constructor() {
-    this.destroyRef.onDestroy(() => void this.feedback?.dismiss());
+    this.destroyRef.onDestroy(() => this.dismissing());
     inject(Connection)
       .changes$.pipe(takeUntilDestroyed())
       .subscribe((event) => {
-        const sources = this.messages();
-        if (event.payload.chatId !== sources[0]?.chatId) return;
+        const sources = this.selection()?.sources ?? this.messages();
+        if (event.payload.chatId !== (this.topic()?.chatId ?? sources[0]?.chatId)) return;
         const removed =
           event.type === ServerWsMessageType.messageDeleted
             ? [event.payload.id]
             : event.type === ServerWsMessageType.messagesBulkDeleted
               ? event.payload.messageIds
               : [];
+        if (this.topic() && !this.selection()) for (const id of removed) this.recalledWhileChoosing.add(id);
         if (
           sources.some((source) => {
             const id = forwardSourceMessage(source)?.id;
@@ -79,62 +113,71 @@ export class ForwardPicker {
   }
   protected dismissing() {
     this.open.set(false);
+    this.dismissing$.next();
     void this.feedback?.dismiss();
   }
   protected readonly select: ChooseChat = async (target, available) => {
-    if (this.submitted() || this.invalid() || !this.open()) return false;
+    const panel = this.panel();
+    if (panel) return panel.choose(target, available);
+    if (this.invalid() || !this.open()) return false;
     void this.feedback?.dismiss();
     this.feedback = undefined;
     this.failure.set(undefined);
     try {
-      if (target.kind !== GroupKind.dm) await this.metadata.ensureDetails(target.chatId);
+      await loadForwardTarget(this.metadata, target);
     } catch {
       await this.report(ForwardSelectionError.NavigationFailed);
       return false;
     }
     if (this.destroyRef.destroyed || !this.open()) return false;
-    if (
-      !this.metadata.canSpeak(target.chatId, target.threadId ? SpeakingAction.ThreadReply : SpeakingAction.ChatMessage)
-    ) {
+    if (!canForwardTo(this.metadata, target)) {
       await this.report(ForwardSelectionError.Restricted);
       return false;
     }
-    const result = await this.resolveSources();
-    if (this.destroyRef.destroyed || !this.open() || this.submitted() || this.invalid()) return false;
+    if (this.invalid()) return false;
     if (!available()) {
       await this.report(ForwardSelectionError.NavigationFailed);
       return false;
     }
-    if ('error' in result) {
-      await this.report(result.error);
+    const topic = this.topic();
+    let sources: (MessageResponse | undefined)[];
+    if (topic) {
+      try {
+        const page = await firstValueFrom(
+          this.api.threads
+            .listForwardSources({ chatId: topic.chatId, threadRootId: topic.threadId })
+            .pipe(takeUntil(this.dismissing$)),
+        );
+        sources = page.messages;
+      } catch (error) {
+        let failure = ForwardSelectionError.TopicLoadFailed;
+        if (error instanceof RpcError) {
+          if (error.code === RpcErrorCode.PayloadTooLarge) failure = ForwardSelectionError.TooMany;
+          if ([RpcErrorCode.Forbidden, RpcErrorCode.NotFound, RpcErrorCode.Gone].includes(error.code))
+            failure = ForwardSelectionError.TopicUnavailable;
+        }
+        await this.report(failure);
+        return false;
+      }
+      if (!available() || !this.open() || this.destroyRef.destroyed || this.invalid()) return false;
+      if (sources.some((message) => message && this.recalledWhileChoosing.has(message.id))) {
+        await this.report(ForwardSelectionError.Stale);
+        return false;
+      }
+    } else {
+      sources = this.messages().map(forwardSourceMessage);
+    }
+    if (
+      !sources.length ||
+      sources.length > MAX_FORWARD_MESSAGES ||
+      !sources.every((message): message is MessageResponse => !!message && canForward(message, sources.length))
+    ) {
+      this.failure.set(ForwardSelectionError.Unavailable);
       return false;
     }
-    const selection = result.sources;
-    if (!this.forwardable(selection)) {
-      if (this.load()) await this.report(ForwardSelectionError.TopicUnavailable);
-      else this.failure.set(ForwardSelectionError.Unavailable);
-      return false;
-    }
-    this.submitted.set(true);
-    try {
-      const opened = await this.navigation.prepareForward(target.chatId, target.threadId, selection, this.moveFrom());
-      if (opened) return true;
-    } catch {
-      /* Keep the selection available after navigation fails. */
-    }
-    this.submitted.set(false);
-    await this.report(ForwardSelectionError.NavigationFailed);
-    return false;
+    this.selection.set({ target, sources });
+    return true;
   };
-  private async resolveSources(): Promise<ForwardSourcesResult> {
-    const load = this.load();
-    if (!load) return { sources: this.messages() };
-    try {
-      return await load();
-    } catch {
-      return { error: ForwardSelectionError.LoadFailed };
-    }
-  }
   private async report(error: ForwardSelectionError) {
     if (this.destroyRef.destroyed || !this.open()) return;
     const toast = await this.toasts.create({
@@ -145,14 +188,5 @@ export class ForwardPicker {
       this.feedback = toast;
       await toast.present();
     } else toast.remove();
-  }
-  /** Every source needs a server ID and must be allowed in a forward request. */
-  private forwardable(selection: readonly ForwardSource[]): boolean {
-    const messages = selection.map(forwardSourceMessage);
-    return (
-      !!messages.length &&
-      messages.length <= MAX_FORWARD_MESSAGES &&
-      messages.every((message) => !!message && canForward(message))
-    );
   }
 }

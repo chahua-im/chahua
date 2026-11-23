@@ -58,7 +58,7 @@ import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
 import { mayBeMediaFile } from '../media-processing/file-type';
 import type { MessageContent } from '../message/message';
 import { StickerPicker } from '../sticker-picker/sticker-picker';
-import { AttachmentUpload, UploadStatus } from '../upload';
+import { AttachmentUploads, AttachmentUpload, UploadStatus } from '../upload';
 import { UploadProgress } from '../upload-progress/upload-progress';
 import { UploadFailure } from '../upload-failure';
 import { VoicePlayer } from '../voice-player/voice-player';
@@ -120,13 +120,15 @@ enum Panel {
 })
 export class MessageComposer {
   readonly text = model('');
+  readonly disabled = input(false);
+  readonly placeholder = input<string>();
   readonly dockStickers = input(false);
   readonly stickersOpened = output<void>();
   readonly relationship = input<FriendRelationshipResponse>();
   readonly restriction = input<SpeakingMode>();
   protected readonly blocked = signal(false);
   private canWrite() {
-    if (this.restriction()) return false;
+    if (this.disabled() || this.restriction()) return false;
     const allowed = this.relationship()?.canDm !== false;
     this.blocked.set(!allowed);
     return allowed;
@@ -153,6 +155,7 @@ export class MessageComposer {
   protected readonly macOS = !isPlatform('ios') && navigator.userAgent.includes('Macintosh');
   protected readonly Status = UploadStatus;
   private readonly api = inject(RpcApi);
+  private readonly attachmentUploads = inject(AttachmentUploads);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly voice = viewChild(VoiceRecorder);
   protected readonly Panel = Panel;
@@ -252,6 +255,7 @@ export class MessageComposer {
   );
   protected readonly canSend = computed(
     () =>
+      !this.disabled() &&
       !this.restriction() &&
       !this.voiceActive() &&
       (this.forwarding() ||
@@ -410,6 +414,7 @@ export class MessageComposer {
       this.addFile(file, mayBeMediaFile(file) ? AttachmentUploadPurpose.media : AttachmentUploadPurpose.file);
   }
   protected paste(event: ClipboardEvent) {
+    if (this.forwarding()) return;
     const files = Array.from(event.clipboardData?.files ?? []);
     if (!files.length) return;
     event.preventDefault();
@@ -427,7 +432,7 @@ export class MessageComposer {
       this.unsupported.set(true);
       return;
     }
-    const upload = new AttachmentUpload(this.api, file, purpose);
+    const upload = this.attachmentUploads.create(file, purpose);
     this.uploads.update((items) => [...items, upload]);
     return upload;
   }
@@ -548,7 +553,7 @@ export class MessageComposer {
     input?.setSelectionRange(range.start + token.length, range.start + token.length);
   }
 
-  private mentionSnapshot(): MentionInfo[] {
+  mentionSnapshot(): MentionInfo[] {
     const display = this.display();
     const known = new Map([
       ...this.mentionInfos(),

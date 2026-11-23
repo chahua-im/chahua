@@ -1,10 +1,10 @@
+import { ModalButton } from '../../ui/modal-button';
 import { Component, inject, signal } from '@angular/core';
 import {
   IonButton,
   IonButtons,
   IonContent,
   IonHeader,
-  IonIcon,
   IonItem,
   IonLabel,
   IonList,
@@ -15,7 +15,6 @@ import {
   IonToolbar,
 } from '@ionic/angular';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { chevronBackOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { RpcApi } from '../../../generated/rpc-api';
 import { PrivacyExceptionKind, ReadReceiptVisibility } from '../../../generated/models';
@@ -30,6 +29,7 @@ import { PrivacyExceptions } from '../privacy-exceptions/privacy-exceptions';
   templateUrl: './read-receipt-settings.html',
   styleUrl: '../settings/settings.scss',
   imports: [
+    ModalButton,
     PrivacyExceptions,
     ContentScrollbars,
     LoadError,
@@ -37,7 +37,6 @@ import { PrivacyExceptions } from '../privacy-exceptions/privacy-exceptions';
     IonButtons,
     IonContent,
     IonHeader,
-    IonIcon,
     IonItem,
     IonLabel,
     IonList,
@@ -55,7 +54,6 @@ export class ReadReceiptSettings {
   private readonly chats = inject(ChatStore);
   protected readonly ExceptionKind = PrivacyExceptionKind;
   protected readonly panels = inject(PanelNavigation);
-  protected readonly backIcon = chevronBackOutline;
   protected readonly Visibility = ReadReceiptVisibility;
   protected readonly loading = signal(true);
   protected readonly saving = signal(false);
