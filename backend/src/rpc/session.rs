@@ -11,6 +11,7 @@
 //! Overloaded without dispatch. Closing a connection cancels its waiting calls,
 //! but already running operations retain their slots until they finish.
 //! Session and control calls use their separate bounded, serial lane.
+//! Unauthenticated reads and mutations are rejected before admission or task creation.
 
 mod admission;
 
@@ -1928,7 +1929,10 @@ async fn schedule_call(
         );
         return ScheduledCall::Immediate(None);
     };
-    if class.is_none() {
+    if class.is_none()
+        || (context.session.is_none()
+            && matches!(class, Some(ExecutionClass::Read | ExecutionClass::Mutation)))
+    {
         let error = if context.session.is_some() {
             RpcError::new(RpcErrorCode::MethodNotFound)
         } else {

@@ -2,6 +2,72 @@ use diesel::prelude::*;
 
 use super::*;
 
+#[tokio::test]
+async fn unauthenticated_ordinary_calls_are_rejected_before_scheduling() {
+    let Some(services) = crate::rpc::test_support::services().await else {
+        return;
+    };
+    let shared = SessionShared::new(TransportState::new());
+    let (controls, _controls_rx) = mpsc::channel(CONTROL_QUEUE);
+    let (results, _results_rx) = mpsc::channel(RESULT_QUEUE);
+    let (guard_failures, _guard_rx) = mpsc::unbounded_channel();
+    let admission = SessionAdmission {
+        ordinary: Arc::new(Semaphore::new(0)),
+        controls: Arc::new(Semaphore::new(0)),
+    };
+    let ordinary_admission = admission::Admission::new(0, 0, 0, 0);
+    let budget = budget(1024);
+    let mut execution = SessionExecution {
+        shared: &shared,
+        services: &services,
+        controls: &controls,
+        guard_failures: &guard_failures,
+        results: &results,
+        admission: &admission,
+        ordinary_admission: &ordinary_admission,
+        budget: &budget,
+        next_sync_seq: 0,
+    };
+    for method in ["users.getMe", "groups.create"] {
+        for destination in [ResultDestination::Single, ResultDestination::Batch(0)] {
+            for id in [Some(RpcId::String("request".into())), None] {
+                let mut outstanding = HashSet::new();
+                let scheduled = schedule_call(
+                    RpcCall {
+                        id: id.clone(),
+                        method: method.into(),
+                        params: None,
+                    },
+                    Instant::now(),
+                    destination,
+                    false,
+                    &mut execution,
+                    &mut outstanding,
+                    None,
+                )
+                .await;
+                let ScheduledCall::Immediate(response) = scheduled else {
+                    panic!("unauthenticated {method} must be rejected before task creation");
+                };
+                if let Some(id) = &id {
+                    let response: Value =
+                        serde_json::from_str(&response.expect("request response").frame.text)
+                            .unwrap();
+                    assert_eq!(response["id"], "request");
+                    assert_eq!(response["error"]["code"], 1001);
+                    assert_eq!(
+                        outstanding.contains(id),
+                        matches!(destination, ResultDestination::Batch(_)),
+                        "batch IDs remain reserved until the aggregate is queued",
+                    );
+                } else {
+                    assert!(response.is_none(), "notifications must not receive replies");
+                }
+            }
+        }
+    }
+}
+
 pub(super) async fn open_with_admission(
     services: RpcServices,
     admission: Arc<admission::Admission>,
