@@ -1,12 +1,13 @@
 import type { MessageResponse } from '../../generated/models';
 
-export function patchMessages(current: MessageResponse[], update: (message: MessageResponse) => MessageResponse) {
-  let messages: MessageResponse[] | undefined;
+/** Preserve the input reference when no item changes. */
+export function patchItems<T>(current: T[], update: (item: T) => T) {
+  let items: T[] | undefined;
   for (let index = 0; index < current.length; index++) {
     const updated = update(current[index]);
-    if (updated !== current[index]) (messages ??= current.slice())[index] = updated;
+    if (updated !== current[index]) (items ??= current.slice())[index] = updated;
   }
-  return messages ?? current;
+  return items ?? current;
 }
 
 export function mergeMessages(current: MessageResponse[], incoming: MessageResponse[]) {

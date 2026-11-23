@@ -103,7 +103,7 @@ function redactDeletedPreview<T extends ReplyPreview>(quote: T): T {
 
 export function redactRecalledReply<T extends { replyToMessage?: ReplyPreview }>(
   message: T,
-  recalledIds: ReadonlySet<SnowflakeID>,
+  recalledIds: MessageIdLookup,
 ): T {
   const quote = message.replyToMessage;
   const replyToMessage = redactRecalledPreview(quote, recalledIds);
@@ -116,15 +116,12 @@ export function redactRecalledPreview<T extends ReplyPreview>(quote: T | undefin
 
 export function redactRecalledCitations(message: MessageResponse, recalledIds: MessageIdLookup): MessageResponse {
   if (!recalledIds.size) return message;
-  const quote = message.replyToMessage;
-  const origin = message.forwardedFrom;
-  const originalQuote = origin?.originalReplyTo;
-  const replyToMessage = redactRecalledPreview(quote, recalledIds);
-  const forwardedFrom =
-    originalQuote && !originalQuote.isDeleted && recalledIds.has(originalQuote.id)
-      ? { ...origin, originalReplyTo: redactDeletedPreview(originalQuote) }
-      : origin;
-  return replyToMessage === quote && forwardedFrom === origin ? message : { ...message, replyToMessage, forwardedFrom };
+  const updated = redactRecalledReply(message, recalledIds);
+  const origin = updated.forwardedFrom;
+  const originalReplyTo = redactRecalledPreview(origin?.originalReplyTo, recalledIds);
+  return origin && originalReplyTo !== origin.originalReplyTo
+    ? { ...updated, forwardedFrom: { ...origin, originalReplyTo } }
+    : updated;
 }
 
 export function replaceMessageCitation(message: MessageResponse, preview: MessagePreview): MessageResponse {

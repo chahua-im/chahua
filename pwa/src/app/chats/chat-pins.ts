@@ -13,6 +13,7 @@ import {
   redactRecalledCitations,
   type MessageChange,
 } from '../messages/message-change';
+import { patchItems } from '../messages/message-merge';
 
 type PinPatch = (pins: PinResponse[]) => PinResponse[];
 type MessagePatch = (message: MessageResponse) => MessageResponse;
@@ -30,13 +31,11 @@ function affectedByEdit(message: MessageResponse, id: SnowflakeID) {
   return message.id === id || (quote?.id === id && !quote.isDeleted);
 }
 
-function patchMessages(pins: PinResponse[], update: MessagePatch): PinResponse[] {
-  let updated: PinResponse[] | undefined;
-  for (const [index, pin] of pins.entries()) {
+function patchPinnedMessages(pins: PinResponse[], update: MessagePatch) {
+  return patchItems(pins, (pin) => {
     const message = update(pin.message);
-    if (message !== pin.message) (updated ??= pins.slice())[index] = { ...pin, message };
-  }
-  return updated ?? pins;
+    return message === pin.message ? pin : { ...pin, message };
+  });
 }
 
 /** One lazily loaded pin collection, owned and shared by ChatStore. */
@@ -149,7 +148,7 @@ export class ChatPins {
     if (ids && this.listRead) {
       const recalls = new Set(ids);
       this.listRead.patches.push((pins) =>
-        patchMessages(pins, (message) =>
+        patchPinnedMessages(pins, (message) =>
           recalls.has(message.id) && !message.isDeleted
             ? redactDeletedMessage(message)
             : redactRecalledCitations(message, recalls),
@@ -164,7 +163,7 @@ export class ChatPins {
       this.listRead?.changes.push(update);
       for (const creation of this.creations) if (creation.message.id === id) creation.needsRefresh = true;
     }
-    this.pinItems.update((pins) => patchMessages(pins, update));
+    this.pinItems.update((pins) => patchPinnedMessages(pins, update));
   }
   private pinForViewer(pin: PinResponse): PinResponse {
     const uid = this.accountUid();

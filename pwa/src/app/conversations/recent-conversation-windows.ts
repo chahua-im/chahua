@@ -5,7 +5,7 @@ import { Connection, ResyncReason } from '../api/connection';
 import type { SnowflakeID } from '../api/snowflake-id';
 import { ChatChangeKind, ChatStore } from '../chats/chat-store';
 import { messageChangePatch, redactRemovedMessage } from '../messages/message-change';
-import { mergeMessageArrivals, patchMessages } from '../messages/message-merge';
+import { mergeMessageArrivals, patchItems } from '../messages/message-merge';
 import { MessageSync, requiresMessagePurge } from '../messages/message-sync';
 import { isMembershipMessage } from '../messages/system-message';
 import { SessionStore } from '../session/session-store';
@@ -197,7 +197,7 @@ export class RecentConversationWindows {
     for (const { scope, window } of this.entries.values()) {
       if (scope.chatId !== chatId) continue;
       const current = window.range.messages;
-      const messages = patchMessages(current, update);
+      const messages = patchItems(current, update);
       if (messages !== current) window.range = { ...window.range, messages };
     }
   }
