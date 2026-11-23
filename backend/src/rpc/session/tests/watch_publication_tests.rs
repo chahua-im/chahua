@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::*;
 use serde_json::Value;
 use tokio::{
-    sync::{mpsc, oneshot, Mutex},
+    sync::{mpsc, oneshot},
     task::JoinSet,
     time::{timeout, Duration},
 };
@@ -11,19 +11,16 @@ use tokio::{
 use crate::{
     dto::{
         conversations::{ConversationRef, ConversationUnreadErrorPayload},
+        rpc::conversations::ConversationsWatchStatesParams,
         ws::ServerWsMessage,
     },
+    rpc::error::RpcErrorCode,
     services::auth_token::{TokenVersion, VerifiedSession},
 };
 
 async fn bound_shared(
     services: &RpcServices,
-) -> (
-    Arc<SessionShared>,
-    RpcOutputSink,
-    mpsc::Receiver<String>,
-    mpsc::Receiver<RpcFrameLease>,
-) {
+) -> (Arc<SessionShared>, RpcOutputSink, mpsc::Receiver<String>) {
     let transport = TransportState::new();
     let shared = SessionShared::new(transport.clone());
     shared
@@ -41,18 +38,13 @@ async fn bound_shared(
         .expect("test session binds");
     shared.state.lock().await.activated = true;
     let (tx, output) = mpsc::channel(4);
-    let (permits, output_permits) = mpsc::channel(4);
     (
         shared,
         RpcOutputSink {
             tx,
-            permits,
-            pair_lock: Arc::new(Mutex::new(())),
-            budget: RpcByteBudget::new(),
             state: transport,
         },
         output,
-        output_permits,
     )
 }
 
@@ -109,7 +101,7 @@ async fn held_unread_forwarding_discards_replaced_generation_and_delivers_curren
     let Some(services) = crate::rpc::test_support::services().await else {
         return;
     };
-    let (shared, sink, mut output, mut output_permits) = bound_shared(&services).await;
+    let (shared, sink, mut output) = bound_shared(&services).await;
     shared
         .replace_unread_watch(Some(unread_watch(1)))
         .await
@@ -139,7 +131,6 @@ async fn held_unread_forwarding_discards_replaced_generation_and_delivers_curren
         .await
         .expect("current watch event publishes")
         .expect("output remains open");
-    let _lease = output_permits.recv().await.expect("output lease");
     let message: Value = serde_json::from_str(&text).expect("JSON-RPC event");
     assert_eq!(message["method"], "events.conversationUnreadError");
     assert_eq!(message["params"]["requestId"], 2);
@@ -154,7 +145,7 @@ async fn held_unread_forwarding_discards_cleared_watch_and_invalid_replacement_k
     let Some(services) = crate::rpc::test_support::services().await else {
         return;
     };
-    let (shared, sink, mut output, _output_permits) = bound_shared(&services).await;
+    let (shared, sink, mut output) = bound_shared(&services).await;
     shared
         .replace_unread_watch(Some(unread_watch(7)))
         .await

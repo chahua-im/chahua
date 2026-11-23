@@ -2,7 +2,7 @@ use diesel::prelude::*;
 use serde_json::{json, Value};
 use tokio::time::{timeout, Duration};
 
-use super::{rpc_session_channels, serve_rpc_session, RpcSessionTransport};
+use super::tests::{rpc_session_channels, serve_rpc_session, RpcSessionTransport};
 use crate::dto::ws::ServerWsMessage;
 
 async fn request(
@@ -33,8 +33,7 @@ async fn response(
         .unwrap();
     timeout(Duration::from_secs(10), async {
         loop {
-            let frame = transport.output.recv().await.expect("session response");
-            let (text, _lease) = frame.into_parts();
+            let text = transport.output.recv().await.expect("session response");
             let response: Value = serde_json::from_str(&text).unwrap();
             if response["id"] == id {
                 return response;

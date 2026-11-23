@@ -231,13 +231,15 @@ upgrade endpoint, `/docs`, `/api-docs`, `/metrics`, `/health`, `/healthz` and
 `/readyz` are excluded. Its outer timing includes authentication, activity
 tracking and handler work through the prepared response, not socket transmission.
 
-RPC timing starts when a complete frame arrives at `RpcSessionInput`, before
-bounded input, control-lane and worker waits, and ends when that call's response
-is serialized and prepared. It excludes sibling batch wait, result/outbound
+RPC timing starts when the connection task passes a complete frame to
+`RpcSession::handle_text`, before control-lane and worker waits, and ends when
+that call's response is serialized and prepared. It excludes sibling batch wait, result/outbound
 queue wait and socket transmission. Each incoming call, including a notification,
 is counted separately; peer responses and outgoing pushes are ignored. A whole
-malformed, oversized or otherwise unparsed envelope rejection is counted once as
-`unknown`. Preparation budget errors are `429`/`1429`, oversized replies are
+malformed or otherwise unparsed envelope rejection is counted once as `unknown`.
+An oversized input rejected by `RpcSession::handle_text` is `413`/`1013` with API `unknown`.
+Messages rejected by the WebSocket decoder's size limit close with code `1009`
+before RPC admission and are not counted as RPC calls. Oversized replies are
 `413`/`1013`, and serialization errors are `500`/`-32603`. Supervised admitted
 work still records if it completes after disconnect; cancellation before
 preparation is not a completion.

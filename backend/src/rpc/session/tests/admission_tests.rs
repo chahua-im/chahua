@@ -16,16 +16,14 @@ async fn unauthenticated_ordinary_calls_are_rejected_before_scheduling() {
         controls: Arc::new(Semaphore::new(0)),
     };
     let ordinary_admission = admission::Admission::new(0, 0, 0, 0);
-    let budget = budget(1024);
     let mut execution = SessionExecution {
-        shared: &shared,
-        services: &services,
-        controls: &controls,
-        guard_failures: &guard_failures,
-        results: &results,
-        admission: &admission,
-        ordinary_admission: &ordinary_admission,
-        budget: &budget,
+        shared,
+        services: services.clone(),
+        controls,
+        guard_failures,
+        results,
+        admission,
+        ordinary_admission,
         next_sync_seq: 0,
     };
     for method in ["users.getMe", "groups.create"] {
@@ -43,7 +41,6 @@ async fn unauthenticated_ordinary_calls_are_rejected_before_scheduling() {
                     false,
                     &mut execution,
                     &mut outstanding,
-                    None,
                 )
                 .await;
                 let ScheduledCall::Immediate(response) = scheduled else {
@@ -51,8 +48,7 @@ async fn unauthenticated_ordinary_calls_are_rejected_before_scheduling() {
                 };
                 if let Some(id) = &id {
                     let response: Value =
-                        serde_json::from_str(&response.expect("request response").frame.text)
-                            .unwrap();
+                        serde_json::from_str(&response.expect("request response").text).unwrap();
                     assert_eq!(response["id"], "request");
                     assert_eq!(response["error"]["code"], 1001);
                     assert_eq!(
