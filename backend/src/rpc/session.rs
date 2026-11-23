@@ -2250,6 +2250,378 @@ fn oversized_request_id(text: &str) -> Option<RpcId> {
     RpcId::from_value(object.remove("id")?)
 }
 
+// The session loop alone owns request IDs, batch assembly, and handshake gating.
+struct SessionLoop<'a> {
+    execution: SessionExecution<'a>,
+    sink: &'a RpcOutputSink,
+    first_message: bool,
+    handshake_pending: bool,
+    next_batch: u64,
+    batches: HashMap<u64, BatchAssembly>,
+    outstanding: HashSet<RpcId>,
+}
+
+impl SessionLoop<'_> {
+    async fn handle_work_result(&mut self, result: WorkResult) -> std::ops::ControlFlow<()> {
+        if matches!(result.destination, ResultDestination::Single) {
+            if let Some(id) = result.id {
+                self.outstanding.remove(&id);
+            }
+        }
+        match result.destination {
+            ResultDestination::Single => {
+                if let Some(response) = result.response {
+                    let lifecycle = response.lifecycle;
+                    let success = response.success;
+                    if lifecycle.is_some() {
+                        self.execution.shared.suspend_authorized_work().await;
+                    }
+                    if self.sink.send_prepared(response.frame).await.is_err() {
+                        self.execution.shared.transport.close();
+                        return std::ops::ControlFlow::Break(());
+                    }
+                    if result.activate_after_success && success {
+                        self.activate_bound_session().await;
+                    }
+                    if let Some(failure) = lifecycle {
+                        handle_lifecycle_failure(failure, self.execution.shared, self.sink).await;
+                        return std::ops::ControlFlow::Break(());
+                    }
+                    if result.close_after_error && !success {
+                        self.execution.shared.transport.close();
+                        return std::ops::ControlFlow::Break(());
+                    }
+                } else if result.activate_after_success {
+                    self.activate_bound_session().await;
+                }
+            }
+            ResultDestination::Batch(batch_id) => {
+                let response_lifecycle = result
+                    .response
+                    .as_ref()
+                    .and_then(|response| response.lifecycle);
+                if response_lifecycle.is_some() {
+                    self.execution.shared.suspend_authorized_work().await;
+                }
+                let mut ready = None;
+                if let Some(batch) = self.batches.get_mut(&batch_id) {
+                    let activate_after_success = result.activate_after_success
+                        && match &result.response {
+                            Some(response) => response.success,
+                            None => true,
+                        };
+                    batch.activate_after_success |= activate_after_success;
+                    if result.counts_toward_batch {
+                        batch.pending = batch.pending.saturating_sub(1);
+                    }
+                    if let Some(response) = result.response {
+                        batch.push(response, result.close_after_error);
+                    }
+                    if batch.pending == 0 {
+                        ready = self.batches.remove(&batch_id);
+                    }
+                }
+                if let Some(batch) = ready {
+                    let completed = self.finish_batch(batch).await;
+                    if completed.is_break() {
+                        return completed;
+                    }
+                }
+            }
+        }
+
+        self.handshake_pending = false;
+        std::ops::ControlFlow::Continue(())
+    }
+    async fn handle_input_frame(
+        &mut self,
+        text: String,
+        lease: InputLease,
+        started: Instant,
+    ) -> std::ops::ControlFlow<()> {
+        if matches!(&lease, InputLease::Oversized(_)) {
+            let InputLease::Oversized(lease) = lease else {
+                unreachable!("matched oversized input above");
+            };
+            // The terminal oversized input has consumed the full
+            // budget; release it before reserving the small 1013 frame.
+            drop(lease);
+            let id = oversized_request_id(&text);
+            drop(text);
+            let response =
+                id.map(|id| RpcResponse::error(id, RpcError::new(RpcErrorCode::PayloadTooLarge)));
+            if let Ok(Some(response)) = record_rejection(
+                self.execution.services,
+                "unknown",
+                started,
+                response,
+                RpcErrorCode::PayloadTooLarge,
+                self.execution.budget,
+            ) {
+                let _ = self.sink.send_prepared(response.frame).await;
+            }
+            self.execution.shared.transport.close();
+            return std::ops::ControlFlow::Break(());
+        }
+        let InputLease::Frame(input_lease) = lease else {
+            unreachable!("oversized frames return above");
+        };
+        let message = match parse_message(&text, MAX_BATCH_ITEMS) {
+            Ok(message) => message,
+            Err(response) => {
+                let code = match &response.outcome {
+                    super::protocol::RpcOutcome::Failure { error } => error.code,
+                    super::protocol::RpcOutcome::Success { .. } => RpcErrorCode::InvalidRequest,
+                };
+                match record_rejection(
+                    self.execution.services,
+                    "unknown",
+                    started,
+                    Some(response),
+                    code,
+                    self.execution.budget,
+                ) {
+                    Ok(Some(response)) => {
+                        if self.sink.send_prepared(response.frame).await.is_err() {
+                            self.execution.shared.transport.close();
+                            return std::ops::ControlFlow::Break(());
+                        }
+                    }
+                    _ => {
+                        self.execution.shared.transport.close();
+                        return std::ops::ControlFlow::Break(());
+                    }
+                }
+                return std::ops::ControlFlow::Continue(());
+            }
+        };
+
+        let opening_handshake = self.first_message;
+        if self.first_message {
+            self.first_message = false;
+            let valid_open = matches!(
+                &message,
+                RpcMessage::Single(RpcItem::Call(RpcCall {
+                    id: Some(RpcId::String(_) | RpcId::Number(_)),
+                    method,
+                    ..
+                })) if method == "session.open"
+            );
+            if !valid_open {
+                if let Ok(Some(response)) = record_rejection(
+                    self.execution.services,
+                    "unknown",
+                    started,
+                    Some(RpcResponse::invalid_request()),
+                    RpcErrorCode::InvalidRequest,
+                    self.execution.budget,
+                ) {
+                    let _ = self.sink.send_prepared(response.frame).await;
+                }
+                self.execution.shared.transport.close();
+                return std::ops::ControlFlow::Break(());
+            }
+            // Do not admit another frame until the first identity and
+            // its response are settled, even if work tasks poll out of order.
+            self.handshake_pending = true;
+        }
+
+        match message {
+            RpcMessage::Single(RpcItem::Response) => {}
+            RpcMessage::Single(RpcItem::Invalid(response)) => {
+                match record_rejection(
+                    self.execution.services,
+                    "unknown",
+                    started,
+                    Some(response),
+                    RpcErrorCode::InvalidRequest,
+                    self.execution.budget,
+                ) {
+                    Ok(Some(response)) => {
+                        if self.sink.send_prepared(response.frame).await.is_err() {
+                            self.execution.shared.transport.close();
+                            return std::ops::ControlFlow::Break(());
+                        }
+                    }
+                    _ => {
+                        self.execution.shared.transport.close();
+                        return std::ops::ControlFlow::Break(());
+                    }
+                }
+            }
+            RpcMessage::Single(RpcItem::Call(call)) => {
+                return self
+                    .handle_single_call(call, started, input_lease, opening_handshake)
+                    .await;
+            }
+            RpcMessage::Batch(items) => {
+                return self.handle_batch(items, started, input_lease).await;
+            }
+        }
+        std::ops::ControlFlow::Continue(())
+    }
+    async fn handle_single_call(
+        &mut self,
+        call: RpcCall,
+        started: Instant,
+        input_lease: RpcFrameLease,
+        opening_handshake: bool,
+    ) -> std::ops::ControlFlow<()> {
+        let close_after_error = opening_handshake;
+        match schedule_call(
+            call,
+            started,
+            ResultDestination::Single,
+            close_after_error,
+            &mut self.execution,
+            &mut self.outstanding,
+            Some(input_lease),
+        )
+        .await
+        {
+            ScheduledCall::Pending => {}
+            ScheduledCall::Immediate(Some(response)) => {
+                if self.sink.send_prepared(response.frame).await.is_err() {
+                    self.execution.shared.transport.close();
+                    return std::ops::ControlFlow::Break(());
+                }
+            }
+            ScheduledCall::Immediate(None) => {}
+            ScheduledCall::Duplicate(response) => {
+                if let Some(response) = response {
+                    let _ = self.sink.send_prepared(response.frame).await;
+                }
+                self.execution.shared.transport.close();
+                return std::ops::ControlFlow::Break(());
+            }
+        }
+        std::ops::ControlFlow::Continue(())
+    }
+    async fn handle_batch(
+        &mut self,
+        items: Vec<RpcItem>,
+        started: Instant,
+        input_lease: RpcFrameLease,
+    ) -> std::ops::ControlFlow<()> {
+        let batch_id = self.next_batch;
+        self.next_batch = self.next_batch.wrapping_add(1);
+        let mut batch = BatchAssembly::new();
+        for item in items {
+            match item {
+                RpcItem::Response => {}
+                RpcItem::Invalid(response) => {
+                    match record_rejection(
+                        self.execution.services,
+                        "unknown",
+                        started,
+                        Some(response),
+                        RpcErrorCode::InvalidRequest,
+                        self.execution.budget,
+                    ) {
+                        Ok(Some(response)) => batch.push(response, false),
+                        _ => {
+                            self.execution.shared.transport.close();
+                            return std::ops::ControlFlow::Break(());
+                        }
+                    }
+                }
+                RpcItem::Call(call) => {
+                    if let Some(id) = &call.id {
+                        batch.request_ids.push(id.clone());
+                    }
+                    let counts_toward_batch = call.id.is_some()
+                        || matches!(
+                            call.method.as_str(),
+                            "session.open"
+                                | "auth.createDevSession"
+                                | "messageSync.resume"
+                                | "messageSync.page"
+                        );
+                    if counts_toward_batch {
+                        batch.pending += 1;
+                    }
+                    match schedule_call(
+                        call,
+                        started,
+                        ResultDestination::Batch(batch_id),
+                        false,
+                        &mut self.execution,
+                        &mut self.outstanding,
+                        Some(input_lease.retain_for_dispatch()),
+                    )
+                    .await
+                    {
+                        ScheduledCall::Pending => {}
+                        ScheduledCall::Immediate(response) => {
+                            if counts_toward_batch {
+                                batch.pending = batch.pending.saturating_sub(1);
+                                if let Some(response) = response {
+                                    batch.push(response, false);
+                                }
+                            }
+                        }
+                        ScheduledCall::Duplicate(response) => {
+                            if let Some(response) = response {
+                                let _ = self.sink.send_prepared(response.frame).await;
+                            }
+                            self.execution.shared.transport.close();
+                            return std::ops::ControlFlow::Break(());
+                        }
+                    }
+                }
+            }
+        }
+        if batch.pending == 0 {
+            return self.finish_batch(batch).await;
+        } else {
+            self.batches.insert(batch_id, batch);
+        }
+        std::ops::ControlFlow::Continue(())
+    }
+    async fn finish_batch(&mut self, mut batch: BatchAssembly) -> std::ops::ControlFlow<()> {
+        let close_after_error = batch.close_after_error;
+        let activate_after_success = batch.activate_after_success;
+        let request_ids = std::mem::take(&mut batch.request_ids);
+        match flush_batch(batch, self.sink, self.execution.budget).await {
+            Ok(lifecycle) => {
+                for id in request_ids {
+                    self.outstanding.remove(&id);
+                }
+                if let Some(failure) = lifecycle {
+                    handle_lifecycle_failure(failure, self.execution.shared, self.sink).await;
+                    return std::ops::ControlFlow::Break(());
+                }
+                if activate_after_success {
+                    self.activate_bound_session().await;
+                }
+                if close_after_error {
+                    self.execution.shared.transport.close();
+                    return std::ops::ControlFlow::Break(());
+                }
+            }
+            Err(_) => {
+                self.execution.shared.transport.close();
+                return std::ops::ControlFlow::Break(());
+            }
+        }
+        std::ops::ControlFlow::Continue(())
+    }
+    async fn activate_bound_session(&self) {
+        self.execution
+            .shared
+            .activate(self.execution.services, self.sink)
+            .await;
+        if let Some((session, _)) = self.execution.shared.bound_identity().await {
+            tokio::spawn(generation_checks(
+                self.execution.shared.clone(),
+                self.execution.services.clone(),
+                session,
+                self.execution.guard_failures.clone(),
+            ));
+        }
+    }
+}
+
 /// Runs one complete RPC session using complete JSON messages. It owns
 /// authentication, session transitions, registry registration, watchers and
 /// revocation checks; the caller owns transport framing and writer I/O.
@@ -2284,12 +2656,7 @@ pub async fn serve_rpc_session(
     let mut input_permits = dependencies.input_permits;
     let mut close = dependencies.state.close_subscription();
     let mut anonymous_tick = time::interval(Duration::from_secs(1));
-    let mut first_message = true;
-    let mut handshake_pending = false;
-    let mut next_batch = 0_u64;
-    let mut batches = HashMap::<u64, BatchAssembly>::new();
-    let mut outstanding = HashSet::<RpcId>::new();
-    let mut execution = SessionExecution {
+    let execution = SessionExecution {
         shared: &shared,
         services: &services,
         controls: &controls_tx,
@@ -2301,7 +2668,16 @@ pub async fn serve_rpc_session(
         next_sync_seq: 0,
     };
 
-    'session: loop {
+    let mut session = SessionLoop {
+        execution,
+        sink: &sink,
+        first_message: true,
+        handshake_pending: false,
+        next_batch: 0,
+        batches: HashMap::new(),
+        outstanding: HashSet::new(),
+    };
+    loop {
         if dependencies.state.is_closed() {
             break;
         }
@@ -2318,315 +2694,18 @@ pub async fn serve_rpc_session(
                 }
             }
             Some(result) = results_rx.recv() => {
-                if matches!(result.destination, ResultDestination::Single) {
-                    if let Some(id) = result.id {
-                        outstanding.remove(&id);
-                    }
-                }
-                match result.destination {
-                    ResultDestination::Single => {
-                        if let Some(response) = result.response {
-                            let lifecycle = response.lifecycle;
-                            let success = response.success;
-                            if lifecycle.is_some() {
-                                shared.suspend_authorized_work().await;
-                            }
-                            if sink.send_prepared(response.frame).await.is_err() {
-                                dependencies.state.close();
-                                break;
-                            }
-                            if result.activate_after_success && success {
-                                shared.activate(&services, &sink).await;
-                                if let Some((session, _)) = shared.bound_identity().await {
-                                    tokio::spawn(generation_checks(
-                                        shared.clone(),
-                                        services.clone(),
-                                        session,
-                                        guard_tx.clone(),
-                                    ));
-                                }
-                            }
-                            if let Some(failure) = lifecycle {
-                                handle_lifecycle_failure(failure, &shared, &sink).await;
-                                break;
-                            }
-                            if result.close_after_error && !success {
-                                dependencies.state.close();
-                                break;
-                            }
-                        } else if result.activate_after_success {
-                            shared.activate(&services, &sink).await;
-                            if let Some((session, _)) = shared.bound_identity().await {
-                                tokio::spawn(generation_checks(
-                                    shared.clone(),
-                                    services.clone(),
-                                    session,
-                                    guard_tx.clone(),
-                                ));
-                            }
-                        }
-                    }
-                    ResultDestination::Batch(batch_id) => {
-                        let response_lifecycle =
-                            result.response.as_ref().and_then(|response| response.lifecycle);
-                        if response_lifecycle.is_some() {
-                            shared.suspend_authorized_work().await;
-                        }
-                        let mut ready = None;
-                        if let Some(batch) = batches.get_mut(&batch_id) {
-                            let activate_after_success = result.activate_after_success
-                                && match &result.response {
-                                    Some(response) => response.success,
-                                    None => true,
-                                };
-                            batch.activate_after_success |= activate_after_success;
-                            if result.counts_toward_batch {
-                                batch.pending = batch.pending.saturating_sub(1);
-                            }
-                            if let Some(response) = result.response {
-                                batch.push(response, result.close_after_error);
-                            }
-                            if batch.pending == 0 {
-                                ready = batches.remove(&batch_id);
-                            }
-                        }
-                        if let Some(mut batch) = ready {
-                            let close_after_error = batch.close_after_error;
-                            let activate_after_success = batch.activate_after_success;
-                            let request_ids = std::mem::take(&mut batch.request_ids);
-                            match flush_batch(batch, &sink, &dependencies.budget).await {
-                                Ok(lifecycle) => {
-                                    for id in request_ids {
-                                        outstanding.remove(&id);
-                                    }
-                                    if let Some(failure) = lifecycle {
-                                        handle_lifecycle_failure(failure, &shared, &sink).await;
-                                        break;
-                                    }
-                                    if activate_after_success {
-                                        shared.activate(&services, &sink).await;
-                                        if let Some((session, _)) = shared.bound_identity().await {
-                                            tokio::spawn(generation_checks(
-                                                shared.clone(),
-                                                services.clone(),
-                                                session,
-                                                guard_tx.clone(),
-                                            ));
-                                        }
-                                    }
-                                    if close_after_error {
-                                        dependencies.state.close();
-                                        break;
-                                    }
-                                }
-                                Err(_) => {
-                                    dependencies.state.close();
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-                handshake_pending = false;
+                if session.handle_work_result(result).await.is_break() { break; }
             }
-            input_text = input.recv(), if !handshake_pending => {
+            input_text = input.recv(), if !session.handshake_pending => {
                 let Some(text) = input_text else { break; };
                 let Some((lease, started)) = input_permits.recv().await else {
                     dependencies.state.close();
                     break;
                 };
-                if matches!(&lease, InputLease::Oversized(_)) {
-                    let InputLease::Oversized(lease) = lease else {
-                        unreachable!("matched oversized input above");
-                    };
-                    // The terminal oversized input has consumed the full
-                    // budget; release it before reserving the small 1013 frame.
-                    drop(lease);
-                    let id = oversized_request_id(&text);
-                    drop(text);
-                    let response = id.map(|id| RpcResponse::error(id, RpcError::new(RpcErrorCode::PayloadTooLarge)));
-                    if let Ok(Some(response)) = record_rejection(&services, "unknown", started, response, RpcErrorCode::PayloadTooLarge, &dependencies.budget) {
-                        let _ = sink.send_prepared(response.frame).await;
-                    }
-                    dependencies.state.close();
-                    break;
-                }
-                let InputLease::Frame(input_lease) = lease else {
-                    unreachable!("oversized frames return above");
-                };
-                let message = match parse_message(&text, MAX_BATCH_ITEMS) {
-                    Ok(message) => message,
-                    Err(response) => {
-                        let code = match &response.outcome {
-                            super::protocol::RpcOutcome::Failure { error } => error.code,
-                            super::protocol::RpcOutcome::Success { .. } => RpcErrorCode::InvalidRequest,
-                        };
-                        match record_rejection(&services, "unknown", started, Some(response), code, &dependencies.budget) {
-                            Ok(Some(response)) => {
-                                if sink.send_prepared(response.frame).await.is_err() {
-                                    dependencies.state.close();
-                                    break;
-                                }
-                            }
-                            _ => {
-                                dependencies.state.close();
-                                break;
-                            }
-                        }
-                        continue;
-                    }
-                };
-
-                let opening_handshake = first_message;
-                if first_message {
-                    first_message = false;
-                    let valid_open = matches!(
-                        &message,
-                        RpcMessage::Single(RpcItem::Call(RpcCall {
-                            id: Some(RpcId::String(_) | RpcId::Number(_)),
-                            method,
-                            ..
-                        })) if method == "session.open"
-                    );
-                    if !valid_open {
-                        if let Ok(Some(response)) = record_rejection(&services, "unknown", started, Some(RpcResponse::invalid_request()), RpcErrorCode::InvalidRequest, &dependencies.budget) {
-                            let _ = sink.send_prepared(response.frame).await;
-                        }
-                        dependencies.state.close();
-                        break;
-                    }
-                    // Do not admit another frame until the first identity and
-                    // its response are settled, even if work tasks poll out of order.
-                    handshake_pending = true;
-                }
-
-                match message {
-                    RpcMessage::Single(RpcItem::Response) => {}
-                    RpcMessage::Single(RpcItem::Invalid(response)) => {
-                        match record_rejection(&services, "unknown", started, Some(response), RpcErrorCode::InvalidRequest, &dependencies.budget) {
-                            Ok(Some(response)) => {
-                                if sink.send_prepared(response.frame).await.is_err() {
-                                    dependencies.state.close();
-                                    break;
-                                }
-                            }
-                            _ => {
-                                dependencies.state.close();
-                                break;
-                            }
-                        }
-                    }
-                    RpcMessage::Single(RpcItem::Call(call)) => {
-                        let close_after_error = opening_handshake;
-                        match schedule_call(
-                            call,
-                            started,
-                            ResultDestination::Single,
-                            close_after_error,
-                            &mut execution,
-                            &mut outstanding,
-                            Some(input_lease),
-                        ).await {
-                            ScheduledCall::Pending => {}
-                            ScheduledCall::Immediate(Some(response)) => {
-                                if sink.send_prepared(response.frame).await.is_err() {
-                                    dependencies.state.close();
-                                    break;
-                                }
-                            }
-                            ScheduledCall::Immediate(None) => {}
-                            ScheduledCall::Duplicate(response) => {
-                                if let Some(response) = response {
-                                    let _ = sink.send_prepared(response.frame).await;
-                                }
-                                dependencies.state.close();
-                                break;
-                            }
-                        }
-                    }
-                    RpcMessage::Batch(items) => {
-                        let batch_id = next_batch;
-                        next_batch = next_batch.wrapping_add(1);
-                        let mut batch = BatchAssembly::new();
-                        for item in items {
-                            match item {
-                                RpcItem::Response => {}
-                                RpcItem::Invalid(response) => {
-                                    match record_rejection(&services, "unknown", started, Some(response), RpcErrorCode::InvalidRequest, &dependencies.budget) {
-                                        Ok(Some(response)) => batch.push(response, false),
-                                        _ => {
-                                            dependencies.state.close();
-                                            break 'session;
-                                        }
-                                    }
-                                }
-                                RpcItem::Call(call) => {
-                                    if let Some(id) = &call.id {
-                                        batch.request_ids.push(id.clone());
-                                    }
-                                    let counts_toward_batch = call.id.is_some()
-                                        || matches!(
-                                            call.method.as_str(),
-                                            "session.open" | "auth.createDevSession" | "messageSync.resume" | "messageSync.page"
-                                        );
-                                    if counts_toward_batch {
-                                        batch.pending += 1;
-                                    }
-                                    match schedule_call(
-                                        call,
-                                        started,
-                                        ResultDestination::Batch(batch_id),
-                                        false,
-                                        &mut execution,
-                                        &mut outstanding,
-                                        Some(input_lease.retain_for_dispatch()),
-                                    ).await {
-                                        ScheduledCall::Pending => {}
-                                        ScheduledCall::Immediate(response) => {
-                                            if counts_toward_batch {
-                                                batch.pending = batch.pending.saturating_sub(1);
-                                                if let Some(response) = response {
-                                                    batch.push(response, false);
-                                                }
-                                            }
-                                        }
-                                        ScheduledCall::Duplicate(response) => {
-                                            if let Some(response) = response {
-                                                let _ = sink.send_prepared(response.frame).await;
-                                            }
-                                            dependencies.state.close();
-                                            break 'session;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        if batch.pending == 0 {
-                            let request_ids = std::mem::take(&mut batch.request_ids);
-                            match flush_batch(batch, &sink, &dependencies.budget).await {
-                                Ok(lifecycle) => {
-                                    for id in request_ids {
-                                        outstanding.remove(&id);
-                                    }
-                                    if let Some(failure) = lifecycle {
-                                        handle_lifecycle_failure(failure, &shared, &sink).await;
-                                        break;
-                                    }
-                                }
-                                Err(_) => {
-                                    dependencies.state.close();
-                                    break;
-                                }
-                            }
-                        } else {
-                            batches.insert(batch_id, batch);
-                        }
-                    }
-                }
+                if session.handle_input_frame(text, lease, started).await.is_break() { break; }
             }
         }
     }
-
     dependencies.state.close();
     shared.remove_registration(&services).await;
 }
