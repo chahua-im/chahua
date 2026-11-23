@@ -114,6 +114,18 @@ function createThreadQuery(archived: boolean) {
   };
 }
 type ThreadQuery = ReturnType<typeof createThreadQuery>;
+
+function listErrors(state: Pick<QueryState, 'ids' | 'listError' | 'rowErrors' | 'unreadErrors'>) {
+  const listError = computed(() => state.listError() ?? (state.rowErrors().size ? ChatListError.Row : undefined));
+  const error = computed(() => {
+    const listFailure = listError();
+    if (listFailure != null) return listFailure;
+    const unreadErrors = state.unreadErrors();
+    return unreadErrors.size && state.ids().some((id) => unreadErrors.has(id)) ? ChatListError.Unread : undefined;
+  });
+  return { listError, error };
+}
+
 @Service()
 export class ChatListStore {
   private readonly rpc = inject(RpcApi);
@@ -396,7 +408,7 @@ export class ChatListStore {
       rowErrors: signal<ReadonlySet<SnowflakeID>>(new Set()),
       headStale: false,
     };
-    const listError = computed(() => state.listError() ?? (state.rowErrors().size ? ChatListError.Row : undefined));
+    const errors = listErrors(state);
     const handle: ChatQuery = {
       items: computed(() =>
         state
@@ -407,14 +419,7 @@ export class ChatListStore {
           .sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? '')),
       ),
       loading: state.loading.asReadonly(),
-      error: computed(
-        () =>
-          listError() ??
-          (state.unreadErrors().size && state.ids().some((id) => state.unreadErrors().has(id))
-            ? ChatListError.Unread
-            : undefined),
-      ),
-      listError,
+      ...errors,
       hasMore: computed(() => !state.dirty() && !!state.cursor()),
       loadingMore: state.loadingMore.asReadonly(),
       loadedThrough: state.loadedThrough.asReadonly(),
@@ -436,7 +441,7 @@ export class ChatListStore {
         this.invalidateQuery(state);
       },
       retry: () =>
-        listError() === ChatListError.Row && !state.dirty()
+        errors.listError() === ChatListError.Row && !state.dirty()
           ? this.retryRows(state)
           : this.fetchQuery(
               state,
@@ -1028,7 +1033,7 @@ export class ChatListStore {
 
   private threadCache(archived: boolean) {
     const state = createThreadQuery(archived);
-    const listError = computed(() => state.listError() ?? (state.rowErrors().size ? ChatListError.Row : undefined));
+    const errors = listErrors(state);
     return {
       state,
       view: {
@@ -1040,14 +1045,7 @@ export class ChatListStore {
           }),
         ),
         loading: state.loading.asReadonly(),
-        error: computed(
-          () =>
-            listError() ??
-            (state.unreadErrors().size && state.ids().some((id) => state.unreadErrors().has(id))
-              ? ChatListError.Unread
-              : undefined),
-        ),
-        listError,
+        ...errors,
         hasMore: computed(() => !!state.cursor()),
         loadingMore: state.loadingMore.asReadonly(),
         activate: () => this.activateThreadQuery(state),
@@ -1056,7 +1054,7 @@ export class ChatListStore {
           return this.loadThreads(state);
         },
         retry: () =>
-          listError() === ChatListError.Row && !state.dirty
+          errors.listError() === ChatListError.Row && !state.dirty
             ? this.retryRows(state)
             : this.loadThreads(
                 state,

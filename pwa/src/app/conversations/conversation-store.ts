@@ -27,7 +27,7 @@ import {
   toMessagePreview,
   type MessageChange,
 } from '../messages/message-change';
-import { mergeMessageArrivals, mergeMessages, patchMessages } from '../messages/message-merge';
+import { mergeMessageArrivals, mergeMessages, patchItems } from '../messages/message-merge';
 import { isVisibleMessage } from '../messages/message-visibility';
 import { MessageSync, requiresMessagePurge } from '../messages/message-sync';
 import { preserveReactionOwnership } from '../messages/reaction-state';
@@ -624,7 +624,7 @@ export class ConversationStore {
   private patchPage(update: MessageUpdate) {
     this.currentPage.update((page) => {
       if (!page) return page;
-      const messages = patchMessages(page.messages, update);
+      const messages = patchItems(page.messages, update);
       return messages === page.messages ? page : { ...page, messages };
     });
   }
