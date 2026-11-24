@@ -11,6 +11,7 @@ import type { StickerPackOrderItem } from './stickerPackOrderItem';
 export interface MeResponse {
   avatarUrl?: string;
   gender: number;
+  groupChatWriteRestricted?: boolean;
   muteDirectChatsByDefault: boolean;
   muteGroupChatsByDefault: boolean;
   permissions: string[];

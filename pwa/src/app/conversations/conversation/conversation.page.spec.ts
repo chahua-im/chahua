@@ -14,6 +14,7 @@ import {
   IonTextarea,
   iosTransitionAnimation,
   NavController,
+  ToastController,
 } from '@ionic/angular';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
@@ -2539,6 +2540,228 @@ describe('ConversationPage', () => {
     expect(button.querySelector('ion-spinner')).toBeNull();
     expect(component['conversation'].items()).toHaveLength(2);
   });
+
+  it('disables group writes and keeps administrator pinning and forwarding available', async () => {
+    const chats = TestBed.inject(ChatStore);
+    chats.invalidate();
+    const details = chats.ensureDetails(testChat.id);
+    peer.expect('groups.get', { chatId: wireChat.id }).flush({ ...wireChat, myRole: GroupRole.admin });
+    await details;
+    TestBed.inject(SessionStore).user.set({ ...testUser, groupChatWriteRestricted: true });
+    fixture.detectChanges();
+
+    const menu = component['menu']()!;
+    menu['selection'].set({
+      messageId: testMessage.id,
+      element: document.createElement('div'),
+      rect: new DOMRect(),
+      own: true,
+    });
+    const actions = menu['menuActions']();
+    for (const action of [MessageAction.Reply, MessageAction.Thread, MessageAction.Edit, MessageAction.Recall])
+      expect(actions).toContainEqual(expect.objectContaining({ action, disabled: true }));
+    for (const action of [MessageAction.Pin, MessageAction.Copy, MessageAction.Forward])
+      expect(actions).toContainEqual(expect.objectContaining({ action, disabled: false }));
+    expect(component['canSendMessage']()).toBe(false);
+    await menu.reactTo(testMessage, '👍');
+    await component['sendMessage']();
+    peer.expectNone('reactions.add');
+    peer.expectNone('messages.send');
+  });
+
+  it.each([GroupKind.group, GroupKind.dm])(
+    'keeps writing disabled until an uncached %s is identified',
+    async (kind) => {
+      TestBed.inject(SessionStore).user.set({ ...testUser, groupChatWriteRestricted: true });
+      const id = '9007199254741555';
+      fixture.componentRef.setInput('id', id);
+      fixture.detectChanges();
+      const details = peer.expect('groups.get', { chatId: id });
+      peer.expect('messages.list', { chatId: id, max: 50 }).flush({
+        messages: [{ ...wireMessage, chatId: id }],
+        chatSettings: { showMembershipMessages: true },
+      });
+      component['draft'].set('保留草稿');
+      await fixture.whenStable();
+      fixture.detectChanges();
+      const composer = fixture.nativeElement.querySelector('app-message-composer') as HTMLElement;
+      const textarea = fixture.debugElement.query(By.directive(IonTextarea)).componentInstance as IonTextarea;
+      expect(textarea.disabled).toBe(true);
+      expect(textarea.value).toBe('保留草稿');
+      expect(composer.querySelector('.restriction-placeholder')).toBeNull();
+      expect(component['canSendMessage']()).toBe(false);
+      await component['menu']()!.reactTo({ ...testMessage, chatId: encodeId(id) }, '👍');
+      await component['sendMessage']();
+      peer.expectNone('reactions.add');
+      peer.expectNone('messages.send');
+
+      details.flush({ ...wireChat, id, kind, myRole: GroupRole.member });
+      await settleMetadata();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      if (kind === GroupKind.dm) peer.expect('chats.getReadReceipt', { chatId: id }).flush({});
+      expect(fixture.debugElement.query(By.directive(IonTextarea)).componentInstance).toBe(textarea);
+      expect(textarea.value).toBe(kind === GroupKind.group ? '' : '保留草稿');
+      expect(component['draft']()).toBe('保留草稿');
+      expect(textarea.disabled).toBe(kind === GroupKind.group);
+      expect(component['canSendMessage']()).toBe(kind === GroupKind.dm);
+      expect(composer.querySelector('.input-row .restriction-placeholder')?.textContent?.trim()).toBe(
+        kind === GroupKind.group ? '当前用户组禁止发言' : undefined,
+      );
+    },
+  );
+
+  it('allows a restricted account to compose immediately in a cached DM', async () => {
+    TestBed.inject(SessionStore).user.set({ ...testUser, groupChatWriteRestricted: true });
+    const id = '9007199254741555';
+    TestBed.inject(ChatStore).remember([{ ...testChat, id: encodeId(id), kind: GroupKind.dm }]);
+    fixture.componentRef.setInput('id', id);
+    fixture.detectChanges();
+
+    expect(component['canSendMessage']()).toBe(true);
+    expect(fixture.debugElement.query(By.directive(IonTextarea)).componentInstance.disabled).toBe(false);
+    peer.expectNone('groups.get');
+    peer.expect('messages.list', { chatId: id, max: 50 }).flush({
+      messages: [],
+      chatSettings: { showMembershipMessages: true },
+    });
+    await settleMetadata();
+    await fixture.whenStable();
+  });
+
+  it('forwards to a known DM thread before caching the parent chat', async () => {
+    const chats = TestBed.inject(ChatStore);
+    const chatId = encodeId('9007199254741777');
+    const threadId = encodeId('9007199254741778');
+    chats.acceptThreads(
+      [
+        {
+          chatId,
+          chatKind: GroupKind.dm,
+          chatName: 'Private thread',
+          threadRootMessage: { ...testMessage, id: threadId, mentions: [] },
+          lastReplyAt: testMessage.createdAt,
+          subscribedAt: testMessage.createdAt,
+          replyCount: 1,
+          unreadCount: 0,
+          archived: false,
+        },
+      ],
+      chats.snapshot(),
+      chats.subscriptionSnapshot(),
+    );
+    expect(chats.get(chatId)).toBeUndefined();
+    TestBed.inject(SessionStore).user.set({ ...testUser, groupChatWriteRestricted: true });
+    const prepare = vi.spyOn(TestBed.inject(ConversationNavigation), 'prepareForward').mockResolvedValue(true);
+    vi.spyOn(TestBed.inject(ToastController), 'create').mockResolvedValue({
+      present: vi.fn(),
+      dismiss: vi.fn(),
+    } as unknown as HTMLIonToastElement);
+    const forward = TestBed.createComponent(ForwardPicker);
+    forward.componentRef.setInput('messages', [testMessage]);
+    const target = { chatId, threadId, kind: chats.threadSummary(threadId)!.chatKind, avatar: {}, time: 0 };
+    expect(await forward.componentInstance['select'](target, () => true)).toBe(true);
+    expect(prepare).toHaveBeenCalledExactlyOnceWith(chatId, threadId, [testMessage], undefined);
+    peer.expectNone('groups.get');
+  });
+
+  it.each([GroupKind.dm, GroupKind.group])(
+    'uses the cached %s thread type while parent conversation details are unavailable',
+    async (kind) => {
+      const chats = TestBed.inject(ChatStore);
+      const parent = '9007199254741777';
+      const root = '9007199254741778';
+      const replyId = '9007199254741779';
+      const chatId = encodeId(parent);
+      const threadId = encodeId(root);
+      const isGroup = kind === GroupKind.group;
+      chats.acceptThreads(
+        [
+          {
+            chatId,
+            chatKind: kind,
+            chatName: 'Cached thread',
+            peer: isGroup ? undefined : { ...otherSender, username: otherSender.name },
+            threadRootMessage: { ...testMessage, id: threadId, mentions: [] },
+            lastReplyAt: testMessage.createdAt,
+            subscribedAt: testMessage.createdAt,
+            replyCount: 1,
+            unreadCount: 0,
+            archived: false,
+          },
+        ],
+        chats.snapshot(),
+        chats.subscriptionSnapshot(),
+      );
+      expect(chats.get(chatId)).toBeUndefined();
+
+      TestBed.inject(SessionStore).user.set({ ...testUser, groupChatWriteRestricted: true });
+      fixture.componentRef.setInput('id', parent);
+      fixture.componentRef.setInput('threadId', root);
+      fixture.detectChanges();
+      const details = peer.expect('groups.get', { chatId: parent });
+      if (!isGroup) {
+        (await peer.expectAsync('friends.getRelationship', { uid: otherSender.uid })).flush({
+          peerUid: otherSender.uid,
+          canDm: true,
+          isFriend: true,
+        });
+      }
+      (await peer.expectAsync('messages.list', { chatId: parent, threadId: root, max: 50, around: root })).flush({
+        messages: [
+          { ...wireMessage, chatId: parent, id: root, threadInfo: { replyCount: 1 } },
+          { ...wireMessage, chatId: parent, id: replyId, clientGeneratedId: 'reply', replyRootId: root },
+        ],
+        chatSettings: { showMembershipMessages: true },
+      });
+      await settleMetadata();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      const textarea = fixture.debugElement.query(By.directive(IonTextarea)).componentInstance as IonTextarea;
+      expect(textarea.disabled).toBe(isGroup);
+
+      const pendingDetails = component['loadChatInfo']();
+      details.error(RpcErrorCode.Unavailable);
+      await expect(pendingDetails).rejects.toMatchObject({ code: RpcErrorCode.Unavailable });
+      component['draft'].set('话题回复');
+      fixture.detectChanges();
+      const send = fixture.nativeElement.querySelector('app-message-composer .send-button') as HTMLButtonElement;
+      expect(textarea.disabled).toBe(isGroup);
+      expect(send.disabled).toBe(isGroup);
+      expect(component['canSendMessage']()).toBe(!isGroup);
+      expect(fixture.nativeElement.querySelector('.input-row .restriction-placeholder')?.textContent?.trim()).toBe(
+        isGroup ? '当前用户组禁止发言' : undefined,
+      );
+
+      const reply = component['conversation'].items().find((message) => message.id === encodeId(replyId))!;
+      const reacting = component['menu']()!.reactTo(reply, '👍');
+      if (!isGroup) {
+        (await peer.expectAsync('reactions.add', { chatId: parent, messageId: replyId, emoji: '👍' })).flush(null);
+      }
+      await reacting;
+      send.click();
+      if (isGroup) {
+        peer.expectNone('reactions.add');
+        peer.expectNone('messages.sendInThread');
+        expect(component['draft']()).toBe('话题回复');
+      } else {
+        const request = await peer.expectAsync(
+          'messages.sendInThread',
+          (params) => params['chatId'] === parent && params['threadId'] === root && params['message'] === '话题回复',
+        );
+        request.flush({
+          ...wireMessage,
+          chatId: parent,
+          id: '9007199254741780',
+          replyRootId: root,
+          clientGeneratedId: request.params!['clientGeneratedId'],
+          message: '话题回复',
+        });
+        await fixture.whenStable();
+        expect(component['draft']()).toBe('');
+      }
+    },
+  );
 
   it('confirms unpin in the normal message menu before removing it', async () => {
     TestBed.inject(ChatStore).invalidate();

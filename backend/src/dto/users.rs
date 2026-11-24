@@ -68,6 +68,8 @@ pub struct MeResponse {
     pub mute_direct_chats_by_default: bool,
     pub show_membership_messages: bool,
     pub show_unread_message_count: bool,
+    #[schema(required = false)]
+    pub group_chat_write_restricted: bool,
 }
 
 /// Account-level display preferences; omitted patches retain their stored values.
@@ -154,11 +156,13 @@ mod tests {
             mute_direct_chats_by_default: false,
             show_membership_messages: false,
             show_unread_message_count: false,
+            group_chat_write_restricted: true,
         };
 
         let value = serde_json::to_value(response).unwrap();
         assert_eq!(value["showMembershipMessages"], json!(false));
         assert_eq!(value["showUnreadMessageCount"], json!(false));
+        assert_eq!(value["groupChatWriteRestricted"], json!(true));
         assert_eq!(value["gender"], json!(2));
         assert_eq!(value["userGroup"]["groupId"], json!(3));
         assert_eq!(value["userGroup"]["name"], json!("Moderator"));

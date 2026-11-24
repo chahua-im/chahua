@@ -22,7 +22,12 @@
       <ng-container [ngTemplateOutlet]="content" />
     </span>
   } @else {
-    <button type="button" class="reaction" [class.reacted]="reaction.reactedByMe" (click)="react.emit(reaction.emoji)">
+    <button
+      type="button"
+      class="reaction"
+      [class.reacted]="reaction.reactedByMe"
+      [disabled]="disabled()"
+      (click)="react.emit(reaction.emoji)">
       <ng-container [ngTemplateOutlet]="content" />
     </button>
   }

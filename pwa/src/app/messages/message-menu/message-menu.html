@@ -9,7 +9,7 @@
     @if (selection(); as selection) {
       @if (message(); as message) {
         <div class="menu-surface" (click)="dismissBackdrop($event)">
-          @if (emojiAnchor() && serverMessage(); as serverMessage) {
+          @if (!groupChatWriteDisabled() && emojiAnchor() && serverMessage(); as serverMessage) {
             <app-emoji-panel
               [class.ion-hide]="!choosingEmoji()"
               [active]="choosingEmoji()"
@@ -24,12 +24,16 @@
               @if (canReact() && serverMessage(); as serverMessage) {
                 <div #reactionBar class="reactions panel">
                   @for (emoji of quickEmojis(); track emoji) {
-                    <button type="button" [class.selected]="selected(emoji)" (click)="reactTo(serverMessage, emoji)">
+                    <button
+                      type="button"
+                      [class.selected]="selected(emoji)"
+                      [disabled]="groupChatWriteDisabled()"
+                      (click)="reactTo(serverMessage, emoji)">
                       {{ emoji }}
                     </button>
                   }
                   @if (serverMessage.reactions.length < 50) {
-                    <button type="button" (click)="openEmojiPicker($event)">
+                    <button type="button" [disabled]="groupChatWriteDisabled()" (click)="openEmojiPicker($event)">
                       <ion-icon [icon]="icons.addOutline"></ion-icon>
                     </button>
                   }
@@ -117,7 +121,7 @@
   </ng-template>
 </ion-modal>
 <ion-alert
-  [isOpen]="!!confirmation()"
+  [isOpen]="!!confirmation() && !(groupChatWriteDisabled() && confirmation()?.action === Action.Recall)"
   [cssClass]="confirmation()?.action === Action.Recall ? 'recall-confirmation' : ''"
   [header]="
     (confirmation()?.action === Action.Recall

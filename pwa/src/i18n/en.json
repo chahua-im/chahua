@@ -905,6 +905,7 @@
     "archivedLoadFailed": "Could not load archived chats"
   },
   "speaking": {
+    "groupChatWriteRestricted": "Your user group cannot post in group chats.",
     "groupTitle": "Group speaking permissions",
     "memberTitle": "Member speaking restriction",
     "adminNote": "Administrators are exempt. The stricter group or member restriction applies.",

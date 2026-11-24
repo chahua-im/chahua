@@ -24,8 +24,12 @@
 button.reaction {
   transition: transform 0.15s ease;
 
-  &:active {
+  &:not(:disabled):active {
     transform: scale(0.95);
+  }
+
+  &:disabled {
+    opacity: 0.6;
   }
 }
 

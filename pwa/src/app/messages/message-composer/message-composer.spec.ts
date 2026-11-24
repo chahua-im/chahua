@@ -1061,6 +1061,34 @@ describe('Message composer upload ownership', () => {
     composer['submit']();
     expect(submitted).toHaveBeenCalledOnce();
   });
+  it('replaces the composer placeholder with the user group restriction and restores the draft when lifted', () => {
+    composer.text.set('保留草稿');
+    fixture.detectChanges();
+    const textarea = fixture.nativeElement.querySelector('ion-textarea');
+    fixture.componentRef.setInput('groupChatWriteRestricted', true);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('ion-textarea')).toBe(textarea);
+    expect(textarea.disabled).toBe(true);
+    expect(textarea.value).toBe('');
+    expect(textarea.placeholder).toBe('当前用户组禁止发言');
+    expect(fixture.nativeElement.querySelector('.input-row .restriction-placeholder').textContent.trim()).toBe(
+      '当前用户组禁止发言',
+    );
+    expect(fixture.nativeElement.querySelector('.attach-button').disabled).toBe(true);
+    expect(fixture.nativeElement.querySelector('.send-button').disabled).toBe(true);
+    composer['submit']();
+    expect(submitted).not.toHaveBeenCalled();
+    expect(composer.text()).toBe('保留草稿');
+
+    fixture.componentRef.setInput('groupChatWriteRestricted', false);
+    fixture.detectChanges();
+    expect(textarea.disabled).toBe(false);
+    expect(textarea.placeholder).toBe('输入消息');
+    expect(textarea.value).toBe('保留草稿');
+    expect(fixture.nativeElement.querySelector('.restriction-placeholder')).toBeNull();
+  });
+
   it('selects mention candidates before Enter can send and leaves IME composition alone', async () => {
     const first = {
       uid: 2,

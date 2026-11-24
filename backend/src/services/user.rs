@@ -11,6 +11,19 @@ use crate::{
     models::{GroupKind, GroupRole, MembershipMessageVisibility},
 };
 
+pub(super) fn lookup_discuz_group_id(
+    conn: &mut PgConnection,
+    uid: i32,
+) -> QueryResult<Option<i32>> {
+    use crate::schema::discuz::discuz::common_member;
+
+    common_member::table
+        .find(uid)
+        .select(common_member::groupid)
+        .first(conn)
+        .optional()
+}
+
 pub fn load_chat_settings(
     conn: &mut PgConnection,
     uid: i32,

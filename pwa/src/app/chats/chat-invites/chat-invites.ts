@@ -34,7 +34,7 @@ import {
   type SnowflakeID,
 } from '../../../generated/models';
 import { decodeId } from '../../api/snowflake-id';
-import { RpcError, RpcErrorCode } from '../../api/rpc-error';
+import { isGroupChatWriteRestrictedError, RpcError, RpcErrorCode } from '../../api/rpc-error';
 import { copyText } from '../../api/clipboard';
 import { inviteStatus, InviteStatus } from '../invite';
 import { ChatStore } from '../chat-store';
@@ -117,6 +117,8 @@ export class ChatInvites {
   protected readonly Picker = InvitePicker;
   protected readonly PickerScope = ChatPickerScope;
   protected readonly picker = signal<InvitePicker | undefined>(undefined);
+  protected readonly disableTarget = (target: ChatPickerTarget) =>
+    this.picker() === InvitePicker.Destination && this.store.groupChatWriteRestricted(target.chatId, target.kind);
   protected readonly editorReady = signal(false);
   protected readonly chooseChat: ChooseChat = (target, available) => {
     if (this.picker() === InvitePicker.GroupCondition) {
@@ -139,6 +141,14 @@ export class ChatInvites {
   });
   protected readonly inputInvalid = signal(false);
   protected readonly requiredGroup = signal<ChatPickerTarget | undefined>(undefined);
+  protected readonly directSendRestricted = computed(() => {
+    const target = this.requiredGroup();
+    return (
+      this.type() === InviteType.membership &&
+      !!target &&
+      this.store.groupChatWriteRestricted(target.chatId, target.kind)
+    );
+  });
   protected readonly destination = signal<ChatPickerTarget | undefined>(undefined);
   protected readonly pending = signal<{ action: InviteAction; id?: SnowflakeID } | undefined>(undefined);
   protected readonly busy = computed(() => this.pending() != null);
@@ -279,7 +289,7 @@ export class ChatInvites {
   }
   protected async create(andSend = false) {
     this.now.set(Date.now());
-    if (!this.canCreate()) return;
+    if (!this.canCreate() || (andSend && this.directSendRestricted())) return;
     const context = this.context;
     this.pending.set({ action: andSend ? InviteAction.CreateAndSend : InviteAction.Create });
     this.operationError.set(undefined);
@@ -364,7 +374,7 @@ export class ChatInvites {
     }
   }
   protected async startShare(invite: InviteResponse) {
-    if (this.busy() || inviteStatus(invite) !== InviteStatus.Active) return;
+    if (this.busy() || inviteStatus(invite) !== InviteStatus.Active || this.inviteSendRestricted(invite)) return;
     this.selected.set(invite);
     this.operationError.set(undefined);
     if (invite.inviteType === InviteType.generic) {
@@ -383,6 +393,13 @@ export class ChatInvites {
         : undefined,
     );
     await this.confirmShare();
+  }
+  protected inviteSendRestricted(invite: InviteResponse) {
+    return (
+      invite.inviteType === InviteType.membership &&
+      invite.requiredChatId != null &&
+      this.store.groupChatWriteRestricted(invite.requiredChatId, GroupKind.group)
+    );
   }
   private async confirmShare(available: () => boolean = () => true) {
     const invite = this.selected();
@@ -444,6 +461,10 @@ export class ChatInvites {
         };
       } else {
         destination = recipient;
+        if (this.store.groupChatWriteRestricted(destination.chatId, destination.kind)) {
+          await this.sendProblem('speaking.groupChatWriteRestricted', available);
+          return;
+        }
         await this.store.ensureDetails(destination.chatId);
       }
       if (!available()) return;
@@ -459,6 +480,8 @@ export class ChatInvites {
     }
   }
   private destinationProblem(destination: ChatPickerTarget) {
+    if (this.store.groupChatWriteRestricted(destination.chatId, destination.kind))
+      return 'speaking.groupChatWriteRestricted';
     if (!this.store.isAccessible(destination.chatId)) return 'chats.invites.sendUnavailable';
     if (destination.kind !== GroupKind.dm && !this.store.canSpeak(destination.chatId, SpeakingAction.ChatMessage)) {
       const mode = this.store.speakingMode(destination.chatId);
@@ -467,6 +490,7 @@ export class ChatInvites {
     return undefined;
   }
   private sendError(error: unknown, fallback: string) {
+    if (isGroupChatWriteRestrictedError(error)) return 'speaking.groupChatWriteRestricted';
     const mode = speakingErrorMode(error);
     if (mode) return `speaking.blocked.${mode}`;
     if (error instanceof RpcError && (error.code === RpcErrorCode.Forbidden || error.code === RpcErrorCode.NotFound))
@@ -483,7 +507,8 @@ export class ChatInvites {
     await this.showSendDialog(alert, available);
   }
   private async confirmDestination(destination: ChatPickerTarget, available: () => boolean) {
-    if (!available()) return false;
+    const canSend = () => available() && !this.store.groupChatWriteRestricted(destination.chatId, destination.kind);
+    if (!canSend()) return false;
     const alert = await this.alerts.create({
       header: this.transloco.translate('chats.invites.share'),
       message: this.transloco.translate('chats.invites.sendConfirmation', {
@@ -494,7 +519,7 @@ export class ChatInvites {
         { text: this.transloco.translate('chats.invites.send'), role: 'confirm' },
       ],
     });
-    return this.showSendDialog(alert, available);
+    return this.showSendDialog(alert, canSend);
   }
   private async showSendDialog(alert: HTMLIonAlertElement, available: () => boolean) {
     if (!available()) return false;

@@ -24,6 +24,10 @@ max_attachment_file_size_bytes = 52428800
 [auth]
 debug_auth_enabled = false
 
+[group_chat.write]
+# Users whose primary group ID is in this list cannot write to group chats.
+restricted_user_group_ids = []
+
 [ids]
 node_id = 0 # Unique per instance; 0..15.
 

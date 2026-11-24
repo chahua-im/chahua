@@ -53,7 +53,71 @@ fn send(
     thread_id: Option<i64>,
     uid: i32,
 ) -> Result<AuthorizedMessageTarget, AppError> {
-    conn.transaction(|conn| authorize_message_send(conn, 1, thread_id, uid).map_err(AppError::from))
+    conn.transaction(|conn| {
+        authorize_message_send(conn, 1, thread_id, uid, &[]).map_err(AppError::from)
+    })
+}
+
+#[test]
+fn discuz_group_restricts_group_content_writes_but_keeps_dm_rules() {
+    use crate::services::social::require_chat_writable;
+
+    let Some(mut conn) = fixture() else {
+        return;
+    };
+    const UID: i32 = 1_900_000_007;
+    const PEER_UID: i32 = 1_900_000_008;
+    const RESTRICTED: i32 = 123;
+    conn.test_transaction::<_, AppError, _>(|conn| {
+        conn.batch_execute(&format!(
+            "CREATE TEMP TABLE friendships (LIKE public.friendships INCLUDING ALL);
+             CREATE TEMP TABLE blocks (LIKE public.blocks INCLUDING ALL);
+             INSERT INTO discuz.common_member (uid, username, loginname, groupid, extgroupids)
+                 VALUES ({UID}, 'write-test-1900000007', 'write-test-1900000007', {RESTRICTED}, ''),
+                        ({PEER_UID}, 'write-test-1900000008', 'write-test-1900000008', 1, '{RESTRICTED}');
+             INSERT INTO groups (id, name, kind, dm_uid1, dm_uid2)
+                 VALUES (4, '', 'dm', {UID}, {PEER_UID});
+             INSERT INTO group_membership (chat_id, uid, role)
+                 VALUES (1, {UID}, 'member'), (2, {UID}, 'admin'),
+                        (1, {PEER_UID}, 'member'), (4, {UID}, 'member'), (4, {PEER_UID}, 'member');
+             INSERT INTO friendships (uid1, uid2, initiated_by)
+                 VALUES ({UID}, {PEER_UID}, {UID});"
+        ))?;
+
+        let restricted_group_ids = [RESTRICTED];
+        for (chat_id, thread_id) in [(1, None), (1, Some(100)), (1, Some(101)), (2, None)] {
+            assert!(matches!(
+                authorize_message_send(conn, chat_id, thread_id, UID, &restricted_group_ids)
+                    .map_err(AppError::from),
+                Err(AppError::GroupChatWriteRestricted)
+            ));
+            assert!(matches!(
+                require_chat_writable(conn, chat_id, UID, &restricted_group_ids),
+                Err(AppError::GroupChatWriteRestricted)
+            ));
+        }
+        assert!(authorize_message_send(conn, 1, None, UID, &[]).is_ok());
+        assert!(authorize_message_send(conn, 1, None, PEER_UID, &restricted_group_ids).is_ok());
+        require_chat_writable(conn, 1, PEER_UID, &restricted_group_ids)?;
+
+        assert!(authorize_message_send(conn, 4, None, UID, &restricted_group_ids).is_ok());
+        require_chat_writable(conn, 4, UID, &restricted_group_ids)?;
+        conn.batch_execute(&format!(
+            "INSERT INTO blocks (blocker_uid, blocked_uid) VALUES ({PEER_UID}, {UID});
+             UPDATE discuz.common_member SET groupid = 1 WHERE uid = {UID};"
+        ))?;
+        assert!(matches!(
+            authorize_message_send(conn, 4, None, UID, &restricted_group_ids).map_err(AppError::from),
+            Err(AppError::Forbidden("Cannot direct-message this user"))
+        ));
+        assert!(matches!(
+            require_chat_writable(conn, 4, UID, &restricted_group_ids),
+            Err(AppError::Forbidden("This chat is read-only because a block is in place"))
+        ));
+        assert!(authorize_message_send(conn, 1, Some(101), UID, &restricted_group_ids).is_ok());
+        require_chat_writable(conn, 1, UID, &restricted_group_ids)?;
+        Ok(())
+    });
 }
 
 #[test]

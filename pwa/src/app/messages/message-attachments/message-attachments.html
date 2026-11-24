@@ -75,6 +75,7 @@
           @if (upload.state().error) {
             <app-upload-failure
               [upload]="upload"
+              [retryDisabled]="retryDisabled()"
               (retry)="retryUpload.emit(upload)"
               (remove)="removeUpload.emit(upload)" />
           }
@@ -93,6 +94,7 @@
           @if (upload.state().error) {
             <app-upload-failure
               [upload]="upload"
+              [retryDisabled]="retryDisabled()"
               (retry)="retryUpload.emit(upload)"
               (remove)="removeUpload.emit(upload)" />
           }
@@ -154,6 +156,7 @@
           @if (upload.state().error) {
             <app-upload-failure
               [upload]="upload"
+              [retryDisabled]="retryDisabled()"
               (retry)="retryUpload.emit(upload)"
               (remove)="removeUpload.emit(upload)" />
           }
@@ -191,6 +194,7 @@
                 @if (upload.state().error) {
                   <app-upload-failure
                     [upload]="upload"
+                    [retryDisabled]="retryDisabled()"
                     (retry)="retryUpload.emit(upload)"
                     (remove)="removeUpload.emit(upload)" />
                 }

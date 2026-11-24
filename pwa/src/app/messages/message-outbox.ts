@@ -26,7 +26,8 @@ import {
   type MentionInfo,
 } from '../../generated/models';
 import { Connection } from '../api/connection';
-import { RpcError, RpcErrorCode, RpcTransportError } from '../api/rpc-error';
+import { isGroupChatWriteRestrictedError, RpcError, RpcErrorCode, RpcTransportError } from '../api/rpc-error';
+import { ChatStore } from '../chats/chat-store';
 import { speakingErrorMode } from '../chats/speaking';
 import type { SnowflakeID } from '../api/snowflake-id';
 import { SessionStore } from '../session/session-store';
@@ -53,6 +54,7 @@ export interface OutgoingMessage {
   readonly body: CreateMessageBody;
   readonly forwarding?: boolean;
   readonly speakingRestriction?: WritableSignal<SpeakingMode | undefined>;
+  readonly groupChatWriteRejected?: WritableSignal<boolean>;
   operation?: Promise<void>;
   disposed: boolean;
 }
@@ -353,7 +355,8 @@ export class MessageOutbox {
   }
 
   async retryUpload(item: OutgoingMessage, upload: AttachmentUpload): Promise<void> {
-    if (item.disposed || item.cancelled() || !item.uploads.includes(upload)) return;
+    if (item.disposed || item.cancelled() || !item.uploads.includes(upload) || this.groupChatWriteRestricted(item))
+      return;
     await upload.retry();
     if (item.disposed || item.cancelled() || !item.uploads.includes(upload)) return;
     if (item.uploads.every((attachment) => attachment.state().status !== UploadStatus.Failed)) await this.retry(item);
@@ -421,6 +424,7 @@ export class MessageOutbox {
   }
 
   cancel(item: OutgoingMessage): Promise<void> {
+    if (this.groupChatWriteRestricted(item)) return Promise.resolve();
     const task = this.tasks.get(item)!;
     task.cancelled.set(true);
     if (item.disposed) {
@@ -455,6 +459,7 @@ export class MessageOutbox {
       editId: original?.id,
       forwarding: !!initial.forward,
       speakingRestriction: signal<SpeakingMode | undefined>(undefined),
+      groupChatWriteRejected: signal(false),
       get body() {
         return intent().body;
       },
@@ -502,10 +507,11 @@ export class MessageOutbox {
   }
 
   retry(item: OutgoingMessage): Promise<void> {
-    if (item.disposed) return Promise.resolve();
+    if (item.disposed || this.groupChatWriteRestricted(item)) return Promise.resolve();
     const task = this.tasks.get(item)!;
     clearTimeout(task.timer);
     task.retryable = true;
+    item.groupChatWriteRejected?.set(false);
     if (item.cancelled()) return this.delete(item);
     if (item.operation) return item.operation;
     item.speakingRestriction?.set(undefined);
@@ -517,6 +523,20 @@ export class MessageOutbox {
   private needsSend(item: OutgoingMessage) {
     const task = this.tasks.get(item)!;
     return !item.disposed && !item.cancelled() && task.acknowledged() < task.intent().revision;
+  }
+
+  private groupChatWriteRestricted(item: OutgoingMessage): boolean {
+    return (
+      this.session.user()?.groupChatWriteRestricted === true &&
+      this.injector.get(ChatStore).groupChatWriteRestricted(item.chatId)
+    );
+  }
+
+  private markGroupChatWriteRejected(item: OutgoingMessage, task: Task) {
+    clearTimeout(task.timer);
+    task.retryable = false;
+    item.groupChatWriteRejected?.set(true);
+    item.delivery.set(MessageDelivery.Failed);
   }
 
   private pump() {
@@ -537,6 +557,10 @@ export class MessageOutbox {
     for (const item of this.pending()) {
       if (item.disposed || item.cancelled() || item.delivery() === MessageDelivery.Failed) continue;
       const task = this.tasks.get(item)!;
+      if (!item.operation && this.needsSend(item) && this.groupChatWriteRestricted(item)) {
+        this.markGroupChatWriteRejected(item, task);
+        continue;
+      }
       const intent = task.intent();
       if (this.needsSend(item) && (item.confirmed() || !task.create) && task.ready?.revision !== intent.revision) {
         if (intent.uploads.every((upload) => upload.state().status === UploadStatus.Ready)) {
@@ -657,6 +681,10 @@ export class MessageOutbox {
         return;
       }
       if (!this.needsSend(item)) return;
+      if (isGroupChatWriteRestrictedError(error)) {
+        this.markGroupChatWriteRejected(item, task);
+        return;
+      }
       item.delivery.set(MessageDelivery.Failed);
       item.speakingRestriction?.set(error instanceof RpcError ? speakingErrorMode(error) : undefined);
       task.retryable = task.retryable && retryable(error);
@@ -756,11 +784,19 @@ export class MessageOutbox {
     if (task.deletion) return task.deletion;
     if (item.disposed || !item.cancelled() || task.deleted || !task.retryable || !message || !item.published())
       return Promise.resolve();
+    if (this.groupChatWriteRestricted(item)) {
+      this.markGroupChatWriteRejected(item, task);
+      return Promise.resolve();
+    }
     task.deletion = (async () => {
       try {
         await this.request(item, this.api.messages.delete({ chatId: item.chatId, messageId: message.id }));
       } catch (error) {
         if (item.disposed || task.deleted) return;
+        if (isGroupChatWriteRestrictedError(error)) {
+          this.markGroupChatWriteRejected(item, task);
+          return;
+        }
         // Missing or already deleted is success; other application failures require intervention.
         if (
           !(error instanceof RpcError) ||

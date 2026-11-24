@@ -905,6 +905,7 @@
     "archivedLoadFailed": "已封存聊天載入失敗"
   },
   "speaking": {
+    "groupChatWriteRestricted": "目前的使用者群組禁止發言",
     "groupTitle": "全群發言權限",
     "memberTitle": "個人發言限制",
     "adminNote": "管理員不受發言限制。群組權限與個人限制取較嚴格的一項。",

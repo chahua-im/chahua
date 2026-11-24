@@ -173,7 +173,10 @@ export class MessageMenu {
   protected readonly message = computed<MessageContent | undefined>(
     () => this.queued()?.message() ?? this.serverMessage(),
   );
-  private readonly chat = computed(() => this.chatInfo.get(this.chatId()));
+  private readonly chat = computed(() => this.chatInfo.conversationInfo(this.chatId(), this.threadId()));
+  protected readonly groupChatWriteDisabled = computed(() =>
+    this.chatInfo.groupChatWriteDisabled(this.chatId(), this.chat()?.kind),
+  );
   protected readonly admin = computed(() => this.chat()?.myRole === GroupRole.admin);
   protected readonly dm = computed(() => this.chat()?.kind === GroupKind.dm);
   /** A DM whose friendship ended keeps its history readable but accepts no writes. */
@@ -262,7 +265,7 @@ export class MessageMenu {
       !message.isDeleted &&
       message.messageType === MessageType.text &&
       !message.threadInfo &&
-      this.chatInfo.canSpeak(this.chatId(), SpeakingAction.CreateThread)
+      (this.groupChatWriteDisabled() || this.chatInfo.canSpeak(this.chatId(), SpeakingAction.CreateThread))
     );
   });
   protected readonly canCopy = computed(() => {
@@ -295,10 +298,12 @@ export class MessageMenu {
       message.messageType === MessageType.text &&
       !message.forwardedFrom &&
       !this.queued()?.forwarding &&
-      this.chatInfo.canSpeak(
-        this.chatId(),
-        message.replyRootId ? SpeakingAction.ThreadReply : SpeakingAction.ChatMessage,
-      ) &&
+      (this.groupChatWriteDisabled() ||
+        this.chatInfo.canSpeak(
+          this.chatId(),
+          message.replyRootId ? SpeakingAction.ThreadReply : SpeakingAction.ChatMessage,
+          this.chat()?.kind,
+        )) &&
       (!!this.queued() || message.sender.uid === this.session.user()?.uid)
     );
   });
@@ -318,12 +323,14 @@ export class MessageMenu {
         destructive: !!options.destructive,
       });
     const writable = !this.readOnly();
-    if (!this.queued() && writable) add(MessageAction.Reply, { disabled: !this.canReply() });
-    if (writable && this.canThread()) add(MessageAction.Thread);
+    const groupWriteDisabled = this.groupChatWriteDisabled();
+    if (!this.queued() && writable) add(MessageAction.Reply, { disabled: groupWriteDisabled || !this.canReply() });
+    if (writable && this.canThread()) add(MessageAction.Thread, { disabled: groupWriteDisabled });
     if (this.canCopy()) add(MessageAction.Copy);
     const source = this.queued() ? this.queued()!.confirmed() : this.serverMessage();
     if (source && canForward(source)) add(MessageAction.Forward);
-    if (writable && this.canEdit()) add(MessageAction.Edit, { disabled: !this.queued() && !this.canReply() });
+    if (writable && this.canEdit())
+      add(MessageAction.Edit, { disabled: groupWriteDisabled || (!this.queued() && !this.canReply()) });
     if (this.canSave()) add(MessageAction.Save);
     else if (
       message &&
@@ -347,7 +354,7 @@ export class MessageMenu {
       (this.pinned() || !message.isDeleted)
     )
       add(MessageAction.Pin, { disabled: this.pins().loading() || this.busy() });
-    if (writable && this.canRecall()) add(MessageAction.Recall, { destructive: true });
+    if (writable && this.canRecall()) add(MessageAction.Recall, { disabled: groupWriteDisabled, destructive: true });
     return slots;
   });
   private readonly page = signal(0);
@@ -355,6 +362,9 @@ export class MessageMenu {
 
   constructor() {
     this.destroyRef.onDestroy(() => this.reset());
+    effect(() => {
+      if (this.groupChatWriteDisabled()) this.choosingEmoji.set(false);
+    });
     effect(() => {
       if (this.queued() || !this.serverMessage()) return;
       untracked(() => {
@@ -558,6 +568,7 @@ export class MessageMenu {
   }
 
   protected openEmojiPicker(event: MouseEvent) {
+    if (this.groupChatWriteDisabled()) return;
     this.emojiAnchor.set(emojiPanelAnchor(event));
     this.choosingEmoji.set(true);
   }
@@ -595,6 +606,10 @@ export class MessageMenu {
   protected async choose(action: MessageAction) {
     const content = this.message();
     if (!content || this.busy()) return;
+    const groupWrite = [MessageAction.Reply, MessageAction.Thread, MessageAction.Edit, MessageAction.Recall].includes(
+      action,
+    );
+    if (groupWrite && this.groupChatWriteDisabled()) return;
     const version = this.version;
     // Start clipboard writes in the click handler to retain Safari user activation.
     if (action === MessageAction.Copy) {
@@ -624,7 +639,8 @@ export class MessageMenu {
         await this.close();
       } else if (action === MessageAction.Edit && this.canEdit()) {
         await this.close();
-        if (version === this.version && !queued.cancelled()) this.editQueued.emit(queued);
+        if (version === this.version && !queued.cancelled() && !this.groupChatWriteDisabled())
+          this.editQueued.emit(queued);
       }
       return;
     }
@@ -640,7 +656,7 @@ export class MessageMenu {
     const saved = this.saved();
     const favorited = this.favorited();
     await this.close();
-    if (version !== this.version) return;
+    if (version !== this.version || (groupWrite && this.groupChatWriteDisabled())) return;
     switch (action) {
       case MessageAction.CreateSticker:
         if (canCreateSticker(message)) await this.prepareSticker(message);
@@ -666,6 +682,7 @@ export class MessageMenu {
           this.chatInfo.canSpeak(
             this.chatId(),
             message.replyRootId ? SpeakingAction.ThreadReply : SpeakingAction.ChatMessage,
+            this.chat()?.kind,
           )
         )
           this.edit.emit(message);
@@ -705,7 +722,11 @@ export class MessageMenu {
     const pending = this.confirmation();
     this.confirmation.set(undefined);
     if (event.detail.role !== 'confirm' || !pending) return;
-    if (pending.action === MessageAction.Recall && this.canRecallMessage(pending.message)) {
+    if (
+      pending.action === MessageAction.Recall &&
+      !this.groupChatWriteDisabled() &&
+      this.canRecallMessage(pending.message)
+    ) {
       await this.perform(() => this.messageActions.recall(pending.message), MessageNotice.Recalled, pending.message.id);
     } else if (pending.action === MessageAction.Pin && this.canManagePins()) {
       await this.perform(
@@ -717,7 +738,7 @@ export class MessageMenu {
   }
 
   async reactTo(message: MessageResponse, emoji: string) {
-    if (this.queued() || this.busy() || message.isDeleted) return;
+    if (this.queued() || this.busy() || message.isDeleted || this.groupChatWriteDisabled()) return;
     const needsOwnership = this.pinnedView() && this.needsReactionOwnership(message);
     if (!needsOwnership && exceedsReactionLimit(message, emoji)) {
       this.notice.set(MessageNotice.ReactionLimit);
@@ -732,7 +753,14 @@ export class MessageMenu {
     await this.perform(
       async () => {
         const target = needsOwnership ? await this.readPinnedReactionTarget(message.id) : message;
-        if (!target || target.isDeleted || version !== this.version || uid !== this.session.user()?.uid) return;
+        if (
+          !target ||
+          target.isDeleted ||
+          version !== this.version ||
+          uid !== this.session.user()?.uid ||
+          this.groupChatWriteDisabled()
+        )
+          return;
         if (needsOwnership && (!this.pins().get(message.id) || this.readOnly())) return;
         if (needsOwnership && exceedsReactionLimit(target, emoji)) {
           limited = true;

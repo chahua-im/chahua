@@ -47,7 +47,7 @@
         <ion-button
           fill="clear"
           [title]="'chats.invites.share' | transloco"
-          [disabled]="busy()"
+          [disabled]="busy() || inviteSendRestricted(invite)"
           (click)="startShare(invite)">
           @if (progress()?.id === invite.id && progress()?.action === Action.Share) {
             <ion-spinner />
@@ -191,7 +191,7 @@
           </span>
         </ion-button>
         @if (type() === Type.targeted || type() === Type.membership) {
-          <ion-button [disabled]="!canCreate()" (click)="create(true)">
+          <ion-button [disabled]="!canCreate() || directSendRestricted()" (click)="create(true)">
             <span class="action-content" [class.busy]="progress()?.action === Action.CreateAndSend">
               <span class="action-label">{{ 'chats.invites.generateAndSend' | transloco }}</span>
               @if (progress()?.action === Action.CreateAndSend) {
@@ -230,6 +230,7 @@
     "
     [excludedId]="chatId()"
     [choose]="chooseChat"
+    [disableTarget]="disableTarget"
     [submitted]="busy()"
     (userSelected)="target.set($event)"
     (closed)="closePicker()" />

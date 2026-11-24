@@ -38,8 +38,11 @@ pub async fn add(
         message_id,
         emoji,
         &mut conn,
-        &services.avatars,
-        &services.ws_registry,
+        api::ReactionWriteDeps {
+            restricted_user_group_ids: &services.config.restricted_user_group_ids,
+            avatars: &services.avatars,
+            registry: &services.ws_registry,
+        },
     )
 }
 
@@ -61,7 +64,10 @@ pub async fn remove(
         message_id,
         emoji,
         &mut conn,
-        &services.avatars,
-        &services.ws_registry,
+        api::ReactionWriteDeps {
+            restricted_user_group_ids: &services.config.restricted_user_group_ids,
+            avatars: &services.avatars,
+            registry: &services.ws_registry,
+        },
     )
 }

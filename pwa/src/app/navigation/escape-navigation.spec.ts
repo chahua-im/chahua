@@ -1,17 +1,20 @@
+import { DOCUMENT } from '@angular/common';
 import { TestBed } from '@angular/core/testing';
 import { EscapeNavigation, EscapePriority } from './escape-navigation';
 
 describe('Escape layer ownership', () => {
   let escape: EscapeNavigation;
+  let frame: HTMLIFrameElement;
+  let testDocument: Document;
   let root: HTMLElement;
   const press = async (options: KeyboardEventInit = {}) => {
     const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...options });
-    (document.activeElement ?? document).dispatchEvent(event);
+    (testDocument.activeElement ?? testDocument).dispatchEvent(event);
     await new Promise((resolve) => setTimeout(resolve, 0));
     return event;
   };
   const overlay = (tag = 'ion-modal') => {
-    const element = document.createElement(tag) as HTMLIonModalElement;
+    const element = testDocument.createElement(tag) as HTMLIonModalElement;
     root.append(element);
     element.overlayIndex = 1;
     element.backdropDismiss = true;
@@ -20,14 +23,19 @@ describe('Escape layer ownership', () => {
     return element;
   };
   beforeEach(() => {
+    // Keep the document-level handler independent of other specs' overlays and focus.
+    frame = document.createElement('iframe');
+    document.body.append(frame);
+    testDocument = frame.contentDocument!;
+    TestBed.configureTestingModule({ providers: [{ provide: DOCUMENT, useValue: testDocument }] });
     escape = TestBed.inject(EscapeNavigation);
-    root = document.createElement('div');
-    document.body.append(root);
+    root = testDocument.createElement('div');
+    testDocument.body.append(root);
   });
-  afterEach(() => root.remove());
+  afterEach(() => frame.remove());
 
   it('closes a sidebar before conversation state regardless of focused input', async () => {
-    const input = document.createElement('input');
+    const input = testDocument.createElement('input');
     root.append(input);
     input.focus();
     const conversation = vi.fn(() => true);
@@ -37,7 +45,7 @@ describe('Escape layer ownership', () => {
     await press();
     expect(sidebar).toHaveBeenCalledOnce();
     expect(conversation).not.toHaveBeenCalled();
-    expect(document.activeElement).toBe(input);
+    expect(testDocument.activeElement).toBe(input);
   });
 
   it('dismisses a popover above selection without reaching a second key listener', async () => {
@@ -55,14 +63,14 @@ describe('Escape layer ownership', () => {
   it.each([false, true])('handles an attachment menu beside a sidebar (blocking alert: %s)', async (blocked) => {
     const sidebar = overlay();
     sidebar.classList.add('panel-sidebar');
-    const menu = document.createElement('div');
+    const menu = testDocument.createElement('div');
     menu.setAttribute('popover', 'auto');
     menu.hidePopover = vi.fn();
     root.append(menu);
     // jsdom does not expose the browser top layer.
-    const query = document.querySelectorAll.bind(document);
+    const query = testDocument.querySelectorAll.bind(testDocument);
     const querySpy = vi
-      .spyOn(document, 'querySelectorAll')
+      .spyOn(testDocument, 'querySelectorAll')
       .mockImplementation((selector: string) =>
         selector === '[popover="auto"]:popover-open' ? ([menu] as unknown as NodeListOf<Element>) : query(selector),
       );
@@ -81,7 +89,7 @@ describe('Escape layer ownership', () => {
 
   it('allows an edit inside the top panel to consume Escape without dismissing it', async () => {
     const panel = overlay();
-    const editor = document.createElement('div');
+    const editor = testDocument.createElement('div');
     panel.append(editor);
     const edit = vi.fn(() => true);
     escape.register(editor, edit, EscapePriority.Conversation);
@@ -92,7 +100,7 @@ describe('Escape layer ownership', () => {
 
   it('ignores hidden panel pages and dismisses only the visible panel', async () => {
     const panel = overlay();
-    const hidden = document.createElement('div');
+    const hidden = testDocument.createElement('div');
     hidden.hidden = true;
     panel.append(hidden);
     const edit = vi.fn(() => true);
@@ -121,7 +129,7 @@ describe('Escape layer ownership', () => {
 
   it('lets a discard confirmation cancel a pending edit exit without repeating that exit', async () => {
     const panel = overlay();
-    const editor = document.createElement('div');
+    const editor = testDocument.createElement('div');
     panel.append(editor);
     let finish!: (handled: boolean) => void;
     const edit = vi.fn(() => new Promise<boolean>((resolve) => (finish = resolve)));
@@ -142,13 +150,13 @@ describe('Escape layer ownership', () => {
     escape.register(root, handler, EscapePriority.Navigation);
     expect((await press({ repeat: true })).defaultPrevented).toBe(true);
     expect((await press({ isComposing: true })).defaultPrevented).toBe(false);
-    const descriptor = Object.getOwnPropertyDescriptor(document, 'fullscreenElement');
-    Object.defineProperty(document, 'fullscreenElement', { configurable: true, value: root });
+    const descriptor = Object.getOwnPropertyDescriptor(testDocument, 'fullscreenElement');
+    Object.defineProperty(testDocument, 'fullscreenElement', { configurable: true, value: root });
     try {
       expect((await press()).defaultPrevented).toBe(false);
     } finally {
-      if (descriptor) Object.defineProperty(document, 'fullscreenElement', descriptor);
-      else Reflect.deleteProperty(document, 'fullscreenElement');
+      if (descriptor) Object.defineProperty(testDocument, 'fullscreenElement', descriptor);
+      else Reflect.deleteProperty(testDocument, 'fullscreenElement');
     }
     expect(handler).not.toHaveBeenCalled();
   });

@@ -793,12 +793,28 @@ export class ChatStore {
     const speaking = this.speakingStates().get(id)?.value;
     return info && speaking ? { ...info, ...speaking } : info;
   }
+  conversationInfo(chatId: SnowflakeID, threadId?: SnowflakeID): ChatInfo | undefined {
+    const chat = this.get(chatId);
+    if (chat || threadId == null) return chat;
+    const thread = this.threadSummary(threadId);
+    if (thread?.chatId !== chatId) return undefined;
+    return { kind: thread.chatKind, name: thread.chatName, avatar: thread.chatAvatar, peer: thread.peer };
+  }
   speakingMode(chatId: SnowflakeID) {
     if (!this.isAccessible(chatId)) return undefined;
     return this.speakingStates().get(chatId)?.value.effectiveSpeakingMode;
   }
-  canSpeak(chatId: SnowflakeID, action: SpeakingAction) {
-    return this.get(chatId)?.kind === GroupKind.dm || allowsSpeaking(this.speakingMode(chatId), action);
+  groupChatWriteRestricted(chatId: SnowflakeID, kind = this.get(chatId)?.kind) {
+    return kind === GroupKind.group && this.session.user()?.groupChatWriteRestricted === true;
+  }
+  groupChatWriteDisabled(chatId: SnowflakeID, kind = this.get(chatId)?.kind) {
+    return kind !== GroupKind.dm && this.session.user()?.groupChatWriteRestricted === true;
+  }
+  canSpeak(chatId: SnowflakeID, action: SpeakingAction, kind = this.get(chatId)?.kind) {
+    return (
+      kind === GroupKind.dm ||
+      (!this.groupChatWriteDisabled(chatId, kind) && allowsSpeaking(this.speakingMode(chatId), action))
+    );
   }
   private applySpeakingState(chatId: SnowflakeID, patch: SpeakingState, version = this.snapshot(), fromRead = false) {
     const previous = this.speakingStates().get(chatId);

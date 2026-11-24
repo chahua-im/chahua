@@ -55,7 +55,14 @@ async fn get_me(
     conn: DbConn,
 ) -> Result<Json<MeResponse>, AppError> {
     conn.run(move |mut conn| async move {
-        users::get_me(uid, &mut conn, &state.avatars, &state.authz_service).map(Json)
+        users::get_me(
+            uid,
+            &mut conn,
+            &state.avatars,
+            &state.authz_service,
+            &state.config.restricted_user_group_ids,
+        )
+        .map(Json)
     })
     .await
 }

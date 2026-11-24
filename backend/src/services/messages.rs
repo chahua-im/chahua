@@ -120,6 +120,7 @@ pub enum MessageSendAuthorizationError {
     ThreadRootNotFound,
     ThreadRootNotText,
     InvalidDmParticipants,
+    GroupChatWriteRestricted,
     SpeakingRestricted(SpeakingMode),
     DirectMessage(DmSendAuthorizationError),
     Database(diesel::result::Error),
@@ -154,6 +155,9 @@ impl From<MessageSendAuthorizationError> for AppError {
                 // dm_uid (e.g. a zombie membership); that is a forbidden
                 // participant, not a server fault.
                 AppError::Forbidden("Not a participant of this chat")
+            }
+            MessageSendAuthorizationError::GroupChatWriteRestricted => {
+                AppError::GroupChatWriteRestricted
             }
             MessageSendAuthorizationError::SpeakingRestricted(mode) => {
                 AppError::SpeakingRestricted(mode)
@@ -1780,6 +1784,7 @@ pub fn authorize_message_send(
     chat_id: i64,
     thread_id: Option<i64>,
     uid: i32,
+    restricted_user_group_ids: &[i32],
 ) -> Result<AuthorizedMessageTarget, MessageSendAuthorizationError> {
     speaking::lock_chat(conn, chat_id, false)?;
     let (kind, dm_uid1, dm_uid2, group_mode, role, member_mode) = groups::table
@@ -1811,6 +1816,8 @@ pub fn authorize_message_send(
             _ => return Err(MessageSendAuthorizationError::InvalidDmParticipants),
         };
         social::check_can_dm(conn, uid, peer)?;
+    } else if social::group_chat_write_is_restricted(conn, uid, restricted_user_group_ids)? {
+        return Err(MessageSendAuthorizationError::GroupChatWriteRestricted);
     }
 
     let thread_root = thread_id

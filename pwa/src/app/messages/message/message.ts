@@ -189,6 +189,7 @@ export class Message<T extends MessageContent = MessageResponse> {
       : MessageDelivery.Sending;
   });
   readonly canReply = input(true);
+  readonly groupChatWriteDisabled = input(false);
   readonly canMention = input(false);
   readonly mention = output<MessageContent['sender']>();
   readonly canOpenThread = input(false);

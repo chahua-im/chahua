@@ -16,6 +16,8 @@ pub enum AppError {
     Unauthorized(&'static str),
     /// 403 Forbidden with a static message.
     Forbidden(&'static str),
+    /// The actor's Discuz primary group is restricted from writing to group chats.
+    GroupChatWriteRestricted,
     /// A user-originated send or edit is disallowed by the current group/member mode.
     SpeakingRestricted(crate::models::SpeakingMode),
     /// 404 Not Found with a static message.
@@ -43,3 +45,5 @@ impl From<diesel::result::Error> for AppError {
         AppError::DbQuery(err)
     }
 }
+pub const GROUP_CHAT_WRITE_RESTRICTION_REASON: &str = "groupChatWriteRestricted";
+pub const GROUP_CHAT_WRITE_RESTRICTION_MESSAGE: &str = "Your account cannot write to group chats";

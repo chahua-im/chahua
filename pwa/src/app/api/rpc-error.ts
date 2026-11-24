@@ -15,6 +15,17 @@ export class RpcError extends Error {
   }
 }
 
+export function isGroupChatWriteRestrictedError(error: unknown): boolean {
+  return (
+    error instanceof RpcError &&
+    error.code === RpcErrorCode.Forbidden &&
+    typeof error.data === 'object' &&
+    error.data != null &&
+    'reason' in error.data &&
+    error.data.reason === 'groupChatWriteRestricted'
+  );
+}
+
 /** A local transport failure, before a JSON-RPC error response exists. */
 export class RpcTransportError extends Error {
   constructor(

@@ -90,3 +90,21 @@ tables or indexes: reads use the group primary key and the membership composite
 primary key. Group-wide changes update one group row, not every member.
 
 Database tests use `WETTY_TEST_DATABASE_URL` pointing at a migrated test database.
+
+## Group chat write restrictions by user group
+
+`group_chat.write.restricted_user_group_ids` is an optional TOML list of
+primary user group IDs used for profile badges. An empty list disables the rule.
+The server loads the list on startup and reads the actor's current primary group
+when authorizing a group chat write.
+
+The rule covers sending (including forwards, invite cards and delegated sends),
+editing, deleting (including bulk deletion), and adding or removing reactions
+in group chats and their threads. It applies to members and administrators.
+Admin-only operations such as pinning and removing members still use their
+existing authorization, including message cleanup during member removal.
+Private chats, group membership, reading, and personal settings keep their
+existing rules. The current user's response from `GET /users/me` and
+`users.getMe` includes `groupChatWriteRestricted`.
+Rejected writes return HTTP 403 with `{"reason":"groupChatWriteRestricted"}`
+or JSON-RPC Forbidden (1003) with the same object in `error.data`.

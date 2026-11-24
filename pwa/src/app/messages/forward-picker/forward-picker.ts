@@ -6,7 +6,12 @@ import { GroupKind, ServerWsMessageType } from '../../../generated/models';
 import { Connection } from '../../api/connection';
 import { ChatStore } from '../../chats/chat-store';
 import { SpeakingAction } from '../../chats/speaking';
-import { ChatPicker, ChatPickerScope, type ChooseChat } from '../../chats/chat-picker/chat-picker';
+import {
+  ChatPicker,
+  ChatPickerScope,
+  type ChatPickerTarget,
+  type ChooseChat,
+} from '../../chats/chat-picker/chat-picker';
 import { ConversationNavigation, type ForwardDraftLocation } from '../../conversations/conversation-navigation';
 import {
   canForward,
@@ -27,6 +32,7 @@ import {
       [title]="title() ?? ((moveFrom() ? 'messages.forward.changeTarget' : 'messages.forward.to') | transloco)"
       [(open)]="open"
       [choose]="select"
+      [disableTarget]="disableTarget"
       [submitted]="submitted()"
       [invalid]="invalid()"
       [failure]="failure() ? (failure()! | transloco: { max: maxForwardMessages }) : undefined"
@@ -54,6 +60,8 @@ export class ForwardPicker {
   );
   protected readonly submitted = signal(false);
   protected readonly open = signal(true);
+  protected readonly disableTarget = (target: ChatPickerTarget) =>
+    this.metadata.groupChatWriteRestricted(target.chatId, target.kind);
   private feedback?: HTMLIonToastElement;
   constructor() {
     this.destroyRef.onDestroy(() => void this.feedback?.dismiss());
@@ -82,7 +90,7 @@ export class ForwardPicker {
     void this.feedback?.dismiss();
   }
   protected readonly select: ChooseChat = async (target, available) => {
-    if (this.submitted() || this.invalid() || !this.open()) return false;
+    if (this.submitted() || this.invalid() || !this.open() || this.disableTarget(target)) return false;
     void this.feedback?.dismiss();
     this.feedback = undefined;
     this.failure.set(undefined);
@@ -92,15 +100,20 @@ export class ForwardPicker {
       await this.report(ForwardSelectionError.NavigationFailed);
       return false;
     }
-    if (this.destroyRef.destroyed || !this.open()) return false;
+    if (this.destroyRef.destroyed || !this.open() || this.disableTarget(target)) return false;
     if (
-      !this.metadata.canSpeak(target.chatId, target.threadId ? SpeakingAction.ThreadReply : SpeakingAction.ChatMessage)
+      !this.metadata.canSpeak(
+        target.chatId,
+        target.threadId ? SpeakingAction.ThreadReply : SpeakingAction.ChatMessage,
+        target.kind,
+      )
     ) {
       await this.report(ForwardSelectionError.Restricted);
       return false;
     }
     const result = await this.resolveSources();
-    if (this.destroyRef.destroyed || !this.open() || this.submitted() || this.invalid()) return false;
+    if (this.destroyRef.destroyed || !this.open() || this.submitted() || this.invalid() || this.disableTarget(target))
+      return false;
     if (!available()) {
       await this.report(ForwardSelectionError.NavigationFailed);
       return false;

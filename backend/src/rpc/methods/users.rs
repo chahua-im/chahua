@@ -23,6 +23,7 @@ pub async fn get_me(
         &mut conn,
         services.avatars.as_ref(),
         services.authz_service.as_ref(),
+        &services.config.restricted_user_group_ids,
     )
 }
 

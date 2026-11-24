@@ -905,6 +905,7 @@
     "archivedLoadFailed": "已归档聊天加载失败"
   },
   "speaking": {
+    "groupChatWriteRestricted": "当前用户组禁止发言",
     "groupTitle": "全群发言权限",
     "memberTitle": "个人发言限制",
     "adminNote": "管理员不受发言限制。群权限与个人限制取更严格的一项。",

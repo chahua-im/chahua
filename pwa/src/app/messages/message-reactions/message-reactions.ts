@@ -17,5 +17,6 @@ export class MessageReactions {
   readonly reactions = input.required<ReactionSummary[]>();
   readonly own = input(false);
   readonly preview = input(false);
+  readonly disabled = input(false);
   readonly react = output<string>();
 }

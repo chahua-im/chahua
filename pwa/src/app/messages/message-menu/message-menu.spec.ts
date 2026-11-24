@@ -192,9 +192,10 @@ describe('MessageMenu', () => {
           provide: ChatStore,
           useValue: {
             pins: vi.fn(() => conversation),
+            groupChatWriteDisabled: () => false,
             canSpeak: (_id: SnowflakeID, action: SpeakingAction) =>
               kind() === GroupKind.dm || admin() || allowsSpeaking(mode(), action),
-            get: () => ({
+            conversationInfo: () => ({
               kind: kind(),
               myRole: admin() ? GroupRole.admin : GroupRole.member,
               peer: kind() === GroupKind.dm ? { uid: 2, username: '朋友' } : undefined,

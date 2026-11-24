@@ -124,7 +124,7 @@
       <button
         class="sticky-avatar"
         [hidden]="!stickyAvatarsEnabled() || stickyRow() == null"
-        [avatarMention]="!selecting() && !speakingRestriction()"
+        [avatarMention]="!selecting() && !speakingRestriction() && !groupChatWriteDisabled()"
         (mentionRequested)="composer()?.insertMention(sender)"
         [style.transform]="'translateY(' + stickyOffset() + 'px)'"
         [routerLink]="['/profile', sender.uid]">
@@ -224,7 +224,8 @@
           [first]="row.first"
           [last]="row.last"
           [canReply]="!editing() && canSendMessage()"
-          [canMention]="!speakingRestriction()"
+          [groupChatWriteDisabled]="groupChatWriteDisabled()"
+          [canMention]="!speakingRestriction() && !groupChatWriteDisabled()"
           (mention)="composer()?.insertMention($event)"
           [jumpDisabled]="!!pendingNavigation()"
           [canOpenThread]="!threadId()"
@@ -233,7 +234,11 @@
           (react)="row.confirmed && menu()?.reactTo(row.confirmed, $event)"
           (jump)="navigateReply($event, row.message.id)"
           (openThread)="openThread($event)"></app-message>
-        @if (row.outgoing?.speakingRestriction?.(); as mode) {
+        @if (row.outgoing?.groupChatWriteRejected?.()) {
+          <p class="speaking-error ion-padding-horizontal ion-text-right">
+            {{ 'speaking.groupChatWriteRestricted' | transloco }}
+          </p>
+        } @else if (row.outgoing?.speakingRestriction?.(); as mode) {
           <p class="speaking-error ion-padding-horizontal ion-text-right">
             {{ 'speaking.blocked.' + mode | transloco }}
           </p>
@@ -362,6 +367,8 @@
     [style.--context-dark]="composerContextColors()?.dark"
     [relationship]="relationship()"
     [restriction]="speakingRestriction()"
+    [groupChatWriteRestricted]="groupChatWriteRestricted()"
+    [writePermissionPending]="groupChatWriteDisabled() && !groupChatWriteRestricted()"
     [chatId]="id()"
     [mentionsEnabled]="mentionsEnabled()"
     [text]="!pendingForward() && editing() ? editText() : draft()"
@@ -373,7 +380,7 @@
     (submitted)="sendMessage($event)"
     (editLast)="editLastMessage()">
     <ng-template #linkContextIcon>
-      @if (draftUrls().length && !speakingRestriction()) {
+      @if (draftUrls().length && !speakingRestriction() && !groupChatWriteDisabled()) {
         <button
           type="button"
           class="link-preview-button"
@@ -408,7 +415,7 @@
         [chatId]="id()"
         [scope]="linkPreviewScope()"
         [text]="linkPreviewText()"
-        [automatic]="!editing() && active() && !speakingRestriction()"
+        [automatic]="!editing() && active() && !speakingRestriction() && !groupChatWriteDisabled()"
         [initial]="editing()?.metadata?.linkPreviews ?? []"
         [choices]="linkPreviewChoices()"
         (choicesChange)="setLinkChoices($event)"
@@ -638,7 +645,7 @@
 }
 
 <ion-alert
-  [isOpen]="!!pendingRecall()"
+  [isOpen]="!!pendingRecall() && !groupChatWriteDisabled()"
   cssClass="recall-confirmation"
   [header]="'messages.menu.confirm.recallTitle' | transloco"
   [message]="
@@ -660,7 +667,6 @@
       : ('messages.selection.recalled' | transloco: { count: recallResult()?.succeeded })
   "
   (didDismiss)="recallResult.set(undefined)" />
-
 <ion-toast
   [isOpen]="!!forwardError()"
   [message]="forwardError() ? (forwardError()! | transloco) : ''"

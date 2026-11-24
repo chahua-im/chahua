@@ -100,6 +100,7 @@
               [delivery]="status()"
               [read]="read()"
               [uploads]="uploads()"
+              [retryDisabled]="groupChatWriteDisabled()"
               (retryUpload)="retryUpload.emit($event)"
               (removeUpload)="removeUpload.emit($event)"></app-message-attachments>
           </div>
@@ -185,13 +186,14 @@
       }
     </div>
     @if (status() === Delivery.Failed && !preview() && !hasUploadFailure()) {
-      <button type="button" class="retry-button" (click)="retry.emit()">
+      <button type="button" class="retry-button" [disabled]="groupChatWriteDisabled()" (click)="retry.emit()">
         <ion-icon [icon]="retryIcon" />
       </button>
     }
     @if (hasReactions()) {
       <app-message-reactions
         [reactions]="message().reactions ?? []"
+        [disabled]="groupChatWriteDisabled()"
         [own]="own()"
         [preview]="!canInteract() || record()"
         (react)="react.emit($event)"></app-message-reactions>

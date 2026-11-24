@@ -197,6 +197,12 @@ impl From<AppError> for RpcError {
                 Self::with_message(RpcErrorCode::Unauthorized, message)
             }
             AppError::Forbidden(message) => Self::with_message(RpcErrorCode::Forbidden, message),
+            AppError::GroupChatWriteRestricted => Self {
+                code: RpcErrorCode::Forbidden,
+                message: crate::errors::GROUP_CHAT_WRITE_RESTRICTION_MESSAGE,
+                data: Some(json!({"reason": crate::errors::GROUP_CHAT_WRITE_RESTRICTION_REASON})),
+                lifecycle: None,
+            },
             AppError::NotFound(message) => Self::with_message(RpcErrorCode::NotFound, message),
             AppError::Conflict(message) => Self::with_message(RpcErrorCode::Conflict, message),
             AppError::MessageIdConflict(existing) => Self {
@@ -279,6 +285,14 @@ mod tests {
                 "data": {"code": "speakingRestricted", "effectiveSpeakingMode": "threadsOnly"},
             })
         );
+    }
+
+    #[test]
+    fn group_chat_write_restriction_preserves_forbidden_and_has_a_stable_reason() {
+        let value =
+            serde_json::to_value(RpcError::from(AppError::GroupChatWriteRestricted)).unwrap();
+        assert_eq!(value["code"], 1003);
+        assert_eq!(value["data"], json!({"reason": "groupChatWriteRestricted"}));
     }
 
     #[test]

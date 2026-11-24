@@ -18,7 +18,13 @@ type UploadState = ReturnType<AttachmentUpload['state']>;
   template: `
     @if (failure()) {
       @if (upload().state().status === Status.Failed) {
-        <button type="button" class="upload-failure" (pointerdown)="$event.stopPropagation()" (click)="show($event)">
+        <button
+          type="button"
+          class="upload-failure"
+          [disabled]="failure()?.canRetry && retryDisabled()"
+          (pointerdown)="$event.stopPropagation()"
+          (click)="show($event)"
+        >
           <ion-icon [icon]="icon" />
         </button>
       }
@@ -42,10 +48,15 @@ type UploadState = ReturnType<AttachmentUpload['state']>;
       font-size: 28px;
       cursor: pointer;
     }
+    .upload-failure:disabled {
+      color: var(--ion-color-medium);
+      cursor: default;
+    }
   `,
 })
 export class UploadFailure {
   readonly upload = input.required<AttachmentUpload>();
+  readonly retryDisabled = input(false);
   readonly retry = output<void>();
   readonly remove = output<void>();
   protected readonly failure = computed(() => this.upload().state().error);
@@ -113,7 +124,8 @@ export class UploadFailure {
     this.opening = true;
     try {
       const state = this.upload().state();
-      if (!state.error || state.status !== UploadStatus.Failed) return;
+      if (!state.error || state.status !== UploadStatus.Failed || (state.error.canRetry && this.retryDisabled()))
+        return;
       const alert = await this.alerts.create({
         header: this.title(),
         subHeader: this.upload().file.name,
@@ -132,7 +144,7 @@ export class UploadFailure {
       if (this.destroyed) return;
       const current = this.upload().state();
       if (!current.error || current.status !== UploadStatus.Failed) return;
-      if (role === FailureAction.Retry && current.error.canRetry) this.retry.emit();
+      if (role === FailureAction.Retry && current.error.canRetry && !this.retryDisabled()) this.retry.emit();
       if (role === FailureAction.Delete && !current.error.canRetry) this.remove.emit();
     } finally {
       this.opening = false;
@@ -151,7 +163,9 @@ export class UploadFailure {
             : this.retryingLabel()
           : this.deleteLabel(),
         role: error.canRetry ? FailureAction.Retry : FailureAction.Delete,
-        htmlAttributes: { disabled: state.status !== UploadStatus.Failed },
+        htmlAttributes: {
+          disabled: state.status !== UploadStatus.Failed || (error.canRetry && this.retryDisabled()),
+        },
       },
     ];
   }
