@@ -57,6 +57,9 @@ export class PinnedMessagesPage {
     transform: (id) => (id ? encodeId(id) : undefined),
   });
   private readonly chatInfo = inject(ChatStore);
+  protected readonly groupChatWriteDisabled = computed(() =>
+    this.chatInfo.groupChatWriteDisabled(this.id(), this.chatInfo.conversationInfo(this.id(), this.threadId())?.kind),
+  );
   protected readonly pins = computed(() => this.chatInfo.pins(this.id(), this.threadId()));
   protected readonly messages = computed(() =>
     this.pins()
@@ -171,6 +174,7 @@ export class PinnedMessagesPage {
     void this.router.navigate(this.originalCommands(message), { fragment: `msg=${decodeId(messageId)}` });
   }
   protected replyTo(message: MessageResponse) {
+    if (this.groupChatWriteDisabled()) return;
     void this.router.navigate(this.originalCommands(message), { queryParams: { reply: decodeId(message.id) } });
   }
   protected openThread(chatId: SnowflakeID, rootId: SnowflakeID) {

@@ -36,6 +36,10 @@ fn auth_error_rejection(error: AppError) -> (StatusCode, &'static str) {
         AppError::Unauthorized(message) => (StatusCode::UNAUTHORIZED, message),
         AppError::Forbidden(message) => (StatusCode::FORBIDDEN, message),
         AppError::SpeakingRestricted(_) => (StatusCode::FORBIDDEN, "Speaking is restricted"),
+        AppError::GroupChatWriteRestricted => (
+            StatusCode::FORBIDDEN,
+            crate::errors::GROUP_CHAT_WRITE_RESTRICTION_MESSAGE,
+        ),
         AppError::NotFound(message) => (StatusCode::NOT_FOUND, message),
         AppError::Conflict(message) => (StatusCode::CONFLICT, message),
         AppError::MessageIdConflict(_) => (StatusCode::CONFLICT, "Conflict"),

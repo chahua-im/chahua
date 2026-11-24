@@ -63,6 +63,7 @@ pub struct AppConfig {
     pub link_previews: Arc<LinkPreviewConfig>,
     pub avatars: Option<Arc<DiscuzAvatarConfig>>,
     pub auth: AuthConfig,
+    pub restricted_user_group_ids: Vec<i32>,
     pub aws_region: Option<String>,
     pub node_id: u64,
     pub message_search_enabled: bool,
@@ -80,6 +81,7 @@ pub struct ConfigFile {
     server: ServerSettings,
     media: MediaSettings,
     auth: AuthSettings,
+    group_chat: GroupChatSettings,
     avatars: AvatarSettings,
     message_search: SearchSettings,
     message_sync: MessageSyncSettings,
@@ -112,6 +114,16 @@ struct MediaSettings {
 #[serde(default, deny_unknown_fields)]
 struct AuthSettings {
     debug_auth_enabled: Option<bool>,
+}
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct GroupChatSettings {
+    write: GroupChatWriteSettings,
+}
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct GroupChatWriteSettings {
+    restricted_user_group_ids: Vec<i32>,
 }
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -238,6 +250,7 @@ impl AppConfig {
             server,
             media,
             auth,
+            group_chat,
             avatars,
             message_search,
             message_sync,
@@ -430,6 +443,7 @@ impl AppConfig {
                 jwt_signing_key,
                 service_token_hash_key,
             },
+            restricted_user_group_ids: group_chat.write.restricted_user_group_ids,
             aws_region: env("AWS_REGION")
                 .or_else(|| env("AWS_DEFAULT_REGION"))
                 .or(media.region),
@@ -553,6 +567,17 @@ mod tests {
         assert_eq!(search.meili_url, "http://search:7700");
         assert_eq!(search.meili_master_key, "key");
         assert_eq!(search.index_uid, "custom");
+    }
+
+    #[test]
+    fn group_chat_write_restrictions_use_toml_and_default_to_empty() {
+        let values = base();
+        let config = AppConfig::resolve(ConfigFile::default(), env(&values), false);
+        assert!(config.restricted_user_group_ids.is_empty());
+
+        let file = parse("[group_chat.write]\nrestricted_user_group_ids = [17, 42]\n");
+        let config = AppConfig::resolve(file, env(&values), false);
+        assert_eq!(config.restricted_user_group_ids, vec![17, 42]);
     }
 
     #[test]

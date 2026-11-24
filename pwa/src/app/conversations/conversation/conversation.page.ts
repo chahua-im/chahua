@@ -394,7 +394,11 @@ export class ConversationPage {
   protected startEdit(message: MessageResponse | OutgoingMessage) {
     const content = 'delivery' in message ? message.message() : message;
     if (
-      !this.chatInfo.canSpeak(this.id(), content.replyRootId ? SpeakingAction.ThreadReply : SpeakingAction.ChatMessage)
+      !this.chatInfo.canSpeak(
+        this.id(),
+        content.replyRootId ? SpeakingAction.ThreadReply : SpeakingAction.ChatMessage,
+        this.conversationInfo()?.kind,
+      )
     )
       return;
     this.cancelForward();
@@ -532,6 +536,13 @@ export class ConversationPage {
     () =>
       this.selectedMessages().size > 0 &&
       [...this.selectedMessages().values()].every((message) => this.canRecallSelectedMessage(message)),
+  );
+  private readonly conversationInfo = computed(() => this.chatInfo.conversationInfo(this.id(), this.threadId()));
+  protected readonly groupChatWriteRestricted = computed(() =>
+    this.chatInfo.groupChatWriteRestricted(this.id(), this.conversationInfo()?.kind),
+  );
+  protected readonly groupChatWriteDisabled = computed(() =>
+    this.chatInfo.groupChatWriteDisabled(this.id(), this.conversationInfo()?.kind),
   );
   protected readonly selecting = signal(false);
   protected readonly selectedMessages = signal<ReadonlyMap<SnowflakeID | string, SelectedMessage>>(new Map());
@@ -677,9 +688,10 @@ export class ConversationPage {
 
   private canRecallSelectedMessage(selected: SelectedMessage) {
     const message = 'delivery' in selected ? selected.message() : selected;
-    const chat = this.chatInfo.get(this.id());
+    const chat = this.conversationInfo();
     return (
       !message.isDeleted &&
+      !this.groupChatWriteDisabled() &&
       !(chat?.kind === GroupKind.dm && this.relationship()?.canDm === false) &&
       (chat?.myRole === GroupRole.admin || message.sender.uid === this.session.user()?.uid)
     );
@@ -690,7 +702,7 @@ export class ConversationPage {
   protected async confirmRecallSelection(event: CustomEvent<{ role?: string }>) {
     const messages = this.pendingRecall();
     this.pendingRecall.set(undefined);
-    if (event.detail.role !== 'confirm' || !messages || this.recalling()) return;
+    if (event.detail.role !== 'confirm' || !messages || this.recalling() || this.groupChatWriteDisabled()) return;
     const version = this.selectionVersion;
     const entry = this.entryKey();
     const current = () => !this.destroyRef.destroyed && version === this.selectionVersion && entry === this.entryKey();
@@ -841,12 +853,18 @@ export class ConversationPage {
     return this.chatInfo.canSpeak(
       this.id(),
       !threadId ? SpeakingAction.ChatMessage : existing ? SpeakingAction.ThreadReply : SpeakingAction.CreateThread,
+      this.conversationInfo()?.kind,
     );
   });
   protected readonly speakingRestriction = computed(() => {
+    if (this.groupChatWriteDisabled()) return undefined;
     const editing = !this.pendingForward() && this.editing();
     const allowed = editing
-      ? this.chatInfo.canSpeak(this.id(), editing.replyRootId ? SpeakingAction.ThreadReply : SpeakingAction.ChatMessage)
+      ? this.chatInfo.canSpeak(
+          this.id(),
+          editing.replyRootId ? SpeakingAction.ThreadReply : SpeakingAction.ChatMessage,
+          this.conversationInfo()?.kind,
+        )
       : this.canSendMessage();
     return allowed ? undefined : this.chatInfo.speakingMode(this.id());
   });
@@ -1131,7 +1149,7 @@ export class ConversationPage {
     const index = this.messages().findIndex((message) => message.message().id === messageId);
     return this.messageElements()[index]?.nativeElement;
   }
-  protected readonly peerUid = computed(() => this.chatInfo.get(this.id())?.peer?.uid);
+  protected readonly peerUid = computed(() => this.conversationInfo()?.peer?.uid);
   protected readonly relationship = computed(() => {
     const uid = this.peerUid();
     return uid ? this.chatInfo.relationship(uid).value() : undefined;
@@ -2846,7 +2864,7 @@ export class ConversationPage {
   }
 
   protected async sendMessage(composition: Composition = { messageType: MessageType.text, attachmentIds: [] }) {
-    if (this.speakingRestriction()) return;
+    if (this.groupChatWriteDisabled() || this.speakingRestriction()) return;
     const target = this.editTarget();
     if (
       composition.messageType === MessageType.text &&

@@ -47,6 +47,7 @@ pub async fn send(
         body,
         &mut conn,
         api::PostMessageDeps {
+            restricted_user_group_ids: &services.config.restricted_user_group_ids,
             id_gen: &services.id_gen,
             media: &services.media,
             avatars: &services.avatars,
@@ -125,6 +126,7 @@ pub async fn edit(
         body,
         &mut conn,
         api::PatchMessageDeps {
+            restricted_user_group_ids: &services.config.restricted_user_group_ids,
             media: &services.media,
             avatars: &services.avatars,
             link_previews: &services.link_previews,
@@ -152,6 +154,7 @@ pub async fn delete(
         message_id,
         &mut conn,
         api::DeleteMessageDeps {
+            restricted_user_group_ids: &services.config.restricted_user_group_ids,
             media: &services.media,
             avatars: &services.avatars,
             ws_registry: &services.ws_registry,
@@ -175,6 +178,7 @@ pub async fn delete_many(
         body,
         &mut conn,
         api::BulkDeleteMessagesDeps {
+            restricted_user_group_ids: &services.config.restricted_user_group_ids,
             media: &services.media,
             avatars: &services.avatars,
             ws_registry: &services.ws_registry,
@@ -198,6 +202,7 @@ pub async fn forward(
         body,
         &mut conn,
         api::ForwardMessagesDeps {
+            restricted_user_group_ids: &services.config.restricted_user_group_ids,
             id_gen: &services.id_gen,
             media: &services.media,
             avatars: &services.avatars,
@@ -228,6 +233,7 @@ pub async fn forward_one(
         body,
         &mut conn,
         api::ForwardMessageDeps {
+            restricted_user_group_ids: &services.config.restricted_user_group_ids,
             id_gen: &services.id_gen,
             media: &services.media,
             avatars: &services.avatars,
@@ -303,6 +309,7 @@ pub async fn send_in_thread(
         body,
         &mut conn,
         api::PostThreadMessageDeps {
+            restricted_user_group_ids: &services.config.restricted_user_group_ids,
             id_gen: &services.id_gen,
             media: &services.media,
             avatars: &services.avatars,

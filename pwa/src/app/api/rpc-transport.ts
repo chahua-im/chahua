@@ -120,6 +120,8 @@ export class RpcTransport {
   readonly state$ = this.stateChanges.asObservable();
   private readonly notifications = new Subject<RpcNotification>();
   readonly notifications$ = this.notifications.asObservable();
+  private readonly serverErrors = new Subject<{ uid: number | undefined; error: RpcError }>();
+  readonly serverErrors$ = this.serverErrors.asObservable();
   private readonly sessionInvalidated = new Subject<void>();
   readonly sessionInvalidated$ = this.sessionInvalidated.asObservable();
   private readonly foreground = new Subject<void>();
@@ -598,9 +600,11 @@ export class RpcTransport {
     if (!hasError && pending.method === 'session.ping') this.lastHeartbeat = Date.now();
     this.release(pending);
     if (pending.abandoned) return;
-    if (hasError && isRpcError(responseError))
-      this.rejectCall(pending, new RpcError(responseError.code, responseError.message, responseError.data));
-    else {
+    if (hasError && isRpcError(responseError)) {
+      const error = new RpcError(responseError.code, responseError.message, responseError.data);
+      this.serverErrors.next({ uid: this.authenticatedUid(), error });
+      this.rejectCall(pending, error);
+    } else {
       if (pending.lane === 'ordinary')
         this.diagnostics.record('rpc.completed', {
           method: pending.method,

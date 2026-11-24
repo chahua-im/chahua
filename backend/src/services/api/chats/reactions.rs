@@ -14,6 +14,13 @@ use crate::services::avatars::AvatarService;
 use crate::services::messages::{load_username_by_uid, load_usernames_by_uids};
 use crate::services::social;
 use crate::services::ws_registry::ConnectionRegistry;
+
+pub struct ReactionWriteDeps<'a> {
+    pub restricted_user_group_ids: &'a [i32],
+    pub avatars: &'a AvatarService,
+    pub registry: &'a ConnectionRegistry,
+}
+
 fn validate_emoji(input: &str) -> Result<String, AppError> {
     if input.is_empty() {
         return Err(AppError::BadRequest("Invalid emoji"));
@@ -192,12 +199,16 @@ pub fn put_reaction(
     message_id: i64,
     emoji: String,
     conn: &mut PgConnection,
-    avatars: &AvatarService,
-    registry: &ConnectionRegistry,
+    deps: ReactionWriteDeps<'_>,
 ) -> Result<(), AppError> {
+    let ReactionWriteDeps {
+        restricted_user_group_ids,
+        avatars,
+        registry,
+    } = deps;
     let emoji = validate_emoji(&emoji)?;
     check_membership(conn, chat_id, uid)?;
-    social::require_chat_writable(conn, chat_id, uid)?;
+    social::require_chat_writable(conn, chat_id, uid, restricted_user_group_ids)?;
 
     // Verify message exists and belongs to this chat
     let message: Message = messages::table
@@ -243,12 +254,16 @@ pub fn delete_reaction(
     message_id: i64,
     emoji: String,
     conn: &mut PgConnection,
-    avatars: &AvatarService,
-    registry: &ConnectionRegistry,
+    deps: ReactionWriteDeps<'_>,
 ) -> Result<(), AppError> {
+    let ReactionWriteDeps {
+        restricted_user_group_ids,
+        avatars,
+        registry,
+    } = deps;
     let emoji = validate_emoji(&emoji)?;
     check_membership(conn, chat_id, uid)?;
-    social::require_chat_writable(conn, chat_id, uid)?;
+    social::require_chat_writable(conn, chat_id, uid, restricted_user_group_ids)?;
 
     let (message, deleted) = conn.transaction::<_, AppError, _>(|conn| {
         // Serialize the flag update with reaction insertion and deletion.

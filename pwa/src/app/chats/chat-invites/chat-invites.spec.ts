@@ -81,6 +81,7 @@ describe('Invite management', () => {
           useValue: {
             ensureDetails: async () => {},
             canSpeak: () => true,
+            groupChatWriteRestricted: () => false,
             isAccessible: () => true,
             speakingMode: () => SpeakingMode.readOnly,
             get: () => ({ peer: { uid: 9 } }),
@@ -176,6 +177,22 @@ describe('Invite management', () => {
       requiredChatId: type === InviteType.membership ? '12' : undefined,
     };
   }
+  it('keeps the invitation form usable while disabling direct send to the required group', async () => {
+    const fixture = await page();
+    const store = TestBed.inject(ChatStore);
+    vi.spyOn(store, 'groupChatWriteRestricted').mockImplementation((_id, kind) => kind === GroupKind.group);
+    const component = fixture.componentInstance;
+    directInvite(component, InviteType.membership);
+    fixture.detectChanges();
+
+    const buttons = fixture.nativeElement.querySelectorAll('.create-actions ion-button');
+    expect(buttons[0].disabled).toBe(false);
+    expect(buttons[1].disabled).toBe(true);
+    await component['create'](true);
+    peer.expectNone('invites.create');
+    peer.expectNone('invites.send');
+  });
+
   it.each([InviteType.targeted, InviteType.membership])(
     'creates a %s invite once and sends it to the selected recipient after confirmation',
     async (type) => {

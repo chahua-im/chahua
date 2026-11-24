@@ -69,8 +69,11 @@ async fn put_reaction(
             message_id,
             emoji,
             &mut conn,
-            &state.avatars,
-            &state.ws_registry,
+            crate::services::api::chats::reactions::ReactionWriteDeps {
+                restricted_user_group_ids: &state.config.restricted_user_group_ids,
+                avatars: &state.avatars,
+                registry: &state.ws_registry,
+            },
         )?;
         Ok(StatusCode::NO_CONTENT)
     })
@@ -104,8 +107,11 @@ async fn delete_reaction(
             message_id,
             emoji,
             &mut conn,
-            &state.avatars,
-            &state.ws_registry,
+            crate::services::api::chats::reactions::ReactionWriteDeps {
+                restricted_user_group_ids: &state.config.restricted_user_group_ids,
+                avatars: &state.avatars,
+                registry: &state.ws_registry,
+            },
         )?;
         Ok(StatusCode::NO_CONTENT)
     })

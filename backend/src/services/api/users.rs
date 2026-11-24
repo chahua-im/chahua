@@ -45,6 +45,7 @@ pub fn get_me(
     conn: &mut PgConnection,
     avatars: &AvatarService,
     authz_service: &AuthorizationService,
+    restricted_user_group_ids: &[i32],
 ) -> Result<MeResponse, AppError> {
     let profiles = lookup_user_profiles(conn, &[uid])?;
     let profile = profiles.get(&uid);
@@ -83,18 +84,24 @@ pub fn get_me(
         .unwrap_or_default();
     let permissions = authz_service.list_permissions(conn, uid, AuthzResource::Global)?;
 
+    let user_group = profile.and_then(|profile| profile.user_group.clone());
+    let group_chat_write_restricted = crate::services::social::discuz_group_write_is_restricted(
+        user_group.as_ref().map(|group| group.group_id),
+        restricted_user_group_ids,
+    );
     Ok(MeResponse {
         uid,
         username,
         avatar_url,
         gender: profile.map(|profile| profile.gender).unwrap_or(0),
-        user_group: profile.and_then(|profile| profile.user_group.clone()),
+        user_group,
         sticker_pack_order,
         permissions,
         mute_group_chats_by_default: notification_defaults.group_chats_muted,
         mute_direct_chats_by_default: notification_defaults.direct_chats_muted,
         show_membership_messages,
         show_unread_message_count,
+        group_chat_write_restricted,
     })
 }
 

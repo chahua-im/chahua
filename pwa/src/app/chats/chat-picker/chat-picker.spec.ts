@@ -92,6 +92,22 @@ describe('Shared chat picker scopes', () => {
     expect(lists.active.release).toHaveBeenCalledOnce();
     expect(lists.archived.release).toHaveBeenCalledOnce();
   });
+  it('keeps disabled group destinations visible and permits choosing a private chat', async () => {
+    lists.active.items.set([{ ...testChat, kind: GroupKind.dm, name: 'Friend' }]);
+    const { picker, fixture, choose } = setup(ChatPickerScope.Chats);
+    fixture.componentRef.setInput('disableTarget', (target: { kind: GroupKind }) => target.kind === GroupKind.group);
+    fixture.detectChanges();
+    const [dm, group] = picker['targets']();
+    expect(picker['targetDisabled'](group)).toBe(true);
+    await picker['select'](group);
+    expect(choose).not.toHaveBeenCalled();
+    expect(picker.open()).toBe(true);
+    expect(picker['targetDisabled'](dm)).toBe(false);
+    await picker['select'](dm);
+    expect(choose).toHaveBeenCalledOnce();
+    expect(picker.open()).toBe(false);
+  });
+
   it('preserves forwarding scope and does not reactivate queries when their internal signals change', () => {
     const { fixture } = setup(ChatPickerScope.ChatsAndThreads);
     expect(lists.chats.mock.calls).toEqual([[false]]);

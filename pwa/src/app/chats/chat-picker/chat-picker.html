@@ -48,7 +48,7 @@
           @for (target of targets(); track targetId(target)) {
             <ion-item
               [button]="true"
-              [disabled]="invalid() || submitted() || resolving()"
+              [disabled]="invalid() || submitted() || resolving() || targetDisabled(target)"
               (pointerdown)="press(target)"
               (click)="select(target)">
               <app-chat-avatar slot="start" [entry]="target.avatar" [size]="40" />

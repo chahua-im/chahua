@@ -304,27 +304,47 @@ impl From<DmSendAuthorizationError> for AppError {
     }
 }
 
-/// Gate member-initiated writes (pins, edits, deletions, reactions) for a chat:
-/// regular groups are unaffected; a dead DM (friendship ended or blocked either
-/// way) is rejected. Membership is the caller's responsibility.
+pub(super) fn group_chat_write_is_restricted(
+    conn: &mut PgConnection,
+    uid: i32,
+    restricted_user_group_ids: &[i32],
+) -> QueryResult<bool> {
+    if restricted_user_group_ids.is_empty() {
+        return Ok(false);
+    }
+    let group_id = user::lookup_discuz_group_id(conn, uid)?;
+    Ok(discuz_group_write_is_restricted(
+        group_id,
+        restricted_user_group_ids,
+    ))
+}
+
+pub(super) fn discuz_group_write_is_restricted(
+    group_id: Option<i32>,
+    restricted_user_group_ids: &[i32],
+) -> bool {
+    group_id.is_some_and(|id| restricted_user_group_ids.contains(&id))
+}
+
+/// Gate member-initiated edits, deletions, and reactions.
+/// Membership is the caller's responsibility.
 pub fn require_chat_writable(
     conn: &mut PgConnection,
     chat_id: i64,
     uid: i32,
+    restricted_user_group_ids: &[i32],
 ) -> Result<(), AppError> {
     let (kind, dm_uid1, dm_uid2) = groups::table
         .filter(groups::id.eq(chat_id))
         .select((groups::kind, groups::dm_uid1, groups::dm_uid2))
         .first::<(GroupKind, Option<i32>, Option<i32>)>(conn)?;
-    if kind != GroupKind::Dm {
-        return Ok(());
+    if kind == GroupKind::Dm {
+        return require_dm_chat_writable(conn, uid, dm_uid1, dm_uid2);
     }
-    let peer = match (dm_uid1, dm_uid2) {
-        (Some(uid1), Some(uid2)) if uid1 == uid => uid2,
-        (Some(uid1), Some(uid2)) if uid2 == uid => uid1,
-        _ => return Err(AppError::Forbidden("Not a participant of this chat")),
-    };
-    require_dm_writable(conn, uid, peer)
+    if group_chat_write_is_restricted(conn, uid, restricted_user_group_ids)? {
+        return Err(AppError::GroupChatWriteRestricted);
+    }
+    Ok(())
 }
 
 /// A DM whose friendship has ended (unfriended or blocked either way) keeps its
@@ -334,7 +354,17 @@ pub fn require_chat_writable(
 ///
 /// The two causes return distinct messages so users can tell a block apart
 /// from an ended friendship.
-fn require_dm_writable(conn: &mut PgConnection, uid: i32, peer: i32) -> Result<(), AppError> {
+pub(super) fn require_dm_chat_writable(
+    conn: &mut PgConnection,
+    uid: i32,
+    dm_uid1: Option<i32>,
+    dm_uid2: Option<i32>,
+) -> Result<(), AppError> {
+    let peer = match (dm_uid1, dm_uid2) {
+        (Some(uid1), Some(uid2)) if uid1 == uid => uid2,
+        (Some(uid1), Some(uid2)) if uid2 == uid => uid1,
+        _ => return Err(AppError::Forbidden("Not a participant of this chat")),
+    };
     if is_blocked_either_direction(conn, uid, peer)? {
         return Err(AppError::Forbidden(
             "This chat is read-only because a block is in place",

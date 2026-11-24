@@ -10,7 +10,7 @@ import { authInterceptor } from '../api/auth.interceptor';
 import { RpcTransport, RpcConnectionState } from '../api/rpc-transport';
 import { RpcErrorCode } from '../api/rpc-error';
 import { RpcTestPeer, provideRpcTesting } from '../api/rpc-testing';
-import { testChat, testUser, wireChat, wireMessage } from '../api/testing';
+import { testChat, testMessage, testUser, wireChat, wireMessage } from '../api/testing';
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
 import { ChatSettingsChanged, SessionStore } from './session-store';
 
@@ -320,6 +320,48 @@ describe('SessionStore', () => {
       .flush({ protocolVersion: 1, authenticated: true, uid: testUser.uid, clientId: 'fixture-client' });
     expect(TestBed.inject(RpcTransport).state()).toBe(RpcConnectionState.Authenticated);
     expect(session.user()).toBe(profile);
+    peer.expectNone('users.getMe');
+  });
+
+  it('applies the group write restriction from a refusal and ignores an older profile refresh', async () => {
+    session.restoreToken();
+    const initialize = session.initialize();
+    await bootstrap('test-link-token', { ...testUser, groupChatWriteRestricted: false });
+    await initialize;
+    expect(session.user()?.groupChatWriteRestricted).toBe(false);
+
+    vi.useFakeTimers();
+    const reconnect = () => {
+      peer.disconnect();
+      vi.advanceTimersByTime(1_200);
+      peer.open();
+      peer
+        .expect('session.open')
+        .flush({ protocolVersion: 1, authenticated: true, uid: testUser.uid, clientId: 'fixture-client' });
+      return peer.expect('users.getMe', {});
+    };
+    const profile = reconnect();
+    const remove = () =>
+      firstValueFrom(
+        TestBed.inject(RpcApi).messages.delete({
+          chatId: testChat.id,
+          messageId: testMessage.id,
+        }),
+      );
+    const unrelated = remove();
+    peer.expect('messages.delete').error(RpcErrorCode.Forbidden);
+    await expect(unrelated).rejects.toMatchObject({ code: RpcErrorCode.Forbidden });
+    expect(session.user()?.groupChatWriteRestricted).toBe(false);
+
+    const denied = remove();
+    peer.expect('messages.delete').error(RpcErrorCode.Forbidden, 'Restricted', { reason: 'groupChatWriteRestricted' });
+    await expect(denied).rejects.toMatchObject({ code: RpcErrorCode.Forbidden });
+    expect(session.user()?.groupChatWriteRestricted).toBe(true);
+    profile.flush({ ...testUser, groupChatWriteRestricted: false });
+    expect(session.user()?.groupChatWriteRestricted).toBe(true);
+
+    reconnect().flush({ ...testUser, groupChatWriteRestricted: false });
+    expect(session.user()?.groupChatWriteRestricted).toBe(false);
   });
 
   it('keeps login usable when optional group hydration is unavailable', async () => {

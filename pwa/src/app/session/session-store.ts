@@ -1,6 +1,6 @@
 import { DestroyRef, inject, isDevMode, Service, signal } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
-import { filter, firstValueFrom, from, timeout, type Observable } from 'rxjs';
+import { EMPTY, catchError, exhaustMap, filter, firstValueFrom, from, timeout, type Observable } from 'rxjs';
 import { RpcApi } from '../../generated/rpc-api';
 import {
   ServerWsMessageType,
@@ -11,7 +11,7 @@ import {
   type User,
 } from '../../generated/models';
 import { Connection } from '../api/connection';
-import { RpcError, RpcErrorCode } from '../api/rpc-error';
+import { isGroupChatWriteRestrictedError, RpcError, RpcErrorCode } from '../api/rpc-error';
 import { RpcConnectionState, RpcTransport } from '../api/rpc-transport';
 import { appVersion } from '../app-version';
 import type { SnowflakeID } from '../api/snowflake-id';
@@ -35,6 +35,7 @@ export class ChatSettingsChanged extends Error {}
 export class SessionStore {
   private urlTokenAdopted = false;
   private chatSettingsWrite = 0;
+  private groupChatWriteVersion = 0;
   private initializationEpoch = 0;
   private boundIdentity?: { uid: number; gen: number };
   private readonly destroy = inject(DestroyRef);
@@ -49,6 +50,28 @@ export class SessionStore {
   readonly expired = signal(false);
   constructor() {
     this.transport.sessionInvalidated$.pipe(takeUntilDestroyed(this.destroy)).subscribe(() => this.invalidate());
+    this.transport.serverErrors$.pipe(takeUntilDestroyed(this.destroy)).subscribe(({ uid, error }) => {
+      const user = this.user();
+      if (!user || user.uid !== (uid ?? this.boundIdentity?.uid) || !isGroupChatWriteRestrictedError(error)) return;
+      ++this.groupChatWriteVersion;
+      this.acceptGroupChatWriteRestriction(true, user.uid);
+    });
+    this.connection.resync$
+      .pipe(
+        exhaustMap(() => {
+          const user = this.user();
+          if (user?.groupChatWriteRestricted == null) return EMPTY;
+          const { uid } = user;
+          if ((this.transport.authenticatedUid() ?? this.boundIdentity?.uid) !== uid) return EMPTY;
+          const version = ++this.groupChatWriteVersion;
+          return this.api.users.getMe().pipe(
+            filter((user) => user.uid === uid && version === this.groupChatWriteVersion),
+            catchError(() => EMPTY),
+          );
+        }),
+        takeUntilDestroyed(this.destroy),
+      )
+      .subscribe((user) => this.acceptGroupChatWriteRestriction(user.groupChatWriteRestricted, user.uid));
     this.api.results$
       .pipe(
         filter(({ method }) => !method.startsWith('savedMessages.')),
@@ -118,6 +141,7 @@ export class SessionStore {
       this.transport.setReconnectToken(refreshed.token);
       this.boundIdentity = tokenIdentity(refreshed.token) ?? this.boundIdentity;
 
+      const groupChatWriteVersion = ++this.groupChatWriteVersion;
       const user = await request(this.api.users.getMe());
       if (!current()) return;
       this.diagnostics.setAccount(user.uid);
@@ -134,6 +158,10 @@ export class SessionStore {
       const userGroup = profile?.members.find((member) => member.uid === user.uid)?.userGroup;
       this.user.set({
         ...user,
+        groupChatWriteRestricted:
+          groupChatWriteVersion === this.groupChatWriteVersion
+            ? user.groupChatWriteRestricted
+            : this.user()?.groupChatWriteRestricted,
         userGroup: profile === undefined && this.user()?.uid === user.uid ? this.user()?.userGroup : userGroup,
       });
     } catch (error) {
@@ -176,12 +204,19 @@ export class SessionStore {
 
   private clearAccountState() {
     this.chatSettingsWrite++;
+    this.groupChatWriteVersion++;
     this.boundIdentity = undefined;
     this.transport.close();
     this.connection.reset();
     this.user.set(undefined);
     this.storage.deactivate();
     this.diagnostics.setAccount(undefined);
+  }
+
+  private acceptGroupChatWriteRestriction(restricted: boolean | undefined, uid: number) {
+    const user = this.user();
+    if (restricted == null || user?.uid !== uid || user.groupChatWriteRestricted === restricted) return;
+    this.user.set({ ...user, groupChatWriteRestricted: restricted });
   }
 
   setShowMembershipMessages(showMembershipMessages: boolean) {

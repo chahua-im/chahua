@@ -132,6 +132,10 @@
   font-size: 22px;
   cursor: pointer;
 }
+.retry-button:disabled {
+  color: var(--ion-color-medium);
+  cursor: default;
+}
 
 .reply-button {
   display: var(--app-reply-button-display);

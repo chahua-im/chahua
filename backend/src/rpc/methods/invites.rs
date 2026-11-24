@@ -36,6 +36,7 @@ pub async fn send(
         params.body,
         &mut conn,
         invites::PostSendInviteMessageDeps {
+            restricted_user_group_ids: &services.config.restricted_user_group_ids,
             id_gen: &services.id_gen,
             media: &services.media,
             avatars: &services.avatars,

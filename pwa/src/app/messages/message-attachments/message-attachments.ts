@@ -109,6 +109,7 @@ export class MessageAttachments {
   readonly delivery = input<MessageDelivery>();
   readonly read = input(false);
   readonly uploads = input<readonly AttachmentUpload[]>([]);
+  readonly retryDisabled = input(false);
   readonly retryUpload = output<AttachmentUpload>();
   readonly removeUpload = output<AttachmentUpload>();
   protected readonly showUploads = signal(false);

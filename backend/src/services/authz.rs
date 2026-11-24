@@ -8,8 +8,8 @@ use diesel::PgConnection;
 
 use crate::errors::AppError;
 use crate::models::{PermissionResourceType, PolicySubjectType};
-use crate::schema::discuz::discuz::common_member;
 use crate::schema::{policy_assignments, policy_permissions};
+use crate::services::user::lookup_discuz_group_id;
 const CACHE_TTL: Duration = Duration::from_secs(60);
 
 #[allow(dead_code)]
@@ -131,7 +131,7 @@ impl AuthorizationService {
         uid: i32,
         resource: Resource,
     ) -> Result<Arc<HashSet<String>>, AppError> {
-        let discuz_group_id = self.lookup_discuz_group_id(conn, uid)?;
+        let discuz_group_id = lookup_discuz_group_id(conn, uid)?;
         self.load_cached_actions(
             conn,
             CacheSubject::User {
@@ -212,20 +212,6 @@ impl AuthorizationService {
         }
 
         Err(AppError::Forbidden("Permission required"))
-    }
-
-    fn lookup_discuz_group_id(
-        &self,
-        conn: &mut PgConnection,
-        uid: i32,
-    ) -> Result<Option<i32>, AppError> {
-        use crate::schema::discuz::discuz::common_member::dsl as cm_dsl;
-
-        Ok(common_member::table
-            .filter(cm_dsl::uid.eq(uid))
-            .select(cm_dsl::groupid)
-            .first::<i32>(conn)
-            .optional()?)
     }
 
     fn load_actions_for_resource(

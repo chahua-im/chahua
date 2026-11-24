@@ -122,6 +122,7 @@ export class ChatPicker {
   readonly title = input.required<string>();
   readonly excludedId = input<SnowflakeID>();
   readonly choose = input<ChooseChat>();
+  readonly disableTarget = input<(target: ChatPickerTarget) => boolean>();
   readonly userSelected = output<MemberSummary>();
   readonly submitted = input(false);
   readonly invalid = input(false);
@@ -409,6 +410,7 @@ export class ChatPicker {
     this.anchors = anchors;
   }
   protected press(target: PickerTarget) {
+    if (this.targetDisabled(target)) return;
     clearTimeout(this.pointerRelease);
     this.pressed.set(this.targetId(target));
   }
@@ -474,11 +476,13 @@ export class ChatPicker {
     }
   }
   protected async select(target: PickerTarget) {
-    if (this.submitted() || this.invalid() || !this.open() || this.resolving()) return;
+    if (this.submitted() || this.invalid() || !this.open() || this.resolving() || this.targetDisabled(target)) return;
     const id = this.targetId(target);
     if (this.pressed() != null && this.pressed() !== id) return;
     const available = () =>
-      !this.destroyRef.destroyed && this.open() && this.allTargets().some((current) => this.targetId(current) === id);
+      !this.destroyRef.destroyed &&
+      this.open() &&
+      this.allTargets().some((current) => this.targetId(current) === id && !this.targetDisabled(current));
     if (!available()) return;
     this.selected.set(id);
     this.resolving.set(true);
@@ -497,6 +501,9 @@ export class ChatPicker {
   }
   protected targetId(target: PickerTarget): SnowflakeID | string {
     return 'user' in target ? `user:${target.user.uid}` : (target.threadId ?? target.chatId);
+  }
+  protected targetDisabled(target: PickerTarget): boolean {
+    return !('user' in target) && (this.disableTarget()?.(target) ?? false);
   }
   private userTarget(user: MemberSummary, time = 0): UserPickerTarget {
     const name = user.username || String(user.uid);

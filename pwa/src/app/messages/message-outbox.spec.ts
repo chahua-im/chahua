@@ -19,6 +19,7 @@ import { provideRpcTesting, RpcTestPeer } from '../api/rpc-testing';
 import { RpcTransport } from '../api/rpc-transport';
 import { decodeId, encodeId, type SnowflakeID } from '../api/snowflake-id';
 import { mockRealtime, testChat, testMessage, testUser, wireMessage } from '../api/testing';
+import { ChatStore } from '../chats/chat-store';
 import { SessionStore } from '../session/session-store';
 import { MessageDelivery } from './message-delivery';
 import { MessageOutbox } from './message-outbox';
@@ -218,6 +219,31 @@ describe('MessageOutbox', () => {
       .expect('messages.send', (params) => params['clientGeneratedId'] === item.clientGeneratedId)
       .flush(wireAccepted(item.clientGeneratedId));
     await retry;
+  });
+
+  it('keeps a group restriction failure for manual retry after the account is allowed again', async () => {
+    TestBed.inject(ChatStore).remember([testChat]);
+    const item = outbox.enqueue(testChat.id, undefined, '保留待发送消息', text);
+    peer.expect('messages.send').error(RpcErrorCode.Forbidden, 'Restricted', { reason: 'groupChatWriteRestricted' });
+    session.user.set({ ...testUser, groupChatWriteRestricted: true });
+    await item.operation;
+    expect(item.delivery()).toBe(MessageDelivery.Failed);
+    expect(item.groupChatWriteRejected?.()).toBe(true);
+    expect(item.message().message).toBe('保留待发送消息');
+
+    await outbox.retry(item);
+    resync.next();
+    (await peer.expectAsync('users.getNotificationSettings')).flush(testUser);
+    peer.expectNone('messages.send');
+
+    session.user.set({ ...testUser, groupChatWriteRestricted: false });
+    const retry = outbox.retry(item);
+    peer
+      .expect('messages.send', (params) => params['clientGeneratedId'] === item.clientGeneratedId)
+      .flush(wireAccepted(item.clientGeneratedId));
+    await retry;
+    expect(item.groupChatWriteRejected?.()).toBe(false);
+    expect(item.delivery()).toBe(MessageDelivery.Sent);
   });
 
   it('lets an echo win over a late failed response without replaying the mutation', async () => {

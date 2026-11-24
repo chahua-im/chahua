@@ -1,7 +1,7 @@
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 
-use crate::errors::AppError;
+use crate::errors::{AppError, GROUP_CHAT_WRITE_RESTRICTION_REASON};
 
 /// Allow converting from the legacy `(StatusCode, &'static str)` tuple so that existing
 /// helpers (e.g. `MediaStore` methods, auth extractors) can interop without rewriting
@@ -40,6 +40,11 @@ impl IntoResponse for AppError {
             AppError::PayloadTooLarge(msg) => (StatusCode::PAYLOAD_TOO_LARGE, msg).into_response(),
             AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg).into_response(),
             AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg).into_response(),
+            AppError::GroupChatWriteRestricted => (
+                StatusCode::FORBIDDEN,
+                axum::Json(serde_json::json!({"reason": GROUP_CHAT_WRITE_RESTRICTION_REASON})),
+            )
+                .into_response(),
             AppError::SpeakingRestricted(mode) => (
                 StatusCode::FORBIDDEN,
                 axum::Json(crate::dto::speaking::SpeakingRestrictedResponse {
@@ -154,6 +159,19 @@ mod tests {
                 "code": "speakingRestricted",
                 "effectiveSpeakingMode": "threadsOnly",
             }),
+        );
+    }
+
+    #[tokio::test]
+    async fn group_chat_write_restriction_returns_a_stable_reason() {
+        let response = AppError::GroupChatWriteRestricted.into_response();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let body = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+            serde_json::json!({"reason": "groupChatWriteRestricted"}),
         );
     }
 

@@ -241,13 +241,13 @@ fn require_pin_permission(
     chat_id: i64,
     uid: i32,
 ) -> Result<GroupKind, AppError> {
-    let kind: GroupKind = groups::table
+    let (kind, dm_uid1, dm_uid2) = groups::table
         .find(chat_id)
-        .select(groups::kind)
-        .first(conn)?;
+        .select((groups::kind, groups::dm_uid1, groups::dm_uid2))
+        .first::<(GroupKind, Option<i32>, Option<i32>)>(conn)?;
     if kind == GroupKind::Dm {
         check_membership(conn, chat_id, uid)?;
-        crate::services::social::require_chat_writable(conn, chat_id, uid)?;
+        crate::services::social::require_dm_chat_writable(conn, uid, dm_uid1, dm_uid2)?;
     } else {
         require_admin_role(conn, chat_id, uid)?;
     }

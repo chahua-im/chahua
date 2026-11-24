@@ -43,6 +43,7 @@ use crate::utils::transaction::AsyncTransaction;
 use crate::MAX_MESSAGES_LIMIT;
 
 pub struct PostMessageDeps<'a> {
+    pub restricted_user_group_ids: &'a [i32],
     pub id_gen: &'a Arc<IdGen>,
     pub media: &'a MediaStore,
     pub avatars: &'a Arc<AvatarService>,
@@ -55,6 +56,7 @@ pub struct PostMessageDeps<'a> {
 }
 
 pub struct ForwardMessagesDeps<'a> {
+    pub restricted_user_group_ids: &'a [i32],
     pub id_gen: &'a Arc<IdGen>,
     pub media: &'a MediaStore,
     pub avatars: &'a Arc<AvatarService>,
@@ -64,6 +66,7 @@ pub struct ForwardMessagesDeps<'a> {
 }
 
 pub struct ForwardMessageDeps<'a> {
+    pub restricted_user_group_ids: &'a [i32],
     pub id_gen: &'a Arc<IdGen>,
     pub media: &'a MediaStore,
     pub avatars: &'a Arc<AvatarService>,
@@ -74,6 +77,7 @@ pub struct ForwardMessageDeps<'a> {
 }
 
 pub struct PostThreadMessageDeps<'a> {
+    pub restricted_user_group_ids: &'a [i32],
     pub id_gen: &'a Arc<IdGen>,
     pub media: &'a MediaStore,
     pub avatars: &'a Arc<AvatarService>,
@@ -85,6 +89,7 @@ pub struct PostThreadMessageDeps<'a> {
 }
 
 pub struct PatchMessageDeps<'a> {
+    pub restricted_user_group_ids: &'a [i32],
     pub media: &'a MediaStore,
     pub avatars: &'a Arc<AvatarService>,
     pub ws_registry: &'a Arc<ConnectionRegistry>,
@@ -93,6 +98,7 @@ pub struct PatchMessageDeps<'a> {
 }
 
 pub struct DeleteMessageDeps<'a> {
+    pub restricted_user_group_ids: &'a [i32],
     pub media: &'a MediaStore,
     pub avatars: &'a Arc<AvatarService>,
     pub ws_registry: &'a Arc<ConnectionRegistry>,
@@ -100,6 +106,7 @@ pub struct DeleteMessageDeps<'a> {
 }
 
 pub struct BulkDeleteMessagesDeps<'a> {
+    pub restricted_user_group_ids: &'a [i32],
     pub media: &'a MediaStore,
     pub avatars: &'a Arc<AvatarService>,
     pub ws_registry: &'a Arc<ConnectionRegistry>,
@@ -577,7 +584,8 @@ pub async fn post_message(
         let mut transaction = AsyncTransaction::begin(conn)?;
         let conn = transaction.connection();
         let result = async {
-            let target = authorize_message_send(conn, chat_id, None, uid)?;
+            let target =
+                authorize_message_send(conn, chat_id, None, uid, deps.restricted_user_group_ids)?;
             let send_result = send_client_message(
                 conn,
                 SendPreparedMessageDeps {
@@ -679,7 +687,13 @@ pub async fn forward_messages(
         let mut transaction = AsyncTransaction::begin(conn)?;
         let conn = transaction.connection();
         let result = async {
-            let target = authorize_message_send(conn, dest_chat_id, body.thread_id, uid)?;
+            let target = authorize_message_send(
+                conn,
+                dest_chat_id,
+                body.thread_id,
+                uid,
+                deps.restricted_user_group_ids,
+            )?;
             let prepared = match prepare_forward_message(
                 conn,
                 deps.id_gen.as_ref(),
@@ -809,7 +823,13 @@ pub async fn forward_message(
         let mut transaction = AsyncTransaction::begin(conn)?;
         let conn = transaction.connection();
         let result = async {
-            let target = authorize_message_send(conn, chat_id, body.thread_id, uid)?;
+            let target = authorize_message_send(
+                conn,
+                chat_id,
+                body.thread_id,
+                uid,
+                deps.restricted_user_group_ids,
+            )?;
             let prepared = match prepare_single_forward(
                 conn,
                 deps.id_gen.as_ref(),
@@ -992,7 +1012,13 @@ pub async fn post_thread_message(
         let mut transaction = AsyncTransaction::begin(conn)?;
         let conn = transaction.connection();
         let result = async {
-            let target = authorize_message_send(conn, chat_id, Some(thread_id), uid)?;
+            let target = authorize_message_send(
+                conn,
+                chat_id,
+                Some(thread_id),
+                uid,
+                deps.restricted_user_group_ids,
+            )?;
             let root_msg = target.thread_root.ok_or(AppError::Internal(
                 "Thread authorization did not return a thread root",
             ))?;
@@ -1165,7 +1191,7 @@ pub async fn patch_message(
     deps: PatchMessageDeps<'_>,
 ) -> Result<MessageResponse, AppError> {
     check_membership(conn, chat_id, uid)?;
-    social::require_chat_writable(conn, chat_id, uid)?;
+    social::require_chat_writable(conn, chat_id, uid, deps.restricted_user_group_ids)?;
     let attachment_ids = parse_attachment_ids(&body.attachment_ids)?;
     let (updated_message, added_mention_uids, previews) =
         conn.transaction::<_, AppError, _>(|conn| {
@@ -1329,7 +1355,7 @@ pub async fn delete_message(
     deps: DeleteMessageDeps<'_>,
 ) -> Result<(), AppError> {
     check_membership(conn, chat_id, uid)?;
-    social::require_chat_writable(conn, chat_id, uid)?;
+    social::require_chat_writable(conn, chat_id, uid, deps.restricted_user_group_ids)?;
     let message: Message = messages::table
         .filter(dsl::id.eq(message_id).and(dsl::chat_id.eq(chat_id)))
         .select(Message::as_select())
@@ -1470,7 +1496,7 @@ pub async fn bulk_delete_messages(
     use crate::services::message_deletion::{delete_selection, validate_message_ids};
     let ids = validate_message_ids(body.message_ids)?;
     check_membership(conn, chat_id, uid)?;
-    social::require_chat_writable(conn, chat_id, uid)?;
+    social::require_chat_writable(conn, chat_id, uid, deps.restricted_user_group_ids)?;
     let is_admin = load_requester_group_role(conn, chat_id, uid)? == Some(GroupRole::Admin);
     let deletion = delete_selection(conn, chat_id, uid, is_admin, &ids)?;
     let payload = BulkDeletedPayload {

@@ -124,9 +124,14 @@ export class MessageComposer {
   readonly stickersOpened = output<void>();
   readonly relationship = input<FriendRelationshipResponse>();
   readonly restriction = input<SpeakingMode>();
+  readonly groupChatWriteRestricted = input(false);
+  readonly writePermissionPending = input(false);
+  protected readonly writeDisabled = computed(
+    () => this.groupChatWriteRestricted() || this.writePermissionPending() || !!this.restriction(),
+  );
   protected readonly blocked = signal(false);
   private canWrite() {
-    if (this.restriction()) return false;
+    if (this.writeDisabled()) return false;
     const allowed = this.relationship()?.canDm !== false;
     this.blocked.set(!allowed);
     return allowed;
@@ -158,7 +163,7 @@ export class MessageComposer {
   protected readonly Panel = Panel;
   protected readonly Purpose = AttachmentUploadPurpose;
   protected readonly panel = signal(Panel.None);
-  readonly stickersVisible = computed(() => this.panel() === Panel.Stickers && !this.restriction());
+  readonly stickersVisible = computed(() => this.panel() === Panel.Stickers && !this.writeDisabled());
   protected readonly dragDepth = signal(0);
   readonly voiceActive = signal(false);
   private readonly destroy = inject(DestroyRef);
@@ -189,7 +194,7 @@ export class MessageComposer {
   private readonly attachmentMenu = viewChild<ElementRef<HTMLDivElement>>('attachmentMenu');
   private cancelAttachmentPicker?: () => void;
   protected openAttachments(menu: HTMLDivElement, button: HTMLButtonElement) {
-    if (this.restriction()) return;
+    if (this.writeDisabled()) return;
     this.cancelAttachmentPicker?.();
     this.panel.set(Panel.None);
     const rect = button.getBoundingClientRect();
@@ -199,7 +204,7 @@ export class MessageComposer {
     menu.showPopover();
   }
   protected pickAttachment(menu: HTMLDivElement, picker: HTMLInputElement) {
-    if (this.restriction()) return;
+    if (this.writeDisabled()) return;
     this.cancelAttachmentPicker?.();
     menu.hidePopover();
     const active = this.host.nativeElement.ownerDocument.activeElement;
@@ -252,7 +257,7 @@ export class MessageComposer {
   );
   protected readonly canSend = computed(
     () =>
-      !this.restriction() &&
+      !this.writeDisabled() &&
       !this.voiceActive() &&
       (this.forwarding() ||
         (!this.error() && (!!this.text().trim() || !!this.existing().length || !!this.selectedUploads().length))),
@@ -270,7 +275,7 @@ export class MessageComposer {
         !this.selectedUploads().length),
   );
   protected async togglePanel(panel: Panel) {
-    if (this.restriction()) return;
+    if (this.writeDisabled()) return;
     this.panel.set(this.panel() === panel ? Panel.None : panel);
     if (this.panel() !== Panel.None) {
       this.stickersOpened.emit();
@@ -329,7 +334,7 @@ export class MessageComposer {
 
   private async applyFormat(kind: InlineFormatKind) {
     const input = await this.textarea()?.getInputElement();
-    if (!input) return;
+    if (!input || this.writeDisabled()) return;
     const display = this.display();
     const result = wrapInlineFormat(
       display.text,
@@ -390,13 +395,14 @@ export class MessageComposer {
   }
 
   protected dragenter(event: DragEvent) {
-    if (event.dataTransfer?.types.includes('Files')) this.dragDepth.update((depth) => depth + 1);
+    if (!this.writeDisabled() && event.dataTransfer?.types.includes('Files'))
+      this.dragDepth.update((depth) => depth + 1);
   }
   dragover(event: DragEvent) {
     const transfer = event.dataTransfer;
     if (!transfer?.types.includes('Files')) return;
     event.preventDefault();
-    transfer.dropEffect = 'copy';
+    transfer.dropEffect = this.writeDisabled() ? 'none' : 'copy';
   }
   protected dragleave() {
     this.dragDepth.update((depth) => Math.max(0, depth - 1));
@@ -417,7 +423,7 @@ export class MessageComposer {
       this.addFile(file, mayBeMediaFile(file) ? AttachmentUploadPurpose.media : AttachmentUploadPurpose.file);
   }
   private addFile(file: File, purpose: AttachmentUploadPurpose) {
-    if (this.restriction()) return;
+    if (this.writeDisabled()) return;
     if (this.forwarding() && purpose !== AttachmentUploadPurpose.voice) return;
     if (this.selectedUploads().length + this.existing().length >= 20) {
       this.tooMany.set(true);
@@ -474,6 +480,7 @@ export class MessageComposer {
     input.setSelectionRange(start, end);
   }
   protected async changed(text: string, event?: Event) {
+    if (this.writeDisabled()) return;
     this.text.set(wireText(editText(this.display(), text)));
     const version = ++this.mentionVersion;
     const input = await this.textarea()?.getInputElement();
@@ -517,7 +524,7 @@ export class MessageComposer {
       });
   }
   async insertMention(sender: MessageContent['sender']) {
-    if (this.restriction() || this.voiceActive()) return;
+    if (this.writeDisabled() || this.voiceActive()) return;
     const input = await this.textarea()?.getInputElement();
     if (!input) return;
     this.mentionRange = { start: input.selectionStart, end: input.selectionEnd };
@@ -525,7 +532,7 @@ export class MessageComposer {
   }
   protected async mention(member: Pick<MentionInfo, 'uid' | 'username' | 'gender' | 'avatarUrl' | 'userGroup'>) {
     const range = this.mentionRange;
-    if (!range) return;
+    if (!range || this.writeDisabled()) return;
     const name = member.username || 'User ' + member.uid;
     const token = '@' + name + ' ';
     const old = this.display();
@@ -616,7 +623,7 @@ export class MessageComposer {
     for (const upload of this.uploads()) if (upload.purpose === AttachmentUploadPurpose.voice) this.remove(upload);
   }
   protected key(event: KeyboardEvent) {
-    if (event.isComposing || event.keyCode === 229) return;
+    if (this.writeDisabled() || event.isComposing || event.keyCode === 229) return;
     const suggestions = this.suggestions();
     if (suggestions.length && ['ArrowUp', 'ArrowDown', 'Enter'].includes(event.key)) {
       event.preventDefault();

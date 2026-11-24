@@ -30,6 +30,7 @@ use crate::utils::ids::IdGen;
 use crate::utils::transaction::AsyncTransaction;
 
 pub struct PostSendInviteMessageDeps<'a> {
+    pub restricted_user_group_ids: &'a [i32],
     pub id_gen: &'a Arc<IdGen>,
     pub media: &'a MediaStore,
     pub avatars: &'a Arc<AvatarService>,
@@ -217,6 +218,7 @@ pub async fn post_send_invite_message(
     deps: PostSendInviteMessageDeps<'_>,
 ) -> Result<SendInviteMessageResponse, AppError> {
     let PostSendInviteMessageDeps {
+        restricted_user_group_ids,
         id_gen,
         media,
         avatars,
@@ -230,7 +232,13 @@ pub async fn post_send_invite_message(
         let mut transaction = AsyncTransaction::begin(conn)?;
         let conn = transaction.connection();
         let result = async {
-            let target = authorize_message_send(conn, body.destination_chat_id, None, uid)?;
+            let target = authorize_message_send(
+                conn,
+                body.destination_chat_id,
+                None,
+                uid,
+                restricted_user_group_ids,
+            )?;
 
             let now = Utc::now();
             let invite = if let Some(invite_id) = body.invite_id {

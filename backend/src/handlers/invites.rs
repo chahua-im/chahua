@@ -67,6 +67,7 @@ async fn post_send_invite_message(
             body,
             &mut conn,
             crate::services::api::invites::PostSendInviteMessageDeps {
+                restricted_user_group_ids: &state.config.restricted_user_group_ids,
                 id_gen: &state.id_gen,
                 media: &state.media,
                 avatars: &state.avatars,

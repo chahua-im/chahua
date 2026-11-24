@@ -1,4 +1,4 @@
-@if (suggestions().length && !restriction()) {
+@if (suggestions().length && !writeDisabled()) {
   <ion-list appScrollbars class="mentions">
     @for (member of suggestions(); track member.uid; let i = $index) {
       <ion-item
@@ -53,7 +53,11 @@
           </div>
         }
         @if (state.error) {
-          <app-upload-failure [upload]="upload" (retry)="upload.retry()" (remove)="remove(upload)" />
+          <app-upload-failure
+            [upload]="upload"
+            [retryDisabled]="groupChatWriteRestricted() || writePermissionPending()"
+            (retry)="upload.retry()"
+            (remove)="remove(upload)" />
         }
         <button type="button" class="upload-remove" (click)="remove(upload)">
           <ion-icon [icon]="icons.closeOutline" />
@@ -77,8 +81,13 @@
   (change)="files($event, Purpose.media)" />
 <input #filesInput type="file" multiple hidden (change)="files($event, Purpose.file)" />
 <div class="bar">
-  @if (voiceActive() && restriction(); as mode) {
-    <p class="ion-padding-horizontal">{{ 'speaking.blocked.' + mode | transloco }}</p>
+  @let mode = restriction();
+  @let groupRestricted = groupChatWriteRestricted();
+  @let restrictionKey =
+    groupRestricted ? 'speaking.groupChatWriteRestricted' : mode ? 'speaking.placeholder.' + mode : undefined;
+  @let placeholder = restrictionKey ?? 'messages.composer.placeholder' | transloco;
+  @if (voiceActive() && restrictionKey) {
+    <p class="ion-padding-horizontal">{{ groupRestricted ? placeholder : ('speaking.blocked.' + mode | transloco) }}</p>
   }
   <div class="compose-context" [hidden]="voiceActive() && !forwarding()"><ng-content /></div>
   <div class="compose-row">
@@ -86,7 +95,7 @@
       type="button"
       #attachButton
       class="attach-button"
-      [disabled]="voiceActive() || forwarding() || !!restriction()"
+      [disabled]="voiceActive() || forwarding() || writeDisabled()"
       (pointerdown)="$event.preventDefault()"
       (click)="openAttachments(attachmentMenu, attachButton)">
       <ion-icon [icon]="icons.attachOutline" />
@@ -95,27 +104,25 @@
       <div class="input-row">
         <ion-textarea
           appScrollbars
-          [disabled]="!!restriction()"
-          [class.restricted]="!!restriction()"
-          [placeholder]="
-            (restriction() ? 'speaking.placeholder.' + restriction() : 'messages.composer.placeholder') | transloco
-          "
+          [disabled]="writeDisabled()"
+          [class.restricted]="!!restrictionKey"
+          [placeholder]="placeholder"
           [autoGrow]="true"
           [rows]="1"
-          [value]="restriction() ? '' : display().text"
+          [value]="restrictionKey ? '' : display().text"
           (ionInput)="changed($event.detail.value || '', $event.detail.event)"
           (beforeinput)="beforeInput($event)"
           (ionFocus)="!dockStickers() && closeStickers()"
           (paste)="paste($event)"
           (keydown)="key($event)" />
-        @if (restriction(); as mode) {
-          <span class="restriction-placeholder">{{ 'speaking.placeholder.' + mode | transloco }}</span>
+        @if (restrictionKey) {
+          <span class="restriction-placeholder">{{ placeholder }}</span>
         }
         @if (!editing() && !forwarding()) {
           <button
             type="button"
             class="sticker-button"
-            [disabled]="!!restriction()"
+            [disabled]="writeDisabled()"
             [attr.title]="windows ? 'Emoji: Win + .' : macOS ? 'Emoji: fn + E' : null"
             [class.selected]="panel() === Panel.Stickers"
             (click)="togglePanel(Panel.Stickers)">
@@ -126,7 +133,7 @@
     </div>
     @if (useVoice()) {
       <app-voice-recorder
-        [disabled]="!!restriction()"
+        [disabled]="writeDisabled()"
         [(active)]="voiceActive"
         (activeChange)="$event && panel.set(Panel.None)"
         (submitted)="sendVoice($event)"
@@ -163,14 +170,18 @@
 
 <div #attachmentMenu popover="auto" class="attachment-menu" (pointerdown)="$event.preventDefault()">
   <ion-list class="actions-menu" lines="none">
-    <ion-item [button]="true" [detail]="false" (click)="pickAttachment(attachmentMenu, photos)">
+    <ion-item
+      [button]="true"
+      [detail]="false"
+      [disabled]="writeDisabled()"
+      (click)="pickAttachment(attachmentMenu, photos)">
       <ion-icon slot="start" [icon]="icons.imageOutline" />
       <ion-label>{{ 'messages.composer.media' | transloco }}</ion-label>
     </ion-item>
     <ion-item
       [button]="true"
       [detail]="false"
-      [disabled]="!!editing()"
+      [disabled]="!!editing() || writeDisabled()"
       (click)="pickAttachment(attachmentMenu, filesInput)">
       <ion-icon slot="start" [icon]="icons.documentOutline" />
       <ion-label>{{ 'messages.composer.files' | transloco }}</ion-label>

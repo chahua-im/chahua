@@ -74,6 +74,7 @@ describe('ForwardPicker', () => {
             get: () => testChat,
             ensureDetails: vi.fn().mockResolvedValue(undefined),
             canSpeak: vi.fn().mockReturnValue(true),
+            groupChatWriteRestricted: () => false,
           },
         },
         { provide: MessageOutbox, useValue: { enqueueForward } },

@@ -194,6 +194,7 @@ async fn post_message(
             body,
             &mut conn,
             crate::services::api::chats::messages::PostMessageDeps {
+                restricted_user_group_ids: &state.config.restricted_user_group_ids,
                 id_gen: &state.id_gen,
                 media: &state.media,
                 avatars: &state.avatars,
@@ -242,6 +243,7 @@ async fn forward_messages(
             body,
             &mut conn,
             crate::services::api::chats::messages::ForwardMessagesDeps {
+                restricted_user_group_ids: &state.config.restricted_user_group_ids,
                 id_gen: &state.id_gen,
                 media: &state.media,
                 avatars: &state.avatars,
@@ -290,6 +292,7 @@ async fn forward_message(
             body,
             &mut conn,
             crate::services::api::chats::messages::ForwardMessageDeps {
+                restricted_user_group_ids: &state.config.restricted_user_group_ids,
                 id_gen: &state.id_gen,
                 media: &state.media,
                 avatars: &state.avatars,
@@ -413,6 +416,7 @@ pub(super) async fn post_thread_message(
             body,
             &mut conn,
             crate::services::api::chats::messages::PostThreadMessageDeps {
+                restricted_user_group_ids: &state.config.restricted_user_group_ids,
                 id_gen: &state.id_gen,
                 media: &state.media,
                 avatars: &state.avatars,
@@ -462,6 +466,7 @@ async fn patch_message(
             body,
             &mut conn,
             crate::services::api::chats::messages::PatchMessageDeps {
+                restricted_user_group_ids: &state.config.restricted_user_group_ids,
                 media: &state.media,
                 avatars: &state.avatars,
                 link_previews: &state.link_previews,
@@ -506,6 +511,7 @@ async fn delete_message(
             message_id,
             &mut conn,
             crate::services::api::chats::messages::DeleteMessageDeps {
+                restricted_user_group_ids: &state.config.restricted_user_group_ids,
                 media: &state.media,
                 avatars: &state.avatars,
                 ws_registry: &state.ws_registry,
@@ -547,6 +553,7 @@ async fn bulk_delete_messages(
             body,
             &mut conn,
             crate::services::api::chats::messages::BulkDeleteMessagesDeps {
+                restricted_user_group_ids: &state.config.restricted_user_group_ids,
                 media: &state.media,
                 avatars: &state.avatars,
                 ws_registry: &state.ws_registry,
