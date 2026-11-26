@@ -47,7 +47,7 @@ pub struct MemberResponse {
     pub joined_at: DateTime<Utc>,
     pub username: Option<String>,
     pub avatar_url: Option<String>,
-    pub gender: i16,
+    pub gender: i32,
     pub user_group: Option<UserGroupTagInfo>,
 }
 

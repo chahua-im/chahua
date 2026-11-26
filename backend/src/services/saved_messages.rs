@@ -47,7 +47,7 @@ struct SavedMentionSnapshot {
     uid: i32,
     username: Option<String>,
     avatar_url: Option<String>,
-    gender: i16,
+    gender: i32,
     #[serde(default)]
     user_group: Option<UserGroupTagInfo>,
 }

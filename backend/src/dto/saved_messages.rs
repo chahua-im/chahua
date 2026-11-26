@@ -40,7 +40,7 @@ pub struct SavedSenderSnapshot {
     pub uid: i32,
     pub name: Option<String>,
     pub avatar_url: Option<String>,
-    pub gender: i16,
+    pub gender: i32,
     #[serde(default)]
     pub user_group: Option<UserGroupTagInfo>,
 }

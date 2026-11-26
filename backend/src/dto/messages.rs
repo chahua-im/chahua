@@ -61,7 +61,7 @@ pub struct MentionInfo {
     pub uid: i32,
     pub username: Option<String>,
     pub avatar_url: Option<String>,
-    pub gender: i16,
+    pub gender: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_group: Option<crate::dto::users::UserGroupTagInfo>,
 }

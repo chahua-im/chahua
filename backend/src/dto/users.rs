@@ -16,7 +16,7 @@ pub struct User {
     pub uid: i32,
     pub avatar_url: Option<String>,
     pub name: Option<String>,
-    pub gender: i16,
+    pub gender: i32,
     pub user_group: Option<UserGroupTagInfo>,
 }
 
@@ -60,7 +60,7 @@ pub struct MeResponse {
     pub uid: i32,
     pub username: String,
     pub avatar_url: Option<String>,
-    pub gender: i16,
+    pub gender: i32,
     pub user_group: Option<UserGroupTagInfo>,
     pub sticker_pack_order: Vec<StickerPackOrderItem>,
     pub permissions: Vec<String>,
@@ -110,7 +110,7 @@ pub struct MemberSummary {
     pub uid: i32,
     pub username: Option<String>,
     pub avatar_url: Option<String>,
-    pub gender: i16,
+    pub gender: i32,
     pub user_group: Option<UserGroupTagInfo>,
 }
 
