@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use diesel::prelude::*;
@@ -17,7 +17,7 @@ use crate::services::authz::{
 };
 use crate::services::avatars::AvatarService;
 use crate::services::sticker_order;
-use crate::services::user::{lookup_user_profiles, search_user_uids_by_prefix};
+use crate::services::user::{lookup_user_profiles, search_users_with_profiles};
 use crate::services::ws_registry::ConnectionRegistry;
 
 const DEFAULT_USER_SEARCH_LIMIT: i64 = 20;
@@ -82,11 +82,16 @@ pub fn get_me(
             serde_json::from_value::<Vec<StickerPackOrderItem>>(extra.sticker_pack_order).ok()
         })
         .unwrap_or_default();
-    let permissions = authz_service.list_permissions(conn, uid, AuthzResource::Global)?;
-
     let user_group = profile.and_then(|profile| profile.user_group.clone());
+    let discuz_group_id = user_group.as_ref().map(|group| group.group_id);
+    let permissions = authz_service.list_permissions_with_group_id(
+        conn,
+        uid,
+        discuz_group_id,
+        AuthzResource::Global,
+    )?;
     let group_chat_write_restricted = crate::services::social::discuz_group_write_is_restricted(
-        user_group.as_ref().map(|group| group.group_id),
+        discuz_group_id,
         restricted_user_group_ids,
     );
     Ok(MeResponse {
@@ -139,48 +144,52 @@ pub fn get_user_search(
 ) -> Result<SearchUsersResponse, AppError> {
     let q = query.q.as_deref().map(str::trim).unwrap_or("");
     let limit = normalize_user_search_limit(query.limit);
-
-    let mut merged_uids = Vec::new();
-    let mut seen_uids = HashSet::new();
-
-    if let Ok(exact_uid) = q.parse::<i32>() {
-        seen_uids.insert(exact_uid);
-        merged_uids.push(exact_uid);
-    }
-
-    if !q.is_empty()
+    let exact_uid = q.parse::<i32>().ok();
+    let allow_prefix_search = !q.is_empty()
         && authz_service.has_permission(
             conn,
             uid,
             AuthzAction::MemberViewAll,
             AuthzResource::Global,
-        )?
-    {
-        for found_uid in search_user_uids_by_prefix(conn, q, limit)? {
-            if seen_uids.insert(found_uid) {
-                merged_uids.push(found_uid);
-            }
-        }
-    }
+        )?;
 
-    let summaries_by_uid = build_member_summary_map(conn, avatars, &merged_uids)?;
-    let summaries: Vec<MemberSummary> = merged_uids
-        .into_iter()
-        .filter_map(|member_uid| summaries_by_uid.get(&member_uid).cloned())
-        .collect();
+    if !allow_prefix_search && exact_uid.is_none() {
+        return Ok(SearchUsersResponse {
+            members: Vec::new(),
+            excluded: Vec::new(),
+        });
+    }
 
     let exclude_member_of = match query.exclude_member_of {
         Some(chat_id) if can_exclude_members_of_chat(conn, uid, chat_id)? => Some(chat_id),
         _ => None,
     };
-    let excluded_uids = match exclude_member_of {
-        Some(chat_id) => {
-            let summary_uids: Vec<i32> = summaries.iter().map(|summary| summary.uid).collect();
-            load_excluded_member_uids(conn, chat_id, &summary_uids)?
-        }
-        None => HashSet::new(),
-    };
-    let (members, excluded) = split_excluded_member_summaries(summaries, &excluded_uids);
+    let rows = search_users_with_profiles(
+        conn,
+        q,
+        allow_prefix_search,
+        exact_uid,
+        limit,
+        exclude_member_of,
+    )?;
+    let uids: Vec<i32> = rows.iter().map(|row| row.uid).collect();
+    let mut avatar_urls = avatars.lookup(&uids);
+    let summaries = rows
+        .into_iter()
+        .map(|row| {
+            (
+                MemberSummary {
+                    uid: row.uid,
+                    username: row.profile.username,
+                    avatar_url: avatar_urls.remove(&row.uid).flatten(),
+                    gender: row.profile.gender,
+                    user_group: row.profile.user_group,
+                },
+                row.is_excluded,
+            )
+        })
+        .collect();
+    let (members, excluded) = split_excluded_member_summaries(summaries);
 
     Ok(SearchUsersResponse { members, excluded })
 }
@@ -238,13 +247,12 @@ fn can_exclude_members_of_chat(
 }
 
 fn split_excluded_member_summaries(
-    summaries: Vec<MemberSummary>,
-    member_uid_set: &HashSet<i32>,
+    summaries: Vec<(MemberSummary, bool)>,
 ) -> (Vec<MemberSummary>, Vec<MemberSummary>) {
     let mut members = Vec::new();
     let mut excluded = Vec::new();
-    for summary in summaries {
-        if member_uid_set.contains(&summary.uid) {
+    for (summary, is_excluded) in summaries {
+        if is_excluded {
             excluded.push(summary);
         } else {
             members.push(summary);
@@ -254,30 +262,10 @@ fn split_excluded_member_summaries(
     (members, excluded)
 }
 
-fn load_excluded_member_uids(
-    conn: &mut PgConnection,
-    chat_id: i64,
-    uids: &[i32],
-) -> Result<HashSet<i32>, AppError> {
-    if uids.is_empty() {
-        return Ok(HashSet::new());
-    }
-
-    use crate::schema::group_membership::dsl as gm_dsl;
-
-    Ok(group_membership::table
-        .filter(gm_dsl::chat_id.eq(chat_id).and(gm_dsl::uid.eq_any(uids)))
-        .select(gm_dsl::uid)
-        .load::<i32>(conn)?
-        .into_iter()
-        .collect())
-}
-
 #[cfg(test)]
 mod tests {
     use super::{normalize_user_search_limit, split_excluded_member_summaries};
     use crate::dto::users::MemberSummary;
-    use std::collections::HashSet;
 
     fn make_summary(uid: i32) -> MemberSummary {
         MemberSummary {
@@ -342,10 +330,13 @@ mod tests {
     }
 
     #[test]
-    fn split_excluded_uses_membership_set() {
-        let summaries = vec![make_summary(1), make_summary(2), make_summary(3)];
-        let excluded_uids = HashSet::from([2, 3]);
-        let result = split_excluded_member_summaries(summaries, &excluded_uids);
+    fn split_excluded_uses_membership_flag() {
+        let summaries = vec![
+            (make_summary(1), false),
+            (make_summary(2), true),
+            (make_summary(3), true),
+        ];
+        let result = split_excluded_member_summaries(summaries);
 
         assert_eq!(
             result

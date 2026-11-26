@@ -1,7 +1,6 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use diesel::prelude::*;
 use diesel::PgConnection;
 use serde_json::json;
@@ -14,8 +13,7 @@ use crate::dto::speaking::{MemberSpeakingModeResponse, UpdateSpeakingModeRequest
 use crate::errors::AppError;
 use crate::metrics::Metrics;
 use crate::models::{
-    GroupJoinReason, GroupKind, GroupMembership, GroupRole, NewGroupMembership, SpeakingMode,
-    SystemMessageKind,
+    GroupJoinReason, GroupKind, GroupRole, NewGroupMembership, SpeakingMode, SystemMessageKind,
 };
 use crate::schema::{self, group_membership, groups};
 use crate::services::avatars::AvatarService;
@@ -24,7 +22,7 @@ use crate::services::media::MediaStore;
 use crate::services::messages::{PreparedMessageSend, SendMessageOutcome, SendPreparedMessageDeps};
 use crate::services::push::PushService;
 use crate::services::user::{
-    lookup_user_profiles, parse_user_search_query, search_group_member_uids, UserSearchMode,
+    lookup_user_profiles, parse_user_search_query, search_group_members, UserSearchMode,
 };
 use crate::services::ws_registry::ConnectionRegistry;
 use crate::utils::ids::IdGen;
@@ -100,43 +98,32 @@ pub fn get_members(
     conn: &mut PgConnection,
     avatars: &AvatarService,
 ) -> Result<ListMembersResponse, AppError> {
-    check_membership(conn, chat_id, uid)?;
-
-    use crate::schema::group_membership::dsl as gm_dsl;
-
-    let requester_is_admin = matches!(
-        load_requester_group_role(conn, chat_id, uid)?,
-        Some(GroupRole::Admin)
-    );
+    let requester_role = load_requester_group_role(conn, chat_id, uid)?
+        .ok_or(AppError::Forbidden("Not a member of this chat"))?;
+    let requester_is_admin = matches!(requester_role, GroupRole::Admin);
 
     let limit = validate_limit(query.limit, MAX_MEMBERS_LIMIT);
     let search_mode = query.mode.unwrap_or(UserSearchMode::Autocomplete);
     let search = parse_user_search_query(query.q.as_deref(), search_mode);
-    let member_uids =
-        search_group_member_uids(conn, chat_id, query.after, limit + 1, search.as_ref())?;
+    let mut rows = search_group_members(conn, chat_id, query.after, limit + 1, search.as_ref())?;
 
-    let has_more = member_uids.len() as i64 > limit;
-    let page_uids: Vec<i32> = member_uids.into_iter().take(limit as usize).collect();
-    let rows: Vec<GroupMembership> = group_membership::table
-        .filter(
-            gm_dsl::chat_id
-                .eq(chat_id)
-                .and(gm_dsl::uid.eq_any(&page_uids)),
-        )
-        .select(GroupMembership::as_select())
-        .load(conn)?;
-
-    let rows_by_uid: HashMap<i32, GroupMembership> =
-        rows.into_iter().map(|row| (row.uid, row)).collect();
-    let page_rows: Vec<(i32, GroupRole, DateTime<Utc>, SpeakingMode)> = page_uids
+    let has_more = rows.len() as i64 > limit;
+    rows.truncate(limit as usize);
+    let uids: Vec<i32> = rows.iter().map(|row| row.uid).collect();
+    let mut avatar_urls = avatars.lookup(&uids);
+    let members: Vec<MemberResponse> = rows
         .into_iter()
-        .filter_map(|member_uid| {
-            rows_by_uid
-                .get(&member_uid)
-                .map(|row| (row.uid, row.role.clone(), row.joined_at, row.speaking_mode))
+        .map(|row| MemberResponse {
+            avatar_url: avatar_urls.remove(&row.uid).flatten(),
+            uid: row.uid,
+            role: row.role,
+            speaking_mode: row.speaking_mode,
+            joined_at: row.joined_at,
+            username: row.profile.username,
+            gender: row.profile.gender,
+            user_group: row.profile.user_group,
         })
         .collect();
-    let members = build_member_responses(conn, avatars, page_rows)?;
     let next_cursor = has_more
         .then(|| members.last().map(|member| member.uid))
         .flatten();
@@ -452,31 +439,4 @@ pub fn put_member_speaking_mode(
     )?;
     crate::services::speaking::broadcast_member_mode(conn, ws_registry, chat_id, target_uid)?;
     Ok(updated)
-}
-
-fn build_member_responses(
-    conn: &mut PgConnection,
-    avatars: &AvatarService,
-    page_rows: Vec<(i32, GroupRole, DateTime<Utc>, SpeakingMode)>,
-) -> Result<Vec<MemberResponse>, AppError> {
-    let uids: Vec<i32> = page_rows.iter().map(|(uid, _, _, _)| *uid).collect();
-    let profiles = lookup_user_profiles(conn, &uids)?;
-    let mut avatar_urls = avatars.lookup(&uids);
-
-    Ok(page_rows
-        .into_iter()
-        .map(|(uid, role, joined_at, speaking_mode)| {
-            let profile = profiles.get(&uid);
-            MemberResponse {
-                avatar_url: avatar_urls.remove(&uid).flatten(),
-                uid,
-                role,
-                speaking_mode,
-                joined_at,
-                username: profile.and_then(|profile| profile.username.clone()),
-                gender: profile.map(|profile| profile.gender).unwrap_or(0),
-                user_group: profile.and_then(|profile| profile.user_group.clone()),
-            }
-        })
-        .collect())
 }

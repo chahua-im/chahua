@@ -41,7 +41,7 @@ use crate::{
         push::{PushJob, PushMessagePreview, PushMessagePreviewSticker, PushService},
         social::{self, DmSendAuthorizationError},
         speaking::{self, SpeakingAction},
-        user::{lookup_user_profiles, UserProfile},
+        user::{lookup_user_profiles, lookup_usernames, UserProfile},
         ws_registry::ConnectionRegistry,
     },
     utils::ids::{self, IdGen},
@@ -231,18 +231,17 @@ pub struct SendPreparedMessageDeps<'a> {
 // ---------------------------------------------------------------------------
 
 pub fn load_username_by_uid(conn: &mut PgConnection, uid: i32) -> QueryResult<Option<String>> {
-    lookup_user_profiles(conn, &[uid])
-        .map(|mut profiles| profiles.remove(&uid).and_then(|profile| profile.username))
+    lookup_usernames(conn, &[uid]).map(|mut names| names.remove(&uid))
 }
 
 pub fn load_usernames_by_uids(
     conn: &mut PgConnection,
     uids: &[i32],
 ) -> std::collections::HashMap<i32, Option<String>> {
-    lookup_user_profiles(conn, uids)
+    lookup_usernames(conn, uids)
         .unwrap_or_default()
         .into_iter()
-        .map(|(uid, profile)| (uid, profile.username))
+        .map(|(uid, name)| (uid, Some(name)))
         .collect()
 }
 
@@ -2424,20 +2423,48 @@ pub async fn attach_metadata(
             }
         };
 
-    let mut avatar_uids = std::collections::HashSet::new();
+    // Collect reaction details and mentions before resolving profiles/avatars so
+    // all referenced UIDs (senders, replies, forwards, reactors, mentions) are
+    // fetched in a single batch.
+    let reacted_message_ids: Vec<i64> = messages_to_process
+        .iter()
+        .filter(|m| m.has_reactions)
+        .map(|m| m.id)
+        .collect();
+    let reaction_details = load_reaction_details(conn, &reacted_message_ids, current_user_uid);
+
+    let mut per_message_mentions: Vec<Vec<i32>> = Vec::with_capacity(messages_to_process.len());
+    let mut all_uids = std::collections::HashSet::new();
     for m in &messages_to_process {
-        avatar_uids.insert(m.sender_uid);
+        all_uids.insert(m.sender_uid);
+        if m.deleted_at.is_none() {
+            if let Some(ref text) = m.message {
+                let uids = extract_mention_uids(text);
+                all_uids.extend(uids.iter().copied());
+                per_message_mentions.push(uids);
+                continue;
+            }
+        }
+        per_message_mentions.push(Vec::new());
     }
     for reply_msg in reply_messages_map.values() {
-        avatar_uids.insert(reply_msg.sender_uid);
+        all_uids.insert(reply_msg.sender_uid);
+        if reply_msg.deleted_at.is_none() {
+            if let Some(ref text) = reply_msg.message {
+                all_uids.extend(extract_mention_uids(text));
+            }
+        }
     }
     for preview in forwarded_bundle_previews.values() {
-        collect_forwarded_preview_item_uids(&preview.messages, &mut avatar_uids);
+        collect_forwarded_preview_item_uids(&preview.messages, &mut all_uids);
     }
-    forward_origins.collect_uids(&mut avatar_uids);
-    let target_uids: Vec<i32> = avatar_uids.into_iter().collect();
-    let mut user_avatars = avatars.lookup(&target_uids);
-    let mut user_profiles = lookup_user_profiles(conn, &target_uids).unwrap_or_default();
+    forward_origins.collect_uids(&mut all_uids);
+    for detail in &reaction_details {
+        all_uids.extend(detail.reactor_uids.iter().copied());
+    }
+    let target_uids: Vec<i32> = all_uids.into_iter().collect();
+    let user_avatars = avatars.lookup(&target_uids);
+    let user_profiles = lookup_user_profiles(conn, &target_uids).unwrap_or_default();
 
     let mut message_attachments_map: std::collections::HashMap<i64, Vec<Attachment>> =
         std::collections::HashMap::new();
@@ -2531,27 +2558,6 @@ pub async fn attach_metadata(
     // --- Reactions ---
     let mut reaction_summaries_map: std::collections::HashMap<i64, Vec<ReactionSummary>> =
         std::collections::HashMap::new();
-    let reacted_message_ids: Vec<i64> = messages_to_process
-        .iter()
-        .filter(|m| m.has_reactions)
-        .map(|m| m.id)
-        .collect();
-    let reaction_details = load_reaction_details(conn, &reacted_message_ids, current_user_uid);
-    let all_reactor_uids: Vec<i32> = reaction_details
-        .iter()
-        .flat_map(|detail| detail.reactor_uids.iter().copied())
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect();
-    let (reactor_names, reactor_avatars) = if all_reactor_uids.is_empty() {
-        (Default::default(), Default::default())
-    } else {
-        (
-            load_usernames_by_uids(conn, &all_reactor_uids),
-            avatars.lookup(&all_reactor_uids),
-        )
-    };
-
     for detail in reaction_details {
         let reactors = if detail.reactor_uids.is_empty() {
             None
@@ -2562,8 +2568,10 @@ pub async fn attach_metadata(
                     .into_iter()
                     .map(|uid| ReactionReactor {
                         uid,
-                        name: reactor_names.get(&uid).cloned().flatten(),
-                        avatar_url: reactor_avatars.get(&uid).cloned().flatten(),
+                        name: user_profiles
+                            .get(&uid)
+                            .and_then(|profile| profile.username.clone()),
+                        avatar_url: user_avatars.get(&uid).cloned().flatten(),
                         sort_index: None,
                     })
                     .collect(),
@@ -2578,45 +2586,6 @@ pub async fn attach_metadata(
                 reacted_by_me: Some(detail.reacted_by_me),
                 reactors,
             });
-    }
-
-    // --- Mentions ---
-    // Collect all mentioned UIDs across all messages (and their reply messages)
-    // so we can batch-resolve profiles.
-    let mut all_mentioned_uids = std::collections::HashSet::new();
-    let mut per_message_mentions: Vec<Vec<i32>> = Vec::with_capacity(messages_to_process.len());
-    for m in &messages_to_process {
-        if let Some(ref text) = m.message {
-            if m.deleted_at.is_none() {
-                let uids = extract_mention_uids(text);
-                for &uid in &uids {
-                    all_mentioned_uids.insert(uid);
-                }
-                per_message_mentions.push(uids);
-                continue;
-            }
-        }
-        per_message_mentions.push(Vec::new());
-    }
-    // Also collect mention UIDs from reply-to messages.
-    for reply_msg in reply_messages_map.values() {
-        if reply_msg.deleted_at.is_none() {
-            if let Some(ref text) = reply_msg.message {
-                for uid in extract_mention_uids(text) {
-                    all_mentioned_uids.insert(uid);
-                }
-            }
-        }
-    }
-    // Resolve profiles and avatars for mentioned UIDs not already loaded
-    let extra_mention_uids: Vec<i32> = all_mentioned_uids
-        .iter()
-        .copied()
-        .filter(|uid| !user_profiles.contains_key(uid))
-        .collect();
-    if !extra_mention_uids.is_empty() {
-        user_profiles.extend(lookup_user_profiles(conn, &extra_mention_uids).unwrap_or_default());
-        user_avatars.extend(avatars.lookup(&extra_mention_uids));
     }
 
     let sticker_emojis = sticker_rows

@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use dashmap::DashMap;
 use diesel::prelude::*;
 use diesel::PgConnection;
+use moka::sync::Cache;
 
 use crate::errors::AppError;
 use crate::models::{PermissionResourceType, PolicySubjectType};
@@ -78,12 +79,21 @@ struct CachedPermissionSet {
 
 pub struct AuthorizationService {
     cache: DashMap<CacheKey, CachedPermissionSet>,
+    discuz_group_cache: Cache<i32, Option<i32>>,
+}
+
+fn new_discuz_group_cache() -> Cache<i32, Option<i32>> {
+    Cache::builder()
+        .max_capacity(25_000)
+        .time_to_live(CACHE_TTL)
+        .build()
 }
 
 impl AuthorizationService {
     pub fn start() -> Arc<Self> {
         Arc::new(Self {
             cache: DashMap::new(),
+            discuz_group_cache: new_discuz_group_cache(),
         })
     }
 
@@ -125,13 +135,50 @@ impl AuthorizationService {
         Ok(actions)
     }
 
+    pub fn list_permissions_with_group_id(
+        &self,
+        conn: &mut PgConnection,
+        uid: i32,
+        discuz_group_id: Option<i32>,
+        resource: Resource,
+    ) -> Result<Vec<String>, AppError> {
+        self.discuz_group_cache.insert(uid, discuz_group_id);
+        let mut actions = self
+            .load_cached_actions(
+                conn,
+                CacheSubject::User {
+                    uid,
+                    discuz_group_id,
+                },
+                resource,
+            )?
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        actions.sort();
+        Ok(actions)
+    }
+
+    fn load_cached_discuz_group_id(
+        &self,
+        conn: &mut PgConnection,
+        uid: i32,
+    ) -> Result<Option<i32>, AppError> {
+        if let Some(group_id) = self.discuz_group_cache.get(&uid) {
+            return Ok(group_id);
+        }
+        let group_id = lookup_discuz_group_id(conn, uid)?;
+        self.discuz_group_cache.insert(uid, group_id);
+        Ok(group_id)
+    }
+
     fn load_cached_user_actions(
         &self,
         conn: &mut PgConnection,
         uid: i32,
         resource: Resource,
     ) -> Result<Arc<HashSet<String>>, AppError> {
-        let discuz_group_id = lookup_discuz_group_id(conn, uid)?;
+        let discuz_group_id = self.load_cached_discuz_group_id(conn, uid)?;
         self.load_cached_actions(
             conn,
             CacheSubject::User {
@@ -343,11 +390,12 @@ impl Resource {
 
 #[cfg(test)]
 mod tests {
-    use super::{AuthorizationService, Resource};
+    use super::{new_discuz_group_cache, AuthorizationService, Resource};
 
     fn empty_service() -> AuthorizationService {
         AuthorizationService {
             cache: Default::default(),
+            discuz_group_cache: new_discuz_group_cache(),
         }
     }
 
@@ -365,5 +413,39 @@ mod tests {
         service.prune_stale_entries();
 
         assert_eq!(service.cache.len(), 1);
+    }
+
+    #[test]
+    fn discuz_group_cache_stores_some_and_none_values() {
+        let service = empty_service();
+        assert_eq!(service.discuz_group_cache.get(&1), None);
+
+        service.discuz_group_cache.insert(1, Some(10));
+        service.discuz_group_cache.insert(2, None);
+
+        assert_eq!(service.discuz_group_cache.get(&1), Some(Some(10)));
+        assert_eq!(service.discuz_group_cache.get(&2), Some(None));
+    }
+
+    #[test]
+    fn list_permissions_with_group_id_seeds_group_cache_and_reads_cached_permissions() {
+        use diesel::Connection;
+
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        let mut conn = diesel::PgConnection::establish(&url).unwrap();
+        let service = empty_service();
+        service.insert_cached_permissions_for_test(
+            (42, Some(7), Resource::Global),
+            &["invite.create", "chat.create"],
+        );
+
+        let permissions = service
+            .list_permissions_with_group_id(&mut conn, 42, Some(7), Resource::Global)
+            .unwrap();
+        assert_eq!(permissions, vec!["chat.create", "invite.create"]);
+        assert_eq!(service.discuz_group_cache.get(&42), Some(Some(7)));
     }
 }
