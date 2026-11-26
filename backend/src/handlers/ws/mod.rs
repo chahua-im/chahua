@@ -6,7 +6,6 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::Response;
 use axum::Json;
-use chrono::Utc;
 use futures::{SinkExt, StreamExt};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -79,7 +78,6 @@ fn record_active_ws_activity(
     client_id: &str,
     track_client: bool,
 ) {
-    tracking.last_seen.record(uid, Utc::now().naive_utc());
     if track_client && activity_tasks.is_empty() {
         let tracking = tracking.clone();
         let client_id = client_id.to_owned();

@@ -1367,10 +1367,6 @@ fn record_active_rpc_activity(
     session: &VerifiedSession,
 ) {
     let uid = session.uid;
-    services
-        .client_tracking
-        .last_seen
-        .record(uid, chrono::Utc::now().naive_utc());
     if activity_tasks.is_empty() {
         let tracking = services.client_tracking.clone();
         let client_id = session.client_id.clone();

@@ -489,11 +489,19 @@ misses for the same UID share one filesystem lookup.
 
 ## Client tracking and daily activity
 
-Tracked authenticated HTTP/RPC operations, active WebSocket pings, and explicit
-active state reports record last seen in memory immediately. Inactive WebSocket
-reports update connection liveness only. Client ownership binding remains
-synchronous on first use/account changes and is cached for same-account activity;
-timestamps, versions, and daily rollups use the shared background activity worker.
+Only active WebSocket pings and explicit active state controls record user/client
+activity. HTTP/RPC business requests, session binding, and token refresh retain
+client ownership and application-version metadata without counting usage or
+updating last seen. Binding remains synchronous on first use/account changes and
+is cached for the same account. New-client counts describe registrations, not usage.
+Last seen records the end of the user's aggregated active period: the last active
+connection's inactive/disconnect time, or its last active report plus 60 seconds
+on silent expiry. Inactive heartbeats and away expiry do not move this timestamp.
+Active observations and presence-end timestamps are buffered for persistence.
+Daily user accounting uses a separate persisted `user_extra.last_active_at`;
+presence-end timestamps never establish activity on a new UTC day. After a process
+restart, an active observation newer than the recorded end supplies a last-seen
+fallback at its 60-second expiry, capped at the current time.
 The worker flushes every 15 seconds with bounded work per tick. Client and user
 buffers each admit up to 100,000 entries; excess new entries are dropped rather
 than blocking requests. Connection acquisition is bounded to two seconds, with
@@ -503,11 +511,12 @@ additive rollups on retry; no persistent deduplication is used. Buffers are
 memory-only, so crashes or overflow can lose unpersisted analytics. Graceful
 shutdown attempts one final bounded flush rather than draining indefinitely.
 
-Client metadata observations retain the five-minute throttle, bypassed on account,
-application-version, or observation UTC-day changes. Legacy active reports preserve
-the recorded application version; RPC supplies its version during session binding.
-Worker snapshots and acknowledgement update the pending gauges, normally every
-15 seconds; they are not a per-scrape measurement of the buffers.
+Client activity observations retain the five-minute throttle, bypassed on account,
+application-version, or observation UTC-day changes. Metadata-only observations
+do not advance client activity timestamps or active-client rollups. Legacy active
+reports preserve the recorded application version; RPC supplies its version during
+session binding. Worker snapshots and acknowledgement update the pending gauges,
+normally every 15 seconds; they are not a per-scrape measurement of the buffers.
 
 HTTP bookkeeping is limited to direct user sessions:
 service-token requests and requests carrying `X-On-Behalf-Of` schedule no client
@@ -528,21 +537,22 @@ client-rebind or client-bookkeeping rollup metrics.
 | `client_rebinds_total` | Counter | Successful client-to-user ownership transitions, recorded immediately after binding commits; daily rollup persistence may lag. | No labels. |
 | `client_tracking_purge_total` | Counter; `kind` | Client tracking records purged, incremented by the number deleted. | `kind` is a bounded record-kind classification. |
 | `activity_daily_rollup_updates_total` | Counter; `result` | Daily activity rollup updates from client bookkeeping, purge work, and last-seen batches; failed batch acquisition or persistence also records an error. | Result is a small outcome classification. |
-| `activity_today_active_users` | Gauge | Exact active-user count for today mirrored from the daily rollup. | No labels. |
-| `activity_today_new_users` | Gauge | Exact new-user count for today mirrored from the daily rollup. | No labels. |
+| `activity_today_active_users` | Gauge | Active-user count for today mirrored from the daily rollup; activity requires an active presence control, not an API request or presence-end timestamp. | No labels. |
+| `activity_today_new_users` | Gauge | New-user count for today mirrored from the daily rollup; first active presence observation establishes user activity. | No labels. |
 | `activity_today_active_clients` | Gauge | Exact active-client count for today mirrored from the daily rollup. | No labels. |
 | `activity_today_new_clients` | Gauge | Exact new-client count for today mirrored from the daily rollup. | No labels. |
 | `activity_today_client_rebinds` | Gauge | Exact client-rebind count for today mirrored from the daily rollup. | No labels. |
 | `activity_today_stale_clients_purged` | Gauge | Exact stale-client purge count for today mirrored from the daily rollup. | No labels. |
 | `activity_today_legacy_subscriptions_purged` | Gauge | Exact legacy-subscription purge count for today mirrored from the daily rollup. | No labels. |
-| `app_version_active_clients` | Gauge; `version` | Unique authenticated client IDs active in the rolling last 24 hours, grouped by their latest persisted app version across HTTP and RPC. | Version values are client supplied and can grow without bound; monitor and constrain this label operationally. |
+| `app_version_active_clients` | Gauge; `version` | Unique authenticated client IDs with active presence observations in the rolling last 24 hours, grouped by their latest persisted app version. | Version values are client supplied and can grow without bound; monitor and constrain this label operationally. |
 
 Each client record contributes once, regardless of request volume, connections,
 reconnects, account rebinds, upgrades, or server restarts. HTTP records versions
-from its app-version header; an authenticated RPC `session.open` alone records
-client usage and its version. Later activity preserves the recorded version. Missing,
-empty, and whitespace-only persisted versions are reported as `unknown`, merged
-with a literal `unknown` version. Anonymous sessions and excluded service-token
+from its app-version header; authenticated RPC session binding records its version
+without recording usage. Active presence reports establish usage and preserve the
+recorded version. Missing, empty, and whitespace-only persisted versions are
+reported as `unknown`, merged with a literal `unknown` version.
+Anonymous sessions and excluded service-token
 or on-behalf-of requests do not contribute client bookkeeping.
 
 Each instance refreshes this shared database snapshot asynchronously at startup

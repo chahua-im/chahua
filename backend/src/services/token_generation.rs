@@ -58,7 +58,7 @@ impl TokenGenerationService {
             .values((
                 user_extra::uid.eq(uid),
                 user_extra::first_seen_at.eq(now),
-                user_extra::last_seen_at.eq(now),
+                user_extra::last_seen_at.eq(chrono::DateTime::UNIX_EPOCH.naive_utc()),
                 user_extra::sticker_pack_order.eq(serde_json::json!([])),
                 user_extra::verification_mode.eq(FriendAddVerificationMode::Direct),
                 user_extra::token_gen.eq(1),

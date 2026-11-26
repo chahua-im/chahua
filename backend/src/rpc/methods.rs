@@ -315,12 +315,6 @@ pub async fn dispatch_call(
                         return Err(RpcError::from(failure));
                     }
                     drop(authentication);
-                    let activity = stages.start("activity");
-                    services
-                        .client_tracking
-                        .record_activity(session.uid, &session.client_id, None)
-                        .map_err(RpcError::from)?;
-                    drop(activity);
                     let _handler = stages.start("handler");
                     runtime.block_on(dispatch_registered(&context, &services, &method, params))
                 })

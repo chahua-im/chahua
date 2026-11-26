@@ -26,10 +26,8 @@ use diesel::PgConnection;
 use tracing::{error, info, warn};
 
 use crate::errors::AppError;
-use crate::models::{
-    ActivityDailyMetric, ClientRecord, NewActivityDailyMetric, NewClientRecord, NewUserExtra,
-};
-use crate::schema::{activity_daily_metrics, clients, push_subscriptions, user_extra};
+use crate::models::{ActivityDailyMetric, ClientRecord, NewActivityDailyMetric, NewClientRecord};
+use crate::schema::{activity_daily_metrics, clients, push_subscriptions};
 use crate::services::service_tokens;
 use crate::utils::auth::{bearer_token, extract_auth_context, X_APP_VERSION, X_ON_BEHALF_OF};
 
@@ -42,7 +40,7 @@ const STALE_CLIENT_RETENTION_DAYS: u64 = 45;
 const WS_UPGRADE_PATHS: [&str; 2] = ["/ws", "/ws/"];
 #[derive(Clone)]
 struct CachedActivity {
-    last_written_at: Instant,
+    last_written_at: Option<Instant>,
     last_observed_at: Instant,
     uid: i32,
     day: NaiveDate,
@@ -52,7 +50,6 @@ struct CachedActivity {
 #[derive(Default, Clone, Copy)]
 struct BindingChange {
     new_client: bool,
-    new_user: bool,
     rebound: bool,
 }
 
@@ -229,19 +226,14 @@ impl ClientTrackingService {
         service
     }
 
-    /// Records semantic client activity for an already authenticated identity.
-    ///
-    /// HTTP adapters retain their response mapping; non-HTTP transports map the same
-    /// error through their own protocol without inheriting HTTP status tuples.
+    /// Binds the client and updates its metadata without observing usage.
     pub fn record_activity(
         &self,
         uid: i32,
         client_id: &str,
         app_version: Option<&str>,
     ) -> Result<(), AppError> {
-        let observed_at = Utc::now().naive_utc();
-        self.last_seen.record(uid, observed_at);
-        self.record_client_activity_at(uid, client_id, app_version, observed_at)
+        self.record_client_activity_at(uid, client_id, app_version, Utc::now().naive_utc(), false)
     }
 
     pub fn record_client_activity(
@@ -250,7 +242,7 @@ impl ClientTrackingService {
         client_id: &str,
         app_version: Option<&str>,
     ) -> Result<(), AppError> {
-        self.record_client_activity_at(uid, client_id, app_version, Utc::now().naive_utc())
+        self.record_client_activity_at(uid, client_id, app_version, Utc::now().naive_utc(), true)
     }
 
     fn record_client_activity_at(
@@ -259,6 +251,7 @@ impl ClientTrackingService {
         client_id: &str,
         app_version: Option<&str>,
         now: NaiveDateTime,
+        active: bool,
     ) -> Result<(), AppError> {
         let slot = match self.recent_writes.get(client_id) {
             Some(slot) => slot.clone(),
@@ -276,7 +269,7 @@ impl ClientTrackingService {
                 error!("client tracking: failed to get DB connection: {:?}", error);
                 AppError::Internal("Database connection failed")
             })?;
-            let (existing, inserted, rebound, initialized) = conn
+            let (existing, inserted, rebound) = conn
                 .transaction::<_, diesel::result::Error, _>(|conn| {
                     let existing = clients::table
                         .find(client_id)
@@ -292,7 +285,7 @@ impl ClientTrackingService {
                             .values(&NewClientRecord {
                                 client_id: client_id.to_owned(),
                                 created_at: now,
-                                last_active: now,
+                                last_active: chrono::DateTime::UNIX_EPOCH.naive_utc(),
                                 last_active_uid: uid,
                                 last_app_version: None,
                             })
@@ -311,13 +304,7 @@ impl ClientTrackingService {
                         .set(push_subscriptions::user_id.eq(uid))
                         .execute(conn)?;
                     }
-                    let initialized = diesel::insert_into(user_extra::table)
-                        .values(NewUserExtra::new(uid, now))
-                        .on_conflict(user_extra::uid)
-                        .do_nothing()
-                        .execute(conn)?
-                        > 0;
-                    Ok((existing, inserted, rebound, initialized))
+                    Ok((existing, inserted, rebound))
                 })
                 .map_err(|error| {
                     error!("client tracking: failed to bind client: {:?}", error);
@@ -325,13 +312,12 @@ impl ClientTrackingService {
                 })?;
             change = BindingChange {
                 new_client: inserted,
-                new_user: initialized,
                 rebound,
             };
             *cached = Some(CachedActivity {
                 uid,
                 day: now.date(),
-                last_written_at: Instant::now(),
+                last_written_at: None,
                 last_observed_at: Instant::now(),
                 last_app_version: existing.and_then(|row| row.last_app_version),
             });
@@ -345,17 +331,22 @@ impl ClientTrackingService {
             app_version.is_some_and(|version| entry.last_app_version.as_deref() != Some(version));
         if bound
             || changed
-            || entry.day != now.date()
-            || entry.last_written_at.elapsed() >= ACTIVITY_WRITE_THROTTLE
+            || (active
+                && (entry.day != now.date()
+                    || entry
+                        .last_written_at
+                        .is_none_or(|at| at.elapsed() >= ACTIVITY_WRITE_THROTTLE)))
         {
             if self
                 .pending
                 .lock()
                 .unwrap()
-                .record(client_id, uid, now, app_version, change)
+                .record(client_id, uid, now, app_version, change, active)
             {
-                entry.day = now.date();
-                entry.last_written_at = Instant::now();
+                if active {
+                    entry.day = now.date();
+                    entry.last_written_at = Some(Instant::now());
+                }
                 if let Some(version) = app_version {
                     entry.last_app_version = Some(version.to_owned());
                 }
@@ -467,6 +458,7 @@ impl ClientTrackingService {
 
         let candidates: Vec<String> = clients::table
             .filter(clients::last_active.lt(stale_cutoff))
+            .filter(clients::created_at.lt(stale_cutoff))
             .order(clients::last_active.asc())
             .limit(PURGE_BATCH_SIZE)
             .select(clients::client_id)
@@ -812,7 +804,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn throttled_client_activity_still_advances_last_seen() {
+    fn client_binding_does_not_advance_last_seen() {
         let db = Pool::builder()
             .max_size(1)
             .min_idle(Some(0))
@@ -830,11 +822,12 @@ mod tests {
             last_seen: last_seen.clone(),
         };
         let before = Utc::now().naive_utc();
-        last_seen.record(17, before - chrono::Duration::minutes(3));
+        let previous = before - chrono::Duration::minutes(3);
+        last_seen.record_end(17, previous);
         service.recent_writes.insert(
             "client".into(),
             Arc::new(Mutex::new(Some(CachedActivity {
-                last_written_at: Instant::now(),
+                last_written_at: Some(Instant::now()),
                 last_observed_at: Instant::now(),
                 uid: 17,
                 day: before.date(),
@@ -844,11 +837,11 @@ mod tests {
 
         service.record_activity(17, "client", None).unwrap();
 
-        assert!(last_seen.latest(17, None).unwrap() >= before);
+        assert_eq!(last_seen.latest(17, None), Some(previous));
     }
 
     #[test]
-    fn client_activity_records_last_seen_before_database_failure() {
+    fn binding_failure_does_not_record_last_seen() {
         let db = Pool::builder()
             .max_size(1)
             .min_idle(Some(0))
@@ -866,11 +859,10 @@ mod tests {
             activity_flush_lock: Mutex::new(()),
             last_seen: last_seen.clone(),
         };
-        let before = Utc::now().naive_utc();
 
         assert!(service.record_activity(17, "client", None).is_err());
 
-        assert!(last_seen.latest(17, None).unwrap() >= before);
+        assert_eq!(last_seen.latest(17, None), None);
     }
 
     #[test]

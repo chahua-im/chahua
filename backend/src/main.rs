@@ -149,6 +149,7 @@ async fn main() {
         pool.clone(),
         metrics.client_tracking.clone(),
     );
+    ws_registry.set_last_seen(client_tracking.last_seen.clone());
     let (activity_shutdown, shutdown_requested) = tokio::sync::oneshot::channel();
     let activity_worker = tokio::spawn(services::client_tracking::run_activity_worker(
         client_tracking.clone(),

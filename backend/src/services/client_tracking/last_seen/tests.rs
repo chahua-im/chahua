@@ -53,9 +53,17 @@ fn create_activity_tables(pool: &DbPool) {
 
 fn insert_user(pool: &DbPool, uid: i32, seen_at: NaiveDateTime) {
     diesel::insert_into(user_extra::table)
-        .values(NewUserExtra::new(uid, seen_at))
+        .values(NewUserExtra {
+            last_seen_at: seen_at,
+            ..NewUserExtra::new(uid, seen_at)
+        })
         .execute(&mut pool.get().expect("get test database connection"))
         .expect("insert isolated user");
+    diesel::sql_query("UPDATE user_extra SET last_active_at = $1 WHERE uid = $2")
+        .bind::<diesel::sql_types::Timestamp, _>(seen_at)
+        .bind::<diesel::sql_types::Integer, _>(uid)
+        .execute(&mut pool.get().unwrap())
+        .unwrap();
 }
 
 fn persisted_last_seen(pool: &DbPool, uid: i32) -> NaiveDateTime {
@@ -87,7 +95,7 @@ fn latest_immediately_prefers_buffered_activity_over_persisted_value() {
     let persisted = timestamp(day, 9, 0, 0);
     let observed = timestamp(day, 10, 0, 0);
 
-    last_seen.record(17, observed);
+    last_seen.record_end(17, observed);
 
     assert_eq!(last_seen.latest(17, Some(persisted)), Some(observed));
 }
@@ -104,8 +112,8 @@ fn stale_observations_do_not_replace_newer_buffered_activity() {
     let day = NaiveDate::from_ymd_opt(2026, 8, 12).expect("valid test day");
     let newer = timestamp(day, 10, 0, 0);
 
-    last_seen.record(17, newer);
-    last_seen.record(17, timestamp(day, 9, 0, 0));
+    last_seen.record_end(17, newer);
+    last_seen.record_end(17, timestamp(day, 9, 0, 0));
 
     assert_eq!(last_seen.latest(17, None), Some(newer));
 }
@@ -122,15 +130,18 @@ fn acknowledging_in_flight_activity_keeps_newer_observations_pending() {
     let day = NaiveDate::from_ymd_opt(2026, 8, 12).unwrap();
     let original = timestamp(day, 10, 0, 0);
     let newer = timestamp(day, 10, 0, 1);
-    last_seen.record(17, original);
+    last_seen.record_end(17, original);
     let batch = last_seen.snapshot();
 
-    last_seen.record(17, newer);
-    let persisted: Vec<_> = batch[&day].iter().map(|(uid, at)| (*uid, *at)).collect();
-    last_seen.acknowledge(day, &persisted);
+    last_seen.record_end(17, newer);
+    let persisted: Vec<_> = batch[&(day, true)]
+        .iter()
+        .map(|(uid, at)| (*uid, *at))
+        .collect();
+    last_seen.acknowledge((day, true), &persisted);
 
     assert_eq!(last_seen.latest(17, Some(original)), Some(newer));
-    assert_eq!(last_seen.snapshot()[&day][&17], newer);
+    assert_eq!(last_seen.snapshot()[&(day, true)][&17], newer);
 }
 
 #[test]
@@ -149,6 +160,8 @@ fn flush_persists_multiple_users_and_daily_active_count() {
 
     last_seen.record(101, first);
     last_seen.record(102, second);
+    last_seen.record_end(101, first);
+    last_seen.record_end(102, second);
     last_seen.flush().expect("flush multiple users");
 
     assert_eq!(persisted_last_seen(&pool, 101), first);
@@ -170,8 +183,10 @@ fn stale_instance_flush_does_not_regress_persisted_activity() {
     let newer = timestamp(day, 10, 0, 0);
 
     newer_instance.record(151, newer);
+    newer_instance.record_end(151, newer);
     newer_instance.flush().expect("flush newer activity");
     stale_instance.record(151, timestamp(day, 9, 0, 0));
+    stale_instance.record_end(151, timestamp(day, 9, 0, 0));
     stale_instance.flush().expect("flush stale activity");
 
     assert_eq!(persisted_last_seen(&pool, 151), newer);
@@ -199,6 +214,7 @@ fn flush_preserves_activity_on_each_side_of_utc_midnight() {
 
     last_seen.record(201, before_midnight);
     last_seen.record(201, at_midnight);
+    last_seen.record_end(201, at_midnight);
     last_seen.flush().expect("flush midnight activity");
 
     assert_eq!(persisted_last_seen(&pool, 201), at_midnight);
@@ -217,7 +233,7 @@ fn failed_flush_retains_activity_until_a_newer_observation_can_persist() {
             "CREATE TEMP TABLE user_extra (
                 LIKE public.user_extra INCLUDING ALL,
                 CONSTRAINT test_last_seen_limit
-                    CHECK (last_seen_at < TIMESTAMP '2026-08-12 10:00:00')
+                    CHECK (last_active_at < TIMESTAMP '2026-08-12 10:00:00')
              );
              CREATE TEMP TABLE activity_daily_metrics (LIKE public.activity_daily_metrics INCLUDING ALL);",
         )
@@ -231,13 +247,14 @@ fn failed_flush_retains_activity_until_a_newer_observation_can_persist() {
 
     last_seen.record(301, rejected);
     assert!(last_seen.flush().is_err());
-    assert_eq!(last_seen.latest(301, Some(initial)), Some(rejected));
+    assert_eq!(last_seen.latest(301, Some(initial)), Some(initial));
 
     pool.get()
         .expect("get test database connection")
         .batch_execute("ALTER TABLE user_extra DROP CONSTRAINT test_last_seen_limit;")
         .expect("remove test-only constraint");
     last_seen.record(301, newer);
+    last_seen.record_end(301, newer);
     last_seen.flush().expect("flush retained newer activity");
 
     assert_eq!(persisted_last_seen(&pool, 301), newer);
@@ -254,6 +271,7 @@ fn flush_creates_missing_user_before_acknowledging() {
     let seen = timestamp(day, 10, 0, 0);
     let last_seen = last_seen(pool.clone());
     last_seen.record(412, seen);
+    last_seen.record_end(412, seen);
     last_seen.flush().unwrap();
     assert_eq!(persisted_last_seen(&pool, 412), seen);
     assert_eq!(active_users(&pool, day), 1);
@@ -268,7 +286,7 @@ fn midnight_retry_does_not_duplicate_committed_day() {
     };
     pool.get().unwrap().batch_execute(
         "CREATE TEMP TABLE user_extra (LIKE public.user_extra INCLUDING ALL,
-             CONSTRAINT test_midnight CHECK (last_seen_at < TIMESTAMP '2026-08-13'));
+             CONSTRAINT test_midnight CHECK (last_active_at < TIMESTAMP '2026-08-13'));
          CREATE TEMP TABLE activity_daily_metrics (LIKE public.activity_daily_metrics INCLUDING ALL);"
     ).unwrap();
     let day = NaiveDate::from_ymd_opt(2026, 8, 12).unwrap();
@@ -286,4 +304,31 @@ fn midnight_retry_does_not_duplicate_committed_day() {
     last_seen.flush().unwrap();
     assert_eq!(active_users(&pool, day), 1);
     assert_eq!(active_users(&pool, next), 1);
+}
+
+#[test]
+fn end_after_midnight_does_not_count_as_activity() {
+    let Some(pool) = test_pool() else {
+        return;
+    };
+    create_activity_tables(&pool);
+    let day = NaiveDate::from_ymd_opt(2026, 8, 12).unwrap();
+    let next = day.succ_opt().unwrap();
+    let last_seen = last_seen(pool.clone());
+    last_seen.record(51, timestamp(day, 23, 59, 30));
+    last_seen.record_end(51, timestamp(next, 0, 0, 30));
+    last_seen.flush().unwrap();
+    assert_eq!(active_users(&pool, day), 1);
+    assert_eq!(persisted_last_seen(&pool, 51), timestamp(next, 0, 0, 30));
+    let absent = activity_daily_metrics::table
+        .find(next)
+        .select(activity_daily_metrics::active_users)
+        .first::<i64>(&mut pool.get().unwrap())
+        .optional()
+        .unwrap();
+    assert_eq!(absent, None);
+    last_seen.record(51, timestamp(next, 1, 0, 0));
+    last_seen.flush().unwrap();
+    assert_eq!(active_users(&pool, next), 1);
+    assert_eq!(persisted_last_seen(&pool, 51), timestamp(next, 0, 0, 30));
 }

@@ -12,10 +12,9 @@ const MAX_PENDING: usize = 100_000;
 #[derive(Clone)]
 pub(super) struct Observation {
     pub uid: i32,
-    pub at: NaiveDateTime,
+    pub active_at: Option<NaiveDateTime>,
     pub version: Option<String>,
     pub new_clients: i64,
-    pub new_users: i64,
     pub rebinds: i64,
     pub sequence: u64,
     pub queued: Instant,
@@ -37,6 +36,7 @@ impl Pending {
         at: NaiveDateTime,
         version: Option<&str>,
         binding: BindingChange,
+        active: bool,
     ) -> bool {
         let key = (at.date(), client.to_owned());
         if !self.entries.contains_key(&key) && self.entries.len() >= MAX_PENDING {
@@ -46,21 +46,21 @@ impl Pending {
         let sequence = self.sequence;
         let entry = self.entries.entry(key).or_insert_with(|| Observation {
             uid,
-            at,
+            active_at: None,
             version: None,
             new_clients: 0,
-            new_users: 0,
             rebinds: 0,
             sequence,
             queued: Instant::now(),
         });
         entry.uid = uid;
-        entry.at = entry.at.max(at);
+        if active {
+            entry.active_at = Some(entry.active_at.map_or(at, |previous| previous.max(at)));
+        }
         if let Some(version) = version {
             entry.version = Some(version.to_owned());
         }
         entry.new_clients += i64::from(binding.new_client);
-        entry.new_users += i64::from(binding.new_user);
         entry.rebinds += i64::from(binding.rebound);
         entry.sequence = sequence;
         true
@@ -102,7 +102,6 @@ impl Pending {
                 self.entries.remove(key);
             } else {
                 current.new_clients -= snapshot.new_clients;
-                current.new_users -= snapshot.new_users;
                 current.rebinds -= snapshot.rebinds;
             }
         }
@@ -148,11 +147,13 @@ impl ClientTrackingService {
                     .select((clients::last_active, clients::last_active_uid))
                     .first::<(NaiveDateTime, i32)>(conn)
                     .optional()?;
-                let active = existing
-                    .as_ref()
-                    .map_or(0, |(at, _)| i64::from(at.date() < day));
+                let active = existing.as_ref().map_or(0, |(at, _)| {
+                    i64::from(observation.active_at.is_some() && at.date() < day)
+                });
                 if let Some((last_active, owner)) = existing {
-                    let at = last_active.max(observation.at);
+                    let at = observation
+                        .active_at
+                        .map_or(last_active, |at| last_active.max(at));
                     if let Some(version) = observation
                         .version
                         .as_deref()
@@ -174,9 +175,9 @@ impl ClientTrackingService {
                     conn,
                     DailyMetricDelta {
                         day,
-                        active_users: observation.new_users,
-                        new_users: observation.new_users,
-                        active_clients: active + observation.new_clients,
+                        active_users: 0,
+                        new_users: 0,
+                        active_clients: active,
                         new_clients: observation.new_clients,
                         client_rebinds: observation.rebinds,
                         stale_clients_purged: 0,
@@ -302,39 +303,49 @@ mod tests {
     }
 
     #[test]
-    fn binding_initializes_user_before_handler_and_counts_once_after_flush() {
+    fn binding_preserves_metadata_without_counting_activity() {
         let Some(service) = fixture() else {
             return;
         };
         use crate::schema::{activity_daily_metrics, user_extra};
-        service.record_activity(17, "new-user", None).unwrap();
-        let preferences = user_extra::table
-            .find(17)
-            .select(user_extra::sticker_pack_order)
-            .first::<serde_json::Value>(&mut service.db.get().unwrap())
-            .unwrap();
-        assert_eq!(preferences, serde_json::json!([]));
-        // Business work can update the initialized row before analytics persist.
-        diesel::update(user_extra::table.find(17))
-            .set(user_extra::sticker_pack_order.eq(serde_json::json!([7])))
-            .execute(&mut service.db.get().unwrap())
+        service
+            .record_activity(17, "new-user", Some("1.0"))
             .unwrap();
         service.flush_pending_activity().unwrap();
-        service.flush_pending_activity().unwrap();
-        let counts = activity_daily_metrics::table
+        assert_eq!(
+            user_extra::table
+                .find(17)
+                .count()
+                .get_result::<i64>(&mut service.db.get().unwrap())
+                .unwrap(),
+            0
+        );
+        let (active_users, active_clients, new_clients) = activity_daily_metrics::table
             .find(Utc::now().date_naive())
             .select((
-                activity_daily_metrics::new_users,
                 activity_daily_metrics::active_users,
+                activity_daily_metrics::active_clients,
+                activity_daily_metrics::new_clients,
             ))
-            .first::<(i64, i64)>(&mut service.db.get().unwrap())
+            .first::<(i64, i64, i64)>(&mut service.db.get().unwrap())
             .unwrap();
-        assert_eq!(counts, (1, 1));
-        let preferences = user_extra::table
-            .find(17)
-            .select(user_extra::sticker_pack_order)
-            .first::<serde_json::Value>(&mut service.db.get().unwrap())
+        assert_eq!((active_users, active_clients, new_clients), (0, 0, 1));
+        let (last_active, version) = clients::table
+            .find("new-user")
+            .select((clients::last_active, clients::last_app_version))
+            .first::<(NaiveDateTime, Option<String>)>(&mut service.db.get().unwrap())
             .unwrap();
-        assert_eq!(preferences, serde_json::json!([7]));
+        assert_eq!(last_active, chrono::DateTime::UNIX_EPOCH.naive_utc());
+        assert_eq!(version.as_deref(), Some("1.0"));
+        service
+            .record_client_activity(17, "new-user", None)
+            .unwrap();
+        service.flush_pending_activity().unwrap();
+        let active_clients = activity_daily_metrics::table
+            .find(Utc::now().date_naive())
+            .select(activity_daily_metrics::active_clients)
+            .first::<i64>(&mut service.db.get().unwrap())
+            .unwrap();
+        assert_eq!(active_clients, 1);
     }
 }

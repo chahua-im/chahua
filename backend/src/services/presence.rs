@@ -1,8 +1,8 @@
 //! Scoped WebSocket presence snapshots.
 //!
 //! Presence is intentionally process-local: the connection registry is the source of live
-//! status, while PostgreSQL supplies authorization and the HTTP/heartbeat-tracked last-seen
-//! value. This service never writes to the database.
+//! status, while PostgreSQL supplies authorization and persisted active-period observations.
+//! This service never writes to the database.
 
 mod changes;
 pub use changes::{take_pending_changes, PresenceChange, PresenceChanges};
@@ -171,6 +171,7 @@ impl PresenceSnapshotService {
         metrics: Arc<PresenceMetrics>,
         last_seen: Arc<LastSeen>,
     ) -> Self {
+        registry.set_last_seen(last_seen.clone());
         Self {
             db,
             registry,
@@ -370,20 +371,33 @@ fn load_visible_users(
         .iter()
         .filter_map(|uid| last_seen.latest(*uid, None).map(|at| (*uid, at)))
         .collect();
-    let presence_by_uid: HashMap<i32, (NaiveDateTime, PresenceVisibility)> = user_extra::table
-        .filter(user_extra::uid.eq_any(policy_uids))
-        .select((
-            user_extra::uid,
-            user_extra::last_seen_at,
-            user_extra::presence_visibility,
-        ))
-        .load::<(i32, NaiveDateTime, PresenceVisibility)>(conn)?
-        .into_iter()
-        .map(|(uid, last_seen_at, visibility)| (uid, (last_seen_at, visibility)))
-        .collect();
+    let presence_by_uid: HashMap<i32, (NaiveDateTime, Option<NaiveDateTime>, PresenceVisibility)> =
+        user_extra::table
+            .filter(user_extra::uid.eq_any(policy_uids))
+            .select((
+                user_extra::uid,
+                user_extra::last_seen_at,
+                diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Timestamp>>(
+                    "user_extra.last_active_at",
+                ),
+                user_extra::presence_visibility,
+            ))
+            .load::<(
+                i32,
+                NaiveDateTime,
+                Option<NaiveDateTime>,
+                PresenceVisibility,
+            )>(conn)?
+            .into_iter()
+            .map(|(uid, last_seen_at, last_active_at, visibility)| {
+                (uid, (last_seen_at, last_active_at, visibility))
+            })
+            .collect();
     let viewer_visibility = presence_by_uid
         .get(&viewer_uid)
-        .map_or(PresenceVisibility::Everyone, |(_, visibility)| *visibility);
+        .map_or(PresenceVisibility::Everyone, |(_, _, visibility)| {
+            *visibility
+        });
 
     let now = Utc::now();
     Ok(user_ids
@@ -399,7 +413,9 @@ fn load_visible_users(
             }
             let peer_visibility = presence_by_uid
                 .get(&uid)
-                .map_or(PresenceVisibility::Everyone, |(_, visibility)| *visibility);
+                .map_or(PresenceVisibility::Everyone, |(_, _, visibility)| {
+                    *visibility
+                });
             let exact = uid == viewer_uid
                 || relationships.get(&uid).is_some_and(|relationship| {
                     presence_is_visible(
@@ -414,10 +430,14 @@ fn load_visible_users(
                 });
             let persisted = presence_by_uid
                 .get(&uid)
-                .map(|(at, _)| *at)
+                .map(|(at, _, _)| *at)
                 .max(observed_by_uid.get(&uid).copied());
-            let last_seen_at = last_seen
-                .latest(uid, persisted)
+            let ended = last_seen.latest(uid, persisted);
+            let active = presence_by_uid.get(&uid).and_then(|(_, at, _)| *at);
+            let last_seen_at = registry
+                .active_period_end(uid)
+                .or_else(|| last_seen_with_crash_fallback(ended, active, now.naive_utc()))
+                .filter(|at| at.and_utc().timestamp() > 0)
                 .map(|at| DateTime::<Utc>::from_naive_utc_and_offset(at, Utc));
             user_presence(
                 uid,
@@ -428,6 +448,17 @@ fn load_visible_users(
             )
         })
         .collect())
+}
+
+fn last_seen_with_crash_fallback(
+    ended: Option<NaiveDateTime>,
+    active: Option<NaiveDateTime>,
+    now: NaiveDateTime,
+) -> Option<NaiveDateTime> {
+    match active.filter(|at| at.and_utc().timestamp() > 0 && ended.is_none_or(|end| *at > end)) {
+        Some(at) => Some((at + chrono::Duration::seconds(60)).min(now)),
+        None => ended,
+    }
 }
 
 fn blocked_presence(uid: i32, peer: &social::PeerRelationship) -> Option<UserPresenceResponse> {
@@ -463,7 +494,11 @@ fn user_presence(
         uid,
         online: exact && state == Some(AppPresenceState::Active),
         away: (exact && state == Some(AppPresenceState::Inactive)).then_some(true),
-        last_seen_at: if exact { last_seen_at } else { None },
+        last_seen_at: if exact && state != Some(AppPresenceState::Active) {
+            last_seen_at
+        } else {
+            None
+        },
         last_seen_bucket,
     }
 }
@@ -534,6 +569,31 @@ mod tests {
     use crate::services::ws_registry::WsMetrics;
     use diesel::r2d2::ConnectionManager;
     use prometheus::Registry;
+
+    #[test]
+    fn crash_fallback_preserves_explicit_ends_and_caps_silent_expiry() {
+        let active = chrono::DateTime::from_timestamp(1_000, 0)
+            .unwrap()
+            .naive_utc();
+        let after = active + chrono::Duration::seconds(10);
+        let late = active + chrono::Duration::seconds(100);
+        assert_eq!(
+            last_seen_with_crash_fallback(None, Some(active), after),
+            Some(after)
+        );
+        assert_eq!(
+            last_seen_with_crash_fallback(None, Some(active), late),
+            Some(active + chrono::Duration::seconds(60))
+        );
+        assert_eq!(
+            last_seen_with_crash_fallback(Some(after), Some(active), late),
+            Some(after)
+        );
+        assert_eq!(
+            last_seen_with_crash_fallback(Some(active), Some(active), late),
+            Some(active)
+        );
+    }
 
     #[test]
     fn blocked_friends_receive_long_ago_in_both_directions_despite_share_overrides() {

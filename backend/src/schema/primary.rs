@@ -585,6 +585,7 @@ diesel::table! {
         mute_direct_chats_by_default -> Bool,
         show_membership_messages -> Bool,
         show_unread_message_count -> Bool,
+        last_active_at -> Nullable<Timestamp>,
     }
 }
 

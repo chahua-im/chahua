@@ -1028,7 +1028,7 @@ impl NewUserExtra {
         Self {
             uid,
             first_seen_at: now,
-            last_seen_at: now,
+            last_seen_at: chrono::DateTime::UNIX_EPOCH.naive_utc(),
             sticker_pack_order: serde_json::json!([]),
             verification_mode: FriendAddVerificationMode::Direct,
             verification_question: None,

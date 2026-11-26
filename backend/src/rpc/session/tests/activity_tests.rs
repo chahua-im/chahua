@@ -18,7 +18,7 @@ async fn call(
 }
 
 #[tokio::test]
-async fn ordinary_calls_and_refresh_observe_activity_without_changing_presence() {
+async fn ordinary_calls_and_refresh_do_not_observe_activity() {
     let Some(services) = crate::rpc::test_support::services().await else {
         return;
     };
@@ -29,29 +29,21 @@ async fn ordinary_calls_and_refresh_observe_activity_without_changing_presence()
         .expect("issue session");
     let (input, mut output, task) = open_authenticated(services.clone(), token).await;
 
-    let before_call = services
-        .client_tracking
-        .last_seen
-        .latest(1, None)
-        .expect("bind records observed activity");
+    let before_call = services.client_tracking.last_seen.latest(1, None);
     let response = call(&input, &mut output, "me", "users.getMe", json!({})).await;
     assert_eq!(response["result"]["uid"], 1);
-    let after_call = services
-        .client_tracking
-        .last_seen
-        .latest(1, None)
-        .expect("ordinary RPC records observed activity");
-    assert!(after_call >= before_call);
+    assert_eq!(
+        services.client_tracking.last_seen.latest(1, None),
+        before_call
+    );
 
-    let before_refresh = after_call;
+    let before_refresh = before_call;
     let response = call(&input, &mut output, "refresh", "auth.refresh", json!({})).await;
     assert!(response["result"]["token"].is_string());
-    let after_refresh = services
-        .client_tracking
-        .last_seen
-        .latest(1, None)
-        .expect("refresh records observed activity");
-    assert!(after_refresh >= before_refresh);
+    assert_eq!(
+        services.client_tracking.last_seen.latest(1, None),
+        before_refresh
+    );
 
     services
         .client_tracking
@@ -75,7 +67,7 @@ async fn ordinary_calls_and_refresh_observe_activity_without_changing_presence()
 }
 
 #[tokio::test]
-async fn binding_failure_rejects_ordinary_operation_before_its_transaction() {
+async fn ordinary_operation_does_not_rebind_client() {
     let Some(services) = crate::rpc::test_support::services().await else {
         return;
     };
@@ -110,14 +102,15 @@ async fn binding_failure_rejects_ordinary_operation_before_its_transaction() {
         json!({"name":"must not commit"}),
     )
     .await;
-    assert_eq!(response["error"]["code"], 1500);
+    assert!(response.get("result").is_some(), "{response}");
     let after = crate::schema::groups::table
         .count()
         .get_result::<i64>(&mut services.db.get().expect("test DB connection"))
         .expect("count groups");
     assert_eq!(
-        after, before,
-        "binding failure precedes the business transaction"
+        after,
+        before + 1,
+        "ordinary operations do not attempt a client rebind"
     );
 
     close_session(input, output, task).await;
@@ -188,7 +181,7 @@ async fn active_controls_buffer_observation_while_inactive_controls_do_not() {
         .issue_session(1, "rpc-control-activity", 0)
         .expect("issue session");
     let (input, mut output, task) = open_authenticated(services.clone(), token).await;
-    let before = services.client_tracking.last_seen.latest(1, None);
+    assert_eq!(services.client_tracking.last_seen.latest(1, None), None);
 
     let active = call(
         &input,
@@ -199,12 +192,7 @@ async fn active_controls_buffer_observation_while_inactive_controls_do_not() {
     )
     .await;
     assert_eq!(active["result"], Value::Null);
-    let after_active = services
-        .client_tracking
-        .last_seen
-        .latest(1, None)
-        .expect("active control buffers observation immediately");
-    assert!(before.is_none_or(|before| after_active >= before));
+    assert_eq!(services.client_tracking.last_seen.latest(1, None), None);
 
     let inactive = call(
         &input,
@@ -215,10 +203,9 @@ async fn active_controls_buffer_observation_while_inactive_controls_do_not() {
     )
     .await;
     assert_eq!(inactive["result"], Value::Null);
-    assert_eq!(
-        services.client_tracking.last_seen.latest(1, None),
-        Some(after_active),
-        "inactive controls retain liveness but do not record activity"
+    assert!(
+        services.client_tracking.last_seen.latest(1, None).is_some(),
+        "ending an active period records last seen"
     );
     assert_eq!(
         services.ws_registry.online_connections(1)[0].app_state,
