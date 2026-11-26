@@ -7,6 +7,10 @@ app_addr = "0.0.0.0:3000"
 metrics_addr = "0.0.0.0:3001"
 # cors_allowed_origins = ["https://chat.example.com"]
 
+[discuz]
+# PostgreSQL schema containing the Discuz user and usergroup tables.
+schema = "discuz"
+
 [logging]
 format = "json"
 filter = "info"

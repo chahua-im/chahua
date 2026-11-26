@@ -18,7 +18,7 @@ function fixture(t) {
   const root = resolve(parent, 'main checkout');
   mkdirSync(root);
   mkdirSync(resolve(root, 'runspace'));
-  for (const file of ['dev.mjs', 'config.mjs', 'processes.mjs', 'docker-compose.yml', 'seed.py']) {
+  for (const file of ['dev.mjs', 'config.mjs', 'processes.mjs', 'docker-compose.yml', 'seed.py', 'discuz_bootstrap.sql']) {
     cpSync(resolve(source, file), resolve(root, 'runspace', file));
   }
   writeFileSync(resolve(root, '.gitignore'), '.env\nnode_modules/\n*.log\n');

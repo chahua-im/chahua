@@ -9,6 +9,26 @@ use serde::Deserialize;
 use std::{net::SocketAddr, sync::Arc};
 
 pub const DEFAULT_MAX_ATTACHMENT_FILE_SIZE_BYTES: i64 = 50 * 1024 * 1024;
+pub const DEFAULT_DISCUZ_SCHEMA: &str = "discuz";
+
+const INVALID_DISCUZ_SCHEMA_ERROR: &str = "discuz.schema must be a valid PostgreSQL identifier (1-63 ASCII letters, digits, or underscores, starting with a letter or underscore)";
+
+pub(crate) fn validate_discuz_schema(raw: &str) -> Result<String, &'static str> {
+    let bytes = raw.as_bytes();
+    if bytes.is_empty() || bytes.len() > 63 {
+        return Err(INVALID_DISCUZ_SCHEMA_ERROR);
+    }
+    if !(bytes[0].is_ascii_alphabetic() || bytes[0] == b'_') {
+        return Err(INVALID_DISCUZ_SCHEMA_ERROR);
+    }
+    if !bytes[1..]
+        .iter()
+        .all(|b| b.is_ascii_alphanumeric() || *b == b'_')
+    {
+        return Err(INVALID_DISCUZ_SCHEMA_ERROR);
+    }
+    Ok(raw.to_string())
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LogFormat {
@@ -59,6 +79,7 @@ pub struct ApnsConfig {
 pub struct AppConfig {
     pub server: ServerConfig,
     pub database_url: String,
+    pub discuz_schema: String,
     pub media: Arc<MediaConfig>,
     pub link_previews: Arc<LinkPreviewConfig>,
     pub avatars: Option<Arc<DiscuzAvatarConfig>>,
@@ -79,6 +100,7 @@ pub struct AppConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct ConfigFile {
     server: ServerSettings,
+    discuz: DiscuzSettings,
     media: MediaSettings,
     auth: AuthSettings,
     group_chat: GroupChatSettings,
@@ -98,6 +120,11 @@ struct ServerSettings {
     app_addr: Option<String>,
     metrics_addr: Option<String>,
     cors_allowed_origins: Option<Vec<String>>,
+}
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct DiscuzSettings {
+    schema: Option<String>,
 }
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -248,6 +275,7 @@ impl AppConfig {
     fn resolve(file: ConfigFile, env: impl Fn(&str) -> Option<String>, debug_build: bool) -> Self {
         let ConfigFile {
             server,
+            discuz,
             media,
             auth,
             group_chat,
@@ -423,6 +451,10 @@ impl AppConfig {
                 cors_allowed_origins,
             },
             database_url: required(env("DATABASE_URL"), "DATABASE_URL"),
+            discuz_schema: validate_discuz_schema(
+                discuz.schema.as_deref().unwrap_or(DEFAULT_DISCUZ_SCHEMA),
+            )
+            .unwrap_or_else(|error| panic!("{error}")),
             media: Arc::new(MediaConfig {
                 bucket: required(env("S3_BUCKET_NAME").or(media.bucket), "S3_BUCKET_NAME"),
                 attachment_prefix: env("ATTACHMENTS_PREFIX")
@@ -811,12 +843,14 @@ mod tests {
         assert!(!config.auth.debug_auth_enabled);
         assert!(!config.message_search_enabled);
         assert!(config.avatars.is_none());
+        assert_eq!(config.discuz_schema, "discuz");
     }
 
     #[test]
     fn example_configuration_and_rust_site_boundary() {
         let file = parse(include_str!("../config.example.toml"));
         let config = AppConfig::resolve(file, env(&base()), false);
+        assert_eq!(config.discuz_schema, "discuz");
         assert_eq!(config.media.bucket, "env-bucket");
         assert!(toml::from_str::<ConfigFile>(
             "[[link_previews.sites]]\nhost='example.com'\nhandler='zhihu'"
@@ -923,5 +957,46 @@ debug_auth_enabled = true
         let headers = config.link_previews.headers_for("example.com").unwrap();
         assert_eq!(headers["cookie"], "session=secret");
         assert!(headers["cookie"].is_sensitive());
+    }
+
+    #[test]
+    fn discuz_schema_uses_toml_and_validates_identifier() {
+        let config = AppConfig::resolve(
+            parse("[discuz]\nschema = \"forum_users\"\n"),
+            env(&base()),
+            false,
+        );
+        assert_eq!(config.discuz_schema, "forum_users");
+
+        let max_len = "a".repeat(63);
+        let config = AppConfig::resolve(
+            parse(&format!("[discuz]\nschema = \"{max_len}\"\n")),
+            env(&base()),
+            false,
+        );
+        assert_eq!(config.discuz_schema, max_len);
+
+        let too_long = "a".repeat(64);
+        for invalid in [
+            "",
+            "   ",
+            "123abc",
+            "discuz-v2",
+            "discuz.other",
+            "discuz; DROP TABLE users",
+            "discuz\\\"",
+            too_long.as_str(),
+        ] {
+            let file = parse(&format!("[discuz]\nschema = \"{invalid}\"\n"));
+            let error = std::panic::catch_unwind(|| AppConfig::resolve(file, env(&base()), false))
+                .err()
+                .unwrap();
+            assert_eq!(
+                error.downcast_ref::<String>().map(String::as_str),
+                Some(INVALID_DISCUZ_SCHEMA_ERROR)
+            );
+        }
+
+        assert!(toml::from_str::<ConfigFile>("[discuz]\nunknown = \"x\"\n").is_err());
     }
 }

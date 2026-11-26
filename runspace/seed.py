@@ -103,6 +103,14 @@ def fixture_user(uid: int) -> tuple[str, str, int, str, str]:
     return name, f"seed-user-{uid:03d}@example.test", group_id, company, occupation
 
 
+def discuz_schema_sql() -> str:
+    path = Path(__file__).resolve().parent / "discuz_bootstrap.sql"
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise SeedError(f"cannot read {path.name}: {exc}") from exc
+
+
 def bootstrap_sql() -> str:
     statements = [
         "BEGIN;",
@@ -534,6 +542,7 @@ def main() -> int:
     args = parse_args()
     try:
         api_url = validate_api_url(args.api_url)
+        compose_psql(discuz_schema_sql())
         compose_psql(bootstrap_sql())
         state_path = args.state_file
         state = load_state(state_path, database_identity())

@@ -120,7 +120,7 @@ cp backend/config.example.toml backend/config.local.toml
 CHAHUA_CONFIG_PATH="$PWD/backend/config.local.toml" node runspace/dev.mjs dev
 ```
 
-The file covers server binds/CORS, logging, media settings and region, development
+The file covers server binds/CORS, logging, the Discuz schema (`[discuz]`), media settings and region, development
 authentication, avatars, message search, public push/APNs metadata, node IDs, and link-preview request headers.
 Runspace's generated bind/storage environment still wins,
 preserving worktree isolation. The Docker image defaults to `/config/config.toml`;
@@ -193,7 +193,7 @@ HTTP supports image uploads when the page itself uses HTTP. To test recording an
 
 ## Test data and development tools
 
-`init`/`seed` create 100 users (UIDs 1–100), four groups, three DMs, messages, threads, reactions, and mixed read states. UID 1 is the development administrator. Search for `seed-search-lantern` to exercise search. Fixture progress is shared and tied to the PostgreSQL cluster; removing the state file can duplicate seeded content. Do not run seeding just to configure a new worktree.
+`init`/`seed` bootstrap the local `discuz` schema tables from [`runspace/discuz_bootstrap.sql`](../runspace/discuz_bootstrap.sql) and create 100 users (UIDs 1–100), four groups, three DMs, messages, threads, reactions, and mixed read states. UID 1 is the development administrator. Search for `seed-search-lantern` to exercise search. Fixture progress is shared and tied to the PostgreSQL cluster; removing the state file can duplicate seeded content. Do not run seeding just to configure a new worktree.
 
 Local frontend development obtains a session for UID 1 when no existing token or development preset takes precedence. To switch a tab's development identity:
 

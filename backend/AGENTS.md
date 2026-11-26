@@ -15,7 +15,7 @@ Parse server-wide configuration in `src/config.rs` (`AppConfig::from_env`), not 
 
 ## Auth
 
-Auth uses JWTs (`src/utils/auth.rs`), with authorization policy in `src/services/authz.rs`. User identity is currently sourced from Discuz tables (`src/schema/discuz*.rs`, `src/services/user.rs`). A design plan for extracting a proper auth/user-provider boundary lives in `docs/auth-provider/` at the repo root — read it before making auth-related changes.
+Auth uses JWTs (`src/utils/auth.rs`), with authorization policy in `src/services/authz.rs`. User identity is currently sourced from Discuz tables (`src/services/user.rs`). A design plan for extracting a proper auth/user-provider boundary lives in `docs/auth-provider/` at the repo root — read it before making auth-related changes.
 
 ## Design background
 

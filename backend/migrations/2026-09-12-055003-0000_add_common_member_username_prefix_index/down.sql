@@ -1,1 +1,0 @@
-DROP INDEX discuz.idx_common_member_username_prefix;

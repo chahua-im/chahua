@@ -11,17 +11,30 @@ use crate::{
     models::{GroupKind, GroupRole, MembershipMessageVisibility},
 };
 
+fn quoted_discuz_schema(conn: &mut PgConnection) -> String {
+    let schema = crate::metrics::queries::connection_discuz_schema(conn);
+    debug_assert!(crate::config::validate_discuz_schema(&schema).is_ok());
+    format!("\"{schema}\"")
+}
+
+#[derive(QueryableByName)]
+struct GroupIdRow {
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    groupid: i32,
+}
+
 pub(super) fn lookup_discuz_group_id(
     conn: &mut PgConnection,
     uid: i32,
 ) -> QueryResult<Option<i32>> {
-    use crate::schema::discuz::discuz::common_member;
-
-    common_member::table
-        .find(uid)
-        .select(common_member::groupid)
-        .first(conn)
-        .optional()
+    let schema = quoted_discuz_schema(conn);
+    sql_query(format!(
+        "SELECT groupid FROM {schema}.common_member WHERE uid = $1"
+    ))
+    .bind::<diesel::sql_types::Integer, _>(uid)
+    .get_result::<GroupIdRow>(conn)
+    .optional()
+    .map(|row| row.map(|row| row.groupid))
 }
 
 pub fn load_chat_settings(
@@ -171,14 +184,21 @@ struct UserUidRow {
     uid: i32,
 }
 
-#[derive(Queryable)]
+#[derive(QueryableByName)]
 struct DiscuzUserProfileRow {
+    #[diesel(sql_type = diesel::sql_types::Integer)]
     uid: i32,
+    #[diesel(sql_type = diesel::sql_types::Text)]
     username: String,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::SmallInt>)]
     gender: Option<i16>,
+    #[diesel(sql_type = diesel::sql_types::Integer)]
     group_id: i32,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
     group_name: Option<String>,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
     chat_group_color: Option<String>,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
     chat_group_color_dark: Option<String>,
 }
 
@@ -211,10 +231,11 @@ pub fn search_group_member_uids(
     let username_prefix = search.map(|search| search.username_prefix.clone());
     let exact_uid = search.and_then(|search| search.exact_uid);
 
-    let query = sql_query(
+    let schema = quoted_discuz_schema(conn);
+    let query = sql_query(format!(
         "SELECT gm.uid
          FROM group_membership AS gm
-         JOIN discuz.common_member AS cm
+         JOIN {schema}.common_member AS cm
            ON cm.uid = gm.uid
          WHERE gm.chat_id = $1
            AND ($2::int4 IS NULL OR gm.uid > $2)
@@ -225,7 +246,7 @@ pub fn search_group_member_uids(
            )
          ORDER BY gm.uid ASC
          LIMIT $6",
-    )
+    ))
     .bind::<diesel::sql_types::BigInt, _>(chat_id)
     .bind::<diesel::sql_types::Nullable<diesel::sql_types::Integer>, _>(after)
     .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(username_prefix)
@@ -243,19 +264,20 @@ pub fn search_user_uids_by_prefix(
     username_prefix: &str,
     limit: i64,
 ) -> QueryResult<Vec<i32>> {
+    let schema = quoted_discuz_schema(conn);
     // Preserve UID ordering while preventing PostgreSQL from favoring a full
     // primary-key scan solely to satisfy the outer ORDER BY.
-    sql_query(
+    sql_query(format!(
         "SELECT matches.uid
          FROM (
              SELECT cm.uid
-             FROM discuz.common_member AS cm
+             FROM {schema}.common_member AS cm
              WHERE LOWER(BTRIM(cm.username::text)) LIKE LOWER($1) || '%'
              OFFSET 0
          ) AS matches
          ORDER BY matches.uid ASC
          LIMIT $2",
-    )
+    ))
     .bind::<diesel::sql_types::Text, _>(username_prefix)
     .bind::<diesel::sql_types::BigInt, _>(limit)
     .load::<UserUidRow>(conn)
@@ -268,31 +290,32 @@ pub fn lookup_user_profiles(
 ) -> QueryResult<HashMap<i32, UserProfile>> {
     let started = std::time::Instant::now();
     let metrics = crate::metrics::queries::connection_metrics(conn);
+    let schema = quoted_discuz_schema(conn);
     let result = (|| {
-        use crate::schema::discuz::discuz::common_member::dsl as cm_dsl;
-        use crate::schema::discuz::discuz::common_usergroup::dsl as cug_dsl;
-        use crate::schema::discuz_manual::discuz::common_member_profile::dsl as cmp_dsl;
-        use crate::schema::usergroup_extra::dsl as uge_dsl;
-
         if uids.is_empty() {
             return Ok(HashMap::new());
         }
 
-        let rows = cm_dsl::common_member
-            .left_join(cmp_dsl::common_member_profile.on(cm_dsl::uid.eq(cmp_dsl::uid)))
-            .left_join(cug_dsl::common_usergroup.on(cm_dsl::groupid.eq(cug_dsl::groupid)))
-            .left_join(uge_dsl::usergroup_extra.on(cm_dsl::groupid.eq(uge_dsl::groupid)))
-            .filter(cm_dsl::uid.eq_any(uids))
-            .select((
-                cm_dsl::uid,
-                cm_dsl::username,
-                cmp_dsl::gender.nullable(),
-                cm_dsl::groupid,
-                cug_dsl::grouptitle.nullable(),
-                uge_dsl::chat_group_color.nullable(),
-                uge_dsl::chat_group_color_dark.nullable(),
-            ))
-            .load::<DiscuzUserProfileRow>(conn)?;
+        let rows = sql_query(format!(
+            "SELECT
+                 cm.uid,
+                 cm.username::text AS username,
+                 cmp.gender,
+                 cm.groupid AS group_id,
+                 cug.grouptitle::text AS group_name,
+                 uge.chat_group_color::text AS chat_group_color,
+                 uge.chat_group_color_dark::text AS chat_group_color_dark
+             FROM {schema}.common_member AS cm
+             LEFT JOIN {schema}.common_member_profile AS cmp
+               ON cm.uid = cmp.uid
+             LEFT JOIN {schema}.common_usergroup AS cug
+               ON cm.groupid = cug.groupid
+             LEFT JOIN usergroup_extra AS uge
+               ON cm.groupid = uge.groupid
+             WHERE cm.uid = ANY($1)",
+        ))
+        .bind::<diesel::sql_types::Array<diesel::sql_types::Integer>, _>(uids)
+        .load::<DiscuzUserProfileRow>(conn)?;
 
         Ok(rows
             .into_iter()
@@ -479,5 +502,87 @@ mod tests {
     #[test]
     fn normalize_discuz_username_handles_all_space_values() {
         assert_eq!(normalize_discuz_username("     "), "");
+    }
+
+    #[test]
+    fn queries_read_from_configured_discuz_schema() {
+        use diesel::connection::SimpleConnection;
+        use diesel::prelude::*;
+
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        let mut conn = PgConnection::establish(&url).unwrap();
+        conn.test_transaction::<_, diesel::result::Error, _>(|conn| {
+            let schema = "custom_discuz_test_schema";
+            conn.batch_execute(&format!(
+                "CREATE SCHEMA {schema};
+                 CREATE TABLE {schema}.common_member (
+                     uid int4 PRIMARY KEY,
+                     username bpchar(50) NOT NULL,
+                     groupid int4 NOT NULL
+                 );
+                 CREATE TABLE {schema}.common_member_profile (
+                     uid int4 PRIMARY KEY,
+                     gender int2 NOT NULL
+                 );
+                 CREATE TABLE {schema}.common_usergroup (
+                     groupid int4 PRIMARY KEY,
+                     grouptitle varchar(255) NOT NULL
+                 );
+                 INSERT INTO {schema}.common_usergroup (groupid, grouptitle)
+                 VALUES (777001, 'Custom Schema Group');
+                 INSERT INTO {schema}.common_member (uid, username, groupid)
+                 VALUES (987665201, 'CustomPrefixAlice   ', 777001),
+                        (987665202, 'CustomPrefixBob', 777001);
+                 INSERT INTO {schema}.common_member_profile (uid, gender)
+                 VALUES (987665201, 2);
+                 INSERT INTO usergroup_extra (groupid, chat_group_color, chat_group_color_dark)
+                 VALUES (777001, '#112233', '#445566')
+                 ON CONFLICT (groupid) DO UPDATE SET
+                     chat_group_color = EXCLUDED.chat_group_color,
+                     chat_group_color_dark = EXCLUDED.chat_group_color_dark;
+                 INSERT INTO groups (id, name)
+                 VALUES (987665200, 'Custom Schema Chat')
+                 ON CONFLICT (id) DO NOTHING;
+                 INSERT INTO group_membership (chat_id, uid)
+                 VALUES (987665200, 987665201), (987665200, 987665202);"
+            ))?;
+
+            crate::metrics::queries::attach_connection_discuz_schema(conn, schema);
+
+            assert_eq!(
+                super::lookup_discuz_group_id(conn, 987665201)?,
+                Some(777001)
+            );
+            assert_eq!(super::lookup_discuz_group_id(conn, 987665299)?, None);
+
+            let profiles = super::lookup_user_profiles(conn, &[987665201, 987665202])?;
+            let alice = profiles.get(&987665201).expect("alice profile");
+            assert_eq!(alice.username.as_deref(), Some("CustomPrefixAlice"));
+            assert_eq!(alice.gender, 2);
+            let group = alice.user_group.as_ref().expect("user group");
+            assert_eq!(group.group_id, 777001);
+            assert_eq!(group.name.as_deref(), Some("Custom Schema Group"));
+            assert_eq!(group.chat_group_color.as_deref(), Some("#112233"));
+            assert_eq!(group.chat_group_color_dark.as_deref(), Some("#445566"));
+
+            let bob = profiles.get(&987665202).expect("bob profile");
+            assert_eq!(bob.username.as_deref(), Some("CustomPrefixBob"));
+            assert_eq!(bob.gender, 0);
+
+            let searched = super::search_user_uids_by_prefix(conn, "customprefix", 10)?;
+            assert_eq!(searched, vec![987665201, 987665202]);
+
+            let parsed = super::parse_user_search_query(
+                Some("customprefixa"),
+                super::UserSearchMode::Autocomplete,
+            );
+            let members =
+                super::search_group_member_uids(conn, 987665200, None, 10, parsed.as_ref())?;
+            assert_eq!(members, vec![987665201]);
+            Ok(())
+        });
     }
 }

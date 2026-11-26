@@ -91,7 +91,8 @@ impl QueryMetrics {
 
 /// Per-connection context, forwarding Diesel events to the configured tracer.
 struct QueryInstrumentation {
-    metrics: Arc<QueryMetrics>,
+    metrics: Option<Arc<QueryMetrics>>,
+    discuz_schema: Arc<str>,
     inner: Option<Box<dyn Instrumentation>>,
 }
 
@@ -103,10 +104,40 @@ impl Instrumentation for QueryInstrumentation {
     }
 }
 
-/// Attach to a fresh connection, preserving the configured default instrumentation.
+/// Attach metrics to a fresh connection using the default Discuz schema,
+/// preserving the configured default instrumentation.
+#[cfg(test)]
 pub fn attach_connection_metrics(conn: &mut PgConnection, metrics: Arc<QueryMetrics>) {
+    attach_connection_context(
+        conn,
+        metrics,
+        Arc::from(crate::config::DEFAULT_DISCUZ_SCHEMA),
+    );
+}
+
+/// Attach metrics and configured Discuz schema to a fresh connection,
+/// preserving the configured default instrumentation.
+pub fn attach_connection_context(
+    conn: &mut PgConnection,
+    metrics: Arc<QueryMetrics>,
+    discuz_schema: Arc<str>,
+) {
+    conn.set_instrumentation(QueryInstrumentation {
+        metrics: Some(metrics),
+        discuz_schema,
+        inner: get_default_instrumentation(),
+    });
+}
+
+#[cfg(test)]
+pub(crate) fn attach_connection_discuz_schema(
+    conn: &mut PgConnection,
+    discuz_schema: impl Into<Arc<str>>,
+) {
+    let metrics = connection_metrics(conn);
     conn.set_instrumentation(QueryInstrumentation {
         metrics,
+        discuz_schema: discuz_schema.into(),
         inner: get_default_instrumentation(),
     });
 }
@@ -114,7 +145,14 @@ pub fn attach_connection_metrics(conn: &mut PgConnection, metrics: Arc<QueryMetr
 pub(crate) fn connection_metrics(conn: &mut PgConnection) -> Option<Arc<QueryMetrics>> {
     conn.instrumentation()
         .downcast_ref::<QueryInstrumentation>()
-        .map(|instrumentation| Arc::clone(&instrumentation.metrics))
+        .and_then(|instrumentation| instrumentation.metrics.as_ref().map(Arc::clone))
+}
+
+pub(crate) fn connection_discuz_schema(conn: &mut PgConnection) -> Arc<str> {
+    conn.instrumentation()
+        .downcast_ref::<QueryInstrumentation>()
+        .map(|instrumentation| Arc::clone(&instrumentation.discuz_schema))
+        .unwrap_or_else(|| Arc::from(crate::config::DEFAULT_DISCUZ_SCHEMA))
 }
 
 pub(crate) fn measure_receipt_query<T>(
@@ -134,11 +172,15 @@ pub(crate) fn measure_receipt_query<T>(
 
 pub struct QueryConnectionCustomizer {
     metrics: Arc<QueryMetrics>,
+    discuz_schema: Arc<str>,
 }
 
 impl QueryConnectionCustomizer {
-    pub fn new(metrics: Arc<QueryMetrics>) -> Self {
-        Self { metrics }
+    pub fn new(metrics: Arc<QueryMetrics>, discuz_schema: impl Into<Arc<str>>) -> Self {
+        Self {
+            metrics,
+            discuz_schema: discuz_schema.into(),
+        }
     }
 }
 
@@ -151,7 +193,11 @@ impl std::fmt::Debug for QueryConnectionCustomizer {
 
 impl CustomizeConnection<PgConnection, diesel::r2d2::Error> for QueryConnectionCustomizer {
     fn on_acquire(&self, conn: &mut PgConnection) -> Result<(), diesel::r2d2::Error> {
-        attach_connection_metrics(conn, Arc::clone(&self.metrics));
+        attach_connection_context(
+            conn,
+            Arc::clone(&self.metrics),
+            Arc::clone(&self.discuz_schema),
+        );
         Ok(())
     }
 }
