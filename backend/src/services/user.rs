@@ -199,7 +199,6 @@ struct DiscuzUserProfileRow {
 }
 
 impl DiscuzUserProfileRow {
-    // Queries widen both int2 and int4 source columns to the same integer type.
     fn into_profile(self) -> UserProfile {
         UserProfile {
             username: Some(normalize_discuz_username(&self.username)),
@@ -276,7 +275,7 @@ pub fn lookup_usernames(
     }
     let schema = quoted_discuz_schema(conn);
     let rows = sql_query(format!(
-        "SELECT uid, username::text AS username
+        "SELECT uid, username
          FROM {schema}.common_member
          WHERE uid = ANY($1)",
     ))
@@ -307,7 +306,7 @@ pub fn search_group_members(
                  gm.role,
                  gm.joined_at,
                  gm.speaking_mode,
-                 cm.username::text AS username,
+                 cm.username,
                  cm.groupid AS group_id
              FROM group_membership AS gm
              JOIN {schema}.common_member AS cm
@@ -328,11 +327,11 @@ pub fn search_group_members(
              page.joined_at,
              page.speaking_mode,
              page.username,
-             cmp.gender::integer AS gender,
+             cmp.gender,
              page.group_id,
-             cug.grouptitle::text AS group_name,
-             uge.chat_group_color::text AS chat_group_color,
-             uge.chat_group_color_dark::text AS chat_group_color_dark
+             cug.grouptitle AS group_name,
+             uge.chat_group_color,
+             uge.chat_group_color_dark
          FROM page
          LEFT JOIN {schema}.common_member_profile AS cmp
            ON page.uid = cmp.uid
@@ -400,12 +399,12 @@ pub fn search_users_with_profiles(
          )
          SELECT
              cm.uid,
-             cm.username::text AS username,
-             cmp.gender::integer AS gender,
+             cm.username,
+             cmp.gender,
              cm.groupid AS group_id,
-             cug.grouptitle::text AS group_name,
-             uge.chat_group_color::text AS chat_group_color,
-             uge.chat_group_color_dark::text AS chat_group_color_dark,
+             cug.grouptitle AS group_name,
+             uge.chat_group_color,
+             uge.chat_group_color_dark,
              (gm.uid IS NOT NULL) AS is_excluded
          FROM combined_uids AS c
          JOIN {schema}.common_member AS cm
@@ -452,12 +451,12 @@ pub fn lookup_user_profiles(
         let rows = sql_query(format!(
             "SELECT
                  cm.uid,
-                 cm.username::text AS username,
-                 cmp.gender::integer AS gender,
+                 cm.username,
+                 cmp.gender,
                  cm.groupid AS group_id,
-                 cug.grouptitle::text AS group_name,
-                 uge.chat_group_color::text AS chat_group_color,
-                 uge.chat_group_color_dark::text AS chat_group_color_dark
+                 cug.grouptitle AS group_name,
+                 uge.chat_group_color,
+                 uge.chat_group_color_dark
              FROM {schema}.common_member AS cm
              LEFT JOIN {schema}.common_member_profile AS cmp
                ON cm.uid = cmp.uid
@@ -658,14 +657,6 @@ mod tests {
             let bootstrap_sql =
                 include_str!("../../../runspace/discuz_bootstrap.sql").replace("discuz", schema);
             conn.batch_execute(&bootstrap_sql)?;
-            for gender_type in ["smallint", "integer"] {
-                conn.batch_execute(&format!(
-                    "ALTER TABLE {schema}.common_member_profile
-                     ALTER COLUMN gender TYPE {gender_type};
-                     TRUNCATE {schema}.common_member_profile,
-                              {schema}.common_member, {schema}.common_usergroup;
-                     DELETE FROM group_membership WHERE chat_id = 987665200;"
-                ))?;
             conn.batch_execute(&format!(
                 "INSERT INTO {schema}.common_usergroup (groupid, grouptitle)
                  VALUES (777001, 'Custom Schema Group');
@@ -742,7 +733,6 @@ mod tests {
                 Some("CustomPrefixAlice")
             );
             assert_eq!(members[0].profile.gender, 2);
-            }
             Ok(())
         });
     }

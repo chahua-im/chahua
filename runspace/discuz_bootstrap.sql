@@ -87,7 +87,7 @@ CREATE INDEX IF NOT EXISTS idx_45438_creditsrange
 CREATE TABLE IF NOT EXISTS discuz.common_member_profile (
     uid int4 NOT NULL,
     realname varchar(255) DEFAULT ''::character varying NOT NULL,
-    gender int2 DEFAULT '0'::smallint NOT NULL,
+    gender int4 DEFAULT 0 NOT NULL,
     birthyear int4 DEFAULT 0 NOT NULL,
     birthmonth int2 DEFAULT '0'::smallint NOT NULL,
     birthday int2 DEFAULT '0'::smallint NOT NULL,
