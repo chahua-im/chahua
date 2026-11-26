@@ -19,6 +19,7 @@ use crate::AppState;
 ///
 /// Unknown user IDs are reported with empty facts; this endpoint deliberately
 /// avoids profile hydration and existence checks.
+/// Empty lists return no relationships; entries equal to `uid` are ignored.
 #[utoipa::path(
     post,
     path = "/relationships",
@@ -93,9 +94,6 @@ fn validate_relationship_request(body: &RelationshipQueryRequest) -> Result<Vec<
     if body.uid <= 0 {
         return Err(AppError::BadRequest("uid is invalid"));
     }
-    if body.peer_uids.is_empty() {
-        return Err(AppError::BadRequest("peerUids must not be empty"));
-    }
     if body.peer_uids.len() > 100 {
         return Err(AppError::BadRequest("peerUids exceeds 100 entries"));
     }
@@ -107,7 +105,7 @@ fn validate_relationship_request(body: &RelationshipQueryRequest) -> Result<Vec<
             return Err(AppError::BadRequest("peerUids contains an invalid uid"));
         }
         if peer_uid == body.uid {
-            return Err(AppError::BadRequest("peerUids must not contain uid"));
+            continue;
         }
         if seen.insert(peer_uid) {
             peers.push(peer_uid);
@@ -139,10 +137,9 @@ mod tests {
 
     #[test]
     fn relationship_request_rejects_invalid_payloads() {
-        assert!(matches!(
-            validate_relationship_request(&request(Vec::new())),
-            Err(AppError::BadRequest("peerUids must not be empty"))
-        ));
+        assert!(validate_relationship_request(&request(Vec::new()))
+            .unwrap()
+            .is_empty());
         assert!(matches!(
             validate_relationship_request(&request(vec![2; 101])),
             Err(AppError::BadRequest("peerUids exceeds 100 entries"))
@@ -155,10 +152,10 @@ mod tests {
             validate_relationship_request(&request(vec![-1])),
             Err(AppError::BadRequest("peerUids contains an invalid uid"))
         ));
-        assert!(matches!(
-            validate_relationship_request(&request(vec![1])),
-            Err(AppError::BadRequest("peerUids must not contain uid"))
-        ));
+        assert_eq!(
+            validate_relationship_request(&request(vec![1, 5, 1, 6])).unwrap(),
+            vec![5, 6]
+        );
     }
 
     #[test]
