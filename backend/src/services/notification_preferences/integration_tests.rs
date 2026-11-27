@@ -13,7 +13,8 @@ fn connection() -> Option<PgConnection> {
         CREATE TEMP TABLE group_membership (chat_id BIGINT, uid INTEGER, archived BOOLEAN NOT NULL DEFAULT FALSE,
             muted_until TIMESTAMPTZ, mute_override BOOLEAN, last_read_message_id BIGINT, role group_role NOT NULL DEFAULT 'member', PRIMARY KEY(chat_id, uid));
         CREATE TEMP TABLE messages (id BIGINT PRIMARY KEY, chat_id BIGINT, reply_root_id BIGINT,
-            deleted_at TIMESTAMPTZ, is_published BOOLEAN DEFAULT TRUE, has_thread BOOLEAN DEFAULT FALSE);
+            deleted_at TIMESTAMPTZ, is_published BOOLEAN DEFAULT TRUE, has_thread BOOLEAN DEFAULT FALSE,
+            sender_uid INTEGER NOT NULL DEFAULT 9, message_type TEXT NOT NULL DEFAULT 'text');
         CREATE TEMP TABLE thread_user_states (chat_id BIGINT, uid INTEGER, thread_root_id BIGINT,
             subscribed BOOLEAN, archived BOOLEAN, last_read_message_id BIGINT);
         CREATE TEMP TABLE message_mentions (chat_id BIGINT, mentioned_uid INTEGER, message_id BIGINT, thread_root_id BIGINT);

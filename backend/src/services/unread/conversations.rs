@@ -188,7 +188,7 @@ impl UnreadService {
                 is_muted: false, // Collection counts describe unread state, including muted conversations.
             })
             .collect::<Vec<_>>();
-        let main_counts = self.count_membership_unreads(conn, &memberships)?;
+        let main_counts = self.count_membership_unreads(conn, uid, &memberships)?;
         let thread_scopes = scopes
             .iter()
             .filter(|scope| scope.thread_id.is_some())
@@ -206,6 +206,7 @@ impl UnreadService {
                          SELECT 1 FROM messages m
                          WHERE m.reply_root_id = s.thread_id AND m.id > s.read_id
                            AND m.deleted_at IS NULL AND m.is_published = TRUE
+                           AND (m.sender_uid <> $4 OR m.message_type = 'system')
                          ORDER BY m.id DESC LIMIT $3
                      ) unread
                  ) counts",
@@ -223,6 +224,7 @@ impl UnreadService {
                     .collect::<Vec<_>>(),
             )
             .bind::<BigInt, _>(MAX_UNREAD_COUNT)
+            .bind::<Integer, _>(uid)
             .load::<Count>(conn)?
             .into_iter()
             .map(|r| (r.id, r.count))
@@ -575,7 +577,7 @@ mod tests {
             INSERT INTO user_extra (uid, mute_group_chats_by_default, mute_direct_chats_by_default) VALUES (1, FALSE, FALSE);
             CREATE TEMP TABLE groups (id BIGINT PRIMARY KEY, kind TEXT NOT NULL);
             CREATE TEMP TABLE group_membership (chat_id BIGINT, uid INTEGER, archived BOOLEAN, last_read_message_id BIGINT, muted_until TIMESTAMPTZ, PRIMARY KEY(chat_id, uid));
-            CREATE TEMP TABLE messages (id BIGINT PRIMARY KEY, chat_id BIGINT, reply_root_id BIGINT, has_thread BOOLEAN DEFAULT FALSE, is_published BOOLEAN DEFAULT TRUE, deleted_at TIMESTAMPTZ);
+            CREATE TEMP TABLE messages (id BIGINT PRIMARY KEY, chat_id BIGINT, reply_root_id BIGINT, has_thread BOOLEAN DEFAULT FALSE, is_published BOOLEAN DEFAULT TRUE, deleted_at TIMESTAMPTZ, sender_uid INTEGER NOT NULL DEFAULT 2, message_type TEXT NOT NULL DEFAULT 'text');
             CREATE TEMP TABLE thread_user_states (chat_id BIGINT, thread_root_id BIGINT, uid INTEGER, subscribed BOOLEAN, archived BOOLEAN, last_read_message_id BIGINT, PRIMARY KEY(chat_id, thread_root_id, uid));
             CREATE TEMP TABLE message_mentions (chat_id BIGINT, thread_root_id BIGINT, message_id BIGINT, mentioned_uid INTEGER, PRIMARY KEY(message_id, mentioned_uid));
             INSERT INTO groups VALUES (1,'group'),(2,'dm'),(3,'group'),(4,'group');
@@ -585,6 +587,7 @@ mod tests {
             ALTER TABLE groups ADD COLUMN membership_message_visibility TEXT NOT NULL DEFAULT 'members';
             INSERT INTO messages(id,chat_id,has_thread) VALUES (10,1,TRUE),(12,1,TRUE),(13,1,FALSE),(20,2,TRUE),(21,2,FALSE),(30,3,TRUE),(31,3,FALSE),(40,4,FALSE);
             INSERT INTO messages(id,chat_id,reply_root_id) VALUES (1001,1,10),(1002,1,10),(2001,2,20),(1201,1,12),(3001,3,30);
+            INSERT INTO messages(id,chat_id,reply_root_id,sender_uid) VALUES (29,2,NULL,1),(2002,2,20,1);
             INSERT INTO messages(id,chat_id,reply_root_id,is_published) VALUES (1003,1,10,FALSE);
             INSERT INTO messages(id,chat_id,reply_root_id,deleted_at) VALUES (1004,1,10,NOW());
             INSERT INTO thread_user_states VALUES (1,10,1,TRUE,FALSE,1000),(2,20,1,TRUE,FALSE,2000),(1,12,1,FALSE,FALSE,0),(3,30,1,TRUE,FALSE,0);

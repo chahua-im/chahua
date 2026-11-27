@@ -564,7 +564,7 @@ mod tests {
                     VALUES (9876720002, 4307, 9876720000, 9876720001, NOW());"
             )?;
             let state = load_thread_read_state(conn, &UnreadService::new(), 9876720000, 9876720001, 4307).unwrap();
-            assert_eq!((state.unread_count, state.unread_mentions, state.unread_reactions), (1, 1, 0));
+            assert_eq!((state.unread_count, state.unread_mentions, state.unread_reactions), (0, 1, 0));
             assert_eq!(state.last_read_message_id, Some(9876720001));
             assert_eq!(thread_svc::get_thread_last_read_message_id(conn, 9876720000, 9876720001, 4307)?, Some(9876720001));
             Err(diesel::result::Error::RollbackTransaction)

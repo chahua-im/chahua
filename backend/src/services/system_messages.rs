@@ -139,8 +139,9 @@ mod tests {
                     assert_eq!(load_membership_message_filter(conn, uid, chat_id)?, !allowed);
                     let rows = super::super::chat_list::load_chat_page(conn, uid, false, Some(chat_id), None, 10, false)?;
                     assert_eq!(rows[0].last_message.as_ref().unwrap().id, if allowed {chat_id+2} else {chat_id+1});
-                    assert_eq!(unread.count_chat_unread(conn, uid, chat_id, None)?, if allowed {2} else {1});
-                    assert_eq!(unread.count_users_app_badges(conn, &[uid])?[&uid], 1);
+                    let expected = i64::from(uid != admin) + i64::from(allowed);
+                    assert_eq!(unread.count_chat_unread(conn, uid, chat_id, None)?, expected);
+                    assert_eq!(unread.count_users_app_badges(conn, &[uid])?[&uid], i64::from(expected > 0));
                 }
                 broadcast_policy(conn, &registry, chat_id)?;
                 for rx in [&mut admin_rx, &mut member_rx] {

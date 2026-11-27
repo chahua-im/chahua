@@ -17,7 +17,7 @@ use crate::dto::chats::{
 };
 use crate::dto::read_receipts::ReadReceiptResponse;
 use crate::errors::AppError;
-use crate::models::GroupKind;
+use crate::models::{GroupKind, MessageType};
 use crate::schema::{group_membership, messages as messages_schema};
 use crate::services::api::{members::check_membership, users::build_member_summary_map};
 use crate::services::authentication::Principal;
@@ -117,7 +117,7 @@ pub(crate) fn build_chat_list_items(
         })
         .collect::<Vec<_>>();
     let phase = stages.start("unread_counts");
-    let unread_counts = unread_service.count_membership_unreads(conn, &memberships)?;
+    let unread_counts = unread_service.count_membership_unreads(conn, uid, &memberships)?;
     drop(phase);
     let phase = stages.start("mention_counts");
     let mention_counts =
@@ -340,40 +340,42 @@ pub fn mark_as_unread(
         } else {
             "TRUE"
         };
-        let last_two: Vec<i64> = messages_schema::table
-            .filter(diesel::dsl::sql::<diesel::sql_types::Bool>(predicate))
+        let visible = || {
+            messages_schema::table
+                .filter(diesel::dsl::sql::<diesel::sql_types::Bool>(predicate))
+                .filter(dsl::chat_id.eq(chat_id))
+                .filter(dsl::reply_root_id.is_null())
+                .filter(dsl::deleted_at.is_null())
+                .filter(dsl::is_published.eq(true))
+        };
+        let latest = visible()
             .filter(
-                dsl::chat_id
-                    .eq(chat_id)
-                    .and(dsl::reply_root_id.is_null())
-                    .and(dsl::deleted_at.is_null())
-                    .and(dsl::is_published.eq(true)),
+                dsl::sender_uid
+                    .ne(uid)
+                    .or(dsl::message_type.eq(MessageType::System)),
             )
             .order(dsl::id.desc())
-            .limit(2)
             .select(dsl::id)
-            .load(conn)?;
-
-        // If < 2 public messages, set to NULL (entire chat unread); otherwise second-to-last.
-        let new_read_id = if last_two.len() >= 2 {
-            Some(last_two[1])
-        } else {
-            None
-        };
+            .first::<i64>(conn)
+            .optional()?;
 
         use crate::schema::group_membership::dsl as gm_dsl;
-        diesel::update(
-            group_membership::table.filter(gm_dsl::chat_id.eq(chat_id).and(gm_dsl::uid.eq(uid))),
-        )
-        .set(gm_dsl::last_read_message_id.eq(new_read_id))
-        .execute(conn)?;
-
-        let unread_count = if new_read_id.is_some() {
-            1
+        let member =
+            group_membership::table.filter(gm_dsl::chat_id.eq(chat_id).and(gm_dsl::uid.eq(uid)));
+        if let Some(latest) = latest {
+            let new_read_id = visible()
+                .filter(dsl::id.lt(latest))
+                .order(dsl::id.desc())
+                .select(dsl::id)
+                .first::<i64>(conn)
+                .optional()?;
+            diesel::update(member)
+                .set(gm_dsl::last_read_message_id.eq(new_read_id))
+                .execute(conn)?;
+            (new_read_id, 1)
         } else {
-            last_two.len() as i64
-        };
-        (new_read_id, unread_count)
+            (member.select(gm_dsl::last_read_message_id).first(conn)?, 0)
+        }
     };
 
     let unread_mentions =
