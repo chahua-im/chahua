@@ -144,16 +144,18 @@ Set `CHAHUA_CONFIG_PATH` to override the container path. Do not bake environment
 configuration or credentials into the image.
 
 `DATABASE_URL`, JWT/service-token signing keys, `VAPID_PRIVATE_KEY`, `MEILI_MASTER_KEY`,
-`APNS_PRIVATE_KEY_PATH`, and AWS credentials remain environment/provider-chain settings,
-not TOML values. Keep actual private key files protected as before. Public metadata such
-as `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`, APNs key/team IDs and topic may be in TOML.
+and AWS credentials remain environment/provider-chain settings, not TOML values. Keep
+actual APNs private-key and FCM service-account JSON files protected outside Git/TOML;
+their file paths (`[push.apns].private_key_path`, `[push.fcm].service_account_path`) and
+public metadata (`[push.web]`, `[push.apns]`, `[push.fcm]`) may live in TOML or be
+overridden by environment variables.
 
 Push providers are independently optional. Normal server startup requires at least one;
 offline reindexing permits none. Web Push requires all of `VAPID_PUBLIC_KEY`,
 `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT`, or none to disable it. Empty or whitespace-only
 environment overrides clear the corresponding file values; partial groups fail startup.
-APNs requires key ID, team ID, topic, and the environment-only private-key path.
-FCM requires project ID and the environment-only service-account path.
+APNs requires key ID, team ID, topic, and `private_key_path` (`APNS_PRIVATE_KEY_PATH`).
+FCM requires project ID and `service_account_path` (`FCM_SERVICE_ACCOUNT_PATH`).
 When Web Push is disabled, its public-key endpoint returns HTTP 503 (RPC `Unavailable`)
 with `web push is not configured`; subscription registration rejects any disabled provider.
 
