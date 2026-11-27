@@ -19,100 +19,27 @@ use crate::dto::ws::{
     ServerWsMessage,
 };
 use crate::errors::AppError;
-use crate::metrics::Metrics;
 use crate::models::{FriendRequest, FriendRequestStatus};
 use crate::services::{
     api::users::build_member_summary_map,
     authentication::Principal,
     authz::{Action as AuthzAction, AuthorizationService},
     avatars::AvatarService,
-    media::MediaStore,
     presence::PresenceSnapshotService,
-    privacy_exceptions,
-    push::PushService,
-    read_receipts,
-    social::{self, CreateRequestOutcome, FriendRequestServiceDeps, ResolveOutcome},
+    privacy_exceptions, read_receipts,
+    social::{self, CreateRequestOutcome, ResolveOutcome, SocialService},
     user::lookup_user_profiles,
     ws_registry::ConnectionRegistry,
 };
-use crate::utils::ids::IdGen;
 
 const MAX_FRIEND_REQUEST_MESSAGE_CHARS: usize = 200;
 const MAX_FRIEND_VERIFICATION_QUESTION_CHARS: usize = 100;
 
-pub struct CreateFriendRequestDeps<'a> {
-    pub authz_service: &'a Arc<AuthorizationService>,
-    pub avatars: &'a Arc<AvatarService>,
-    pub id_gen: &'a Arc<IdGen>,
-    pub media: &'a MediaStore,
-    pub metrics: &'a Arc<Metrics>,
-    pub ws_registry: &'a Arc<ConnectionRegistry>,
-    pub presence_service: &'a Arc<PresenceSnapshotService>,
-    pub push_service: &'a Arc<PushService>,
-}
-
-impl CreateFriendRequestDeps<'_> {
-    fn social(&self) -> FriendRequestServiceDeps<'_> {
-        FriendRequestServiceDeps {
-            id_gen: self.id_gen,
-            media: self.media,
-            avatars: self.avatars,
-            metrics: self.metrics,
-            ws_registry: self.ws_registry,
-            presence_service: self.presence_service,
-            push_service: self.push_service,
-        }
-    }
-}
-
-pub struct AcceptFriendRequestDeps<'a> {
-    pub authz_service: &'a Arc<AuthorizationService>,
-    pub avatars: &'a Arc<AvatarService>,
-    pub id_gen: &'a Arc<IdGen>,
-    pub media: &'a MediaStore,
-    pub metrics: &'a Arc<Metrics>,
-    pub ws_registry: &'a Arc<ConnectionRegistry>,
-    pub presence_service: &'a Arc<PresenceSnapshotService>,
-    pub push_service: &'a Arc<PushService>,
-}
-
-impl AcceptFriendRequestDeps<'_> {
-    fn social(&self) -> FriendRequestServiceDeps<'_> {
-        FriendRequestServiceDeps {
-            id_gen: self.id_gen,
-            media: self.media,
-            avatars: self.avatars,
-            metrics: self.metrics,
-            ws_registry: self.ws_registry,
-            presence_service: self.presence_service,
-            push_service: self.push_service,
-        }
-    }
-}
-
-pub struct RejectFriendRequestDeps<'a> {
-    pub authz_service: &'a Arc<AuthorizationService>,
-    pub avatars: &'a Arc<AvatarService>,
-    pub id_gen: &'a Arc<IdGen>,
-    pub media: &'a MediaStore,
-    pub metrics: &'a Arc<Metrics>,
-    pub ws_registry: &'a Arc<ConnectionRegistry>,
-    pub presence_service: &'a Arc<PresenceSnapshotService>,
-    pub push_service: &'a Arc<PushService>,
-}
-
-impl RejectFriendRequestDeps<'_> {
-    fn social(&self) -> FriendRequestServiceDeps<'_> {
-        FriendRequestServiceDeps {
-            id_gen: self.id_gen,
-            media: self.media,
-            avatars: self.avatars,
-            metrics: self.metrics,
-            ws_registry: self.ws_registry,
-            presence_service: self.presence_service,
-            push_service: self.push_service,
-        }
-    }
+pub struct FriendsService {
+    pub authz_service: Arc<AuthorizationService>,
+    pub avatars: Arc<AvatarService>,
+    pub ws_registry: Arc<ConnectionRegistry>,
+    pub social: Arc<SocialService>,
 }
 
 pub enum CreateFriendRequestResult {
@@ -288,56 +215,61 @@ pub async fn delete_friend(
     Ok(())
 }
 
-pub async fn create_friend_request(
-    principal: Principal,
-    body: CreateFriendRequestBody,
-    conn: &mut PgConnection,
-    deps: CreateFriendRequestDeps<'_>,
-) -> Result<CreateFriendRequestResult, AppError> {
-    let uid = principal.require_user_action(
-        conn,
-        deps.authz_service,
-        AuthzAction::OnBehalfOfSocialWrite,
-    )?;
-    validate_friend_request_message(body.message.as_deref())?;
-    let target_profiles = lookup_user_profiles(conn, &[body.to_uid])?;
-    if !target_profiles.contains_key(&body.to_uid) {
-        return Err(AppError::NotFound("User not found"));
-    }
-    match social::create_friend_request(conn, deps.social(), uid, body.to_uid, body.message).await?
-    {
-        CreateRequestOutcome::Created { request } => {
-            deps.ws_registry.broadcast_to_uids(
-                &[request.to_uid],
-                Arc::new(ServerWsMessage::FriendRequestReceived(
-                    FriendRequestReceivedPayload { from_uid: uid },
-                )),
-            );
-            Ok(CreateFriendRequestResult::Created(build_request_response(
-                conn,
-                deps.avatars,
-                &request,
-            )?))
+impl FriendsService {
+    pub async fn create_friend_request(
+        &self,
+        principal: Principal,
+        body: CreateFriendRequestBody,
+        conn: &mut PgConnection,
+    ) -> Result<CreateFriendRequestResult, AppError> {
+        let uid = principal.require_user_action(
+            conn,
+            &self.authz_service,
+            AuthzAction::OnBehalfOfSocialWrite,
+        )?;
+        validate_friend_request_message(body.message.as_deref())?;
+        let target_profiles = lookup_user_profiles(conn, &[body.to_uid])?;
+        if !target_profiles.contains_key(&body.to_uid) {
+            return Err(AppError::NotFound("User not found"));
         }
-        CreateRequestOutcome::AutoAccepted { request } => {
-            deps.ws_registry.broadcast_to_uids(
-                &[request.from_uid],
-                Arc::new(ServerWsMessage::FriendRequestResolved(
-                    FriendRequestResolvedPayload {
-                        request_id: request.id,
-                        status: FriendRequestStatus::Accepted,
-                        by_uid: uid,
-                    },
-                )),
-            );
-            Ok(CreateFriendRequestResult::AutoAccepted(
-                build_request_response(conn, deps.avatars, &request)?,
-            ))
+        match self
+            .social
+            .create_friend_request(conn, uid, body.to_uid, body.message)
+            .await?
+        {
+            CreateRequestOutcome::Created { request } => {
+                self.ws_registry.broadcast_to_uids(
+                    &[request.to_uid],
+                    Arc::new(ServerWsMessage::FriendRequestReceived(
+                        FriendRequestReceivedPayload { from_uid: uid },
+                    )),
+                );
+                Ok(CreateFriendRequestResult::Created(build_request_response(
+                    conn,
+                    &self.avatars,
+                    &request,
+                )?))
+            }
+            CreateRequestOutcome::AutoAccepted { request } => {
+                self.ws_registry.broadcast_to_uids(
+                    &[request.from_uid],
+                    Arc::new(ServerWsMessage::FriendRequestResolved(
+                        FriendRequestResolvedPayload {
+                            request_id: request.id,
+                            status: FriendRequestStatus::Accepted,
+                            by_uid: uid,
+                        },
+                    )),
+                );
+                Ok(CreateFriendRequestResult::AutoAccepted(
+                    build_request_response(conn, &self.avatars, &request)?,
+                ))
+            }
+            CreateRequestOutcome::AlreadyPending => {
+                Err(AppError::Conflict("Friend request already pending"))
+            }
+            CreateRequestOutcome::AlreadyFriends => Err(AppError::Conflict("Already friends")),
         }
-        CreateRequestOutcome::AlreadyPending => {
-            Err(AppError::Conflict("Friend request already pending"))
-        }
-        CreateRequestOutcome::AlreadyFriends => Err(AppError::Conflict("Already friends")),
     }
 }
 
@@ -381,61 +313,67 @@ pub async fn list_friend_request_history(
     Ok(ListFriendRequestHistoryResponse { requests })
 }
 
-pub async fn accept_friend_request(
-    principal: Principal,
-    request_id: i64,
-    conn: &mut PgConnection,
-    deps: AcceptFriendRequestDeps<'_>,
-) -> Result<FriendRequestResponse, AppError> {
-    let uid = principal.require_user_action(
-        conn,
-        deps.authz_service,
-        AuthzAction::OnBehalfOfSocialWrite,
-    )?;
-    let outcome =
-        social::resolve_friend_request(conn, deps.social(), uid, request_id, true).await?;
-    let request = outcome.request();
-    deps.ws_registry.broadcast_to_uids(
-        &[request.from_uid],
-        Arc::new(ServerWsMessage::FriendRequestResolved(
-            FriendRequestResolvedPayload {
-                request_id: request.id,
-                status: FriendRequestStatus::Accepted,
-                by_uid: uid,
-            },
-        )),
-    );
-    build_request_response(conn, deps.avatars, request)
-}
-
-pub async fn reject_friend_request(
-    principal: Principal,
-    request_id: i64,
-    conn: &mut PgConnection,
-    deps: RejectFriendRequestDeps<'_>,
-) -> Result<FriendRequestResponse, AppError> {
-    let uid = principal.require_user_action(
-        conn,
-        deps.authz_service,
-        AuthzAction::OnBehalfOfSocialWrite,
-    )?;
-    let outcome =
-        social::resolve_friend_request(conn, deps.social(), uid, request_id, false).await?;
-    let request = outcome.request();
-    deps.ws_registry.broadcast_to_uids(
-        &[request.from_uid],
-        Arc::new(ServerWsMessage::FriendRequestResolved(
-            FriendRequestResolvedPayload {
-                request_id: request.id,
-                status: FriendRequestStatus::Rejected,
-                by_uid: uid,
-            },
-        )),
-    );
-    if matches!(&outcome, ResolveOutcome::RejectedWhileFriends(_)) {
-        return Err(AppError::Conflict("You are already friends with this user"));
+impl FriendsService {
+    pub async fn accept_friend_request(
+        &self,
+        principal: Principal,
+        request_id: i64,
+        conn: &mut PgConnection,
+    ) -> Result<FriendRequestResponse, AppError> {
+        let uid = principal.require_user_action(
+            conn,
+            &self.authz_service,
+            AuthzAction::OnBehalfOfSocialWrite,
+        )?;
+        let outcome = self
+            .social
+            .resolve_friend_request(conn, uid, request_id, true)
+            .await?;
+        let request = outcome.request();
+        self.ws_registry.broadcast_to_uids(
+            &[request.from_uid],
+            Arc::new(ServerWsMessage::FriendRequestResolved(
+                FriendRequestResolvedPayload {
+                    request_id: request.id,
+                    status: FriendRequestStatus::Accepted,
+                    by_uid: uid,
+                },
+            )),
+        );
+        build_request_response(conn, &self.avatars, request)
     }
-    build_request_response(conn, deps.avatars, request)
+
+    pub async fn reject_friend_request(
+        &self,
+        principal: Principal,
+        request_id: i64,
+        conn: &mut PgConnection,
+    ) -> Result<FriendRequestResponse, AppError> {
+        let uid = principal.require_user_action(
+            conn,
+            &self.authz_service,
+            AuthzAction::OnBehalfOfSocialWrite,
+        )?;
+        let outcome = self
+            .social
+            .resolve_friend_request(conn, uid, request_id, false)
+            .await?;
+        let request = outcome.request();
+        self.ws_registry.broadcast_to_uids(
+            &[request.from_uid],
+            Arc::new(ServerWsMessage::FriendRequestResolved(
+                FriendRequestResolvedPayload {
+                    request_id: request.id,
+                    status: FriendRequestStatus::Rejected,
+                    by_uid: uid,
+                },
+            )),
+        );
+        if matches!(&outcome, ResolveOutcome::RejectedWhileFriends(_)) {
+            return Err(AppError::Conflict("You are already friends with this user"));
+        }
+        build_request_response(conn, &self.avatars, request)
+    }
 }
 
 pub async fn archive_friend_request(

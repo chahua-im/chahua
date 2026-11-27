@@ -11,7 +11,6 @@ use crate::dto::members::{
 };
 use crate::errors::AppError;
 use crate::extractors::DbConn;
-use crate::services::api::members::{self, DeleteRemoveMemberDeps, PostAddMemberDeps};
 use crate::utils::auth::CurrentUid;
 use crate::AppState;
 
@@ -51,7 +50,10 @@ async fn get_members(
     Query(query): Query<ListMembersQuery>,
 ) -> Result<Json<ListMembersResponse>, AppError> {
     conn.run(move |mut conn| async move {
-        members::get_members(uid, chat_id, query, &mut conn, &state.avatars).map(Json)
+        state
+            .members
+            .get_members(uid, chat_id, query, &mut conn)
+            .map(Json)
     })
     .await
 }
@@ -78,21 +80,10 @@ async fn post_add_member(
     Json(body): Json<AddMemberBody>,
 ) -> Result<(StatusCode, Json<MemberResponse>), AppError> {
     conn.run(move |mut conn| async move {
-        let response = members::post_add_member(
-            uid,
-            chat_id,
-            body,
-            &mut conn,
-            PostAddMemberDeps {
-                id_gen: &state.id_gen,
-                media: &state.media,
-                avatars: &state.avatars,
-                metrics: &state.metrics,
-                ws_registry: &state.ws_registry,
-                push_service: &state.push_service,
-            },
-        )
-        .await?;
+        let response = state
+            .members
+            .post_add_member(uid, chat_id, body, &mut conn)
+            .await?;
         Ok((StatusCode::CREATED, Json(response)))
     })
     .await
@@ -125,23 +116,10 @@ async fn delete_remove_member(
     conn: DbConn,
 ) -> Result<StatusCode, AppError> {
     conn.run(move |mut conn| async move {
-        members::delete_remove_member(
-            uid,
-            chat_id,
-            target_uid,
-            query,
-            &mut conn,
-            DeleteRemoveMemberDeps {
-                id_gen: &state.id_gen,
-                media: &state.media,
-                avatars: &state.avatars,
-                metrics: &state.metrics,
-                ws_registry: &state.ws_registry,
-                push_service: &state.push_service,
-                background_service: &state.background_service,
-            },
-        )
-        .await?;
+        state
+            .members
+            .delete_remove_member(uid, chat_id, target_uid, query, &mut conn)
+            .await?;
         Ok(StatusCode::NO_CONTENT)
     })
     .await
@@ -173,16 +151,10 @@ async fn patch_member(
     Json(body): Json<UpdateMemberBody>,
 ) -> Result<Json<MemberResponse>, AppError> {
     conn.run(move |mut conn| async move {
-        members::patch_member(
-            requester_uid,
-            chat_id,
-            target_uid,
-            body,
-            &mut conn,
-            &state.avatars,
-            &state.ws_registry,
-        )
-        .map(Json)
+        state
+            .members
+            .patch_member(requester_uid, chat_id, target_uid, body, &mut conn)
+            .map(Json)
     })
     .await
 }
@@ -215,15 +187,10 @@ async fn put_member_speaking_mode(
     Json(body): Json<crate::dto::speaking::UpdateSpeakingModeRequest>,
 ) -> Result<Json<crate::dto::speaking::MemberSpeakingModeResponse>, AppError> {
     conn.run(move |mut conn| async move {
-        members::put_member_speaking_mode(
-            uid,
-            chat_id,
-            target_uid,
-            body,
-            &mut conn,
-            &state.ws_registry,
-        )
-        .map(Json)
+        state
+            .members
+            .put_member_speaking_mode(uid, chat_id, target_uid, body, &mut conn)
+            .map(Json)
     })
     .await
 }

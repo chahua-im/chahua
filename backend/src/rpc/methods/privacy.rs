@@ -7,12 +7,12 @@ use crate::dto::rpc::privacy::{
     PrivacyUpdatePresenceSettingsParams, PrivacyUpdateReadReceiptSettingsParams,
 };
 use crate::errors::AppError;
-use crate::rpc::{RpcCallContext, RpcServices};
+use crate::rpc::{AppState, RpcCallContext};
 use crate::services::api::friends;
 
 pub async fn get_presence_settings(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     _: PrivacyGetPresenceSettingsParams,
 ) -> Result<PresenceSettingsResponse, AppError> {
     let uid = context.uid()?;
@@ -22,7 +22,7 @@ pub async fn get_presence_settings(
 
 pub async fn update_presence_settings(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: PrivacyUpdatePresenceSettingsParams,
 ) -> Result<PresenceSettingsResponse, AppError> {
     let uid = context.uid()?;
@@ -38,7 +38,7 @@ pub async fn update_presence_settings(
 
 pub async fn get_read_receipt_settings(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     _: PrivacyGetReadReceiptSettingsParams,
 ) -> Result<ReadReceiptSettingsResponse, AppError> {
     let uid = context.uid()?;
@@ -48,7 +48,7 @@ pub async fn get_read_receipt_settings(
 
 pub async fn update_read_receipt_settings(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: PrivacyUpdateReadReceiptSettingsParams,
 ) -> Result<ReadReceiptSettingsResponse, AppError> {
     let uid = context.uid()?;
@@ -59,7 +59,7 @@ pub async fn update_read_receipt_settings(
 
 pub async fn list_exceptions(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: PrivacyListExceptionsParams,
 ) -> Result<PrivacyExceptionsResponse, AppError> {
     let uid = context.uid()?;
@@ -70,7 +70,7 @@ pub async fn list_exceptions(
 
 pub async fn clear_exceptions(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: PrivacyClearExceptionsParams,
 ) -> Result<(), AppError> {
     let uid = context.uid()?;

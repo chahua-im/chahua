@@ -231,16 +231,53 @@ upgrade endpoint, `/docs`, `/api-docs`, `/metrics`, `/health`, `/healthz` and
 `/readyz` are excluded. Its outer timing includes authentication, activity
 tracking and handler work through the prepared response, not socket transmission.
 
-RPC timing starts when a complete frame arrives at `RpcSessionInput`, before
-bounded input, control-lane and worker waits, and ends when that call's response
-is serialized and prepared. It excludes sibling batch wait, result/outbound
+RPC timing starts when the connection task passes a complete frame to
+`RpcSession::handle_text`, before control-lane and worker waits, and ends when
+that call's response is serialized and prepared. It excludes sibling batch wait, result/outbound
 queue wait and socket transmission. Each incoming call, including a notification,
 is counted separately; peer responses and outgoing pushes are ignored. A whole
-malformed, oversized or otherwise unparsed envelope rejection is counted once as
-`unknown`. Preparation budget errors are `429`/`1429`, oversized replies are
+malformed or otherwise unparsed envelope rejection is counted once as `unknown`.
+An oversized input rejected by `RpcSession::handle_text` is `413`/`1013` with API `unknown`.
+Messages rejected by the WebSocket decoder's size limit close with code `1009`
+before RPC admission and are not counted as RPC calls. Oversized replies are
 `413`/`1013`, and serialization errors are `500`/`-32603`. Supervised admitted
 work still records if it completes after disconnect; cancellation before
 preparation is not a completion.
+
+### RPC admission queue
+
+Read and mutation calls wait for execution capacity in a process-wide queue.
+Accounts take turns, with running limits per connection, per account, and per
+process. Session/control calls use a separate lane. The queue limits and maximum
+wait are defined in `src/rpc/session.rs` and its `admission` module.
+
+| Family | Type / labels | Meaning and recording boundary | Buckets / cardinality |
+| --- | --- | --- | --- |
+| `rpc_admission_queue_depth` | Gauge; none | Calls currently waiting for execution capacity, excluding running calls. Incremented on enqueue; decremented on grant, timeout, or cancellation. | One series; exported as zero before first use. |
+| `rpc_admission_wait_duration_seconds` | Histogram; `outcome` | Time from enqueue until capacity is granted (`started`), the wait expires (`timeout`), or the waiting call is dropped (`cancelled`, including disconnect). | `H3`; three fixed outcome series, initialized at startup. |
+
+Immediate admissions and full-queue rejections have no queue wait observation.
+Execution time and socket transmission are excluded. A grant counts as `started`
+even if the call is cancelled before its worker resumes. Timeout observation
+includes any delay before the expired waiter is removed. No account, connection,
+or request identifiers are metric labels.
+
+**Current queue depth:**
+
+```promql
+rpc_admission_queue_depth{job="wetty-chat-backend"}
+```
+
+**Average queue wait over five minutes (seconds, all outcomes):**
+
+```promql
+sum(rate(rpc_admission_wait_duration_seconds_sum{job="wetty-chat-backend"}[5m]))
+/
+sum(rate(rpc_admission_wait_duration_seconds_count{job="wetty-chat-backend"}[5m]))
+```
+
+No completed queue waits in the window means no average is available. Filter both
+terms by `outcome="started"` to show the average only for granted calls.
 
 ### API stage diagnostics
 

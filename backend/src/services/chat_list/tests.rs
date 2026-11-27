@@ -1,0 +1,147 @@
+use super::*;
+use diesel::connection::SimpleConnection;
+
+#[test]
+fn last_message_previews_preserve_display_data_and_redact_deleted_content() {
+    let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+        eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+        return;
+    };
+    let mut conn = PgConnection::establish(&url).unwrap();
+    conn.test_transaction::<_, diesel::result::Error, _>(|conn| {
+            conn.batch_execute(
+                "CREATE TEMP TABLE messages (LIKE public.messages INCLUDING ALL);
+                 CREATE TEMP TABLE attachments (LIKE public.attachments INCLUDING ALL);
+                 CREATE TEMP TABLE stickers (LIKE public.stickers INCLUDING ALL);
+                 INSERT INTO discuz.common_member(uid, username, loginname) VALUES
+                   (987665900, 'preview-sender', 'preview-sender'),
+                   (987665901, 'preview-mention', 'preview-mention'),
+                   (987665902, 'preview-origin', 'preview-origin');
+                 INSERT INTO stickers(id, media_id, emoji) VALUES (77, 88, '🙂');
+                 INSERT INTO messages(id, chat_id, sender_uid, message_type, system_kind, message,
+                                      client_generated_id, created_at) VALUES
+                   (1, 99, 987665902, 'text', NULL, 'origin @[uid:987665902]', 'preview-origin', NOW()),
+                   (10, 10, 987665900, 'text', NULL, 'hello @[uid:987665901] @[uid:987665901]', 'preview-text', NOW()),
+                   (11, 11, 987665900, 'sticker', NULL, NULL, 'preview-sticker', NOW()),
+                   (12, 12, 987665900, 'text', NULL, 'forwarded text', 'preview-forward', NOW()),
+                   (13, 13, 987665900, 'system', 'member_joined', '{\"text\":\"member joined\",\"links\":{\"uid\":987665901}}', 'preview-system', NOW()),
+                   (14, 14, 987665900, 'text', NULL, 'secret @[uid:987665902]', 'preview-deleted', NOW());
+                 UPDATE messages SET forwarded_from_message_id = 1 WHERE id IN (11, 12, 14);
+                 UPDATE messages SET sticker_id = 77 WHERE id IN (11, 14);
+                 UPDATE messages SET deleted_at = NOW() WHERE id = 14;
+                 INSERT INTO attachments(id, message_id, kind, external_reference, size,
+                                         created_at, \"order\", deleted_at) VALUES
+                   (100, 10, 'image/png', 'second', 1, NOW(), 1, NULL),
+                   (101, 10, 'image/jpeg', 'first', 1, NOW(), 0, NULL),
+                   (102, 10, 'image/gif', 'removed', 1, NOW(), 0, NOW()),
+                   (103, 14, 'application/pdf', 'secret', 1, NOW(), 0, NULL);",
+            )?;
+            let messages = messages::table
+                .filter(messages::id.between(10, 14))
+                .select(Message::as_select())
+                .load(conn)?;
+            let avatars = AvatarService::new(
+                None,
+                std::sync::Arc::new(super::super::avatars::AvatarMetrics::new(
+                    &prometheus::Registry::new(),
+                )),
+            );
+            let previews = load_last_message_previews(conn, messages, &avatars);
+            let text = &previews[&10];
+            assert_eq!(text.sender.name.as_deref(), Some("preview-sender"));
+            assert_eq!(text.message.as_deref(), Some("hello @[uid:987665901] @[uid:987665901]"));
+            assert_eq!(text.mentions.iter().map(|mention| (mention.uid, mention.username.as_deref())).collect::<Vec<_>>(),
+                       [(987665901, Some("preview-mention"))]);
+            assert_eq!(text.attachments.iter().map(|attachment| attachment.kind.as_str()).collect::<Vec<_>>(),
+                       ["image/jpeg", "image/png"]);
+            let sticker = &previews[&11];
+            assert_eq!(sticker.sticker.as_ref().unwrap().emoji, "🙂");
+            assert!(sticker.forwarded_from_name.is_none());
+            let forwarded = &previews[&12];
+            assert_eq!(forwarded.forwarded_from_name.as_deref(), Some("preview-origin"));
+            assert!(forwarded.mentions.is_empty());
+            let system = &previews[&13];
+            assert_eq!(system.message.as_deref(), Some("member joined"));
+            assert_eq!(system.system_links.as_ref().unwrap().uid, Some(987665901));
+            let deleted = &previews[&14];
+            assert!(deleted.is_deleted);
+            assert_eq!(deleted.sender.name.as_deref(), Some("preview-sender"));
+            assert!(deleted.message.is_none());
+            assert!(deleted.sticker.is_none());
+            assert!(deleted.attachments.is_empty());
+            assert!(deleted.mentions.is_empty());
+            assert!(deleted.forwarded_from_name.is_none());
+            assert!(deleted.system_links.is_none());
+            Ok(())
+        });
+}
+
+#[test]
+fn visible_order_and_cursors_share_the_same_message_boundary() {
+    let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+        eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+        return;
+    };
+    let mut conn = PgConnection::establish(&url).unwrap();
+    conn.test_transaction::<_, diesel::result::Error, _>(|conn| {
+            conn.batch_execute("INSERT INTO groups(id, name) VALUES
+                (987665201, 'A'), (987665202, 'B'), (987665203, 'hidden'),
+                (987665204, 'empty'), (987665205, 'same-time'), (987665206, 'archived'),
+                (987665207, 'not-a-member');
+                INSERT INTO media(id, content_type, storage_key, size, created_at, purpose, deleted_at) VALUES
+                  (987665401, 'image/png', 'avatars/live.png', 1, NOW(), 'avatar', NULL),
+                  (987665402, 'image/png', 'avatars/deleted.png', 1, NOW(), 'avatar', NOW());
+                UPDATE groups SET avatar_image_id = 987665401 WHERE id = 987665201;
+                UPDATE groups SET avatar_image_id = 987665402 WHERE id = 987665204;
+                INSERT INTO group_membership(chat_id, uid, archived)
+                  SELECT id, 987665200, id = 987665206 FROM groups
+                  WHERE id BETWEEN 987665201 AND 987665206;
+                INSERT INTO messages(id, chat_id, sender_uid, client_generated_id, message_type, system_kind, message, created_at) VALUES
+                  (987665301, 987665201, 1717, 'visible-A', 'text', NULL, 'A', '2026-10-24 10:00Z'),
+                  (987665302, 987665201, 1717, 'hidden-A', 'system', 'member_joined', 'joined', '2026-10-24 12:00Z'),
+                  (987665303, 987665202, 1717, 'visible-B', 'text', NULL, 'B', '2026-10-24 11:00Z'),
+                  (987665304, 987665203, 1717, 'hidden-only', 'system', 'member_left', 'left', '2026-10-24 13:00Z'),
+                  (987665305, 987665205, 1717, 'same-time', 'text', NULL, 'C', '2026-10-24 11:00Z'),
+                  (987665306, 987665206, 1717, 'archived', 'text', NULL, 'D', '2026-10-24 14:00Z');
+                UPDATE groups SET last_message_id = latest.id, last_message_at = latest.created_at
+                  FROM (SELECT DISTINCT ON (chat_id) chat_id, id, created_at FROM messages
+                    WHERE chat_id BETWEEN 987665201 AND 987665206 ORDER BY chat_id, id DESC) latest
+                  WHERE groups.id = latest.chat_id;")?;
+            let uid = 987665200;
+            let first = load_chat_page(conn, uid, false, None, None, 2, true)?;
+            assert_eq!(first.iter().map(|r| r.chat_id).collect::<Vec<_>>(), [987665205, 987665202]);
+            let second = load_chat_page(conn, uid, false, None, Some(first[1].chat_id), 2, true)?;
+            assert_eq!(second.iter().map(|r| r.chat_id).collect::<Vec<_>>(), [987665201, 987665204]);
+            assert_eq!(second[0].avatar_key.as_deref(), Some("avatars/live.png"));
+            assert!(second[1].avatar_key.is_none());
+            assert_eq!(second[0].last_message.as_ref().unwrap().id, 987665301);
+            assert_eq!(second[0].last_message_at, Some(second[0].last_message.as_ref().unwrap().created_at));
+            let tail = load_chat_page(conn, uid, false, None, Some(second[1].chat_id), 2, true)?;
+            assert_eq!(tail.len(), 1);
+            assert_eq!(tail[0].chat_id, 987665203);
+            assert!(tail[0].last_message_at.is_none() && tail[0].last_message.is_none());
+            assert!(load_chat_page(conn, uid, false, None, Some(987665207), 2, true)?.is_empty());
+            let archived = load_chat_page(conn, uid, true, None, None, 10, true)?;
+            assert_eq!(archived.len(), 1);
+            assert_eq!(archived[0].chat_id, 987665206);
+            let selected = load_chat_rows_by_ids(conn, uid, &[987665201, 987665206, 987665207], true)?;
+            assert_eq!(selected.len(), 2);
+            let active = selected.iter().find(|row| row.chat_id == 987665201).unwrap();
+            assert_eq!(active.last_message.as_ref().unwrap().id, 987665301);
+            assert!(selected.iter().find(|row| row.chat_id == 987665206).unwrap().archived);
+            assert!(load_chat_rows_by_ids(conn, uid, &[], true)?.is_empty());
+            let unfiltered = load_chat_page(conn, uid, false, None, None, 10, false)?;
+            assert_eq!(unfiltered[0].chat_id, 987665203);
+            assert_eq!(unfiltered[1].chat_id, 987665201);
+            // A hidden arrival changes neither visible order nor cursor.
+            conn.batch_execute("INSERT INTO messages(id, chat_id, sender_uid, client_generated_id, message_type, system_kind, created_at)
+                VALUES (987665308, 987665201, 1717, 'later-hidden', 'system', 'member_added', '2026-10-24 15:00Z');
+                UPDATE groups SET last_message_id = 987665308, last_message_at = '2026-10-24 15:00Z' WHERE id = 987665201;")?;
+            let next = load_chat_page(conn, uid, false, None, Some(987665202), 2, true)?;
+            assert_eq!(next[0].last_message.as_ref().unwrap().id, 987665301);
+            assert!(crate::services::user::load_chat_settings(conn, uid)?.show_membership_messages);
+            crate::services::user::save_chat_settings(conn, uid, crate::dto::users::UpdateChatSettings { show_membership_messages: Some(false), ..Default::default() })?;
+            assert!(!crate::services::user::load_chat_settings(conn, uid)?.show_membership_messages);
+            Ok(())
+        });
+}

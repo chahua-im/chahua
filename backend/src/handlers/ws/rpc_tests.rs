@@ -7,14 +7,18 @@ use serde_json::{json, Value};
 use tokio::{net::TcpListener, task::JoinHandle, time::timeout};
 use tokio_tungstenite::{
     connect_async,
-    tungstenite::{client::IntoClientRequest, Message},
+    tungstenite::{
+        client::IntoClientRequest,
+        protocol::frame::{
+            coding::{CloseCode, Data, OpCode},
+            Frame,
+        },
+        Message,
+    },
     MaybeTlsStream, WebSocketStream,
 };
 
-use crate::{
-    rpc::RpcServices,
-    state::{AppInner, AppState},
-};
+use crate::AppState;
 
 type Client = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
@@ -29,30 +33,8 @@ impl Drop for Server {
     }
 }
 
-fn state(services: &RpcServices) -> AppState {
-    AppState::new(AppInner {
-        db: services.db.clone(),
-        id_gen: services.id_gen.clone(),
-        metrics: services.metrics.clone(),
-        config: services.config.clone(),
-        media: services.media.clone(),
-        avatars: services.avatars.clone(),
-        link_previews: services.link_previews.clone(),
-        authz_service: services.authz_service.clone(),
-        ws_registry: services.ws_registry.clone(),
-        presence_service: services.presence_service.clone(),
-        push_service: services.push_service.clone(),
-        unread_service: services.unread_service.clone(),
-        client_tracking: services.client_tracking.clone(),
-        background_service: services.background_service.clone(),
-        message_search: services.message_search.clone(),
-        auth_token_service: services.auth_token_service.clone(),
-        token_generation: services.token_generation.clone(),
-    })
-}
-
-fn router(services: &RpcServices) -> Router {
-    let state = state(services);
+fn router(services: &AppState) -> Router {
+    let state = services.clone();
     Router::new()
         .route("/ws", get(super::ws_handler))
         .route("/activity-probe", get(|| async { "ok" }))
@@ -67,7 +49,7 @@ fn router(services: &RpcServices) -> Router {
         .with_state(state)
 }
 
-async fn server(services: &RpcServices) -> Server {
+async fn server(services: &AppState) -> Server {
     let app = router(services);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -90,6 +72,167 @@ async fn connect(server: &Server, bearer: &str) -> Client {
         .headers_mut()
         .insert("authorization", format!("Bearer {bearer}").parse().unwrap());
     connect_async(request).await.unwrap().0
+}
+
+async fn send_sized_text(client: &mut Client, text: String, fragmented: bool, oversized: bool) {
+    if fragmented {
+        let bytes = text.into_bytes();
+        let split = bytes.len() / 2;
+        client
+            .send(Message::Frame(Frame::message(
+                bytes[..split].to_vec(),
+                OpCode::Data(Data::Text),
+                false,
+            )))
+            .await
+            .unwrap();
+        let result = client
+            .send(Message::Frame(Frame::message(
+                bytes[split..].to_vec(),
+                OpCode::Data(Data::Continue),
+                true,
+            )))
+            .await;
+        if !oversized {
+            result.unwrap();
+        }
+    } else {
+        let result = client.send(Message::Text(text.into())).await;
+        if !oversized {
+            result.unwrap();
+        }
+    }
+}
+
+fn pad_to(mut text: String, size: usize) -> String {
+    assert!(text.len() <= size);
+    text.push_str(&" ".repeat(size - text.len()));
+    text
+}
+
+async fn expect_too_big_close(client: &mut Client) {
+    timeout(Duration::from_secs(10), async {
+        loop {
+            match client
+                .next()
+                .await
+                .expect("close frame")
+                .expect("valid WebSocket frame")
+            {
+                Message::Close(Some(frame)) => {
+                    assert_eq!(frame.code, CloseCode::Size);
+                    return;
+                }
+                Message::Text(text) => {
+                    let event: Value = serde_json::from_str(&text).unwrap();
+                    assert_eq!(event["method"], "events.presenceUpdate");
+                }
+                other => panic!("expected close 1009, got {other:?}"),
+            }
+        }
+    })
+    .await
+    .expect("close deadline");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn wire_message_limit_applies_before_and_after_rpc_open() {
+    let Some(services) = crate::rpc::test_support::services().await else {
+        return;
+    };
+    let server = server(&services).await;
+    let token = services
+        .auth_token_service
+        .issue_session(1, &uuid::Uuid::new_v4().to_string(), 0)
+        .unwrap();
+    let limit = crate::rpc::session::MAX_FRAME_BYTES;
+    let open = json!({
+        "jsonrpc": "2.0", "id": "open", "method": "session.open",
+        "params": {"protocolVersion": 1, "token": token, "appVersion": "test"}
+    })
+    .to_string();
+    let ping = json!({
+        "jsonrpc": "2.0", "id": "ping", "method": "session.ping", "params": {}
+    })
+    .to_string();
+
+    for fragmented in [false, true] {
+        for after_open in [false, true] {
+            let mut client = connect(&server, &token).await;
+            if after_open {
+                send_wire(&mut client, serde_json::from_str(&open).unwrap()).await;
+                assert_eq!(
+                    next_wire(&mut client).await["result"]["authenticated"],
+                    true
+                );
+            }
+            let payload = if after_open { &ping } else { &open };
+            send_sized_text(
+                &mut client,
+                pad_to(payload.clone(), limit + 1),
+                fragmented,
+                true,
+            )
+            .await;
+            expect_too_big_close(&mut client).await;
+        }
+
+        let mut client = connect(&server, &token).await;
+        send_sized_text(&mut client, pad_to(open.clone(), limit), fragmented, false).await;
+        assert_eq!(
+            next_wire(&mut client).await["result"]["authenticated"],
+            true
+        );
+        send_sized_text(&mut client, pad_to(ping.clone(), limit), fragmented, false).await;
+        assert_eq!(
+            after_presence(&mut client).await,
+            json!({"jsonrpc": "2.0", "id": "ping", "result": null}),
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn large_immediate_batch_does_not_block_socket_session() {
+    let Some(services) = crate::rpc::test_support::services().await else {
+        return;
+    };
+    let server = server(&services).await;
+    let token = services
+        .auth_token_service
+        .issue_session(1, &uuid::Uuid::new_v4().to_string(), 0)
+        .unwrap();
+    let mut client = connect(&server, &token).await;
+    send_wire(
+        &mut client,
+        json!({
+            "jsonrpc": "2.0", "id": "open", "method": "session.open",
+            "params": {"protocolVersion": 1, "token": token, "appVersion": "test"}
+        }),
+    )
+    .await;
+    assert_eq!(
+        next_wire(&mut client).await["result"]["authenticated"],
+        true
+    );
+
+    let batch: Vec<_> = (0..32)
+        .map(|id| json!({"jsonrpc": "2.0", "id": id, "method": "unknown.operation"}))
+        .collect();
+    send_wire(&mut client, json!(batch)).await;
+    let response = after_presence(&mut client).await;
+    let responses = response.as_array().expect("aggregate batch response");
+    assert_eq!(responses.len(), 32);
+    for id in 0..32 {
+        assert!(responses
+            .iter()
+            .any(|response| response["id"] == id && response["error"]["code"] == -32601));
+    }
+
+    send_call(&mut client, "ping", "session.ping", json!({})).await;
+    assert_eq!(
+        after_presence(&mut client).await,
+        json!({"jsonrpc": "2.0", "id": "ping", "result": null}),
+    );
 }
 
 async fn rpc(client: &mut Client, id: &str, method: &str, params: Value) -> Value {
@@ -126,7 +269,7 @@ async fn rpc(client: &mut Client, id: &str, method: &str, params: Value) -> Valu
     .expect("RPC response deadline")
 }
 
-async fn wait_removed(services: &RpcServices) {
+async fn wait_removed(services: &AppState) {
     timeout(Duration::from_secs(5), async {
         while !services.ws_registry.online_connections(1).is_empty() {
             tokio::time::sleep(Duration::from_millis(5)).await;
@@ -247,7 +390,7 @@ async fn service_token_authentication_wait_does_not_stall_other_requests() {
             get(|_: crate::services::authentication::Principal| async { "authorized" }),
         )
         .route("/probe", get(|| async { "responsive" }))
-        .with_state(state(&services));
+        .with_state(services.clone());
     let credential = crate::services::service_tokens::generate_credential(
         &services.config.auth.service_token_hash_key,
     )

@@ -3,12 +3,11 @@ use crate::dto::{
     rpc::reactions::{ReactionsAddParams, ReactionsListParams, ReactionsRemoveParams},
 };
 use crate::errors::AppError;
-use crate::rpc::{RpcCallContext, RpcServices};
-use crate::services::api::chats::reactions as api;
+use crate::rpc::{AppState, RpcCallContext};
 
 pub async fn list(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ReactionsListParams,
 ) -> Result<ReactionDetailResponse, AppError> {
     let ReactionsListParams {
@@ -17,12 +16,14 @@ pub async fn list(
     } = params;
     let uid = context.uid()?;
     let mut conn = services.db.get()?;
-    api::get_reaction_details(uid, chat_id, message_id, &mut conn, &services.avatars)
+    services
+        .reactions
+        .get_reaction_details(uid, chat_id, message_id, &mut conn)
 }
 
 pub async fn add(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ReactionsAddParams,
 ) -> Result<(), AppError> {
     let ReactionsAddParams {
@@ -32,23 +33,14 @@ pub async fn add(
     } = params;
     let uid = context.uid()?;
     let mut conn = services.db.get()?;
-    api::put_reaction(
-        uid,
-        chat_id,
-        message_id,
-        emoji,
-        &mut conn,
-        api::ReactionWriteDeps {
-            restricted_user_group_ids: &services.config.restricted_user_group_ids,
-            avatars: &services.avatars,
-            registry: &services.ws_registry,
-        },
-    )
+    services
+        .reactions
+        .put_reaction(uid, chat_id, message_id, emoji, &mut conn)
 }
 
 pub async fn remove(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ReactionsRemoveParams,
 ) -> Result<(), AppError> {
     let ReactionsRemoveParams {
@@ -58,16 +50,7 @@ pub async fn remove(
     } = params;
     let uid = context.uid()?;
     let mut conn = services.db.get()?;
-    api::delete_reaction(
-        uid,
-        chat_id,
-        message_id,
-        emoji,
-        &mut conn,
-        api::ReactionWriteDeps {
-            restricted_user_group_ids: &services.config.restricted_user_group_ids,
-            avatars: &services.avatars,
-            registry: &services.ws_registry,
-        },
-    )
+    services
+        .reactions
+        .delete_reaction(uid, chat_id, message_id, emoji, &mut conn)
 }

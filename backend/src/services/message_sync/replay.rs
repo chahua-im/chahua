@@ -34,11 +34,17 @@ pub(crate) struct ReplayService {
 }
 
 #[derive(Debug)]
+pub(crate) struct ReplayBatch {
+    pub to: String,
+    pub changes: Vec<Change>,
+}
+
+#[derive(Debug)]
 pub(crate) enum Advance {
     Revoked,
     Reset { cursor: String, reason: ResetReason },
     Unchanged,
-    Batch { to: String, changes: Vec<Change> },
+    Batches(Vec<ReplayBatch>),
 }
 
 impl ReplayService {
@@ -142,11 +148,15 @@ impl ReplayService {
         if from == head {
             return Ok(Advance::Unchanged);
         }
-        let changed: Vec<(i64, bool)> = change::table
+        let changed: Vec<(i64, bool, Option<i64>)> = change::table
             .filter(change::chat_id.eq(chat_id))
             .filter(change::seq.gt(from).and(change::seq.le(head)))
             .group_by(change::message_id)
-            .select((change::message_id, bool_or(change::created)))
+            .select((
+                change::message_id,
+                bool_or(change::created),
+                diesel::dsl::min(change::seq),
+            ))
             .order(change::message_id.asc())
             .limit(REPLAY_LIMIT + 1)
             .load(conn)?;
@@ -156,24 +166,29 @@ impl ReplayService {
         let rows =
             visibility.replay_rows(conn, chat_id, changed.iter().map(|entry| entry.0).collect())?;
         let mut changed = changed.into_iter().peekable();
-        let mut changes = Vec::with_capacity(rows.len());
+        let mut sequenced_changes = Vec::with_capacity(rows.len());
         let mut upserts = Vec::new();
-        let mut appeared = Vec::new();
+        let mut upsert_meta = Vec::new();
         for (row, visible) in rows {
             while changed.peek().is_some_and(|entry| entry.0 < row.id) {
                 changed.next();
             }
-            let (_, created) = changed
+            let (_, created, min_seq) = changed
                 .next()
                 .expect("projected row was selected by change ID");
+            let min_seq = min_seq.expect("nonempty change group has sequence");
             if visible {
-                appeared.push(created);
+                upsert_meta.push((min_seq, row.id, created));
                 upserts.push(row);
             } else {
-                changes.push(Change::Delete {
-                    message_id: row.id,
-                    thread_root_id: row.reply_root_id,
-                });
+                sequenced_changes.push((
+                    min_seq,
+                    row.id,
+                    Change::Delete {
+                        message_id: row.id,
+                        thread_root_id: row.reply_root_id,
+                    },
+                ));
             }
         }
         if !upserts.is_empty() {
@@ -185,21 +200,125 @@ impl ReplayService {
                 uid,
             ));
             check_projection(conn)?;
-            changes.extend(
-                projected
-                    .into_iter()
-                    .zip(appeared)
-                    .map(|(message, appeared)| Change::Upsert {
-                        message: Box::new(message),
-                        appeared,
-                    }),
-            );
+            sequenced_changes.extend(projected.into_iter().zip(upsert_meta).map(
+                |(message, (min_seq, id, appeared))| {
+                    (
+                        min_seq,
+                        id,
+                        Change::Upsert {
+                            message: Box::new(message),
+                            appeared,
+                        },
+                    )
+                },
+            ));
         }
-        Ok(Advance::Batch {
-            to: self.key.encode(&position),
-            changes,
-        })
+        match pack_replay_batches(
+            chat_id,
+            cursor.expect("validated cursor"),
+            &position,
+            &self.key,
+            sequenced_changes,
+            crate::rpc::session::MAX_FRAME_BYTES,
+        ) {
+            Ok(batches) => Ok(Advance::Batches(batches)),
+            Err(reason) => Ok(reset(reason)),
+        }
     }
+}
+
+fn pack_replay_batches(
+    chat_id: i64,
+    from_cursor: &str,
+    position: &Position,
+    key: &CursorKey,
+    mut items: Vec<(i64, i64, Change)>,
+    max_frame_bytes: usize,
+) -> Result<Vec<ReplayBatch>, ResetReason> {
+    let head_cursor = key.encode(position);
+    if items.is_empty() {
+        return Ok(vec![ReplayBatch {
+            to: head_cursor,
+            changes: Vec::new(),
+        }]);
+    }
+    items.sort_by_key(|(seq, id, _)| (*seq, *id));
+
+    let mut groups: Vec<(i64, Vec<Change>)> = Vec::new();
+    for (seq, _, change) in items {
+        if let Some((last_seq, changes)) =
+            groups.last_mut().filter(|(last_seq, _)| *last_seq == seq)
+        {
+            let _ = last_seq;
+            changes.push(change);
+        } else {
+            groups.push((seq, vec![change]));
+        }
+    }
+
+    let max_from = if from_cursor.len() >= head_cursor.len() {
+        from_cursor
+    } else {
+        &head_cursor
+    };
+    let envelope_bytes =
+        crate::rpc::events::encode_event(&crate::dto::ws::ServerWsMessage::MessageSyncBatch(
+            crate::dto::message_sync::MessageSyncBatch {
+                chat_id,
+                from: max_from.to_owned(),
+                to: head_cursor.clone(),
+                changes: Vec::new(),
+            },
+        ))
+        .expect("empty sync batch encodes")
+        .len();
+
+    let mut batches = Vec::new();
+    let mut current_changes = Vec::new();
+    let mut current_bytes = 0usize;
+    let mut current_last_seq = 0i64;
+
+    for (seq, group_changes) in groups {
+        let mut group_bytes = group_changes.len().saturating_sub(1);
+        for change in &group_changes {
+            group_bytes += serde_json::to_vec(change)
+                .expect("sync change serializes")
+                .len();
+        }
+        if envelope_bytes + group_bytes > max_frame_bytes {
+            return Err(ResetReason::TooLarge);
+        }
+        let added_bytes = if current_changes.is_empty() {
+            group_bytes
+        } else {
+            1 + group_bytes
+        };
+        if !current_changes.is_empty()
+            && envelope_bytes + current_bytes + added_bytes > max_frame_bytes
+        {
+            let to = key.encode(&Position {
+                h: current_last_seq,
+                ..position.clone()
+            });
+            batches.push(ReplayBatch {
+                to,
+                changes: std::mem::take(&mut current_changes),
+            });
+            current_changes = group_changes;
+            current_bytes = group_bytes;
+            current_last_seq = seq;
+        } else {
+            current_changes.extend(group_changes);
+            current_bytes += added_bytes;
+            current_last_seq = seq;
+        }
+    }
+
+    batches.push(ReplayBatch {
+        to: head_cursor,
+        changes: current_changes,
+    });
+    Ok(batches)
 }
 
 fn check_position(
@@ -227,3 +346,6 @@ fn check_position(
     }
     Ok(from.h)
 }
+
+#[cfg(test)]
+mod tests;

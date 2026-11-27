@@ -8,68 +8,11 @@ pub mod session;
 #[cfg(test)]
 pub(crate) mod test_support;
 
-use std::ops::Deref;
 use std::sync::Arc;
 
-use crate::config::AppConfig;
 use crate::errors::AppError;
-use crate::metrics::Metrics;
-use crate::services::{
-    auth_token::{AuthTokenService, VerifiedSession},
-    authentication::Principal,
-    authz::AuthorizationService,
-    avatars::AvatarService,
-    background::BackgroundService,
-    client_tracking::ClientTrackingService,
-    link_previews::LinkPreviewService,
-    media::MediaStore,
-    message_search::MessageSearchService,
-    presence::PresenceSnapshotService,
-    push::PushService,
-    token_generation::TokenGenerationService,
-    unread::UnreadService,
-    ws_registry::ConnectionRegistry,
-};
-use crate::state::DbPool;
-use crate::utils::ids::IdGen;
-
-/// Owned composition root shared by RPC dispatch workers, not an operation dependency.
-pub struct RpcServiceHandles {
-    pub db: DbPool,
-    pub id_gen: Arc<IdGen>,
-    pub metrics: Arc<Metrics>,
-    pub config: Arc<AppConfig>,
-    pub media: MediaStore,
-    pub avatars: Arc<AvatarService>,
-    pub link_previews: Arc<LinkPreviewService>,
-    pub authz_service: Arc<AuthorizationService>,
-    pub ws_registry: Arc<ConnectionRegistry>,
-    pub presence_service: Arc<PresenceSnapshotService>,
-    pub push_service: Arc<PushService>,
-    pub unread_service: Arc<UnreadService>,
-    pub client_tracking: Arc<ClientTrackingService>,
-    pub background_service: Arc<BackgroundService>,
-    pub message_search: Option<Arc<MessageSearchService>>,
-    pub auth_token_service: Arc<AuthTokenService>,
-    pub token_generation: Arc<TokenGenerationService>,
-}
-
-#[derive(Clone)]
-pub struct RpcServices(Arc<RpcServiceHandles>);
-
-impl RpcServices {
-    pub fn new(handles: RpcServiceHandles) -> Self {
-        Self(Arc::new(handles))
-    }
-}
-
-impl Deref for RpcServices {
-    type Target = RpcServiceHandles;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+use crate::services::{auth_token::VerifiedSession, authentication::Principal};
+use crate::AppState;
 
 #[derive(Clone)]
 pub struct RpcCallContext {

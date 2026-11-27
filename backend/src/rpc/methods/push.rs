@@ -4,12 +4,12 @@ use crate::dto::rpc::push::{
     PushUnsubscribeParams,
 };
 use crate::errors::AppError;
-use crate::rpc::{RpcCallContext, RpcServices};
+use crate::rpc::{AppState, RpcCallContext};
 use crate::services::api::push;
 
 pub async fn get_vapid_public_key(
     _context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     _params: PushGetVapidPublicKeyParams,
 ) -> Result<VapidPublicKeyResponse, AppError> {
     Ok(push::get_vapid_public_key(services.push_service.as_ref()))
@@ -17,7 +17,7 @@ pub async fn get_vapid_public_key(
 
 pub async fn get_subscription_status(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: PushGetSubscriptionStatusParams,
 ) -> Result<SubscriptionStatusResponse, AppError> {
     let session = context.verified_session()?;
@@ -32,7 +32,7 @@ pub async fn get_subscription_status(
 
 pub async fn subscribe(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: PushSubscribeParams,
 ) -> Result<(), AppError> {
     let session = context.verified_session()?;
@@ -50,7 +50,7 @@ pub async fn subscribe(
 
 pub async fn unsubscribe(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: PushUnsubscribeParams,
 ) -> Result<(), AppError> {
     let session = context.verified_session()?;

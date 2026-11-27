@@ -26,7 +26,7 @@ use utoipa::{
 
 use super::error::{RpcError, RpcErrorCode, RpcLifecycleFailure};
 use super::protocol::{decode_params, RpcCall, RpcResponse};
-use super::{RpcCallContext, RpcServices};
+use super::{AppState, RpcCallContext};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExecutionClass {
@@ -81,7 +81,7 @@ macro_rules! register_methods {
             match method { $( $name => $name, )+ _ => "unknown" }
         }
 
-        async fn dispatch_registered(context: &RpcCallContext, services: &RpcServices, method: &str, params: Option<Value>) -> Result<Value, RpcError> {
+        async fn dispatch_registered(context: &RpcCallContext, services: &AppState, method: &str, params: Option<Value>) -> Result<Value, RpcError> {
             match method {
                 $( $name => {
                     let params: $params = decode_params(params)?;
@@ -250,7 +250,7 @@ register_methods! {
 pub async fn dispatch_call(
     context: &RpcCallContext,
     call: RpcCall,
-    services: &RpcServices,
+    services: &AppState,
 ) -> (Option<RpcResponse>, Option<RpcErrorCode>) {
     let RpcCall { id, method, params } = call;
     let class = method_class(&method);

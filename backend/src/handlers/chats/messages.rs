@@ -108,20 +108,11 @@ async fn search_messages(
     Query(params): Query<SearchMessagesQuery>,
 ) -> Result<Json<SearchMessagesResponse>, AppError> {
     conn.run(move |mut conn| async move {
-        crate::services::api::chats::messages::search_messages(
-            uid,
-            chat_id,
-            params,
-            &mut conn,
-            crate::services::api::chats::messages::SearchMessagesDeps {
-                media: &state.media,
-                avatars: &state.avatars,
-                metrics: &state.metrics,
-                message_search: &state.message_search,
-            },
-        )
-        .await
-        .map(Json)
+        state
+            .messages
+            .search_messages(uid, chat_id, params, &mut conn)
+            .await
+            .map(Json)
     })
     .await
 }
@@ -150,16 +141,11 @@ async fn get_message(
     conn: DbConn,
 ) -> Result<Json<MessageResponse>, AppError> {
     conn.run(move |mut conn| async move {
-        crate::services::api::chats::messages::get_message(
-            uid,
-            chat_id,
-            message_id,
-            &mut conn,
-            &state.media,
-            &state.avatars,
-        )
-        .await
-        .map(Json)
+        state
+            .messages
+            .get_message(uid, chat_id, message_id, &mut conn)
+            .await
+            .map(Json)
     })
     .await
 }
@@ -188,25 +174,10 @@ async fn post_message(
     Json(body): Json<CreateMessageBody>,
 ) -> Result<impl IntoResponse, AppError> {
     conn.run(move |mut conn| async move {
-        let response = crate::services::api::chats::messages::post_message(
-            principal,
-            chat_id,
-            body,
-            &mut conn,
-            crate::services::api::chats::messages::PostMessageDeps {
-                restricted_user_group_ids: &state.config.restricted_user_group_ids,
-                id_gen: &state.id_gen,
-                media: &state.media,
-                avatars: &state.avatars,
-                link_previews: &state.link_previews,
-                metrics: &state.metrics,
-                authz_service: &state.authz_service,
-                ws_registry: &state.ws_registry,
-                push_service: &state.push_service,
-                message_search: &state.message_search,
-            },
-        )
-        .await?;
+        let response = state
+            .messages
+            .post_message(principal, chat_id, body, &mut conn)
+            .await?;
         Ok((StatusCode::CREATED, Json(response)))
     })
     .await
@@ -237,22 +208,10 @@ async fn forward_messages(
     Json(body): Json<ForwardMessagesBody>,
 ) -> Result<impl IntoResponse, AppError> {
     conn.run(move |mut conn| async move {
-        let response = crate::services::api::chats::messages::forward_messages(
-            uid,
-            dest_chat_id,
-            body,
-            &mut conn,
-            crate::services::api::chats::messages::ForwardMessagesDeps {
-                restricted_user_group_ids: &state.config.restricted_user_group_ids,
-                id_gen: &state.id_gen,
-                media: &state.media,
-                avatars: &state.avatars,
-                metrics: &state.metrics,
-                ws_registry: &state.ws_registry,
-                push_service: &state.push_service,
-            },
-        )
-        .await?;
+        let response = state
+            .messages
+            .forward_messages(uid, dest_chat_id, body, &mut conn)
+            .await?;
         Ok((StatusCode::CREATED, Json(response)))
     })
     .await
@@ -285,24 +244,10 @@ async fn forward_message(
     Json(body): Json<ForwardMessageBody>,
 ) -> Result<impl IntoResponse, AppError> {
     conn.run(move |mut conn| async move {
-        let response = crate::services::api::chats::messages::forward_message(
-            uid,
-            chat_id,
-            message_id,
-            body,
-            &mut conn,
-            crate::services::api::chats::messages::ForwardMessageDeps {
-                restricted_user_group_ids: &state.config.restricted_user_group_ids,
-                id_gen: &state.id_gen,
-                media: &state.media,
-                avatars: &state.avatars,
-                metrics: &state.metrics,
-                ws_registry: &state.ws_registry,
-                push_service: &state.push_service,
-                message_search: &state.message_search,
-            },
-        )
-        .await?;
+        let response = state
+            .messages
+            .forward_message(uid, chat_id, message_id, body, &mut conn)
+            .await?;
         Ok((StatusCode::CREATED, Json(response)))
     })
     .await
@@ -332,15 +277,10 @@ async fn get_forwarded_messages(
     conn: DbConn,
 ) -> Result<Json<ForwardedMessagesResponse>, AppError> {
     conn.run(move |mut conn| async move {
-        crate::services::api::chats::messages::get_forwarded_messages(
-            uid,
-            chat_id,
-            message_id,
-            &mut conn,
-            &state.media,
-            &state.avatars,
-        )
-        .map(Json)
+        state
+            .messages
+            .get_forwarded_messages(uid, chat_id, message_id, &mut conn)
+            .map(Json)
     })
     .await
 }
@@ -371,16 +311,10 @@ async fn get_forwarded_bundle_messages(
     conn: DbConn,
 ) -> Result<Json<ForwardedMessagesResponse>, AppError> {
     conn.run(move |mut conn| async move {
-        crate::services::api::chats::messages::get_forwarded_bundle_messages(
-            uid,
-            chat_id,
-            message_id,
-            bundle_id,
-            &mut conn,
-            &state.media,
-            &state.avatars,
-        )
-        .map(Json)
+        state
+            .messages
+            .get_forwarded_bundle_messages(uid, chat_id, message_id, bundle_id, &mut conn)
+            .map(Json)
     })
     .await
 }
@@ -409,25 +343,10 @@ pub(super) async fn post_thread_message(
     Json(body): Json<CreateMessageBody>,
 ) -> Result<impl IntoResponse, AppError> {
     conn.run(move |mut conn| async move {
-        let response = crate::services::api::chats::messages::post_thread_message(
-            uid,
-            chat_id,
-            thread_id,
-            body,
-            &mut conn,
-            crate::services::api::chats::messages::PostThreadMessageDeps {
-                restricted_user_group_ids: &state.config.restricted_user_group_ids,
-                id_gen: &state.id_gen,
-                media: &state.media,
-                avatars: &state.avatars,
-                link_previews: &state.link_previews,
-                metrics: &state.metrics,
-                ws_registry: &state.ws_registry,
-                push_service: &state.push_service,
-                message_search: &state.message_search,
-            },
-        )
-        .await?;
+        let response = state
+            .messages
+            .post_thread_message(uid, chat_id, thread_id, body, &mut conn)
+            .await?;
         Ok((StatusCode::CREATED, Json(response)))
     })
     .await
@@ -459,23 +378,11 @@ async fn patch_message(
     Json(body): Json<UpdateMessageBody>,
 ) -> Result<Json<MessageResponse>, AppError> {
     conn.run(move |mut conn| async move {
-        crate::services::api::chats::messages::patch_message(
-            uid,
-            chat_id,
-            message_id,
-            body,
-            &mut conn,
-            crate::services::api::chats::messages::PatchMessageDeps {
-                restricted_user_group_ids: &state.config.restricted_user_group_ids,
-                media: &state.media,
-                avatars: &state.avatars,
-                link_previews: &state.link_previews,
-                ws_registry: &state.ws_registry,
-                message_search: &state.message_search,
-            },
-        )
-        .await
-        .map(Json)
+        state
+            .messages
+            .patch_message(uid, chat_id, message_id, body, &mut conn)
+            .await
+            .map(Json)
     })
     .await
 }
@@ -505,20 +412,10 @@ async fn delete_message(
     conn: DbConn,
 ) -> Result<StatusCode, AppError> {
     conn.run(move |mut conn| async move {
-        crate::services::api::chats::messages::delete_message(
-            uid,
-            chat_id,
-            message_id,
-            &mut conn,
-            crate::services::api::chats::messages::DeleteMessageDeps {
-                restricted_user_group_ids: &state.config.restricted_user_group_ids,
-                media: &state.media,
-                avatars: &state.avatars,
-                ws_registry: &state.ws_registry,
-                message_search: &state.message_search,
-            },
-        )
-        .await?;
+        state
+            .messages
+            .delete_message(uid, chat_id, message_id, &mut conn)
+            .await?;
         Ok(StatusCode::NO_CONTENT)
     })
     .await
@@ -547,21 +444,11 @@ async fn bulk_delete_messages(
     Json(body): Json<BulkDeleteMessagesBody>,
 ) -> Result<Json<BulkDeletedPayload>, AppError> {
     conn.run(move |mut conn| async move {
-        crate::services::api::chats::messages::bulk_delete_messages(
-            uid,
-            chat_id,
-            body,
-            &mut conn,
-            crate::services::api::chats::messages::BulkDeleteMessagesDeps {
-                restricted_user_group_ids: &state.config.restricted_user_group_ids,
-                media: &state.media,
-                avatars: &state.avatars,
-                ws_registry: &state.ws_registry,
-                message_search: &state.message_search,
-            },
-        )
-        .await
-        .map(Json)
+        state
+            .messages
+            .bulk_delete_messages(uid, chat_id, body, &mut conn)
+            .await
+            .map(Json)
     })
     .await
 }

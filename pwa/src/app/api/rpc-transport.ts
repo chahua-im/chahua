@@ -17,6 +17,7 @@ const RECONNECT_MAX_MS = 30_000;
 const MAX_ORDINARY_SENT = 16;
 const MAX_ORDINARY_QUEUED = 64;
 const MAX_CONTROL_PENDING = 8;
+const MAX_FRAME_BYTES = 1024 * 1024;
 const MAX_REQUEST_BYTES = 64 * 1024 * 1024;
 const REPLACEABLE_CONTROLS = new Set([
   'presence.watch',
@@ -369,7 +370,11 @@ export class RpcTransport {
     const previous = REPLACEABLE_CONTROLS.has(method)
       ? this.controlQueue.find((call) => call.method === method)
       : undefined;
-    if (bytes > MAX_REQUEST_BYTES || this.queuedBytes - (previous?.bytes ?? 0) + bytes > MAX_REQUEST_BYTES) {
+    if (bytes > MAX_FRAME_BYTES) {
+      reject(this.admissionError(method, id, new RpcError(RpcErrorCode.PayloadTooLarge, 'Payload too large')));
+      return undefined;
+    }
+    if (this.queuedBytes - (previous?.bytes ?? 0) + bytes > MAX_REQUEST_BYTES) {
       reject(this.admissionError(method, id, new RpcTransportError('overloaded', 'The RPC request queue is full')));
       return undefined;
     }
@@ -526,7 +531,8 @@ export class RpcTransport {
       this.protocolFailure('RPC frames must be text');
       return;
     }
-    if (utf8.encode(raw).byteLength + this.queuedBytes > MAX_REQUEST_BYTES) {
+    const rawBytes = utf8.encode(raw).byteLength;
+    if (rawBytes > MAX_FRAME_BYTES || rawBytes + this.queuedBytes > MAX_REQUEST_BYTES) {
       this.protocolFailure('The RPC frame exceeds the transport byte budget');
       return;
     }

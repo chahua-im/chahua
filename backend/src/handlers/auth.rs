@@ -46,16 +46,7 @@ async fn post_dev_session(
         .get(X_CLIENT_ID)
         .map(|value| value.to_str().unwrap_or("").to_owned());
     tokio::task::spawn_blocking(move || {
-        let issued = crate::services::api::auth::post_dev_session(
-            request,
-            client_id,
-            crate::services::api::auth::PostDevSessionDeps {
-                config: &state.config,
-                auth_token_service: &state.auth_token_service,
-                token_generation: &state.token_generation,
-                db: &state.db,
-            },
-        )?;
+        let issued = state.dev_sessions.post_dev_session(request, client_id)?;
         Ok(Json(issued.response))
     })
     .await

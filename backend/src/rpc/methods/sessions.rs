@@ -1,11 +1,11 @@
 use crate::dto::rpc::sessions::SessionsListClientsParams;
 use crate::dto::ws::OnlineClientConnectionResponse;
 use crate::errors::AppError;
-use crate::rpc::{RpcCallContext, RpcServices};
+use crate::rpc::{AppState, RpcCallContext};
 
 pub async fn list_clients(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     _: SessionsListClientsParams,
 ) -> Result<Vec<OnlineClientConnectionResponse>, AppError> {
     crate::services::api::ws::get_online_clients(

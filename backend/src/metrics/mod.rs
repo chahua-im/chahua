@@ -2,8 +2,10 @@ mod api;
 mod http;
 mod pool;
 pub mod queries;
+mod rpc_admission;
 
 pub use api::{ApiMetrics, ApiStages};
+pub use rpc_admission::RpcAdmissionMetrics;
 
 use axum::extract::State;
 use axum::http::{header, HeaderValue, StatusCode};
@@ -27,6 +29,7 @@ pub use http::track_http_metrics;
 pub struct Metrics {
     registry: Registry,
     pub api: Arc<ApiMetrics>,
+    pub rpc_admission: Arc<RpcAdmissionMetrics>,
     pub chat: Arc<ChatMetrics>,
     pub ws: Arc<WsMetrics>,
     pub presence: Arc<PresenceMetrics>,
@@ -50,6 +53,7 @@ impl Metrics {
             .expect("process collector registration should succeed");
         Self {
             api: Arc::new(ApiMetrics::new(&registry)),
+            rpc_admission: Arc::new(RpcAdmissionMetrics::new(&registry)),
             chat: Arc::new(ChatMetrics::new(&registry)),
             ws: Arc::new(WsMetrics::new(&registry)),
             presence: Arc::new(PresenceMetrics::new(&registry)),
@@ -100,153 +104,4 @@ pub async fn metrics_handler(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::services::client_tracking::ActivityTodaySnapshot;
-    use axum::body::Body;
-    use axum::http::Request as HttpRequest;
-    use axum::routing::get;
-    use axum::Router;
-    use tower::ServiceExt;
-
-    #[tokio::test]
-    async fn metrics_endpoint_renders_registered_collectors() {
-        let metrics = Arc::new(Metrics::new());
-        metrics
-            .api
-            .record("http", "messages.list", StatusCode::OK, "none", 0.001);
-        metrics
-            .api
-            .record("rpc", "messages.list", StatusCode::FORBIDDEN, "1003", 0.05);
-        metrics
-            .chat
-            .record_message(42, crate::models::GroupKind::Group);
-        metrics.push.record_notification("web_push", true);
-        metrics.push.record_job("success", 0.002);
-        metrics.push.record_suppressed();
-        metrics.push.record_delivery_failure("web_push", "expired");
-        metrics
-            .push
-            .record_subscription_prune("web_push", "expired");
-        metrics.ws.set_connected_users(2);
-        metrics.ws.set_connection_states(1, 1);
-        metrics.ws.record_connection_open();
-        metrics.ws.record_connection_duration(12.0);
-        metrics.avatars.record_lookup(2, 0.003, 0.001);
-        metrics.presence.record_snapshot(true, 0.003);
-        metrics.presence.record_scope_load(true, 0.002);
-        metrics.presence.record_group_lookup(0.001);
-        metrics.presence.record_group_refresh(true, 0.001);
-        metrics.presence.record_group_scan(5000, 0.0005);
-        metrics.ws.record_message_pushed("message");
-        metrics.ws.record_message_dropped("message");
-        metrics.client_tracking.record_activity_write("success");
-        metrics
-            .client_tracking
-            .record_activity_write_skipped("throttled");
-        metrics.client_tracking.record_rebind();
-        metrics.client_tracking.record_purge("stale_clients", 2);
-        metrics
-            .client_tracking
-            .record_daily_rollup_update("success");
-        metrics
-            .audio_transcode
-            .record_source("audio/ogg;codecs=opus");
-        metrics.audio_transcode.record_job("success", 0.75);
-        metrics
-            .client_tracking
-            .set_activity_today(ActivityTodaySnapshot {
-                active_users: 3,
-                new_users: 1,
-                active_clients: 4,
-                new_clients: 2,
-                client_rebinds: 1,
-                stale_clients_purged: 2,
-                legacy_subscriptions_purged: 0,
-            });
-        metrics
-            .client_tracking
-            .set_app_version_active_clients(&std::collections::HashMap::from([(
-                "abc1234".to_owned(),
-                1,
-            )]));
-        metrics
-            .message_search
-            .record_index_operation("upsert", "success");
-        metrics.background.record_job("cleanup", "success", 0.01);
-        let app = Router::new()
-            .route("/metrics", get(metrics_handler))
-            .with_state(metrics);
-
-        let response = app
-            .oneshot(
-                HttpRequest::builder()
-                    .uri("/metrics")
-                    .body(Body::empty())
-                    .expect("request should build"),
-            )
-            .await
-            .expect("metrics route should respond");
-
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .expect("body should be readable");
-        let body = String::from_utf8(body.to_vec()).expect("metrics body should be utf8");
-        assert!(body.contains("api_requests_total"));
-        assert!(body.contains("api_request_duration_seconds"));
-        assert!(body.contains("messages_total"));
-        assert!(body.contains("messages_by_chat_kind_total{chat_kind=\"group\"} 1"));
-        assert!(body.contains("push_notifications_total"));
-        assert!(body.contains("push_notification_jobs_total"));
-        assert!(body.contains("push_notification_job_duration_seconds"));
-        assert!(body.contains("push_notifications_suppressed_total"));
-        assert!(body.contains("push_delivery_failures_total"));
-        assert!(body.contains("push_subscription_prunes_total"));
-        assert!(body.contains("ws_connected_users"));
-        assert!(body.contains("ws_active_connections"));
-        assert!(body.contains("ws_inactive_connections"));
-        assert!(body.contains("ws_connections_total"));
-        assert!(body.contains("ws_connection_duration_seconds"));
-        assert!(body.contains("presence_snapshot_duration_seconds"));
-        assert!(body.contains("presence_scope_load_duration_seconds"));
-        assert!(body.contains("presence_group_count_lookup_duration_seconds"));
-        assert!(body.contains("presence_group_count_refresh_duration_seconds"));
-        assert!(body.contains("presence_group_online_scan_duration_seconds"));
-        assert!(body.contains("presence_group_members_scanned"));
-        assert!(body.contains("discuz_avatar_lookup_duration_seconds"));
-        assert!(body.contains("discuz_avatar_lookup_fs_duration_seconds"));
-        assert!(body.contains("discuz_avatar_lookup_users_total"));
-        assert!(body.contains("ws_messages_pushed_total"));
-        assert!(body.contains("ws_messages_dropped_total"));
-        assert!(body.contains("client_activity_writes_total"));
-        assert!(body.contains("client_activity_writes_skipped_total"));
-        assert!(body.contains("client_rebinds_total"));
-        assert!(body.contains("client_tracking_purge_total"));
-        assert!(body.contains("activity_daily_rollup_updates_total"));
-        assert!(body.contains("activity_today_active_users"));
-        assert!(body.contains("activity_today_new_users"));
-        assert!(body.contains("activity_today_active_clients"));
-        assert!(body.contains("activity_today_new_clients"));
-        assert!(body.contains("activity_today_client_rebinds"));
-        assert!(body.contains("activity_today_stale_clients_purged"));
-        assert!(body.contains("activity_today_legacy_subscriptions_purged"));
-        assert!(body.contains("app_version_active_clients"));
-        assert!(body.contains("message_search_index_operations_total"));
-        assert!(body.contains("message_search_queries_total"));
-        assert!(body.contains("message_search_query_duration_seconds"));
-        assert!(body.contains("message_search_index_operation_duration_seconds"));
-        assert!(body.contains("message_search_candidates_per_query"));
-        assert!(body.contains("message_search_results_per_query"));
-        assert!(body.contains("message_search_candidates_dropped_total"));
-        assert!(body.contains("message_search_index_documents_total"));
-        assert!(body.contains("message_search_reindex_duration_seconds"));
-        assert!(body.contains("message_search_reindex_documents_total"));
-        assert!(body.contains("message_search_reindex_last_success_timestamp_seconds"));
-        assert!(body.contains("background_jobs_total"));
-        assert!(body.contains("background_job_duration_seconds"));
-        assert!(body.contains("audio_transcode_source_total"));
-        assert!(body.contains("audio_transcode_jobs_total"));
-        assert!(body.contains("audio_transcode_job_duration_seconds"));
-    }
-}
+mod tests;

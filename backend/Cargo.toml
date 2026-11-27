@@ -10,6 +10,7 @@ unused_must_use = "deny"
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.8", features = ["ws", "multipart"] }
+tokio-tungstenite = "0.28"
 diesel = { version = "2", features = [
     "postgres",
     "r2d2",
@@ -78,5 +79,4 @@ incremental = true
 
 [dev-dependencies]
 http02 = { package = "http", version = "0.2" }
-tokio-tungstenite = "0.28"
 tokio = { version = "1", features = ["test-util"] }

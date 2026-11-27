@@ -17,10 +17,7 @@ use crate::dto::friends::{
 };
 use crate::errors::AppError;
 use crate::extractors::DbConn;
-use crate::services::api::friends::{
-    self, AcceptFriendRequestDeps, CreateFriendRequestDeps, CreateFriendRequestResult,
-    RejectFriendRequestDeps,
-};
+use crate::services::api::friends::{self, CreateFriendRequestResult};
 use crate::services::authentication::Principal;
 use crate::utils::auth::CurrentUid;
 use crate::AppState;
@@ -140,22 +137,10 @@ async fn create_friend_request(
     Json(body): Json<CreateFriendRequestBody>,
 ) -> Result<(StatusCode, Json<FriendRequestResponse>), AppError> {
     conn.run(move |mut conn| async move {
-        match friends::create_friend_request(
-            principal,
-            body,
-            &mut conn,
-            CreateFriendRequestDeps {
-                authz_service: &state.authz_service,
-                avatars: &state.avatars,
-                id_gen: &state.id_gen,
-                media: &state.media,
-                metrics: &state.metrics,
-                ws_registry: &state.ws_registry,
-                presence_service: &state.presence_service,
-                push_service: &state.push_service,
-            },
-        )
-        .await?
+        match state
+            .friends
+            .create_friend_request(principal, body, &mut conn)
+            .await?
         {
             CreateFriendRequestResult::Created(response) => {
                 Ok((StatusCode::CREATED, Json(response)))
@@ -241,22 +226,10 @@ async fn accept_friend_request(
 ) -> Result<Json<FriendRequestResponse>, AppError> {
     conn.run(move |mut conn| async move {
         Ok(Json(
-            friends::accept_friend_request(
-                principal,
-                request_id,
-                &mut conn,
-                AcceptFriendRequestDeps {
-                    authz_service: &state.authz_service,
-                    avatars: &state.avatars,
-                    id_gen: &state.id_gen,
-                    media: &state.media,
-                    metrics: &state.metrics,
-                    ws_registry: &state.ws_registry,
-                    presence_service: &state.presence_service,
-                    push_service: &state.push_service,
-                },
-            )
-            .await?,
+            state
+                .friends
+                .accept_friend_request(principal, request_id, &mut conn)
+                .await?,
         ))
     })
     .await
@@ -284,22 +257,10 @@ async fn reject_friend_request(
 ) -> Result<Json<FriendRequestResponse>, AppError> {
     conn.run(move |mut conn| async move {
         Ok(Json(
-            friends::reject_friend_request(
-                principal,
-                request_id,
-                &mut conn,
-                RejectFriendRequestDeps {
-                    authz_service: &state.authz_service,
-                    avatars: &state.avatars,
-                    id_gen: &state.id_gen,
-                    media: &state.media,
-                    metrics: &state.metrics,
-                    ws_registry: &state.ws_registry,
-                    presence_service: &state.presence_service,
-                    push_service: &state.push_service,
-                },
-            )
-            .await?,
+            state
+                .friends
+                .reject_friend_request(principal, request_id, &mut conn)
+                .await?,
         ))
     })
     .await

@@ -1,12 +1,12 @@
 use crate::dto::blocks::ListBlocksResponse;
 use crate::dto::rpc::blocks::{BlocksCreateParams, BlocksDeleteParams, BlocksListParams};
 use crate::errors::AppError;
-use crate::rpc::{RpcCallContext, RpcServices};
+use crate::rpc::{AppState, RpcCallContext};
 use crate::services::api::blocks;
 
 pub async fn list(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     _: BlocksListParams,
 ) -> Result<ListBlocksResponse, AppError> {
     let principal = context.principal()?;
@@ -21,7 +21,7 @@ pub async fn list(
 
 pub async fn create(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: BlocksCreateParams,
 ) -> Result<(), AppError> {
     let principal = context.principal()?;
@@ -38,7 +38,7 @@ pub async fn create(
 
 pub async fn delete(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: BlocksDeleteParams,
 ) -> Result<(), AppError> {
     let principal = context.principal()?;

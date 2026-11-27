@@ -5,11 +5,11 @@ use crate::dto::chats::{
 use crate::dto::read_receipts::ReadReceiptResponse;
 use crate::dto::rpc::chats::*;
 use crate::errors::AppError;
-use crate::rpc::{RpcCallContext, RpcServices};
+use crate::rpc::{AppState, RpcCallContext};
 
 pub async fn list(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ChatsListParams,
 ) -> Result<ListChatsResponse, AppError> {
     let uid = context.uid()?;
@@ -31,7 +31,7 @@ pub async fn list(
 
 pub async fn get_total_unread_count(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     _params: ChatsGetTotalUnreadCountParams,
 ) -> Result<UnreadCountResponse, AppError> {
     let principal = context.principal()?;
@@ -46,7 +46,7 @@ pub async fn get_total_unread_count(
 
 pub async fn archive(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ChatsArchiveParams,
 ) -> Result<(), AppError> {
     let uid = context.uid()?;
@@ -61,7 +61,7 @@ pub async fn archive(
 
 pub async fn unarchive(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ChatsUnarchiveParams,
 ) -> Result<(), AppError> {
     let uid = context.uid()?;
@@ -76,7 +76,7 @@ pub async fn unarchive(
 
 pub async fn mark_as_read(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ChatsMarkAsReadParams,
 ) -> Result<MarkChatReadStateResponse, AppError> {
     let uid = context.uid()?;
@@ -93,7 +93,7 @@ pub async fn mark_as_read(
 
 pub async fn mark_as_unread(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ChatsMarkAsUnreadParams,
 ) -> Result<MarkChatReadStateResponse, AppError> {
     let uid = context.uid()?;
@@ -110,7 +110,7 @@ pub async fn mark_as_unread(
 
 pub async fn get_unread_count(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ChatsGetUnreadCountParams,
 ) -> Result<MarkChatReadStateResponse, AppError> {
     let uid = context.uid()?;
@@ -125,7 +125,7 @@ pub async fn get_unread_count(
 
 pub async fn get_read_receipt(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ChatsGetReadReceiptParams,
 ) -> Result<ReadReceiptResponse, AppError> {
     let uid = context.uid()?;
@@ -135,7 +135,7 @@ pub async fn get_read_receipt(
 
 pub async fn list_mentions(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ChatsListMentionsParams,
 ) -> Result<UnreadMentionIdsResponse, AppError> {
     let uid = context.uid()?;
@@ -151,7 +151,7 @@ pub async fn list_mentions(
 
 pub async fn list_unread_reactions(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ChatsListUnreadReactionsParams,
 ) -> Result<UnreadReactionIdsResponse, AppError> {
     let uid = context.uid()?;
@@ -167,7 +167,7 @@ pub async fn list_unread_reactions(
 
 pub async fn acknowledge_reactions(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ChatsAcknowledgeReactionsParams,
 ) -> Result<UnreadReactionsAckResponse, AppError> {
     let uid = context.uid()?;

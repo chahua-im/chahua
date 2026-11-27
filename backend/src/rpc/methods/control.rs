@@ -11,7 +11,7 @@ use crate::dto::rpc::{
 };
 use crate::rpc::error::{RpcError, RpcErrorCode};
 use crate::rpc::session::{ControlReply, RpcControlCommand};
-use crate::rpc::{RpcCallContext, RpcServices};
+use crate::rpc::{AppState, RpcCallContext};
 
 async fn command<T>(
     context: &RpcCallContext,
@@ -55,7 +55,7 @@ async fn command<T>(
 
 pub async fn open(
     context: &RpcCallContext,
-    _services: &RpcServices,
+    _services: &AppState,
     params: SessionOpenParams,
 ) -> Result<SessionOpenResult, RpcError> {
     command(context, |reply| RpcControlCommand::Open { params, reply }).await
@@ -63,7 +63,7 @@ pub async fn open(
 
 pub async fn message_sync_resume(
     context: &RpcCallContext,
-    _services: &RpcServices,
+    _services: &AppState,
     params: MessageSyncResumeParams,
 ) -> Result<EmptyResult, RpcError> {
     command(context, |reply| RpcControlCommand::MessageSyncResume {
@@ -80,7 +80,7 @@ pub async fn message_sync_resume(
 
 pub async fn message_sync_page(
     context: &RpcCallContext,
-    _services: &RpcServices,
+    _services: &AppState,
     params: MessageSyncPageParams,
 ) -> Result<EmptyResult, RpcError> {
     command(context, |reply| RpcControlCommand::MessageSyncPage {
@@ -97,7 +97,7 @@ pub async fn message_sync_page(
 
 pub async fn create_dev_session(
     context: &RpcCallContext,
-    _services: &RpcServices,
+    _services: &AppState,
     params: AuthCreateDevSessionParams,
 ) -> Result<AuthTokenResponse, RpcError> {
     command(context, |reply| RpcControlCommand::CreateDevSession {
@@ -109,7 +109,7 @@ pub async fn create_dev_session(
 
 pub async fn refresh(
     context: &RpcCallContext,
-    _services: &RpcServices,
+    _services: &AppState,
     _params: AuthRefreshParams,
 ) -> Result<AuthTokenResponse, RpcError> {
     command(context, |reply| RpcControlCommand::Refresh { reply }).await
@@ -117,7 +117,7 @@ pub async fn refresh(
 
 pub async fn ping(
     context: &RpcCallContext,
-    _services: &RpcServices,
+    _services: &AppState,
     params: SessionPingParams,
 ) -> Result<(), RpcError> {
     command(context, |reply| RpcControlCommand::Ping { params, reply }).await
@@ -125,7 +125,7 @@ pub async fn ping(
 
 pub async fn set_app_state(
     context: &RpcCallContext,
-    _services: &RpcServices,
+    _services: &AppState,
     params: SessionSetAppStateParams,
 ) -> Result<(), RpcError> {
     command(context, |reply| RpcControlCommand::SetAppState {
@@ -137,7 +137,7 @@ pub async fn set_app_state(
 
 pub async fn watch_presence(
     context: &RpcCallContext,
-    _services: &RpcServices,
+    _services: &AppState,
     params: PresenceWatchParams,
 ) -> Result<(), RpcError> {
     command(context, |reply| RpcControlCommand::WatchPresence {
@@ -149,7 +149,7 @@ pub async fn watch_presence(
 
 pub async fn watch_unread(
     context: &RpcCallContext,
-    _services: &RpcServices,
+    _services: &AppState,
     params: ConversationsWatchUnreadParams,
 ) -> Result<(), RpcError> {
     command(context, |reply| RpcControlCommand::WatchUnread {
@@ -161,7 +161,7 @@ pub async fn watch_unread(
 
 pub async fn watch_states(
     context: &RpcCallContext,
-    _services: &RpcServices,
+    _services: &AppState,
     params: ConversationsWatchStatesParams,
 ) -> Result<(), RpcError> {
     command(context, |reply| RpcControlCommand::WatchStates {

@@ -3,11 +3,11 @@ use crate::dto::attachments::{
 };
 use crate::dto::rpc::attachments::*;
 use crate::errors::AppError;
-use crate::rpc::{RpcCallContext, RpcServices};
+use crate::rpc::{AppState, RpcCallContext};
 
 pub async fn list_for_chat(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: AttachmentsListForChatParams,
 ) -> Result<ListChatAttachmentsResponse, AppError> {
     let uid = context.uid()?;
@@ -24,7 +24,7 @@ pub async fn list_for_chat(
 
 pub async fn create_upload_url(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: AttachmentsCreateUploadUrlParams,
 ) -> Result<UploadUrlResponse, AppError> {
     let uid = context.uid()?;
@@ -42,7 +42,7 @@ pub async fn create_upload_url(
 
 pub async fn get_config(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     _params: AttachmentsGetConfigParams,
 ) -> Result<AttachmentConfigResponse, AppError> {
     Ok(crate::services::api::attachments::get_config(

@@ -9,7 +9,6 @@ use utoipa_axum::router::OpenApiRouter;
 use crate::dto::pins::{CreatePinBody, ListPinsResponse, PinResponse};
 use crate::errors::AppError;
 use crate::extractors::DbConn;
-use crate::services::api::pins::{self, CreatePinDeps, DeletePinDeps};
 use crate::utils::auth::CurrentUid;
 use crate::AppState;
 
@@ -56,8 +55,7 @@ async fn list_pins(
     conn: DbConn,
 ) -> Result<Json<ListPinsResponse>, AppError> {
     conn.run(move |mut conn| async move {
-        let response =
-            pins::list_pins(uid, path.chat_id, &mut conn, &state.media, &state.avatars).await?;
+        let response = state.pins.list_pins(uid, path.chat_id, &mut conn).await?;
         Ok(Json(response))
     })
     .await
@@ -84,21 +82,10 @@ async fn create_pin(
     Json(body): Json<CreatePinBody>,
 ) -> Result<(StatusCode, Json<PinResponse>), AppError> {
     conn.run(move |mut conn| async move {
-        let pin_response = pins::create_pin(
-            uid,
-            path.chat_id,
-            body,
-            &mut conn,
-            CreatePinDeps {
-                id_gen: &state.id_gen,
-                media: &state.media,
-                avatars: &state.avatars,
-                metrics: &state.metrics,
-                ws_registry: &state.ws_registry,
-                push_service: &state.push_service,
-            },
-        )
-        .await?;
+        let pin_response = state
+            .pins
+            .create_pin(uid, path.chat_id, body, &mut conn)
+            .await?;
         Ok((StatusCode::CREATED, Json(pin_response)))
     })
     .await
@@ -124,21 +111,10 @@ async fn delete_pin(
     conn: DbConn,
 ) -> Result<StatusCode, AppError> {
     conn.run(move |mut conn| async move {
-        pins::delete_pin(
-            uid,
-            path.chat_id,
-            path.pin_id,
-            &mut conn,
-            DeletePinDeps {
-                id_gen: &state.id_gen,
-                media: &state.media,
-                avatars: &state.avatars,
-                metrics: &state.metrics,
-                ws_registry: &state.ws_registry,
-                push_service: &state.push_service,
-            },
-        )
-        .await?;
+        state
+            .pins
+            .delete_pin(uid, path.chat_id, path.pin_id, &mut conn)
+            .await?;
         Ok(StatusCode::NO_CONTENT)
     })
     .await
@@ -164,15 +140,10 @@ async fn list_thread_pins(
     conn: DbConn,
 ) -> Result<Json<ListPinsResponse>, AppError> {
     conn.run(move |mut conn| async move {
-        let response = pins::list_thread_pins(
-            uid,
-            path.chat_id,
-            path.thread_root_id,
-            &mut conn,
-            &state.media,
-            &state.avatars,
-        )
-        .await?;
+        let response = state
+            .pins
+            .list_thread_pins(uid, path.chat_id, path.thread_root_id, &mut conn)
+            .await?;
         Ok(Json(response))
     })
     .await
@@ -200,22 +171,10 @@ async fn create_thread_pin(
     Json(body): Json<CreatePinBody>,
 ) -> Result<(StatusCode, Json<PinResponse>), AppError> {
     conn.run(move |mut conn| async move {
-        let pin_response = pins::create_thread_pin(
-            uid,
-            path.chat_id,
-            path.thread_root_id,
-            body,
-            &mut conn,
-            CreatePinDeps {
-                id_gen: &state.id_gen,
-                media: &state.media,
-                avatars: &state.avatars,
-                metrics: &state.metrics,
-                ws_registry: &state.ws_registry,
-                push_service: &state.push_service,
-            },
-        )
-        .await?;
+        let pin_response = state
+            .pins
+            .create_thread_pin(uid, path.chat_id, path.thread_root_id, body, &mut conn)
+            .await?;
         Ok((StatusCode::CREATED, Json(pin_response)))
     })
     .await
@@ -242,22 +201,16 @@ async fn delete_thread_pin(
     conn: DbConn,
 ) -> Result<StatusCode, AppError> {
     conn.run(move |mut conn| async move {
-        pins::delete_thread_pin(
-            uid,
-            path.chat_id,
-            path.thread_root_id,
-            path.pin_id,
-            &mut conn,
-            DeletePinDeps {
-                id_gen: &state.id_gen,
-                media: &state.media,
-                avatars: &state.avatars,
-                metrics: &state.metrics,
-                ws_registry: &state.ws_registry,
-                push_service: &state.push_service,
-            },
-        )
-        .await?;
+        state
+            .pins
+            .delete_thread_pin(
+                uid,
+                path.chat_id,
+                path.thread_root_id,
+                path.pin_id,
+                &mut conn,
+            )
+            .await?;
         Ok(StatusCode::NO_CONTENT)
     })
     .await

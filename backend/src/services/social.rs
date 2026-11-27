@@ -11,7 +11,6 @@ use chrono::Utc;
 use diesel::prelude::*;
 
 use crate::errors::AppError;
-use crate::metrics::Metrics;
 use crate::models::{
     FriendAddVerificationMode, FriendPresenceOverride, FriendReadReceiptOverride, FriendRequest,
     FriendRequestStatus, GroupJoinReason, GroupKind, GroupRole, GroupVisibility, MessageType,
@@ -20,29 +19,22 @@ use crate::models::{
 };
 use crate::schema::{blocks, friend_requests, friendships, group_membership, groups, user_extra};
 use crate::services::{
-    avatars::AvatarService,
-    media::MediaStore,
-    messages::{
-        load_username_by_uid, PreparedMessageSend, SendMessageOutcome, SendPreparedMessageDeps,
-    },
+    messages::{load_username_by_uid, MessageWriter, PreparedMessageSend, SendMessageOutcome},
     presence::PresenceSnapshotService,
     push::PushService,
     user,
     ws_registry::ConnectionRegistry,
 };
-use crate::utils::ids::{self, IdGen};
+use crate::utils::ids;
 
 const UNRESOLVED_FRIEND_REQUEST_STATUSES: [FriendRequestStatus; 2] =
     [FriendRequestStatus::Pending, FriendRequestStatus::Archived];
 
-pub struct FriendRequestServiceDeps<'a> {
-    pub id_gen: &'a Arc<IdGen>,
-    pub media: &'a MediaStore,
-    pub avatars: &'a Arc<AvatarService>,
-    pub metrics: &'a Arc<Metrics>,
-    pub ws_registry: &'a Arc<ConnectionRegistry>,
-    pub presence_service: &'a Arc<PresenceSnapshotService>,
-    pub push_service: &'a Arc<PushService>,
+pub struct SocialService {
+    pub message_writer: Arc<MessageWriter>,
+    pub ws_registry: Arc<ConnectionRegistry>,
+    pub presence_service: Arc<PresenceSnapshotService>,
+    pub push_service: Arc<PushService>,
 }
 
 /// Return the pair as `(min, max)` so each relationship is stored once.
@@ -482,56 +474,53 @@ fn create_dm_for_friendship(
 /// Best-effort system message announcing the accepted friend request. Sender
 /// is the user who accepted; both UIs render "{sender} {text}". Fails silently
 /// so acceptance never breaks on announcement failure.
-async fn send_friendship_accepted_message(
-    conn: &mut PgConnection,
-    deps: FriendRequestServiceDeps<'_>,
-    sender_uid: i32,
-    peer_uid: i32,
-    chat_id: i64,
-    chat_kind: GroupKind,
-) {
-    let peer_username = load_username_by_uid(conn, peer_uid)
-        .unwrap_or_default()
-        .unwrap_or_else(|| "Someone".to_string());
-    if let Ok(SendMessageOutcome::Created(send_result)) =
-        crate::services::messages::send_prepared_message(
-            conn,
-            SendPreparedMessageDeps {
-                id_gen: deps.id_gen,
-                media: deps.media,
-                avatars: deps.avatars,
-                metrics: deps.metrics,
-            },
-            PreparedMessageSend {
-                system_kind: Some(crate::models::SystemMessageKind::FriendRequestAccepted),
-                forwarded_from_message_id: None,
-                metadata: None,
-                chat_id,
-                chat_kind,
-                sender_uid,
-                message: Some(super::system_messages::with_user(
-                    format!("accepted {peer_username}'s friend request"),
-                    peer_uid,
-                )),
-                message_type: MessageType::System,
-                sticker_id: None,
-                reply_to_id: None,
-                reply_root_id: None,
-                client_generated_id: uuid::Uuid::new_v4().to_string(),
-                attachment_ids: vec![],
-                publish_immediately: true,
-                forwarded_bundle_id: None,
-                forwarded_preview_total: None,
-                forwarded_preview_contains_forwarded_messages: None,
-                forwarded_preview_items: None,
-            },
-        )
-        .await
-    {
-        let send_result = *send_result;
-        send_result
-            .side_effects
-            .fire(deps.ws_registry, deps.push_service);
+impl SocialService {
+    async fn send_friendship_accepted_message(
+        &self,
+        conn: &mut PgConnection,
+        sender_uid: i32,
+        peer_uid: i32,
+        chat_id: i64,
+        chat_kind: GroupKind,
+    ) {
+        let peer_username = load_username_by_uid(conn, peer_uid)
+            .unwrap_or_default()
+            .unwrap_or_else(|| "Someone".to_string());
+        if let Ok(SendMessageOutcome::Created(send_result)) = self
+            .message_writer
+            .send_prepared_message(
+                conn,
+                PreparedMessageSend {
+                    system_kind: Some(crate::models::SystemMessageKind::FriendRequestAccepted),
+                    forwarded_from_message_id: None,
+                    metadata: None,
+                    chat_id,
+                    chat_kind,
+                    sender_uid,
+                    message: Some(super::system_messages::with_user(
+                        format!("accepted {peer_username}'s friend request"),
+                        peer_uid,
+                    )),
+                    message_type: MessageType::System,
+                    sticker_id: None,
+                    reply_to_id: None,
+                    reply_root_id: None,
+                    client_generated_id: uuid::Uuid::new_v4().to_string(),
+                    attachment_ids: vec![],
+                    publish_immediately: true,
+                    forwarded_bundle_id: None,
+                    forwarded_preview_total: None,
+                    forwarded_preview_contains_forwarded_messages: None,
+                    forwarded_preview_items: None,
+                },
+            )
+            .await
+        {
+            let send_result = *send_result;
+            send_result
+                .side_effects
+                .fire(&self.ws_registry, &self.push_service);
+        }
     }
 }
 
@@ -928,97 +917,106 @@ fn normalize_request_message(
     }
 }
 
-pub async fn create_friend_request(
-    conn: &mut PgConnection,
-    deps: FriendRequestServiceDeps<'_>,
-    from: i32,
-    to: i32,
-    message: Option<String>,
-) -> Result<CreateRequestOutcome, AppError> {
-    if from == to {
-        return Err(AppError::BadRequest(
-            "Cannot send a friend request to yourself",
-        ));
-    }
-    let now = Utc::now();
-
-    if is_blocked_either_direction(conn, from, to)? {
-        return Err(AppError::Forbidden(
-            "Cannot send a friend request to a blocked user",
-        ));
-    }
-    if are_mutual_friends(conn, from, to)? {
-        return Ok(CreateRequestOutcome::AlreadyFriends);
-    }
-    if let Some(existing) = find_unresolved_request_between(conn, from, to)? {
-        if existing.from_uid == from {
-            return Ok(CreateRequestOutcome::AlreadyPending);
+impl SocialService {
+    pub async fn create_friend_request(
+        &self,
+        conn: &mut PgConnection,
+        from: i32,
+        to: i32,
+        message: Option<String>,
+    ) -> Result<CreateRequestOutcome, AppError> {
+        if from == to {
+            return Err(AppError::BadRequest(
+                "Cannot send a friend request to yourself",
+            ));
         }
-        // Reciprocal pending request (to -> from): auto-accept it.
-        let dm_group_id = ids::next_gid(deps.id_gen.as_ref()).await.map_err(|err| {
-            tracing::error!("failed to generate dm group id: {:?}", err);
-            AppError::Internal("Failed to generate id")
-        })?;
-        let (request, (dm_chat_id, chat_kind)) = conn
-            .transaction::<(FriendRequest, (i64, GroupKind)), AppError, _>(|conn| {
-                let updated = diesel::update(
-                    friend_requests::table
-                        .filter(friend_requests::id.eq(existing.id))
-                        .filter(friend_requests::from_uid.eq(to))
-                        .filter(friend_requests::to_uid.eq(from))
-                        .filter(friend_requests::status.eq_any(UNRESOLVED_FRIEND_REQUEST_STATUSES)),
-                )
-                .set((
-                    friend_requests::status.eq(FriendRequestStatus::Accepted),
-                    friend_requests::decided_at.eq(now),
-                ))
-                .returning(FriendRequest::as_returning())
-                .get_result::<FriendRequest>(conn)
-                .optional()?
-                .ok_or(AppError::Conflict("Friend request is no longer pending"))?;
-                insert_friendship(conn, from, to, from, now)?;
-                let dm_chat_id = create_dm_for_friendship(conn, dm_group_id, from, to, now)?;
-                Ok((updated, dm_chat_id))
+        let now = Utc::now();
+
+        if is_blocked_either_direction(conn, from, to)? {
+            return Err(AppError::Forbidden(
+                "Cannot send a friend request to a blocked user",
+            ));
+        }
+        if are_mutual_friends(conn, from, to)? {
+            return Ok(CreateRequestOutcome::AlreadyFriends);
+        }
+        if let Some(existing) = find_unresolved_request_between(conn, from, to)? {
+            if existing.from_uid == from {
+                return Ok(CreateRequestOutcome::AlreadyPending);
+            }
+            // Reciprocal pending request (to -> from): auto-accept it.
+            let dm_group_id = ids::next_gid(self.message_writer.id_gen.as_ref())
+                .await
+                .map_err(|err| {
+                    tracing::error!("failed to generate dm group id: {:?}", err);
+                    AppError::Internal("Failed to generate id")
+                })?;
+            let (request, (dm_chat_id, chat_kind)) = conn
+                .transaction::<(FriendRequest, (i64, GroupKind)), AppError, _>(|conn| {
+                    let updated = diesel::update(
+                        friend_requests::table
+                            .filter(friend_requests::id.eq(existing.id))
+                            .filter(friend_requests::from_uid.eq(to))
+                            .filter(friend_requests::to_uid.eq(from))
+                            .filter(
+                                friend_requests::status.eq_any(UNRESOLVED_FRIEND_REQUEST_STATUSES),
+                            ),
+                    )
+                    .set((
+                        friend_requests::status.eq(FriendRequestStatus::Accepted),
+                        friend_requests::decided_at.eq(now),
+                    ))
+                    .returning(FriendRequest::as_returning())
+                    .get_result::<FriendRequest>(conn)
+                    .optional()?
+                    .ok_or(AppError::Conflict("Friend request is no longer pending"))?;
+                    insert_friendship(conn, from, to, from, now)?;
+                    let dm_chat_id = create_dm_for_friendship(conn, dm_group_id, from, to, now)?;
+                    Ok((updated, dm_chat_id))
+                })?;
+            self.ws_registry.wake_message_sync(&[from, to], dm_chat_id);
+            self.presence_service.pair_policy_changed(from, to);
+            // The auto-accepter (`from`) just reciprocated the pending request.
+            self.send_friendship_accepted_message(conn, from, to, dm_chat_id, chat_kind)
+                .await;
+            return Ok(CreateRequestOutcome::AutoAccepted { request });
+        }
+
+        // Apply the target's verification settings to the new request.
+        let (mode, target_question) = get_friend_settings(conn, to)?;
+        let (message, question) = normalize_request_message(mode, message, target_question)?;
+
+        let id = ids::next_id(&self.message_writer.id_gen)
+            .await
+            .map_err(|err| {
+                tracing::error!("failed to generate friend request id: {:?}", err);
+                AppError::Internal("Failed to generate id")
             })?;
-        deps.ws_registry.wake_message_sync(&[from, to], dm_chat_id);
-        deps.presence_service.pair_policy_changed(from, to);
-        // The auto-accepter (`from`) just reciprocated the pending request.
-        send_friendship_accepted_message(conn, deps, from, to, dm_chat_id, chat_kind).await;
-        return Ok(CreateRequestOutcome::AutoAccepted { request });
+
+        let request = conn.transaction::<FriendRequest, AppError, _>(|conn| {
+            diesel::insert_into(friend_requests::table)
+                .values(&NewFriendRequest {
+                    id,
+                    from_uid: from,
+                    to_uid: to,
+                    status: FriendRequestStatus::Pending,
+                    created_at: now,
+                    message,
+                    question,
+                })
+                .returning(FriendRequest::as_returning())
+                .get_result(conn)
+                .map_err(|err| match err {
+                    diesel::result::Error::DatabaseError(
+                        diesel::result::DatabaseErrorKind::UniqueViolation,
+                        _,
+                    ) => AppError::Conflict("Friend request already pending"),
+                    other => AppError::from(other),
+                })
+        })?;
+
+        Ok(CreateRequestOutcome::Created { request })
     }
-
-    // Apply the target's verification settings to the new request.
-    let (mode, target_question) = get_friend_settings(conn, to)?;
-    let (message, question) = normalize_request_message(mode, message, target_question)?;
-
-    let id = ids::next_id(deps.id_gen).await.map_err(|err| {
-        tracing::error!("failed to generate friend request id: {:?}", err);
-        AppError::Internal("Failed to generate id")
-    })?;
-
-    let request = conn.transaction::<FriendRequest, AppError, _>(|conn| {
-        diesel::insert_into(friend_requests::table)
-            .values(&NewFriendRequest {
-                id,
-                from_uid: from,
-                to_uid: to,
-                status: FriendRequestStatus::Pending,
-                created_at: now,
-                message,
-                question,
-            })
-            .returning(FriendRequest::as_returning())
-            .get_result(conn)
-            .map_err(|err| match err {
-                diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::UniqueViolation,
-                    _,
-                ) => AppError::Conflict("Friend request already pending"),
-                other => AppError::from(other),
-            })
-    })?;
-
-    Ok(CreateRequestOutcome::Created { request })
 }
 
 /// Result of a recipient resolving a friend request.
@@ -1039,99 +1037,104 @@ impl ResolveOutcome {
     }
 }
 
-/// Accept or reject a friend request. Only the recipient (`to_uid`) may resolve.
-pub async fn resolve_friend_request(
-    conn: &mut PgConnection,
-    deps: FriendRequestServiceDeps<'_>,
-    resolver_uid: i32,
-    request_id: i64,
-    accept: bool,
-) -> Result<ResolveOutcome, AppError> {
-    let dm_group_id = if accept {
-        Some(ids::next_gid(deps.id_gen.as_ref()).await.map_err(|err| {
-            tracing::error!("failed to generate dm group id: {:?}", err);
-            AppError::Internal("Failed to generate id")
-        })?)
-    } else {
-        None
-    };
-    let now = Utc::now();
-    let (outcome, dm_chat_id) = conn
-        .transaction::<(ResolveOutcome, Option<(i64, GroupKind)>), AppError, _>(|conn| {
-            let new_status = if accept {
-                FriendRequestStatus::Accepted
-            } else {
-                FriendRequestStatus::Rejected
-            };
-            let request = diesel::update(
-                friend_requests::table
-                    .filter(friend_requests::id.eq(request_id))
-                    .filter(friend_requests::to_uid.eq(resolver_uid))
-                    .filter(friend_requests::status.eq_any(UNRESOLVED_FRIEND_REQUEST_STATUSES)),
+impl SocialService {
+    /// Accept or reject a friend request. Only the recipient (`to_uid`) may resolve.
+    pub async fn resolve_friend_request(
+        &self,
+        conn: &mut PgConnection,
+        resolver_uid: i32,
+        request_id: i64,
+        accept: bool,
+    ) -> Result<ResolveOutcome, AppError> {
+        let dm_group_id = if accept {
+            Some(
+                ids::next_gid(self.message_writer.id_gen.as_ref())
+                    .await
+                    .map_err(|err| {
+                        tracing::error!("failed to generate dm group id: {:?}", err);
+                        AppError::Internal("Failed to generate id")
+                    })?,
             )
-            .set((
-                friend_requests::status.eq(new_status),
-                friend_requests::decided_at.eq(now),
-            ))
-            .returning(FriendRequest::as_returning())
-            .get_result::<FriendRequest>(conn)
-            .optional()?;
-
-            let Some(request) = request else {
-                let existing_recipient = friend_requests::table
-                    .filter(friend_requests::id.eq(request_id))
-                    .select(friend_requests::to_uid)
-                    .first::<i32>(conn)
-                    .optional()?;
-                return match existing_recipient {
-                    None => Err(AppError::NotFound("Friend request not found")),
-                    Some(to_uid) if to_uid != resolver_uid => Err(AppError::Forbidden(
-                        "Only the recipient can respond to this friend request",
-                    )),
-                    Some(_) => Err(AppError::Conflict("Friend request is no longer pending")),
+        } else {
+            None
+        };
+        let now = Utc::now();
+        let (outcome, dm_chat_id) = conn
+            .transaction::<(ResolveOutcome, Option<(i64, GroupKind)>), AppError, _>(|conn| {
+                let new_status = if accept {
+                    FriendRequestStatus::Accepted
+                } else {
+                    FriendRequestStatus::Rejected
                 };
-            };
+                let request = diesel::update(
+                    friend_requests::table
+                        .filter(friend_requests::id.eq(request_id))
+                        .filter(friend_requests::to_uid.eq(resolver_uid))
+                        .filter(friend_requests::status.eq_any(UNRESOLVED_FRIEND_REQUEST_STATUSES)),
+                )
+                .set((
+                    friend_requests::status.eq(new_status),
+                    friend_requests::decided_at.eq(now),
+                ))
+                .returning(FriendRequest::as_returning())
+                .get_result::<FriendRequest>(conn)
+                .optional()?;
 
-            if let Some(dm_group_id) = dm_group_id {
-                insert_friendship(
-                    conn,
-                    request.from_uid,
-                    request.to_uid,
-                    request.from_uid,
-                    now,
-                )?;
-                let dm_chat_id = create_dm_for_friendship(
-                    conn,
-                    dm_group_id,
-                    request.from_uid,
-                    request.to_uid,
-                    now,
-                )?;
-                return Ok((ResolveOutcome::Resolved(request), Some(dm_chat_id)));
-            }
-            if are_mutual_friends(conn, request.from_uid, request.to_uid)? {
-                return Ok((ResolveOutcome::RejectedWhileFriends(request), None));
-            }
-            Ok((ResolveOutcome::Resolved(request), None))
-        })?;
-    if let Some((chat_id, chat_kind)) = dm_chat_id {
-        deps.ws_registry.wake_message_sync(
-            &[outcome.request().from_uid, outcome.request().to_uid],
-            chat_id,
-        );
-        deps.presence_service
-            .pair_policy_changed(outcome.request().from_uid, outcome.request().to_uid);
-        send_friendship_accepted_message(
-            conn,
-            deps,
-            resolver_uid,
-            outcome.request().from_uid,
-            chat_id,
-            chat_kind,
-        )
-        .await;
+                let Some(request) = request else {
+                    let existing_recipient = friend_requests::table
+                        .filter(friend_requests::id.eq(request_id))
+                        .select(friend_requests::to_uid)
+                        .first::<i32>(conn)
+                        .optional()?;
+                    return match existing_recipient {
+                        None => Err(AppError::NotFound("Friend request not found")),
+                        Some(to_uid) if to_uid != resolver_uid => Err(AppError::Forbidden(
+                            "Only the recipient can respond to this friend request",
+                        )),
+                        Some(_) => Err(AppError::Conflict("Friend request is no longer pending")),
+                    };
+                };
+
+                if let Some(dm_group_id) = dm_group_id {
+                    insert_friendship(
+                        conn,
+                        request.from_uid,
+                        request.to_uid,
+                        request.from_uid,
+                        now,
+                    )?;
+                    let dm_chat_id = create_dm_for_friendship(
+                        conn,
+                        dm_group_id,
+                        request.from_uid,
+                        request.to_uid,
+                        now,
+                    )?;
+                    return Ok((ResolveOutcome::Resolved(request), Some(dm_chat_id)));
+                }
+                if are_mutual_friends(conn, request.from_uid, request.to_uid)? {
+                    return Ok((ResolveOutcome::RejectedWhileFriends(request), None));
+                }
+                Ok((ResolveOutcome::Resolved(request), None))
+            })?;
+        if let Some((chat_id, chat_kind)) = dm_chat_id {
+            self.ws_registry.wake_message_sync(
+                &[outcome.request().from_uid, outcome.request().to_uid],
+                chat_id,
+            );
+            self.presence_service
+                .pair_policy_changed(outcome.request().from_uid, outcome.request().to_uid);
+            self.send_friendship_accepted_message(
+                conn,
+                resolver_uid,
+                outcome.request().from_uid,
+                chat_id,
+                chat_kind,
+            )
+            .await;
+        }
+        Ok(outcome)
     }
-    Ok(outcome)
 }
 
 pub fn archive_friend_request(
@@ -1266,81 +1269,4 @@ pub fn unblock_user(conn: &mut PgConnection, blocker: i32, blocked: i32) -> Resu
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        canonical_pair, directional_presence_overrides, friend_presence_override_from_db,
-        friend_presence_override_to_db, merge_request_history,
-    };
-    use crate::models::{FriendPresenceOverride, FriendRequest, FriendRequestStatus};
-    use chrono::{DateTime, Utc};
-
-    fn request_history_entry(
-        id: i64,
-        created_at_seconds: i64,
-        status: FriendRequestStatus,
-    ) -> FriendRequest {
-        FriendRequest {
-            id,
-            from_uid: 1,
-            to_uid: 2,
-            status,
-            created_at: DateTime::<Utc>::from_timestamp(created_at_seconds, 0).unwrap(),
-            decided_at: None,
-            message: None,
-            question: None,
-        }
-    }
-
-    #[test]
-    fn merge_request_history_orders_all_statuses_with_id_tiebreak() {
-        let incoming = vec![
-            request_history_entry(10, 100, FriendRequestStatus::Pending),
-            request_history_entry(30, 300, FriendRequestStatus::Accepted),
-        ];
-        let outgoing = vec![
-            request_history_entry(20, 200, FriendRequestStatus::Rejected),
-            request_history_entry(40, 300, FriendRequestStatus::Pending),
-        ];
-
-        let merged = merge_request_history(incoming, outgoing);
-
-        assert_eq!(
-            merged
-                .into_iter()
-                .map(|request| request.id)
-                .collect::<Vec<_>>(),
-            vec![40, 30, 20, 10],
-        );
-    }
-
-    #[test]
-    fn canonical_pair_orders_low_high() {
-        assert_eq!(canonical_pair(5, 3), (3, 5));
-        assert_eq!(canonical_pair(3, 5), (3, 5));
-        assert_eq!(canonical_pair(-1, 9), (-1, 9));
-    }
-
-    #[test]
-    fn presence_overrides_follow_both_canonical_friendship_directions() {
-        assert_eq!(
-            directional_presence_overrides(true, Some(true), Some(false)),
-            (Some(true), Some(false))
-        );
-        assert_eq!(
-            directional_presence_overrides(false, Some(true), Some(false)),
-            (Some(false), Some(true))
-        );
-    }
-
-    #[test]
-    fn presence_override_enum_round_trips_through_nullable_storage() {
-        for (override_value, stored) in [
-            (FriendPresenceOverride::Inherit, None),
-            (FriendPresenceOverride::Share, Some(true)),
-            (FriendPresenceOverride::Hide, Some(false)),
-        ] {
-            assert_eq!(friend_presence_override_to_db(override_value), stored);
-            assert_eq!(friend_presence_override_from_db(stored), override_value);
-        }
-    }
-}
+mod tests;

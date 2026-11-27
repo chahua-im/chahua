@@ -8,12 +8,12 @@ use crate::dto::users::{
     ChatSettings, MeResponse, NotificationSettingsResponse, SearchUsersResponse,
 };
 use crate::errors::AppError;
-use crate::rpc::{RpcCallContext, RpcServices};
+use crate::rpc::{AppState, RpcCallContext};
 use crate::services::api::{notification_preferences, users};
 
 pub async fn get_me(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     _params: UsersGetMeParams,
 ) -> Result<MeResponse, AppError> {
     let uid = context.uid()?;
@@ -29,7 +29,7 @@ pub async fn get_me(
 
 pub async fn update_sticker_pack_order(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: UsersUpdateStickerPackOrderParams,
 ) -> Result<(), AppError> {
     let uid = context.uid()?;
@@ -39,7 +39,7 @@ pub async fn update_sticker_pack_order(
 
 pub async fn update_chat_settings(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: UsersUpdateChatSettingsParams,
 ) -> Result<ChatSettings, AppError> {
     let uid = context.uid()?;
@@ -49,7 +49,7 @@ pub async fn update_chat_settings(
 
 pub async fn search(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: UsersSearchParams,
 ) -> Result<SearchUsersResponse, AppError> {
     let uid = context.uid()?;
@@ -65,7 +65,7 @@ pub async fn search(
 
 pub async fn get_notification_settings(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     _params: UsersGetNotificationSettingsParams,
 ) -> Result<NotificationSettingsResponse, AppError> {
     let uid = context.uid()?;
@@ -75,7 +75,7 @@ pub async fn get_notification_settings(
 
 pub async fn update_notification_settings(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: UsersUpdateNotificationSettingsParams,
 ) -> Result<NotificationSettingsResponse, AppError> {
     let uid = context.uid()?;
@@ -90,7 +90,7 @@ pub async fn update_notification_settings(
 
 pub async fn list_notification_exceptions(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: UsersListNotificationExceptionsParams,
 ) -> Result<NotificationExceptionsResponse, AppError> {
     let uid = context.uid()?;
@@ -106,7 +106,7 @@ pub async fn list_notification_exceptions(
 
 pub async fn clear_notification_exceptions(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: UsersClearNotificationExceptionsParams,
 ) -> Result<NotificationExceptionsCleared, AppError> {
     let uid = context.uid()?;

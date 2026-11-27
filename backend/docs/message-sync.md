@@ -80,8 +80,11 @@ rest by ascending chat ID:
   `from` must equal the client's installed checkpoint. Each change is either
   `{kind: "upsert", appeared, message}` or `{kind: "delete", messageId,
   threadRootId}` (`threadRootId` is null for a main-timeline message). A batch
-  may be empty. Apply all changes before installing `to`; replay brings each ID
-  to its current viewer-specific state, not through every intervening revision.
+  may be empty. A continuous advance may emit multiple sequential
+  `messageSyncBatch` frames chained by `from`/`to` cursors to fit within the
+  RPC frame size limit (followed by one `messageSyncReady` on resume). Apply all
+  changes in a frame before installing `to`; replay brings each ID to its current
+  viewer-specific state, not through every intervening revision.
 - `messageSyncReady {chatId, cursor}` follows a continuous resume, with or
   without a batch. It repeats the checkpoint. Subsequent live advances do not
   emit `Ready`.

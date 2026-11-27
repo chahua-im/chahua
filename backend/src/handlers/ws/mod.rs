@@ -6,9 +6,9 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::Response;
 use axum::Json;
-use futures::{SinkExt, StreamExt};
-use std::sync::Arc;
+use futures::{stream::SplitSink, FutureExt, SinkExt, StreamExt};
 use std::time::{Duration, Instant};
+use std::{future::Future, ops::ControlFlow, sync::Arc};
 use tokio::time::timeout;
 use tracing::{debug, trace, warn};
 use utoipa_axum::router::OpenApiRouter;
@@ -70,6 +70,23 @@ async fn get_online_clients(
 const PONG_JSON: &str = r#"{"type":"pong"}"#;
 const PRESENCE_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
 const RPC_IO_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn is_message_too_big(error: &axum::Error) -> bool {
+    matches!(
+        std::error::Error::source(error)
+            .and_then(|source| source.downcast_ref::<tokio_tungstenite::tungstenite::Error>()),
+        Some(tokio_tungstenite::tungstenite::Error::Capacity(
+            tokio_tungstenite::tungstenite::error::CapacityError::MessageTooLong { .. }
+        ))
+    )
+}
+
+fn message_too_big_close() -> Message {
+    Message::Close(Some(axum::extract::ws::CloseFrame {
+        code: 1009,
+        reason: "message too big".into(),
+    }))
+}
 
 fn record_active_ws_activity(
     activity_tasks: &mut tokio::task::JoinSet<()>,
@@ -149,7 +166,9 @@ async fn ws_handler(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
-    ws.on_upgrade(move |socket| handle_auth_and_socket(socket, state, headers))
+    ws.max_message_size(crate::rpc::session::MAX_FRAME_BYTES)
+        .max_frame_size(crate::rpc::session::MAX_FRAME_BYTES)
+        .on_upgrade(move |socket| handle_auth_and_socket(socket, state, headers))
 }
 
 async fn handle_auth_and_socket(mut socket: WebSocket, state: AppState, headers: HeaderMap) {
@@ -157,6 +176,10 @@ async fn handle_auth_and_socket(mut socket: WebSocket, state: AppState, headers:
     // malformed JSON remains a silent legacy-compatible negotiation failure.
     let first_text = match timeout(Duration::from_secs(5), socket.recv()).await {
         Ok(Some(Ok(Message::Text(text)))) => text,
+        Ok(Some(Err(error))) if is_message_too_big(&error) => {
+            let _ = timeout(RPC_IO_TIMEOUT, socket.send(message_too_big_close())).await;
+            return;
+        }
         _ => return,
     };
 
@@ -222,56 +245,72 @@ async fn handle_auth_and_socket(mut socket: WebSocket, state: AppState, headers:
     handle_socket(socket, state, uid, registry, entry, rx, track_client).await;
 }
 
-fn rpc_services(state: &AppState) -> crate::rpc::RpcServices {
-    crate::rpc::RpcServices::new(crate::rpc::RpcServiceHandles {
-        db: state.db.clone(),
-        id_gen: state.id_gen.clone(),
-        metrics: state.metrics.clone(),
-        config: state.config.clone(),
-        media: state.media.clone(),
-        avatars: state.avatars.clone(),
-        link_previews: state.link_previews.clone(),
-        authz_service: state.authz_service.clone(),
-        ws_registry: state.ws_registry.clone(),
-        presence_service: state.presence_service.clone(),
-        push_service: state.push_service.clone(),
-        unread_service: state.unread_service.clone(),
-        client_tracking: state.client_tracking.clone(),
-        background_service: state.background_service.clone(),
-        message_search: state.message_search.clone(),
-        auth_token_service: state.auth_token_service.clone(),
-        token_generation: state.token_generation.clone(),
-    })
+async fn drive_rpc_processing(
+    processing: impl Future<Output = ControlFlow<()>>,
+    output: &mut crate::rpc::session::RpcSessionOutput,
+    writer: &mut SplitSink<WebSocket, Message>,
+) -> ControlFlow<()> {
+    tokio::pin!(processing);
+    loop {
+        tokio::select! {
+            result = &mut processing => {
+                if result.is_break() {
+                    // Flush correlated replies and lifecycle notifications already queued
+                    // by the engine before closing the socket.
+                    while let Some(Some(text)) = output.recv().now_or_never() {
+                        if !matches!(
+                            timeout(RPC_IO_TIMEOUT, writer.send(Message::Text(text.into()))).await,
+                            Ok(Ok(()))
+                        ) {
+                            break;
+                        }
+                    }
+                }
+                return result;
+            }
+            outbound = output.recv() => {
+                let Some(text) = outbound else {
+                    return ControlFlow::Break(());
+                };
+                if !matches!(
+                    timeout(RPC_IO_TIMEOUT, writer.send(Message::Text(text.into()))).await,
+                    Ok(Ok(()))
+                ) {
+                    return ControlFlow::Break(());
+                }
+            }
+        }
+    }
 }
 
 async fn handle_rpc_socket(socket: WebSocket, state: AppState, first_text: String) {
-    let (input_rx, output_tx, dependencies, transport) =
-        crate::rpc::session::rpc_session_channels(rpc_services(&state));
-    let mut session_task = tokio::spawn(crate::rpc::session::serve_rpc_session(
-        input_rx,
-        output_tx,
-        dependencies,
-    ));
-    let crate::rpc::session::RpcSessionTransport { input, mut output } = transport;
-
-    if !matches!(
-        timeout(RPC_IO_TIMEOUT, input.send(first_text)).await,
-        Ok(Ok(()))
-    ) {
-        input.close();
-        let _ = timeout(RPC_IO_TIMEOUT, &mut session_task).await;
+    let (mut session, mut output) = crate::rpc::session::RpcSession::new(state);
+    let (mut writer, mut reader) = socket.split();
+    if drive_rpc_processing(session.handle_text(first_text), &mut output, &mut writer)
+        .await
+        .is_break()
+    {
+        session.close();
+        session.shutdown().await;
         return;
     }
-
-    let (mut writer, mut reader) = socket.split();
     loop {
         tokio::select! {
-            incoming = reader.next() => match incoming {
+            event = session.next_event() => {
+                if drive_rpc_processing(session.handle_event(event), &mut output, &mut writer)
+                    .await
+                    .is_break()
+                {
+                    break;
+                }
+            }
+            incoming = reader.next(), if session.accepts_input() => match incoming {
                 Some(Ok(Message::Text(text))) => {
-                    if !matches!(
-                        timeout(RPC_IO_TIMEOUT, input.send(text.to_string())).await,
-                        Ok(Ok(()))
-                    ) {
+                    if drive_rpc_processing(
+                        session.handle_text(text.to_string()),
+                        &mut output,
+                        &mut writer,
+                    ).await.is_break() {
                         break;
                     }
                 }
@@ -298,16 +337,18 @@ async fn handle_rpc_socket(socket: WebSocket, state: AppState, first_text: Strin
                     break;
                 }
                 Some(Ok(Message::Pong(_))) => {}
+                Some(Err(error)) if is_message_too_big(&error) => {
+                    let _ = timeout(RPC_IO_TIMEOUT, writer.send(message_too_big_close())).await;
+                    break;
+                }
                 Some(Err(_)) | None => break,
             },
             outbound = output.recv() => match outbound {
-                Some(frame) => {
-                    let (text, lease) = frame.into_parts();
+                Some(text) => {
                     let sent = timeout(
                         RPC_IO_TIMEOUT,
                         writer.send(Message::Text(text.into())),
                     ).await;
-                    drop(lease);
                     if !matches!(sent, Ok(Ok(()))) {
                         break;
                     }
@@ -317,9 +358,8 @@ async fn handle_rpc_socket(socket: WebSocket, state: AppState, first_text: Strin
         }
     }
 
-    input.close();
-    drop(output);
-    let _ = timeout(RPC_IO_TIMEOUT, &mut session_task).await;
+    session.close();
+    session.shutdown().await;
 }
 
 struct TicketSyncSink<'a>(&'a mut WebSocket);
@@ -609,6 +649,10 @@ async fn handle_socket(
                             ClientWsMessage::Auth { .. } | ClientWsMessage::Unknown => {}
                         }
                     }
+                    Some(Err(error)) if is_message_too_big(&error) => {
+                        let _ = timeout(RPC_IO_TIMEOUT, socket.send(message_too_big_close())).await;
+                        break;
+                    }
                     Some(Err(_)) | None => break,
                     _ => {}
                 }
@@ -635,33 +679,4 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
 mod rpc_tests;
 
 #[cfg(test)]
-mod tests {
-    use super::selects_rpc;
-    use crate::services::presence::parse_legacy_presence_watch;
-
-    #[test]
-    fn first_object_with_jsonrpc_selects_rpc_without_falling_back_to_legacy() {
-        assert!(selects_rpc(
-            r#"{"jsonrpc":"2.0","method":"session.open","id":"1"}"#
-        ));
-        assert!(selects_rpc(
-            r#"{"jsonrpc":null,"type":"auth","ticket":"legacy"}"#
-        ));
-        assert!(!selects_rpc(r#"{"type":"auth","ticket":"legacy"}"#));
-        assert!(!selects_rpc(r#"["jsonrpc"]"#));
-        assert!(!selects_rpc(r#"{"jsonrpc""2.0"}"#));
-    }
-
-    #[test]
-    fn legacy_presence_watch_replaces_with_empty_scope_without_publication() {
-        assert!(matches!(
-            parse_legacy_presence_watch(Some(4), Some(Vec::new()), Some(Vec::new())),
-            Some(None)
-        ));
-    }
-
-    #[test]
-    fn legacy_presence_watch_rejects_scopes_above_protocol_bounds() {
-        assert!(parse_legacy_presence_watch(Some(4), Some((0..101).collect()), None).is_none());
-    }
-}
+mod tests;

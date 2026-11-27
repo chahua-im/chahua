@@ -12,7 +12,6 @@ use crate::dto::{
     ws::{PinUpdatePayload, ServerWsMessage},
 };
 use crate::errors::AppError;
-use crate::metrics::Metrics;
 use crate::models::{
     GroupKind, Message, MessageType, NewPinnedMessage, PinnedMessage, SystemMessageKind,
 };
@@ -21,30 +20,18 @@ use crate::services::api::members::{check_membership, require_admin_role};
 use crate::services::avatars::AvatarService;
 use crate::services::media::MediaStore;
 use crate::services::messages::{
-    attach_metadata, PreparedMessageSend, SendMessageOutcome, SendPreparedMessageDeps,
+    attach_metadata, MessageWriter, PreparedMessageSend, SendMessageOutcome,
 };
 use crate::services::push::PushService;
 use crate::services::ws_registry::ConnectionRegistry;
-use crate::utils::ids::{self, IdGen};
+use crate::utils::ids;
 
 const MAX_PINS_PER_SCOPE: i64 = 50;
 
-pub struct CreatePinDeps<'a> {
-    pub id_gen: &'a Arc<IdGen>,
-    pub media: &'a MediaStore,
-    pub avatars: &'a Arc<AvatarService>,
-    pub metrics: &'a Arc<Metrics>,
-    pub ws_registry: &'a Arc<ConnectionRegistry>,
-    pub push_service: &'a Arc<PushService>,
-}
-
-pub struct DeletePinDeps<'a> {
-    pub id_gen: &'a Arc<IdGen>,
-    pub media: &'a MediaStore,
-    pub avatars: &'a Arc<AvatarService>,
-    pub metrics: &'a Arc<Metrics>,
-    pub ws_registry: &'a Arc<ConnectionRegistry>,
-    pub push_service: &'a Arc<PushService>,
+pub struct PinsService {
+    pub writer: Arc<MessageWriter>,
+    pub ws_registry: Arc<ConnectionRegistry>,
+    pub push_service: Arc<PushService>,
 }
 
 /// Which pin list a request addresses. Chat-level pins and the pins of each
@@ -85,91 +72,99 @@ fn message_belongs_to_thread(
     message_id == thread_root_id || reply_root_id == Some(thread_root_id)
 }
 
-pub async fn list_pins(
-    uid: i32,
-    chat_id: i64,
-    conn: &mut PgConnection,
-    media: &MediaStore,
-    avatars: &AvatarService,
-) -> Result<ListPinsResponse, AppError> {
-    list_pins_in_scope(uid, chat_id, PinScope::Chat, conn, media, avatars).await
-}
+impl PinsService {
+    pub async fn list_pins(
+        &self,
+        uid: i32,
+        chat_id: i64,
+        conn: &mut PgConnection,
+    ) -> Result<ListPinsResponse, AppError> {
+        list_pins_in_scope(
+            uid,
+            chat_id,
+            PinScope::Chat,
+            conn,
+            &self.writer.media,
+            &self.writer.avatars,
+        )
+        .await
+    }
 
-pub async fn create_pin(
-    uid: i32,
-    chat_id: i64,
-    body: CreatePinBody,
-    conn: &mut PgConnection,
-    deps: CreatePinDeps<'_>,
-) -> Result<PinResponse, AppError> {
-    create_pin_in_scope(uid, chat_id, PinScope::Chat, body.message_id, conn, deps).await
-}
+    pub async fn create_pin(
+        &self,
+        uid: i32,
+        chat_id: i64,
+        body: CreatePinBody,
+        conn: &mut PgConnection,
+    ) -> Result<PinResponse, AppError> {
+        create_pin_in_scope(uid, chat_id, PinScope::Chat, body.message_id, conn, self).await
+    }
 
-pub async fn delete_pin(
-    uid: i32,
-    chat_id: i64,
-    pin_id: i64,
-    conn: &mut PgConnection,
-    deps: DeletePinDeps<'_>,
-) -> Result<(), AppError> {
-    delete_pin_in_scope(uid, chat_id, PinScope::Chat, pin_id, conn, deps).await
-}
+    pub async fn delete_pin(
+        &self,
+        uid: i32,
+        chat_id: i64,
+        pin_id: i64,
+        conn: &mut PgConnection,
+    ) -> Result<(), AppError> {
+        delete_pin_in_scope(uid, chat_id, PinScope::Chat, pin_id, conn, self).await
+    }
 
-pub async fn list_thread_pins(
-    uid: i32,
-    chat_id: i64,
-    thread_root_id: i64,
-    conn: &mut PgConnection,
-    media: &MediaStore,
-    avatars: &AvatarService,
-) -> Result<ListPinsResponse, AppError> {
-    list_pins_in_scope(
-        uid,
-        chat_id,
-        PinScope::Thread { thread_root_id },
-        conn,
-        media,
-        avatars,
-    )
-    .await
-}
+    pub async fn list_thread_pins(
+        &self,
+        uid: i32,
+        chat_id: i64,
+        thread_root_id: i64,
+        conn: &mut PgConnection,
+    ) -> Result<ListPinsResponse, AppError> {
+        list_pins_in_scope(
+            uid,
+            chat_id,
+            PinScope::Thread { thread_root_id },
+            conn,
+            &self.writer.media,
+            &self.writer.avatars,
+        )
+        .await
+    }
 
-pub async fn create_thread_pin(
-    uid: i32,
-    chat_id: i64,
-    thread_root_id: i64,
-    body: CreatePinBody,
-    conn: &mut PgConnection,
-    deps: CreatePinDeps<'_>,
-) -> Result<PinResponse, AppError> {
-    create_pin_in_scope(
-        uid,
-        chat_id,
-        PinScope::Thread { thread_root_id },
-        body.message_id,
-        conn,
-        deps,
-    )
-    .await
-}
+    pub async fn create_thread_pin(
+        &self,
+        uid: i32,
+        chat_id: i64,
+        thread_root_id: i64,
+        body: CreatePinBody,
+        conn: &mut PgConnection,
+    ) -> Result<PinResponse, AppError> {
+        create_pin_in_scope(
+            uid,
+            chat_id,
+            PinScope::Thread { thread_root_id },
+            body.message_id,
+            conn,
+            self,
+        )
+        .await
+    }
 
-pub async fn delete_thread_pin(
-    uid: i32,
-    chat_id: i64,
-    thread_root_id: i64,
-    pin_id: i64,
-    conn: &mut PgConnection,
-    deps: DeletePinDeps<'_>,
-) -> Result<(), AppError> {
-    delete_pin_in_scope(
-        uid,
-        chat_id,
-        PinScope::Thread { thread_root_id },
-        pin_id,
-        conn,
-        deps,
-    )
-    .await
+    pub async fn delete_thread_pin(
+        &self,
+        uid: i32,
+        chat_id: i64,
+        thread_root_id: i64,
+        pin_id: i64,
+        conn: &mut PgConnection,
+    ) -> Result<(), AppError> {
+        delete_pin_in_scope(
+            uid,
+            chat_id,
+            PinScope::Thread { thread_root_id },
+            pin_id,
+            conn,
+            self,
+        )
+        .await
+    }
 }
 
 async fn list_pins_in_scope(
@@ -260,7 +255,7 @@ async fn create_pin_in_scope(
     scope: PinScope,
     message_id: i64,
     conn: &mut PgConnection,
-    deps: CreatePinDeps<'_>,
+    deps: &PinsService,
 ) -> Result<PinResponse, AppError> {
     let chat_kind = require_pin_permission(conn, chat_id, uid)?;
 
@@ -312,7 +307,7 @@ async fn create_pin_in_scope(
         return Err(AppError::Conflict("Maximum number of pins reached"));
     }
 
-    let pin_id = ids::next_message_id(deps.id_gen.as_ref())
+    let pin_id = ids::next_message_id(deps.writer.id_gen.as_ref())
         .await
         .map_err(|e| {
             tracing::error!("ferroid pin id: {:?}", e);
@@ -341,7 +336,14 @@ async fn create_pin_in_scope(
             AppError::Internal("Database error")
         })?;
 
-    let enriched = attach_metadata(conn, vec![msg], deps.media, deps.avatars, uid).await;
+    let enriched = attach_metadata(
+        conn,
+        vec![msg],
+        &deps.writer.media,
+        &deps.writer.avatars,
+        uid,
+    )
+    .await;
     let msg_response = enriched
         .into_iter()
         .next()
@@ -367,14 +369,9 @@ async fn create_pin_in_scope(
             message_id,
         },
         conn,
-        SendPreparedMessageDeps {
-            id_gen: deps.id_gen,
-            media: deps.media,
-            avatars: deps.avatars,
-            metrics: deps.metrics,
-        },
-        deps.ws_registry,
-        deps.push_service,
+        &deps.writer,
+        &deps.ws_registry,
+        &deps.push_service,
     )
     .await;
 
@@ -412,7 +409,7 @@ async fn delete_pin_in_scope(
     scope: PinScope,
     pin_id: i64,
     conn: &mut PgConnection,
-    deps: DeletePinDeps<'_>,
+    deps: &PinsService,
 ) -> Result<(), AppError> {
     let chat_kind = require_pin_permission(conn, chat_id, uid)?;
 
@@ -439,14 +436,9 @@ async fn delete_pin_in_scope(
             message_id: pin.message_id,
         },
         conn,
-        SendPreparedMessageDeps {
-            id_gen: deps.id_gen,
-            media: deps.media,
-            avatars: deps.avatars,
-            metrics: deps.metrics,
-        },
-        deps.ws_registry,
-        deps.push_service,
+        &deps.writer,
+        &deps.ws_registry,
+        &deps.push_service,
     )
     .await;
 
@@ -500,7 +492,7 @@ struct PinSystemMessage {
 async fn send_pin_system_message(
     event: PinSystemMessage,
     conn: &mut PgConnection,
-    send_message_deps: SendPreparedMessageDeps<'_>,
+    writer: &MessageWriter,
     ws_registry: &Arc<ConnectionRegistry>,
     push_service: &Arc<PushService>,
 ) {
@@ -530,10 +522,9 @@ async fn send_pin_system_message(
     };
     let thread_root_id = scope.thread_root_id();
 
-    if let Ok(SendMessageOutcome::Created(send_result)) =
-        crate::services::messages::send_prepared_message(
+    if let Ok(SendMessageOutcome::Created(send_result)) = writer
+        .send_prepared_message(
             conn,
-            send_message_deps,
             PreparedMessageSend {
                 system_kind: Some(system_kind),
                 forwarded_from_message_id: None,
