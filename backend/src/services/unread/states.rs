@@ -122,7 +122,6 @@ fn load_states(
         .filter_map(|scope| {
             let &(cursor, kind, allowed) = memberships.get(&scope.chat_id)?;
             Some(ChatUnreadCursor {
-                uid,
                 chat_id: scope.chat_id,
                 last_read_message_id: unread_cursor(cursor),
                 hide_membership_messages:
@@ -170,7 +169,6 @@ fn load_states(
                      WHERE s.thread_id <> 0 AND ts.thread_root_id IS NOT NULL
                        AND m.reply_root_id = s.thread_id AND m.deleted_at IS NULL
                        AND m.is_published = TRUE AND m.id > COALESCE(ts.last_read_message_id, 0)
-                       AND (m.sender_uid <> $3 OR m.message_type = 'system')
                      LIMIT $4
                  ) items
              ) unread
@@ -402,7 +400,6 @@ mod tests {
                  UPDATE messages SET has_thread=TRUE WHERE id=98767100011;
                  INSERT INTO messages(id, chat_id, sender_uid, client_generated_id, message_type, system_kind, reply_root_id, created_at)
                     VALUES (98767100015,9876710001,987671000,'state-watch-reply','system','member_joined',98767100011,NOW()),
-                           (98767100016,9876710001,987671000,'state-watch-own-reply','text',NULL,98767100011,NOW()),
                            (98767100025,9876710002,987671000,'state-watch-untracked','text',NULL,98767100021,NOW());
                  INSERT INTO thread_user_states(chat_id, thread_root_id, uid, subscribed, last_read_message_id)
                     VALUES (9876710001,98767100011,987671000,FALSE,98767100011);
@@ -443,7 +440,7 @@ mod tests {
             let rows = load_states(conn, &service, uid, &scopes)?;
             assert_eq!(rows.iter().map(|row| row.conversation).collect::<Vec<_>>(), scopes);
             assert_eq!(rows[0].last_read_message_id, None);
-            assert_eq!(rows[0].unread_count, 2);
+            assert_eq!(rows[0].unread_count, 3);
             for (index, row) in rows[1..48].iter().enumerate() {
                 assert!(row.accessible);
                 assert_eq!(row.unread_count, 2);
@@ -471,7 +468,7 @@ mod tests {
             })?;
             queries.lock().unwrap().clear();
             let shown = load_states(conn, &service, uid, &scopes)?;
-            assert_eq!(shown[0].unread_count, 3);
+            assert_eq!(shown[0].unread_count, 4);
             assert_eq!(shown[1].unread_count, 3);
             assert_eq!(shown[50].unread_count, 1);
             assert!(queries.lock().unwrap().len() <= 8, "snapshot queries must stay batched");

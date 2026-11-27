@@ -1,17 +1,16 @@
-//! Main-chat unread counts share a bounded window per chat, visibility variant
-//! and database revision. Binary searches count visible IDs and subtract the
-//! viewer's own messages. A truncated window falls back to SQL when its older
-//! rows could change the result.
+//! Main-chat unread counts share the latest `MAX_UNREAD_COUNT` eligible live IDs
+//! per chat, membership-message visibility variant, and database revision.
+//! Descending-order binary search gives exact counts below the cap and saturated
+//! counts for older cursors, without retaining message history per user.
 //!
 //! Every request validates revisions in a batch. A missing window loads its IDs
 //! and revision in one SQL snapshot; changed revisions reload the entire bounded
 //! window, including after deletion or delayed publication. Notifications are not
 //! required for cache correctness. The cache has a 64 MiB weighted eviction budget
-//! for window storage plus estimated entry overhead; in-flight loads are separate.
+//! for ID storage plus estimated entry overhead; in-flight loads are separate.
 //! Transactions and unversioned scopes bypass shared windows. Thread, mention,
 //! and reaction counts use their own query paths.
 
-use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -29,9 +28,6 @@ use crate::schema::{group_membership, groups};
 use crate::services::notification_preferences::{
     load_notification_defaults, load_notification_defaults_for_users, ChatNotificationSetting,
 };
-
-// A full window can leave at most one author's count below the cap for older cursors.
-const CHAT_UNREAD_WINDOW_SIZE: i64 = MAX_UNREAD_COUNT * 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChatUnreadMembership {
@@ -63,38 +59,13 @@ pub struct UnreadSummaryCounts {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct ChatUnreadCursor {
-    pub(super) uid: i32,
     pub(super) hide_membership_messages: bool,
     pub(super) chat_id: i64,
     pub(super) last_read_message_id: i64,
 }
 
-impl ChatUnreadMembership {
-    fn cursor(&self, uid: i32) -> ChatUnreadCursor {
-        ChatUnreadCursor {
-            uid,
-            hide_membership_messages: self.hide_membership_messages,
-            chat_id: self.chat_id,
-            last_read_message_id: unread_cursor(self.last_read_message_id),
-        }
-    }
-}
-
-impl UserChatUnreadMembership {
-    fn cursor(&self) -> ChatUnreadCursor {
-        ChatUnreadCursor {
-            uid: self.uid,
-            hide_membership_messages: self.hide_membership_messages,
-            chat_id: self.chat_id,
-            last_read_message_id: unread_cursor(self.last_read_message_id),
-        }
-    }
-}
-
 #[derive(diesel::QueryableByName)]
 struct ChatUnreadCountRow {
-    #[diesel(sql_type = diesel::sql_types::Integer)]
-    uid: i32,
     #[diesel(sql_type = diesel::sql_types::BigInt)]
     chat_id: i64,
     #[diesel(sql_type = diesel::sql_types::BigInt)]
@@ -107,37 +78,14 @@ struct ChatUnreadCountRow {
 struct ChatUnreadWindowRow {
     #[diesel(sql_type = diesel::sql_types::Array<diesel::sql_types::BigInt>)]
     ids: Vec<i64>,
-    #[diesel(sql_type = diesel::sql_types::Array<diesel::sql_types::Nullable<diesel::sql_types::Integer>>)]
-    authors: Vec<Option<i32>>,
     #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::BigInt>)]
     revision: Option<i64>,
 }
 
-struct ChatUnreadWindow {
-    ids: Box<[i64]>,
-    authored: Box<[(i32, Reverse<i64>)]>,
-}
-
-impl ChatUnreadWindow {
-    fn count(&self, cursor: ChatUnreadCursor) -> Option<i64> {
-        let total = self
-            .ids
-            .partition_point(|&id| id > cursor.last_read_message_id);
-        let start = self.authored.partition_point(|&(uid, _)| uid < cursor.uid);
-        let own = self.authored[start..].partition_point(|&(uid, Reverse(id))| {
-            uid == cursor.uid && id > cursor.last_read_message_id
-        });
-        let count = (total - own) as i64;
-        // Older rows matter only if the window is truncated and the count has not saturated.
-        (total < CHAT_UNREAD_WINDOW_SIZE as usize || count >= MAX_UNREAD_COUNT)
-            .then_some(count.min(MAX_UNREAD_COUNT))
-    }
-}
-
 pub struct UnreadService {
-    // Immutable windows shared across every user's cursor.
+    // Immutable descending live-ID windows shared across every user's cursor.
     // Revision keys prevent a late load from replacing a newer snapshot.
-    windows: Cache<(i64, bool, i64), Arc<ChatUnreadWindow>>,
+    windows: Cache<(i64, bool, i64), Arc<[i64]>>,
     single_flight: Cache<(i64, bool), Arc<Mutex<()>>>,
 }
 
@@ -258,10 +206,8 @@ impl UnreadService {
         Self {
             windows: Cache::builder()
                 .max_capacity(64 * 1024 * 1024)
-                .weigher(|_: &(i64, bool, i64), window: &Arc<ChatUnreadWindow>| {
-                    (std::mem::size_of_val(window.ids.as_ref())
-                        + std::mem::size_of_val(window.authored.as_ref())
-                        + 96) as u32
+                .weigher(|_: &(i64, bool, i64), ids: &Arc<[i64]>| {
+                    (std::mem::size_of_val(ids.as_ref()) + 64) as u32
                 })
                 .build(),
             single_flight: Cache::new(10_000),
@@ -279,15 +225,20 @@ impl UnreadService {
     ) -> Result<i64, DieselError> {
         let hide_membership_messages =
             crate::services::system_messages::load_membership_message_filter(conn, uid, chat_id)?;
-        let cursor = ChatUnreadCursor {
-            uid,
-            hide_membership_messages,
-            chat_id,
-            last_read_message_id: unread_cursor(last_read_message_id),
-        };
         Ok(self
-            .count_chat_unread_cursors(conn, [cursor])?
-            .get(&cursor)
+            .count_chat_unread_cursors(
+                conn,
+                [ChatUnreadCursor {
+                    hide_membership_messages,
+                    chat_id,
+                    last_read_message_id: unread_cursor(last_read_message_id),
+                }],
+            )?
+            .get(&ChatUnreadCursor {
+                hide_membership_messages,
+                chat_id,
+                last_read_message_id: unread_cursor(last_read_message_id),
+            })
             .copied()
             .unwrap_or(0))
     }
@@ -295,16 +246,31 @@ impl UnreadService {
     pub fn count_membership_unreads(
         &self,
         conn: &mut PgConnection,
-        uid: i32,
         memberships: &[ChatUnreadMembership],
     ) -> Result<HashMap<i64, i64>, DieselError> {
-        Ok(self
-            .count_chat_unread_cursors(
-                conn,
-                memberships.iter().map(|membership| membership.cursor(uid)),
-            )?
-            .into_iter()
-            .map(|(cursor, count)| (cursor.chat_id, count))
+        let counts = self.count_chat_unread_cursors(
+            conn,
+            memberships.iter().map(|membership| ChatUnreadCursor {
+                hide_membership_messages: membership.hide_membership_messages,
+                chat_id: membership.chat_id,
+                last_read_message_id: unread_cursor(membership.last_read_message_id),
+            }),
+        )?;
+        Ok(memberships
+            .iter()
+            .map(|membership| {
+                (
+                    membership.chat_id,
+                    counts
+                        .get(&ChatUnreadCursor {
+                            hide_membership_messages: membership.hide_membership_messages,
+                            chat_id: membership.chat_id,
+                            last_read_message_id: unread_cursor(membership.last_read_message_id),
+                        })
+                        .copied()
+                        .unwrap_or(0),
+                )
+            })
             .collect())
     }
 
@@ -314,8 +280,7 @@ impl UnreadService {
         uid: i32,
     ) -> Result<UnreadSummaryCounts, DieselError> {
         let memberships = Self::load_user_chat_memberships(conn, uid)?;
-        let counts = self.count_membership_unreads(conn, uid, &memberships)?;
-        Ok(summarize_membership_unreads(&memberships, &counts))
+        self.count_membership_unread_summary(conn, &memberships)
     }
 
     /// Preference-selected Main badge for APNs; excludes archived/muted chats and all replies.
@@ -726,6 +691,22 @@ impl UnreadService {
         })
     }
 
+    fn count_membership_unread_summary(
+        &self,
+        conn: &mut PgConnection,
+        memberships: &[ChatUnreadMembership],
+    ) -> Result<UnreadSummaryCounts, DieselError> {
+        let counts = self.count_chat_unread_cursors(
+            conn,
+            memberships.iter().map(|membership| ChatUnreadCursor {
+                hide_membership_messages: membership.hide_membership_messages,
+                chat_id: membership.chat_id,
+                last_read_message_id: unread_cursor(membership.last_read_message_id),
+            }),
+        )?;
+        Ok(summarize_membership_unreads(memberships, &counts))
+    }
+
     fn count_user_membership_app_badges(
         &self,
         conn: &mut PgConnection,
@@ -747,11 +728,22 @@ impl UnreadService {
             conn,
             counting_memberships
                 .iter()
-                .map(|membership| membership.cursor()),
+                .map(|membership| ChatUnreadCursor {
+                    hide_membership_messages: membership.hide_membership_messages,
+                    chat_id: membership.chat_id,
+                    last_read_message_id: unread_cursor(membership.last_read_message_id),
+                }),
         )?;
 
         for membership in counting_memberships {
-            let count = counts.get(&membership.cursor()).copied().unwrap_or(0);
+            let count = counts
+                .get(&ChatUnreadCursor {
+                    hide_membership_messages: membership.hide_membership_messages,
+                    chat_id: membership.chat_id,
+                    last_read_message_id: unread_cursor(membership.last_read_message_id),
+                })
+                .copied()
+                .unwrap_or(0);
             let current = totals.entry(membership.uid).or_insert(0);
             if membership.show_unread_message_count {
                 *current = capped_add(*current, count);
@@ -776,7 +768,6 @@ impl UnreadService {
                 c.chat_id,
                 c.last_read_message_id,
                 c.hide_membership_messages,
-                c.uid,
             )
         });
         cursors.dedup();
@@ -814,17 +805,16 @@ impl UnreadService {
                 continue;
             };
             let scope = (cursor.chat_id, cursor.hide_membership_messages);
-            let window = match windows.entry(scope) {
+            let ids = match windows.entry(scope) {
                 std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
                 std::collections::hash_map::Entry::Vacant(entry) => {
                     entry.insert(self.chat_unread_window(conn, scope, revision)?)
                 }
             };
-            if let Some(count) = window.count(cursor) {
-                counts.insert(cursor, count);
-            } else {
-                misses.push(cursor);
-            }
+            counts.insert(
+                cursor,
+                ids.partition_point(|id| *id > cursor.last_read_message_id) as i64,
+            );
         }
         let (hidden, shown): (Vec<_>, Vec<_>) = misses
             .into_iter()
@@ -839,67 +829,57 @@ impl UnreadService {
         conn: &mut PgConnection,
         scope: (i64, bool),
         revision: i64,
-    ) -> Result<Arc<ChatUnreadWindow>, DieselError> {
+    ) -> Result<Arc<[i64]>, DieselError> {
         let key = (scope.0, scope.1, revision);
-        if let Some(window) = self.windows.get(&key) {
-            return Ok(window);
+        if let Some(ids) = self.windows.get(&key) {
+            return Ok(ids);
         }
         let flight = self
             .single_flight
             .get_with(scope, || Arc::new(Mutex::new(())));
         let _guard = flight.lock().unwrap_or_else(|error| error.into_inner());
-        if let Some(window) = self.windows.get(&key) {
-            return Ok(window);
+        if let Some(ids) = self.windows.get(&key) {
+            return Ok(ids);
         }
         let predicate = if scope.1 {
             crate::services::system_messages::NON_MEMBERSHIP_PREDICATE
         } else {
             "TRUE"
         };
-        // IDs, authors and revision must come from the same statement snapshot.
-        // System messages keep their normal visibility even when attributed to the viewer.
+        // IDs and revision must come from the same statement snapshot. A commit
+        // after the revision probe may mean this load observes a newer revision.
+        // ARRAY preserves ordering and returns an empty array for an empty chat.
         let row = sql_query(format!(
-            "SELECT COALESCE(array_agg(id ORDER BY id DESC), '{{}}') AS ids,
-             COALESCE(array_agg(author ORDER BY id DESC), '{{}}') AS authors,
-             (SELECT revision FROM chat_unread_revisions WHERE chat_id = $1
-                AND to_regclass('pg_temp.messages') IS NULL
-                AND to_regclass('pg_temp.groups') IS NULL
-                AND pg_current_xact_id_if_assigned() IS NULL) AS revision
-             FROM (
-                 SELECT id, CASE WHEN message_type <> 'system' THEN sender_uid END AS author
-                 FROM messages
+            "SELECT ARRAY(
+                 SELECT id FROM messages
                  WHERE chat_id = $1 AND deleted_at IS NULL AND is_published = TRUE
                    AND reply_root_id IS NULL AND {predicate}
                  ORDER BY id DESC LIMIT $2
-             ) recent"
+             ) AS ids,
+             (SELECT revision FROM chat_unread_revisions WHERE chat_id = $1
+                AND to_regclass('pg_temp.messages') IS NULL
+                AND to_regclass('pg_temp.groups') IS NULL
+                AND pg_current_xact_id_if_assigned() IS NULL) AS revision"
         ))
         .bind::<diesel::sql_types::BigInt, _>(scope.0)
-        .bind::<diesel::sql_types::BigInt, _>(CHAT_UNREAD_WINDOW_SIZE)
+        .bind::<diesel::sql_types::BigInt, _>(MAX_UNREAD_COUNT)
         .get_result::<ChatUnreadWindowRow>(conn)?;
-        let mut authored: Vec<_> = row
-            .ids
-            .iter()
-            .zip(row.authors)
-            .filter_map(|(&id, uid)| uid.map(|uid| (uid, Reverse(id))))
-            .collect();
-        authored.sort_unstable();
-        let window = Arc::new(ChatUnreadWindow {
-            ids: row.ids.into_boxed_slice(),
-            authored: authored.into_boxed_slice(),
-        });
+        let ids: Arc<[i64]> = row.ids.into();
         if let Some(revision) = row.revision {
             self.windows
-                .insert((scope.0, scope.1, revision), window.clone());
+                .insert((scope.0, scope.1, revision), ids.clone());
         }
-        Ok(window)
+        Ok(ids)
     }
 
     fn count_chat_unread_cursors_with_filter(
         &self,
         conn: &mut PgConnection,
-        cursors: Vec<ChatUnreadCursor>,
+        mut cursors: Vec<ChatUnreadCursor>,
         hide_membership_messages: bool,
     ) -> Result<HashMap<ChatUnreadCursor, i64>, DieselError> {
+        cursors.sort_unstable_by_key(|cursor| (cursor.chat_id, cursor.last_read_message_id));
+        cursors.dedup();
         if cursors.is_empty() {
             return Ok(HashMap::new());
         }
@@ -912,16 +892,15 @@ impl UnreadService {
             .iter()
             .map(|cursor| cursor.last_read_message_id)
             .collect::<Vec<_>>();
-        let uids = cursors.iter().map(|cursor| cursor.uid).collect::<Vec<_>>();
         let predicate = if hide_membership_messages {
             crate::services::system_messages::NON_MEMBERSHIP_PREDICATE
         } else {
             "TRUE"
         };
         let rows = sql_query(format!(
-            "SELECT requested.uid, requested.chat_id, requested.last_read_message_id, counts.unread_count
-             FROM UNNEST($1::BIGINT[], $2::BIGINT[], $3::INTEGER[])
-                 AS requested(chat_id, last_read_message_id, uid)
+            "SELECT requested.chat_id, requested.last_read_message_id, counts.unread_count
+             FROM UNNEST($1::BIGINT[], $2::BIGINT[])
+                 AS requested(chat_id, last_read_message_id)
              CROSS JOIN LATERAL (
                  SELECT COUNT(*)::BIGINT AS unread_count
                  FROM (
@@ -931,22 +910,20 @@ impl UnreadService {
                        AND deleted_at IS NULL
                        AND is_published = TRUE
                        AND reply_root_id IS NULL
-                       AND (sender_uid <> requested.uid OR message_type = 'system')
+                       AND (deleted_at IS NULL OR has_thread = true)
                        AND {predicate}
-                     ORDER BY id DESC LIMIT $4
+                     ORDER BY id DESC LIMIT $3
                  ) unread
              ) counts",
         ))
         .bind::<diesel::sql_types::Array<diesel::sql_types::BigInt>, _>(chat_ids)
         .bind::<diesel::sql_types::Array<diesel::sql_types::BigInt>, _>(last_read_message_ids)
-        .bind::<diesel::sql_types::Array<diesel::sql_types::Integer>, _>(uids)
         .bind::<diesel::sql_types::BigInt, _>(MAX_UNREAD_COUNT)
         .load::<ChatUnreadCountRow>(conn)?;
 
         let mut counts = HashMap::with_capacity(rows.len());
         for row in rows {
             let cursor = ChatUnreadCursor {
-                uid: row.uid,
                 hide_membership_messages,
                 chat_id: row.chat_id,
                 last_read_message_id: row.last_read_message_id,
@@ -1096,7 +1073,7 @@ pub(super) fn unread_cursor(last_read_message_id: Option<i64>) -> i64 {
 
 fn summarize_membership_unreads(
     memberships: &[ChatUnreadMembership],
-    counts: &HashMap<i64, i64>,
+    counts: &HashMap<ChatUnreadCursor, i64>,
 ) -> UnreadSummaryCounts {
     let mut summary = UnreadSummaryCounts {
         unread_count: 0,
@@ -1106,7 +1083,14 @@ fn summarize_membership_unreads(
     };
 
     for membership in memberships {
-        let count = counts.get(&membership.chat_id).copied().unwrap_or(0);
+        let count = counts
+            .get(&ChatUnreadCursor {
+                hide_membership_messages: membership.hide_membership_messages,
+                chat_id: membership.chat_id,
+                last_read_message_id: unread_cursor(membership.last_read_message_id),
+            })
+            .copied()
+            .unwrap_or(0);
         if membership.archived {
             summary.archived_unread_count = capped_add(summary.archived_unread_count, count);
             if count > 0 {
@@ -1156,9 +1140,34 @@ mod tests {
             membership(2, None, false, Some(now + Duration::minutes(1))),
             membership(3, None, true, Some(now + Duration::minutes(1))),
         ];
-        let counts = [(1, MAX_UNREAD_COUNT), (2, 3), (3, 1)]
-            .into_iter()
-            .collect();
+        let counts = [
+            (
+                ChatUnreadCursor {
+                    hide_membership_messages: false,
+                    chat_id: 1,
+                    last_read_message_id: 10,
+                },
+                MAX_UNREAD_COUNT,
+            ),
+            (
+                ChatUnreadCursor {
+                    hide_membership_messages: false,
+                    chat_id: 2,
+                    last_read_message_id: i64::MIN,
+                },
+                3,
+            ),
+            (
+                ChatUnreadCursor {
+                    hide_membership_messages: false,
+                    chat_id: 3,
+                    last_read_message_id: i64::MIN,
+                },
+                1,
+            ),
+        ]
+        .into_iter()
+        .collect();
 
         assert_eq!(
             summarize_membership_unreads(&memberships, &counts),
@@ -2283,8 +2292,7 @@ mod tests {
              CREATE TABLE messages (
                  id BIGINT PRIMARY KEY, chat_id BIGINT NOT NULL,
                  reply_root_id BIGINT, is_published BOOLEAN NOT NULL,
-                 deleted_at TIMESTAMPTZ, system_kind TEXT,
-                 sender_uid INTEGER NOT NULL DEFAULT 2, message_type TEXT NOT NULL DEFAULT 'text'
+                 deleted_at TIMESTAMPTZ, system_kind TEXT, has_thread BOOLEAN NOT NULL DEFAULT FALSE
              );
              INSERT INTO groups VALUES (1);",
         )
@@ -2296,7 +2304,6 @@ mod tests {
         .unwrap();
         let service = UnreadService::new();
         let cursor = ChatUnreadCursor {
-            uid: 1,
             chat_id: 1,
             last_read_message_id: 0,
             hide_membership_messages: false,
@@ -2329,19 +2336,17 @@ mod tests {
         // for counting live IDs. Both visibility variants must stay independent.
         writer
             .batch_execute(&format!(
-                "INSERT INTO messages (id, chat_id, is_published, system_kind, sender_uid, message_type)
-             SELECT n * 2, 1, TRUE, CASE WHEN n % 3 = 0 THEN 'member_joined' END,
-                    CASE WHEN n % 2 = 0 THEN 1 ELSE 2 END,
-                    CASE WHEN n % 3 = 0 THEN 'system' ELSE 'text' END
+                "INSERT INTO messages (id, chat_id, is_published, system_kind)
+             SELECT n * 2, 1, TRUE, CASE WHEN n % 3 = 0 THEN 'member_joined' END
              FROM generate_series(1, {}) n;
              INSERT INTO messages (id, chat_id, is_published) VALUES (1, 1, FALSE);",
                 MAX_UNREAD_COUNT * 2
             ))
             .unwrap();
         let verify = |conn: &mut PgConnection| {
-            let cursors: Vec<_> = [(1, false), (1, true), (2, false), (2, true), (3, false)]
+            let cursors: Vec<_> = [false, true]
                 .into_iter()
-                .flat_map(|(uid, hidden)| {
+                .flat_map(|hidden| {
                     [
                         0,
                         1,
@@ -2354,7 +2359,6 @@ mod tests {
                     ]
                     .into_iter()
                     .map(move |id| ChatUnreadCursor {
-                        uid,
                         last_read_message_id: id,
                         hide_membership_messages: hidden,
                         ..cursor
@@ -2371,15 +2375,14 @@ mod tests {
                     "TRUE"
                 };
                 let expected = diesel::sql_query(format!(
-                    "SELECT {}::INTEGER AS uid, 1::BIGINT AS chat_id, {}::BIGINT AS last_read_message_id,
+                    "SELECT 1::BIGINT AS chat_id, {}::BIGINT AS last_read_message_id,
                             COUNT(*)::BIGINT AS unread_count
                      FROM (SELECT id FROM messages
                            WHERE chat_id = 1 AND id > {}
                              AND deleted_at IS NULL AND is_published
                              AND reply_root_id IS NULL AND {predicate}
-                             AND (sender_uid <> {} OR message_type = 'system')
                            ORDER BY id DESC LIMIT {}) live",
-                    cursor.uid, cursor.last_read_message_id, cursor.last_read_message_id, cursor.uid, MAX_UNREAD_COUNT
+                    cursor.last_read_message_id, cursor.last_read_message_id, MAX_UNREAD_COUNT
                 ))
                 .get_result::<super::ChatUnreadCountRow>(conn)
                 .unwrap();
@@ -2397,16 +2400,6 @@ mod tests {
                 MAX_UNREAD_COUNT * 3
             ))
             .unwrap();
-        verify(conn);
-        writer
-            .batch_execute(&format!(
-                "INSERT INTO messages (id, chat_id, is_published, sender_uid)
-                 SELECT n + {}, 1, TRUE, 1 FROM generate_series(1, {}) n;",
-                MAX_UNREAD_COUNT * 4,
-                MAX_UNREAD_COUNT * 2,
-            ))
-            .unwrap();
-        // A window full of own messages still has unread rows farther back.
         verify(conn);
         // Delayed publication inserts an old ID, not necessarily the newest ID.
         writer
@@ -2467,7 +2460,6 @@ mod tests {
             .unwrap();
         let service = UnreadService::new();
         let cursor = ChatUnreadCursor {
-            uid: uid - 1,
             chat_id: chat,
             last_read_message_id: i64::MIN,
             hide_membership_messages: false,
@@ -2484,7 +2476,6 @@ mod tests {
         };
         insert(&mut second, chat + 1);
         assert_eq!(count(&mut first, cursor), 1);
-        assert_eq!(count(&mut first, ChatUnreadCursor { uid, ..cursor }), 0);
         assert_eq!(count(&mut first, cursor), 1);
         let read_cursor = ChatUnreadCursor {
             last_read_message_id: chat + 1,
@@ -2526,7 +2517,6 @@ mod tests {
             .bind::<BigInt, _>(chat + 1).execute(&mut second).unwrap();
         assert_eq!(count(&mut first, cursor), 1);
         assert_eq!(count(&mut first, hidden), 0);
-        assert_eq!(count(&mut first, ChatUnreadCursor { uid, ..cursor }), 1);
         diesel::sql_query("UPDATE messages SET deleted_at = NOW() WHERE id = $1")
             .bind::<BigInt, _>(chat + 1)
             .execute(&mut second)

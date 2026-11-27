@@ -47,8 +47,6 @@ Backend APNs badge values and foreground app-icon values honor the same persiste
 
 Message arrival/deletion/publication, read-state changes on any device, archive/mute changes, timed-mute expiry, membership/access changes, membership-message visibility, and the count-mode preference can change the authoritative result. Clients consume server snapshots instead of incrementing local estimates or summing loaded list pages. Hidden membership messages follow the existing unread visibility policy.
 
-Unread counts exclude the viewer's own user messages in chats and threads. Visible system messages retain their normal unread behavior. Marking a chat unread from the list moves its read position to just before the newest message that can count as unread.
-
 ## Examples
 
 For eligible Main chats A with 5 unread messages and B with 2, plus archived C with 8 and muted D with 4:

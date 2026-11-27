@@ -260,7 +260,6 @@ pub fn get_thread_unread_count(
                             AND m.deleted_at IS NULL
                             AND m.is_published = TRUE
                             AND m.id > COALESCE($3, 0)
-                            AND (m.sender_uid <> $2 OR m.message_type = 'system')
              WHERE ts.thread_root_id = $1
                AND ts.uid = $2
              LIMIT $4
@@ -815,7 +814,6 @@ pub fn get_unread_summary_counts(
                    AND m.deleted_at IS NULL
                    AND m.is_published = TRUE
                    AND m.id > ts.last_read_message_id
-                   AND (m.sender_uid <> $1 OR m.message_type = 'system')
                )
          ),
          archived_unread_threads AS (
@@ -829,7 +827,6 @@ pub fn get_unread_summary_counts(
                    AND m.deleted_at IS NULL
                    AND m.is_published = TRUE
                    AND m.id > ts.last_read_message_id
-                   AND (m.sender_uid <> $1 OR m.message_type = 'system')
                )
          ),
          active_unread_messages AS (
@@ -842,7 +839,6 @@ pub fn get_unread_summary_counts(
                    AND m.deleted_at IS NULL
                    AND m.is_published = TRUE
                    AND m.id > ts.last_read_message_id
-                   AND (m.sender_uid <> $1 OR m.message_type = 'system')
                  LIMIT $2
              ) unread_message ON TRUE
              WHERE ts.archived = FALSE
@@ -858,7 +854,6 @@ pub fn get_unread_summary_counts(
                    AND m.deleted_at IS NULL
                    AND m.is_published = TRUE
                    AND m.id > ts.last_read_message_id
-                   AND (m.sender_uid <> $1 OR m.message_type = 'system')
                  LIMIT $2
              ) unread_message ON TRUE
              WHERE ts.archived = TRUE
@@ -936,7 +931,6 @@ pub fn enrich_thread_list(
                AND m.deleted_at IS NULL
                AND m.is_published = TRUE
                AND m.id > COALESCE(ts.last_read_message_id, 0)
-               AND (m.sender_uid <> $1 OR m.message_type = 'system')
              LIMIT $3
          ) AS unread_messages ON TRUE
          WHERE ts.uid = $1
@@ -1639,7 +1633,7 @@ mod tests {
             .unwrap()
             .threads;
             assert_eq!(items.len(), 2);
-            assert!(items.iter().all(|item| item.unread_count == 0));
+            assert!(items.iter().all(|item| item.unread_count > 0));
         }
         conn.batch_execute(
             "DELETE FROM group_membership WHERE chat_id = 76200 AND uid = 987676200;",
