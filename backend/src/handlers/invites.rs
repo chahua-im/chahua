@@ -38,8 +38,7 @@ async fn post_invite(
     Json(body): Json<CreateInviteBody>,
 ) -> Result<(StatusCode, Json<InviteResponse>), AppError> {
     conn.run(move |mut conn| async move {
-        let response =
-            crate::services::api::invites::post_invite(uid, body, &mut conn, &state.id_gen).await?;
+        let response = state.invites.post_invite(uid, body, &mut conn).await?;
         Ok((StatusCode::CREATED, Json(response)))
     })
     .await
@@ -62,21 +61,10 @@ async fn post_send_invite_message(
     Json(body): Json<SendInviteMessageBody>,
 ) -> Result<(StatusCode, Json<SendInviteMessageResponse>), AppError> {
     conn.run(move |mut conn| async move {
-        let response = crate::services::api::invites::post_send_invite_message(
-            uid,
-            body,
-            &mut conn,
-            crate::services::api::invites::PostSendInviteMessageDeps {
-                restricted_user_group_ids: &state.config.restricted_user_group_ids,
-                id_gen: &state.id_gen,
-                media: &state.media,
-                avatars: &state.avatars,
-                metrics: &state.metrics,
-                ws_registry: &state.ws_registry,
-                push_service: &state.push_service,
-            },
-        )
-        .await?;
+        let response = state
+            .invites
+            .post_send_invite_message(uid, body, &mut conn)
+            .await?;
         Ok((StatusCode::CREATED, Json(response)))
     })
     .await
@@ -146,14 +134,10 @@ async fn get_invite_by_code(
     Query(query): Query<GetInviteByCodeQuery>,
 ) -> Result<Json<InvitePreviewResponse>, AppError> {
     conn.run(move |mut conn| async move {
-        crate::services::api::invites::get_invite_by_code(
-            uid,
-            query,
-            &mut conn,
-            &state.media,
-            &state.avatars,
-        )
-        .map(Json)
+        state
+            .invites
+            .get_invite_by_code(uid, query, &mut conn)
+            .map(Json)
     })
     .await
 }
@@ -229,21 +213,11 @@ async fn post_redeem_invite(
     Json(body): Json<RedeemInviteBody>,
 ) -> Result<Json<RedeemInviteResponse>, AppError> {
     conn.run(move |mut conn| async move {
-        crate::services::api::invites::post_redeem_invite(
-            uid,
-            body,
-            &mut conn,
-            crate::services::api::invites::PostRedeemInviteDeps {
-                id_gen: &state.id_gen,
-                media: &state.media,
-                avatars: &state.avatars,
-                metrics: &state.metrics,
-                ws_registry: &state.ws_registry,
-                push_service: &state.push_service,
-            },
-        )
-        .await
-        .map(Json)
+        state
+            .invites
+            .post_redeem_invite(uid, body, &mut conn)
+            .await
+            .map(Json)
     })
     .await
 }

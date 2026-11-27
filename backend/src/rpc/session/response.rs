@@ -3,7 +3,7 @@ use tokio::time::Instant;
 use crate::rpc::{
     error::{RpcError, RpcErrorCode, RpcLifecycleFailure},
     protocol::{RpcOutcome, RpcResponse},
-    RpcServices,
+    AppState,
 };
 
 use super::{io::RpcIoError, MAX_FRAME_BYTES};
@@ -48,7 +48,7 @@ pub(super) fn prepare_response(response: RpcResponse) -> Result<PreparedResponse
 }
 
 pub(super) fn prepare_recorded(
-    services: &RpcServices,
+    services: &AppState,
     api: &'static str,
     started: Instant,
     response: Option<RpcResponse>,
@@ -71,7 +71,7 @@ pub(super) fn prepare_recorded(
 }
 
 pub(super) fn record_rejection(
-    services: &RpcServices,
+    services: &AppState,
     api: &'static str,
     started: Instant,
     response: Option<RpcResponse>,

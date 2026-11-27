@@ -557,25 +557,7 @@ mod tests {
         let Some(services) = crate::rpc::test_support::services().await else {
             return;
         };
-        let state = AppState::new(crate::state::AppInner {
-            db: services.db.clone(),
-            id_gen: services.id_gen.clone(),
-            metrics: services.metrics.clone(),
-            config: services.config.clone(),
-            media: services.media.clone(),
-            avatars: services.avatars.clone(),
-            link_previews: services.link_previews.clone(),
-            authz_service: services.authz_service.clone(),
-            ws_registry: services.ws_registry.clone(),
-            presence_service: services.presence_service.clone(),
-            push_service: services.push_service.clone(),
-            unread_service: services.unread_service.clone(),
-            client_tracking: services.client_tracking.clone(),
-            background_service: services.background_service.clone(),
-            message_search: services.message_search.clone(),
-            auth_token_service: services.auth_token_service.clone(),
-            token_generation: services.token_generation.clone(),
-        });
+        let state = services.clone();
         let app = Router::new()
             .nest("/chats", router().split_for_parts().0)
             .with_state(state.clone());

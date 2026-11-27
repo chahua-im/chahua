@@ -7,7 +7,7 @@ HTTP APIs, JSON-RPC operations, and real-time updates for the PWA and other clie
 
 | Layer | Responsibility |
 | --- | --- |
-| `src/main.rs`, `src/config.rs`, `src/state.rs` | Startup, configuration, dependency wiring, and shared state. |
+| `src/main.rs`, `src/lib.rs`, `src/bootstrap.rs`, `src/config.rs`, `src/state.rs` | Binary entry point, library boundary, startup, configuration, and shared service ownership. |
 | `src/handlers/`, `src/rpc/` | HTTP and WebSocket transport, request decoding, session management, and response mapping. |
 | `src/services/api/` | Shared application operations, authorization, transactions, and post-commit publication. |
 | `src/services/` | Domain logic and integrations: messages, users, unread state, presence, media, search, and push. |
@@ -16,8 +16,9 @@ HTTP APIs, JSON-RPC operations, and real-time updates for the PWA and other clie
 Configuration is resolved once at startup from optional TOML plus environment
 overrides; secret values remain outside TOML. See [application configuration](../docs/local-setup.md#application-configuration).
 
-Transport adapters call shared application services rather than duplicating business
-logic. Services receive the dependencies they need, not the entire `AppState`.
+HTTP handlers and RPC sessions share one `AppState` backed by `Arc<AppServices>`.
+Application services are constructed once at startup with narrow dependencies;
+they do not receive the entire `AppState`. Transport adapters delegate to these services.
 HTTP database operations and DB-capable authentication run on blocking workers;
 request-body streaming stays on the async side.
 

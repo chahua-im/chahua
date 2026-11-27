@@ -20,7 +20,7 @@ const VIEWER: i32 = 4_000_306;
 async fn service() -> Option<ReplayService> {
     let url = std::env::var("WETTY_TEST_DATABASE_URL").ok()?;
     let config = AppConfig::from_env(ConfigFile::from_env());
-    let media = crate::build_media_store(&config).await;
+    let media = crate::bootstrap::build_media_store(&config).await;
     let avatars = Arc::new(AvatarService::new(None, Metrics::new().avatars.clone()));
     let pool = DbPool::builder()
         .max_size(1)

@@ -1,0 +1,442 @@
+use super::*;
+use serde_json::Value;
+
+fn api_document() -> Value {
+    serde_json::to_value(document()).unwrap()
+}
+
+#[test]
+fn list_sync_openapi_contract() {
+    let document = api_document();
+    let operation = &document["paths"]["/chats/difference"]["get"];
+    assert!(operation.is_object());
+    assert_eq!(
+        operation["security"][0]["bearer_jwt"],
+        serde_json::json!([])
+    );
+    let removal = &document["components"]["schemas"]["ListSyncRemoval"];
+    for field in ["chatId", "threadId"] {
+        assert_eq!(removal["properties"][field]["x-snowflake-id"], true);
+    }
+    assert!(!removal["required"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("threadId")));
+}
+
+#[test]
+fn sticker_from_message_contract() {
+    let document = crate::rpc::schema::openrpc_document();
+    let method = document["methods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|method| method["name"] == "stickers.createFromMessage")
+        .unwrap();
+    assert_eq!(method["x-execution-class"], "mutation");
+    for field in ["packId", "chatId", "messageId"] {
+        let param = method["params"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|param| param["name"] == field)
+            .unwrap();
+        assert_eq!(param["schema"]["type"], "string");
+        assert_eq!(param["schema"]["x-snowflake-id"], true);
+    }
+
+    let params: crate::dto::rpc::stickers::StickersCreateFromMessageParams = serde_json::from_value(
+            serde_json::json!({"packId": "9223372036854775807", "chatId": "9007199254740993", "messageId": "9007199254740995", "emoji": "😀"})
+        ).unwrap();
+    assert_eq!(params.pack_id, i64::MAX);
+    assert_eq!(params.body.chat_id, 9007199254740993);
+    let body: crate::dto::stickers::CreateStickerFromMessageBody = serde_json::from_value(
+            serde_json::json!({"chatId": "9007199254740993", "messageId": "9007199254740995", "emoji": "😀"})
+        ).unwrap();
+    assert_eq!(body.chat_id, 9007199254740993);
+    assert_eq!(body.message_id, 9007199254740995);
+    assert!(body.name.is_none());
+}
+
+#[test]
+fn sticker_discovery_and_visibility_contract() {
+    let document = api_document();
+    let schemas = &document["components"]["schemas"];
+    assert_eq!(
+        schemas["StickerPackSort"]["enum"],
+        serde_json::json!(["subscribers", "trending"])
+    );
+    assert_eq!(
+        schemas["StickerPackVisibility"]["enum"],
+        serde_json::json!(["public", "private"])
+    );
+    let parameters = document["paths"]["/stickers/packs"]["get"]["parameters"]
+        .as_array()
+        .unwrap();
+    for parameter in parameters {
+        assert_ne!(parameter["required"], true);
+    }
+    assert_eq!(
+        parameters.iter().find(|p| p["name"] == "limit").unwrap()["schema"]["maximum"],
+        50
+    );
+    assert_eq!(
+        schemas["CreateStickerPackBody"]["properties"]["visibility"]["default"],
+        "public"
+    );
+    assert!(!schemas["CreateStickerPackBody"]["required"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("visibility")));
+    assert!(schemas["StickerPackSummary"]["properties"]["visibility"].is_object());
+    assert!(document["paths"]["/stickers/packs/{pack_id}"]["get"]["responses"]["404"].is_object());
+    assert!(
+        document["paths"]["/stickers/packs/{pack_id}/subscription"]["put"]["responses"]["404"]
+            .is_object()
+    );
+}
+
+#[test]
+fn speaking_modes_document_admin_endpoints_and_camel_case_states() {
+    let document = api_document();
+    assert!(document["paths"]["/group/{chat_id}/speaking-mode"]["put"].is_object());
+    assert!(document["paths"]["/group/{chat_id}/members/{uid}/speaking-mode"]["put"].is_object());
+    let schemas = &document["components"]["schemas"];
+    assert_eq!(
+        schemas["SpeakingMode"]["enum"],
+        serde_json::json!(["unrestricted", "threadsOnly", "repliesOnly", "readOnly"])
+    );
+    for field in ["speakingMode", "mySpeakingMode", "effectiveSpeakingMode"] {
+        assert!(schemas["GroupInfoResponse"]["properties"][field].is_object());
+    }
+    assert!(schemas["MemberResponse"]["properties"]["speakingMode"].is_object());
+    assert!(
+        schemas["SpeakingRestrictedResponse"]["properties"]["effectiveSpeakingMode"].is_object()
+    );
+}
+
+#[test]
+fn chat_membership_event_contract() {
+    let document = api_document();
+    let schemas = &document["components"]["schemas"];
+    assert_eq!(
+        schemas["ChatMembershipChangedPayload"]["properties"]["chatId"]["type"],
+        "string"
+    );
+    assert!(schemas["ServerWsMessage"]["oneOf"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|event| {
+            event["properties"]["type"]["enum"] == serde_json::json!(["chatMembershipChanged"])
+        }));
+}
+
+#[test]
+fn system_kind_contract() {
+    let document = api_document();
+    let kinds = document["components"]["schemas"]["SystemMessageKind"]["enum"]
+        .as_array()
+        .unwrap();
+    assert_eq!(kinds.len(), 10);
+    assert!(kinds.contains(&serde_json::json!("member_joined")));
+    for name in ["MessageResponse", "MessagePreview"] {
+        assert!(document["components"]["schemas"][name]["properties"]["systemKind"].is_object());
+    }
+}
+
+#[test]
+fn account_chat_settings_contract() {
+    let document = api_document();
+    assert!(document["paths"]["/users/me/chat-settings"]["put"].is_object());
+    assert_eq!(
+        document["components"]["schemas"]["MeResponse"]["properties"]["showMembershipMessages"]
+            ["type"],
+        "boolean"
+    );
+    assert!(document["components"]["schemas"]["UpdateChatSettings"]["required"].is_null());
+    for name in ["MeResponse", "ChatSettings", "UpdateChatSettings"] {
+        assert!(
+            document["components"]["schemas"][name]["properties"]["showUnreadMessageCount"]
+                .is_object()
+        );
+    }
+    let payload = &document["components"]["schemas"]["ConversationUnreadPayload"]["properties"];
+    assert!(payload["unreadChatIds"].is_null());
+    assert!(payload["mainUnread"].is_object());
+}
+
+#[test]
+fn membership_filter_contract() {
+    let document = api_document();
+    let parameters = document["paths"]["/chats/{chat_id}/messages"]["get"]["parameters"]
+        .as_array()
+        .unwrap();
+    assert!(!parameters
+        .iter()
+        .any(|parameter| parameter["name"] == "excludeSystemKinds"));
+    let schemas = &document["components"]["schemas"];
+    assert!(schemas["ListChatsResponse"]["properties"]["chatSettings"].is_object());
+    assert!(schemas["ListMessagesResponse"]["properties"]["chatSettings"].is_object());
+    assert!(schemas["ListMessagesResponse"]["properties"]["readThroughMessageId"].is_null());
+    assert!(schemas["ChatListItem"]["properties"]["readThroughMessageId"].is_null());
+    assert!(schemas["ChatListItem"]["properties"]["lastNonMembershipMessage"].is_null());
+}
+
+#[test]
+fn notification_preferences_document_partial_defaults_and_explicit_chat_modes() {
+    let document = api_document();
+    assert!(document["paths"]["/users/me/notification-settings"]["patch"].is_object());
+    assert!(document["paths"]["/users/me/notification-exceptions"]["get"].is_object());
+    assert!(document["paths"]["/group/{chat_id}/notification-setting"]["put"].is_object());
+    let schemas = &document["components"]["schemas"];
+    assert_eq!(
+        schemas["GroupInfoResponse"]["properties"]["archived"]["type"],
+        "boolean"
+    );
+    assert!(schemas["GroupInfoResponse"]["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|field| field == "archived"));
+    assert!(schemas["UpdateNotificationSettingsRequest"]["required"]
+        .as_array()
+        .is_none_or(|fields| fields.is_empty()));
+    assert_eq!(
+        schemas["NotificationSettingMode"]["enum"],
+        serde_json::json!([
+            "inherit",
+            "alwaysMuted",
+            "alwaysUnmuted",
+            "temporarilyMuted"
+        ])
+    );
+    assert_eq!(
+        schemas["ChatNotificationSettingResponse"]["properties"]["chatId"]["type"],
+        "string"
+    );
+    let events = schemas["ServerWsMessage"].to_string();
+    assert!(events.contains("notificationSettingsChanged"));
+    assert!(events.contains("chatNotificationSettingChanged"));
+}
+
+#[test]
+fn bulk_deletion_documents_bounded_string_ids_and_a_reconciled_response() {
+    let document = api_document();
+    let ids =
+        &document["components"]["schemas"]["BulkDeleteMessagesBody"]["properties"]["messageIds"];
+    assert_eq!(ids["minItems"], 1);
+    assert_eq!(ids["maxItems"], 100);
+    assert_eq!(ids["items"]["type"], "string");
+    let operation = &document["paths"]["/chats/{chat_id}/messages/bulk-delete"]["post"];
+    assert_eq!(operation["operationId"], "bulk_delete_messages");
+    assert_eq!(
+        operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/BulkDeletedPayload"
+    );
+}
+
+#[test]
+fn merged_forward_selection_documents_its_size_limits() {
+    let document = api_document();
+    let selection =
+        &document["components"]["schemas"]["ForwardMessagesBody"]["properties"]["messageIds"];
+    assert_eq!(selection["minItems"], 2);
+    assert_eq!(selection["maxItems"], 100);
+}
+
+#[test]
+fn merged_forward_documents_an_optional_string_thread_id() {
+    let document = api_document();
+    let schemas = &document["components"]["schemas"];
+    let merged = &schemas["ForwardMessagesBody"];
+    let thread = &merged["properties"]["threadId"];
+    assert!(!thread.is_null());
+    assert_eq!(
+        thread["type"],
+        schemas["ForwardMessageBody"]["properties"]["threadId"]["type"]
+    );
+    assert!(!merged["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|field| field == "threadId"));
+}
+
+#[test]
+fn list_row_filters_are_documented_as_optional_string_ids() {
+    let document = api_document();
+    for (path, name) in [("/chats", "chatId"), ("/threads", "rootId")] {
+        let params = document["paths"][path]["get"]["parameters"]
+            .as_array()
+            .unwrap();
+        let parameter = params.iter().find(|p| p["name"] == name).unwrap();
+        assert_ne!(parameter["required"], true);
+    }
+}
+
+#[test]
+fn unread_collections_are_ws_only_and_legacy_unread_routes_remain() {
+    let document = api_document();
+    assert!(document["paths"]
+        .get("/conversations/unread-summary")
+        .is_none());
+    for path in ["/chats/unread", "/threads/unread"] {
+        assert!(document["paths"][path]["get"].is_object());
+    }
+    let schemas = &document["components"]["schemas"];
+    assert!(schemas["ConversationView"].is_object());
+    assert!(schemas["ConversationUnreadPayload"].is_object());
+    assert!(schemas.get("ConversationUnreadRequest").is_none());
+    assert!(schemas.get("ConversationUnreadResponse").is_none());
+}
+
+#[test]
+fn system_message_links_are_optional_and_preserve_snowflake_ids() {
+    let document = api_document();
+    let schemas = &document["components"]["schemas"];
+    for name in ["MessageResponse", "MessagePreview"] {
+        assert!(schemas[name]["properties"]["systemLinks"].is_object());
+        assert!(!schemas[name]["required"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("systemLinks")));
+    }
+    assert_eq!(
+        schemas["SystemMessageLinks"]["properties"]["messageId"]["type"],
+        serde_json::json!(["string", "null"])
+    );
+}
+
+#[test]
+fn api_document_security_requirements_use_registered_schemes() {
+    let document = api_document();
+    let schemes = document["components"]["securitySchemes"]
+        .as_object()
+        .unwrap();
+    for (path, item) in document["paths"].as_object().unwrap() {
+        for operation in item.as_object().unwrap().values() {
+            if let Some(requirements) = operation["security"].as_array() {
+                for requirement in requirements {
+                    for name in requirement.as_object().unwrap().keys() {
+                        assert!(
+                            schemes.contains_key(name),
+                            "{path}: unknown security scheme {name}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(
+        document["paths"]["/chats/{chat_id}/reactions/read"]["post"]["security"],
+        serde_json::json!([{"bearer_jwt": []}]),
+    );
+}
+
+#[test]
+fn api_document_has_no_unresolved_references() {
+    fn check_references(value: &Value, document: &Value) {
+        match value {
+            Value::Object(object) => {
+                if let Some(reference) = object.get("$ref").and_then(Value::as_str) {
+                    let pointer = reference.strip_prefix('#').expect("local API reference");
+                    assert!(
+                        document.pointer(pointer).is_some(),
+                        "unresolved: {reference}"
+                    );
+                }
+                for child in object.values() {
+                    check_references(child, document);
+                }
+            }
+            Value::Array(array) => {
+                for child in array {
+                    check_references(child, document);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let document = api_document();
+    check_references(&document, &document);
+}
+
+#[test]
+fn api_document_uses_strings_for_snowflake_path_ids() {
+    let document = api_document();
+    let paths = document["paths"].as_object().unwrap();
+    let snowflake_ids = [
+        "chat_id",
+        "message_id",
+        "thread_id",
+        "thread_root_id",
+        "request_id",
+        "invite_id",
+        "pin_id",
+        "pack_id",
+        "sticker_id",
+    ];
+    let mut checked_ids = 0;
+
+    for (path, item) in paths {
+        for operation in item.as_object().unwrap().values() {
+            let Some(parameters) = operation.get("parameters").and_then(Value::as_array) else {
+                continue;
+            };
+            for parameter in parameters {
+                let name = parameter["name"].as_str().unwrap();
+                if parameter["in"] == "path" && snowflake_ids.contains(&name) {
+                    assert_eq!(
+                            parameter["schema"]["type"],
+                            "string",
+                            "{path}: path ID {name} must preserve integers beyond JavaScript's safe range"
+                        );
+                    checked_ids += 1;
+                }
+            }
+        }
+    }
+
+    assert!(checked_ids > 0, "the document must include path IDs");
+}
+
+#[test]
+fn snowflake_marker_manifest_marks_wire_ids_only() {
+    let document = api_document();
+    let schemas = &document["components"]["schemas"];
+    assert_eq!(
+        schemas["ServiceTokenResponse"]["properties"]["id"]["x-snowflake-id"],
+        true
+    );
+    assert_eq!(
+        schemas["MessageResponse"]["properties"]["chatId"]["x-snowflake-id"],
+        true
+    );
+    assert_eq!(
+        schemas["CreateMessageBody"]["properties"]["attachmentIds"]["items"]["x-snowflake-id"],
+        true
+    );
+    assert_eq!(
+        schemas["UpdateMessageBody"]["properties"]["attachmentIds"]["items"]["x-snowflake-id"],
+        true
+    );
+    assert_eq!(
+        schemas["StickerPackOrderItem"]["properties"]["stickerPackId"]["x-snowflake-id"],
+        true
+    );
+    assert_eq!(
+        schemas["BulkDeletedPayload"]["properties"]["threadRootIds"]["items"]["x-snowflake-id"],
+        true
+    );
+    assert!(schemas["StickerPackSummary"]["properties"]["ownerUid"]
+        .get("x-snowflake-id")
+        .is_none());
+    assert!(schemas["ReactionSummary"]["properties"]["count"]
+        .get("x-snowflake-id")
+        .is_none());
+    assert!(schemas["ListThreadsResponse"]["properties"]["nextCursor"]
+        .get("x-snowflake-id")
+        .is_none());
+}

@@ -1,12 +1,12 @@
 use crate::dto::invites::*;
 use crate::dto::rpc::invites::*;
 use crate::errors::AppError;
-use crate::rpc::{RpcCallContext, RpcServices};
+use crate::rpc::{AppState, RpcCallContext};
 use crate::services::api::invites;
 
 pub async fn list(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: InvitesListParams,
 ) -> Result<ListInvitesResponse, AppError> {
     let uid = context.uid()?;
@@ -16,41 +16,33 @@ pub async fn list(
 
 pub async fn create(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: InvitesCreateParams,
 ) -> Result<InviteResponse, AppError> {
     let uid = context.uid()?;
     let mut conn = services.db.get()?;
-    invites::post_invite(uid, params.body, &mut conn, &services.id_gen).await
+    services
+        .invites
+        .post_invite(uid, params.body, &mut conn)
+        .await
 }
 
 pub async fn send(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: InvitesSendParams,
 ) -> Result<SendInviteMessageResponse, AppError> {
     let uid = context.uid()?;
     let mut conn = services.db.get()?;
-    invites::post_send_invite_message(
-        uid,
-        params.body,
-        &mut conn,
-        invites::PostSendInviteMessageDeps {
-            restricted_user_group_ids: &services.config.restricted_user_group_ids,
-            id_gen: &services.id_gen,
-            media: &services.media,
-            avatars: &services.avatars,
-            metrics: &services.metrics,
-            ws_registry: &services.ws_registry,
-            push_service: &services.push_service,
-        },
-    )
-    .await
+    services
+        .invites
+        .post_send_invite_message(uid, params.body, &mut conn)
+        .await
 }
 
 pub async fn get(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: InvitesGetParams,
 ) -> Result<InviteResponse, AppError> {
     let uid = context.uid()?;
@@ -60,23 +52,19 @@ pub async fn get(
 
 pub async fn get_by_code(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: InvitesGetByCodeParams,
 ) -> Result<InvitePreviewResponse, AppError> {
     let uid = context.uid()?;
     let mut conn = services.db.get()?;
-    invites::get_invite_by_code(
-        uid,
-        params.query,
-        &mut conn,
-        &services.media,
-        &services.avatars,
-    )
+    services
+        .invites
+        .get_invite_by_code(uid, params.query, &mut conn)
 }
 
 pub async fn update(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: InvitesUpdateParams,
 ) -> Result<InviteResponse, AppError> {
     let uid = context.uid()?;
@@ -86,7 +74,7 @@ pub async fn update(
 
 pub async fn delete(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: InvitesDeleteParams,
 ) -> Result<(), AppError> {
     let uid = context.uid()?;
@@ -96,23 +84,13 @@ pub async fn delete(
 
 pub async fn redeem(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: InvitesRedeemParams,
 ) -> Result<RedeemInviteResponse, AppError> {
     let uid = context.uid()?;
     let mut conn = services.db.get()?;
-    invites::post_redeem_invite(
-        uid,
-        params.body,
-        &mut conn,
-        invites::PostRedeemInviteDeps {
-            id_gen: &services.id_gen,
-            media: &services.media,
-            avatars: &services.avatars,
-            metrics: &services.metrics,
-            ws_registry: &services.ws_registry,
-            push_service: &services.push_service,
-        },
-    )
-    .await
+    services
+        .invites
+        .post_redeem_invite(uid, params.body, &mut conn)
+        .await
 }

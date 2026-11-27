@@ -86,7 +86,7 @@ enum SessionEventKind {
 }
 
 impl RpcSession {
-    pub fn new(services: super::RpcServices) -> (Self, RpcSessionOutput) {
+    pub fn new(services: super::AppState) -> (Self, RpcSessionOutput) {
         let (tx, rx) = mpsc::channel(OUTPUT_QUEUE);
         let session = Self::with_channels(
             services,
@@ -98,7 +98,7 @@ impl RpcSession {
     }
 
     fn with_channels(
-        services: super::RpcServices,
+        services: super::AppState,
         ordinary_admission: Arc<admission::Admission>,
         state: Arc<io::TransportState>,
         output: mpsc::Sender<String>,

@@ -3,12 +3,12 @@ use crate::dto::service_tokens::{
     CreateServiceTokenResponse, ListServiceTokensResponse, RotateServiceTokenResponse,
 };
 use crate::errors::AppError;
-use crate::rpc::{RpcCallContext, RpcServices};
+use crate::rpc::{AppState, RpcCallContext};
 use crate::services::api::service_tokens;
 
 pub async fn create(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ServiceTokensCreateParams,
 ) -> Result<CreateServiceTokenResponse, AppError> {
     let uid = context.uid()?;
@@ -26,7 +26,7 @@ pub async fn create(
 
 pub async fn list(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     _: ServiceTokensListParams,
 ) -> Result<ListServiceTokensResponse, AppError> {
     let uid = context.uid()?;
@@ -36,7 +36,7 @@ pub async fn list(
 
 pub async fn delete(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ServiceTokensDeleteParams,
 ) -> Result<(), AppError> {
     let uid = context.uid()?;
@@ -46,7 +46,7 @@ pub async fn delete(
 
 pub async fn rotate(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ServiceTokensRotateParams,
 ) -> Result<RotateServiceTokenResponse, AppError> {
     let uid = context.uid()?;

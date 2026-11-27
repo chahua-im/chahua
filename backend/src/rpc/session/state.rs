@@ -19,7 +19,7 @@ use crate::{
 use super::super::{
     error::{RpcError, RpcErrorCode, RpcLifecycleFailure},
     protocol::RpcId,
-    RpcCallContext, RpcServices,
+    AppState, RpcCallContext,
 };
 use super::{
     controls::RpcControlCommand,
@@ -166,7 +166,7 @@ impl SessionShared {
 
     pub(super) async fn bind(
         &self,
-        services: &RpcServices,
+        services: &AppState,
         session: VerifiedSession,
         sync_enabled: bool,
     ) -> Result<(), RpcError> {
@@ -311,7 +311,7 @@ impl SessionShared {
         Ok(())
     }
     // The successful handshake reply must be enqueued before activating publishers.
-    pub(super) async fn activate(self: &Arc<Self>, services: &RpcServices, sink: &RpcOutputSink) {
+    pub(super) async fn activate(self: &Arc<Self>, services: &AppState, sink: &RpcOutputSink) {
         if let Some(activation) = self.take_activation().await {
             activation.start_publishers(self, services, sink);
         }
@@ -344,7 +344,7 @@ impl SessionShared {
         self.state.lock().await.accepting = false;
     }
 
-    pub(super) async fn remove_registration(&self, services: &RpcServices) {
+    pub(super) async fn remove_registration(&self, services: &AppState) {
         let bound = self.state.lock().await.bound.take();
         if let Some(bound) = bound {
             services

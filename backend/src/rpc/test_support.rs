@@ -6,8 +6,13 @@ use std::sync::Arc;
 
 use diesel::{connection::SimpleConnection, prelude::*, r2d2::ConnectionManager};
 
-use super::{RpcServiceHandles, RpcServices};
-use crate::{config::AppConfig, metrics::Metrics, services, state::DbPool};
+use crate::{
+    config::AppConfig,
+    metrics::Metrics,
+    services,
+    state::{AppServices, DbPool},
+    AppState,
+};
 
 struct IsolatedTables(Arc<crate::metrics::queries::QueryMetrics>);
 
@@ -78,7 +83,7 @@ impl diesel::r2d2::CustomizeConnection<PgConnection, diesel::r2d2::Error> for Is
 /// Requires the normally migrated and bootstrap-seeded isolated smoke DB.
 /// The single retained connection keeps temporary tables consistent across
 /// service calls; concurrency/admission tests use explicit operation barriers.
-pub(crate) async fn services() -> Option<RpcServices> {
+pub(crate) async fn services() -> Option<AppState> {
     let Ok(database_url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
         eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
         return None;
@@ -106,7 +111,7 @@ pub(crate) async fn services() -> Option<RpcServices> {
         metrics.presence.clone(),
         client_tracking.last_seen.clone(),
     ));
-    let media = crate::build_media_store(&config).await;
+    let media = crate::bootstrap::build_media_store(&config).await;
     let avatars = Arc::new(services::avatars::AvatarService::new(
         config.avatars.clone(),
         metrics.avatars.clone(),
@@ -118,38 +123,100 @@ pub(crate) async fn services() -> Option<RpcServices> {
         ws_registry.clone(),
         config.link_previews.clone(),
     );
-    Some(RpcServices::new(RpcServiceHandles {
-        db: db.clone(),
-        id_gen: Arc::new(crate::utils::ids::new_generator(config.node_id)),
+    let id_gen = Arc::new(crate::utils::ids::new_generator(config.node_id));
+    let authz_service = services::authz::AuthorizationService::start();
+    let push_service = services::push::PushService::start(
+        db.clone(),
+        ws_registry.clone(),
+        metrics.push.clone(),
+        unread_service.clone(),
+        config
+            .push
+            .clone()
+            .expect("push configuration for RPC services"),
+    );
+    let background_service = services::background::BackgroundService::start(
+        db.clone(),
+        ws_registry.clone(),
+        metrics.background.clone(),
+        None,
+    );
+    let auth_token_service = Arc::new(services::auth_token::AuthTokenService::new(
+        &config.auth.jwt_signing_key,
+    ));
+    let token_generation = services::token_generation::TokenGenerationService::start();
+    let restricted_user_group_ids: Arc<[i32]> = config.restricted_user_group_ids.as_slice().into();
+    let message_writer = Arc::new(services::messages::MessageWriter {
+        id_gen: id_gen.clone(),
+        media: media.clone(),
+        avatars: avatars.clone(),
+        metrics: metrics.clone(),
+    });
+    let social = Arc::new(services::social::SocialService {
+        message_writer: message_writer.clone(),
+        ws_registry: ws_registry.clone(),
+        presence_service: presence_service.clone(),
+        push_service: push_service.clone(),
+    });
+    Some(AppState::new(AppServices {
+        messages: Arc::new(services::api::chats::messages::MessagesService {
+            restricted_user_group_ids: restricted_user_group_ids.clone(),
+            message_writer: message_writer.clone(),
+            authz_service: authz_service.clone(),
+            ws_registry: ws_registry.clone(),
+            push_service: push_service.clone(),
+            message_search: None,
+            link_previews: link_previews.clone(),
+        }),
+        friends: Arc::new(services::api::friends::FriendsService {
+            authz_service: authz_service.clone(),
+            avatars: avatars.clone(),
+            ws_registry: ws_registry.clone(),
+            social,
+        }),
+        invites: Arc::new(services::api::invites::InvitesService {
+            restricted_user_group_ids: restricted_user_group_ids.clone(),
+            writer: message_writer.clone(),
+            ws_registry: ws_registry.clone(),
+            push_service: push_service.clone(),
+        }),
+        members: Arc::new(services::api::members::MembersService {
+            writer: message_writer.clone(),
+            ws_registry: ws_registry.clone(),
+            push_service: push_service.clone(),
+            background_service: background_service.clone(),
+        }),
+        pins: Arc::new(services::api::pins::PinsService {
+            writer: message_writer,
+            ws_registry: ws_registry.clone(),
+            push_service: push_service.clone(),
+        }),
+        reactions: Arc::new(services::api::chats::reactions::ReactionsService {
+            restricted_user_group_ids,
+            avatars: avatars.clone(),
+            registry: ws_registry.clone(),
+        }),
+        dev_sessions: Arc::new(services::api::auth::DevSessionsService {
+            config: config.clone(),
+            auth_token_service: auth_token_service.clone(),
+            token_generation: token_generation.clone(),
+            db: db.clone(),
+        }),
+        db,
+        id_gen,
         media,
         avatars,
         link_previews,
-        authz_service: services::authz::AuthorizationService::start(),
-        ws_registry: ws_registry.clone(),
+        authz_service,
+        ws_registry,
         presence_service,
-        push_service: services::push::PushService::start(
-            db.clone(),
-            ws_registry.clone(),
-            metrics.push.clone(),
-            unread_service.clone(),
-            config
-                .push
-                .clone()
-                .expect("push configuration for RPC services"),
-        ),
+        push_service,
         unread_service,
         client_tracking,
-        background_service: services::background::BackgroundService::start(
-            db,
-            ws_registry,
-            metrics.background.clone(),
-            None,
-        ),
+        background_service,
         message_search: None,
-        auth_token_service: Arc::new(services::auth_token::AuthTokenService::new(
-            &config.auth.jwt_signing_key,
-        )),
-        token_generation: services::token_generation::TokenGenerationService::start(),
+        auth_token_service,
+        token_generation,
         metrics,
         config,
     }))

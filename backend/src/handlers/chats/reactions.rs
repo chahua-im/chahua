@@ -30,14 +30,10 @@ async fn get_reaction_details(
     conn: DbConn,
 ) -> Result<Json<ReactionDetailResponse>, AppError> {
     conn.run(move |mut conn| async move {
-        crate::services::api::chats::reactions::get_reaction_details(
-            uid,
-            chat_id,
-            message_id,
-            &mut conn,
-            &state.avatars,
-        )
-        .map(Json)
+        state
+            .reactions
+            .get_reaction_details(uid, chat_id, message_id, &mut conn)
+            .map(Json)
     })
     .await
 }
@@ -63,18 +59,9 @@ async fn put_reaction(
     conn: DbConn,
 ) -> Result<StatusCode, AppError> {
     conn.run(move |mut conn| async move {
-        crate::services::api::chats::reactions::put_reaction(
-            uid,
-            chat_id,
-            message_id,
-            emoji,
-            &mut conn,
-            crate::services::api::chats::reactions::ReactionWriteDeps {
-                restricted_user_group_ids: &state.config.restricted_user_group_ids,
-                avatars: &state.avatars,
-                registry: &state.ws_registry,
-            },
-        )?;
+        state
+            .reactions
+            .put_reaction(uid, chat_id, message_id, emoji, &mut conn)?;
         Ok(StatusCode::NO_CONTENT)
     })
     .await
@@ -101,18 +88,9 @@ async fn delete_reaction(
     conn: DbConn,
 ) -> Result<StatusCode, AppError> {
     conn.run(move |mut conn| async move {
-        crate::services::api::chats::reactions::delete_reaction(
-            uid,
-            chat_id,
-            message_id,
-            emoji,
-            &mut conn,
-            crate::services::api::chats::reactions::ReactionWriteDeps {
-                restricted_user_group_ids: &state.config.restricted_user_group_ids,
-                avatars: &state.avatars,
-                registry: &state.ws_registry,
-            },
-        )?;
+        state
+            .reactions
+            .delete_reaction(uid, chat_id, message_id, emoji, &mut conn)?;
         Ok(StatusCode::NO_CONTENT)
     })
     .await

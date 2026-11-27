@@ -19,7 +19,7 @@ use crate::{
 };
 
 async fn bound_shared(
-    services: &RpcServices,
+    services: &AppState,
 ) -> (Arc<SessionShared>, RpcOutputSink, mpsc::Receiver<String>) {
     let transport = TransportState::new();
     let shared = SessionShared::new(transport.clone());

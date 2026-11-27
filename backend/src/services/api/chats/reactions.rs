@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use diesel::prelude::*;
 use diesel::PgConnection;
 use unicode_segmentation::UnicodeSegmentation;
@@ -15,10 +17,10 @@ use crate::services::messages::{load_username_by_uid, load_usernames_by_uids};
 use crate::services::social;
 use crate::services::ws_registry::ConnectionRegistry;
 
-pub struct ReactionWriteDeps<'a> {
-    pub restricted_user_group_ids: &'a [i32],
-    pub avatars: &'a AvatarService,
-    pub registry: &'a ConnectionRegistry,
+pub struct ReactionsService {
+    pub restricted_user_group_ids: Arc<[i32]>,
+    pub avatars: Arc<AvatarService>,
+    pub registry: Arc<ConnectionRegistry>,
 }
 
 fn validate_emoji(input: &str) -> Result<String, AppError> {
@@ -120,153 +122,95 @@ fn broadcast_reaction_update(
     registry.broadcast_to_uids(&member_uids, ws_msg);
     member_uids
 }
-pub fn get_reaction_details(
-    uid: i32,
-    chat_id: i64,
-    message_id: i64,
-    conn: &mut PgConnection,
-    avatars: &AvatarService,
-) -> Result<ReactionDetailResponse, AppError> {
-    check_membership(conn, chat_id, uid)?;
+impl ReactionsService {
+    pub fn get_reaction_details(
+        &self,
+        uid: i32,
+        chat_id: i64,
+        message_id: i64,
+        conn: &mut PgConnection,
+    ) -> Result<ReactionDetailResponse, AppError> {
+        check_membership(conn, chat_id, uid)?;
 
-    // Reactions are not exposed for deleted messages (even thread-root placeholders).
-    let _message: Message = messages::table
-        .filter(messages::id.eq(message_id))
-        .filter(diesel::dsl::sql::<diesel::sql_types::Bool>(
-            crate::services::system_messages::NON_MEMBERSHIP_PREDICATE,
-        ))
-        .filter(messages::chat_id.eq(chat_id))
-        .filter(messages::deleted_at.is_null())
-        .filter(messages::is_published.eq(true))
-        .first(conn)
-        .optional()?
-        .ok_or(AppError::NotFound("Message not found"))?;
+        // Reactions are not exposed for deleted messages (even thread-root placeholders).
+        let _message: Message = messages::table
+            .filter(messages::id.eq(message_id))
+            .filter(diesel::dsl::sql::<diesel::sql_types::Bool>(
+                crate::services::system_messages::NON_MEMBERSHIP_PREDICATE,
+            ))
+            .filter(messages::chat_id.eq(chat_id))
+            .filter(messages::deleted_at.is_null())
+            .filter(messages::is_published.eq(true))
+            .first(conn)
+            .optional()?
+            .ok_or(AppError::NotFound("Message not found"))?;
 
-    // Load all reactions for this message
-    let raw: Vec<(String, i32)> = message_reactions::table
-        .filter(message_reactions::message_id.eq(message_id))
-        .order(message_reactions::created_at.asc())
-        .select((message_reactions::emoji, message_reactions::user_uid))
-        .load(conn)?;
+        // Load all reactions for this message
+        let raw: Vec<(String, i32)> = message_reactions::table
+            .filter(message_reactions::message_id.eq(message_id))
+            .order(message_reactions::created_at.asc())
+            .select((message_reactions::emoji, message_reactions::user_uid))
+            .load(conn)?;
 
-    // Group by emoji, preserving order
-    let mut groups: Vec<ReactionDetailGroup> = Vec::new();
-    let mut emoji_index: std::collections::HashMap<String, usize> =
-        std::collections::HashMap::new();
-    let mut all_uids = std::collections::HashSet::new();
+        // Group by emoji, preserving order
+        let mut groups: Vec<ReactionDetailGroup> = Vec::new();
+        let mut emoji_index: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        let mut all_uids = std::collections::HashSet::new();
 
-    for (idx, (emoji, uid)) in raw.iter().enumerate() {
-        all_uids.insert(*uid);
-        if let Some(&gi) = emoji_index.get(emoji) {
-            groups[gi].reactors.push(ReactionReactor {
-                uid: *uid,
-                name: None,
-                avatar_url: None,
-                sort_index: Some(idx as i32),
-            });
-        } else {
-            let gi = groups.len();
-            emoji_index.insert(emoji.clone(), gi);
-            groups.push(ReactionDetailGroup {
-                emoji: emoji.clone(),
-                reactors: vec![ReactionReactor {
+        for (idx, (emoji, uid)) in raw.iter().enumerate() {
+            all_uids.insert(*uid);
+            if let Some(&gi) = emoji_index.get(emoji) {
+                groups[gi].reactors.push(ReactionReactor {
                     uid: *uid,
                     name: None,
                     avatar_url: None,
                     sort_index: Some(idx as i32),
-                }],
-            });
+                });
+            } else {
+                let gi = groups.len();
+                emoji_index.insert(emoji.clone(), gi);
+                groups.push(ReactionDetailGroup {
+                    emoji: emoji.clone(),
+                    reactors: vec![ReactionReactor {
+                        uid: *uid,
+                        name: None,
+                        avatar_url: None,
+                        sort_index: Some(idx as i32),
+                    }],
+                });
+            }
         }
-    }
+        // Resolve names + avatars
+        let uids_vec: Vec<i32> = all_uids.into_iter().collect();
+        let names = load_usernames_by_uids(conn, &uids_vec);
+        let avatars = self.avatars.lookup(&uids_vec);
 
-    // Resolve names + avatars
-    let uids_vec: Vec<i32> = all_uids.into_iter().collect();
-    let names = load_usernames_by_uids(conn, &uids_vec);
-    let avatars = avatars.lookup(&uids_vec);
-
-    for group in &mut groups {
-        for reactor in &mut group.reactors {
-            reactor.name = names.get(&reactor.uid).cloned().flatten();
-            reactor.avatar_url = avatars.get(&reactor.uid).cloned().flatten();
+        for group in &mut groups {
+            for reactor in &mut group.reactors {
+                reactor.name = names.get(&reactor.uid).cloned().flatten();
+                reactor.avatar_url = avatars.get(&reactor.uid).cloned().flatten();
+            }
         }
+
+        Ok(ReactionDetailResponse { reactions: groups })
     }
+    pub fn put_reaction(
+        &self,
+        uid: i32,
+        chat_id: i64,
+        message_id: i64,
+        emoji: String,
+        conn: &mut PgConnection,
+    ) -> Result<(), AppError> {
+        let restricted_user_group_ids = &self.restricted_user_group_ids;
+        let avatars = &self.avatars;
+        let registry = &self.registry;
+        let emoji = validate_emoji(&emoji)?;
+        check_membership(conn, chat_id, uid)?;
+        social::require_chat_writable(conn, chat_id, uid, restricted_user_group_ids)?;
 
-    Ok(ReactionDetailResponse { reactions: groups })
-}
-pub fn put_reaction(
-    uid: i32,
-    chat_id: i64,
-    message_id: i64,
-    emoji: String,
-    conn: &mut PgConnection,
-    deps: ReactionWriteDeps<'_>,
-) -> Result<(), AppError> {
-    let ReactionWriteDeps {
-        restricted_user_group_ids,
-        avatars,
-        registry,
-    } = deps;
-    let emoji = validate_emoji(&emoji)?;
-    check_membership(conn, chat_id, uid)?;
-    social::require_chat_writable(conn, chat_id, uid, restricted_user_group_ids)?;
-
-    // Verify message exists and belongs to this chat
-    let message: Message = messages::table
-        .filter(messages::id.eq(message_id))
-        .filter(diesel::dsl::sql::<diesel::sql_types::Bool>(
-            crate::services::system_messages::NON_MEMBERSHIP_PREDICATE,
-        ))
-        .filter(messages::chat_id.eq(chat_id))
-        .filter(messages::deleted_at.is_null())
-        .filter(messages::is_published.eq(true))
-        .first(conn)
-        .optional()?
-        .ok_or(AppError::NotFound("Message not found"))?;
-
-    let inserted = crate::services::reactions::insert_reaction(conn, &message, uid, emoji)?;
-
-    let member_uids = broadcast_reaction_update(conn, avatars, registry, chat_id, message_id);
-
-    // Directed unread-reaction notification to the message author. Only on a
-    // genuinely new row (re-putting the same emoji is a no-op) and never for
-    // self-reactions or authors who are no longer chat members.
-    if inserted > 0 && message.sender_uid != uid && member_uids.contains(&message.sender_uid) {
-        let actor_name = load_username_by_uid(conn, uid)?.unwrap_or_else(|| "Someone".to_string());
-        let payload = NotificationPayload {
-            notification_type: NotificationType::Reaction,
-            chat_id,
-            message_id,
-            thread_root_id: message.reply_root_id,
-            actor_uid: uid,
-            actor_name: Some(actor_name),
-        };
-        registry.broadcast_to_uids(
-            &[message.sender_uid],
-            std::sync::Arc::new(ServerWsMessage::Notification(payload)),
-        );
-    }
-
-    Ok(())
-}
-pub fn delete_reaction(
-    uid: i32,
-    chat_id: i64,
-    message_id: i64,
-    emoji: String,
-    conn: &mut PgConnection,
-    deps: ReactionWriteDeps<'_>,
-) -> Result<(), AppError> {
-    let ReactionWriteDeps {
-        restricted_user_group_ids,
-        avatars,
-        registry,
-    } = deps;
-    let emoji = validate_emoji(&emoji)?;
-    check_membership(conn, chat_id, uid)?;
-    social::require_chat_writable(conn, chat_id, uid, restricted_user_group_ids)?;
-
-    let (message, deleted) = conn.transaction::<_, AppError, _>(|conn| {
-        // Serialize the flag update with reaction insertion and deletion.
+        // Verify message exists and belongs to this chat
         let message: Message = messages::table
             .filter(messages::id.eq(message_id))
             .filter(diesel::dsl::sql::<diesel::sql_types::Bool>(
@@ -275,52 +219,109 @@ pub fn delete_reaction(
             .filter(messages::chat_id.eq(chat_id))
             .filter(messages::deleted_at.is_null())
             .filter(messages::is_published.eq(true))
-            .for_no_key_update()
             .first(conn)
             .optional()?
             .ok_or(AppError::NotFound("Message not found"))?;
 
-        let deleted = diesel::delete(
-            message_reactions::table
-                .filter(message_reactions::message_id.eq(message_id))
-                .filter(message_reactions::user_uid.eq(uid))
-                .filter(message_reactions::emoji.eq(&emoji)),
-        )
-        .execute(conn)?;
+        let inserted = crate::services::reactions::insert_reaction(conn, &message, uid, emoji)?;
 
-        if deleted > 0
-            && !diesel::select(diesel::dsl::exists(
-                message_reactions::table.filter(message_reactions::message_id.eq(message_id)),
-            ))
-            .get_result::<bool>(conn)?
-        {
-            diesel::update(messages::table.find(message_id))
-                .set(messages::has_reactions.eq(false))
-                .execute(conn)?;
-        }
-        Ok((message, deleted))
-    })?;
-
-    if deleted > 0 {
         let member_uids = broadcast_reaction_update(conn, avatars, registry, chat_id, message_id);
-        // Removing a reaction changes the author's unread count too. Notify only
-        // that user rather than making every chat member refetch unread state.
-        if message.sender_uid != uid && member_uids.contains(&message.sender_uid) {
+
+        // Directed unread-reaction notification to the message author. Only on a
+        // genuinely new row (re-putting the same emoji is a no-op) and never for
+        // self-reactions or authors who are no longer chat members.
+        if inserted > 0 && message.sender_uid != uid && member_uids.contains(&message.sender_uid) {
+            let actor_name =
+                load_username_by_uid(conn, uid)?.unwrap_or_else(|| "Someone".to_string());
+            let payload = NotificationPayload {
+                notification_type: NotificationType::Reaction,
+                chat_id,
+                message_id,
+                thread_root_id: message.reply_root_id,
+                actor_uid: uid,
+                actor_name: Some(actor_name),
+            };
             registry.broadcast_to_uids(
                 &[message.sender_uid],
-                std::sync::Arc::new(ServerWsMessage::Notification(NotificationPayload {
-                    notification_type: NotificationType::Reaction,
-                    chat_id,
-                    message_id,
-                    thread_root_id: message.reply_root_id,
-                    actor_uid: uid,
-                    actor_name: None,
-                })),
+                std::sync::Arc::new(ServerWsMessage::Notification(payload)),
             );
         }
-    }
 
-    Ok(())
+        Ok(())
+    }
+    pub fn delete_reaction(
+        &self,
+        uid: i32,
+        chat_id: i64,
+        message_id: i64,
+        emoji: String,
+        conn: &mut PgConnection,
+    ) -> Result<(), AppError> {
+        let restricted_user_group_ids = &self.restricted_user_group_ids;
+        let avatars = &self.avatars;
+        let registry = &self.registry;
+        let emoji = validate_emoji(&emoji)?;
+        check_membership(conn, chat_id, uid)?;
+        social::require_chat_writable(conn, chat_id, uid, restricted_user_group_ids)?;
+
+        let (message, deleted) = conn.transaction::<_, AppError, _>(|conn| {
+            // Serialize the flag update with reaction insertion and deletion.
+            let message: Message = messages::table
+                .filter(messages::id.eq(message_id))
+                .filter(diesel::dsl::sql::<diesel::sql_types::Bool>(
+                    crate::services::system_messages::NON_MEMBERSHIP_PREDICATE,
+                ))
+                .filter(messages::chat_id.eq(chat_id))
+                .filter(messages::deleted_at.is_null())
+                .filter(messages::is_published.eq(true))
+                .for_no_key_update()
+                .first(conn)
+                .optional()?
+                .ok_or(AppError::NotFound("Message not found"))?;
+
+            let deleted = diesel::delete(
+                message_reactions::table
+                    .filter(message_reactions::message_id.eq(message_id))
+                    .filter(message_reactions::user_uid.eq(uid))
+                    .filter(message_reactions::emoji.eq(&emoji)),
+            )
+            .execute(conn)?;
+
+            if deleted > 0
+                && !diesel::select(diesel::dsl::exists(
+                    message_reactions::table.filter(message_reactions::message_id.eq(message_id)),
+                ))
+                .get_result::<bool>(conn)?
+            {
+                diesel::update(messages::table.find(message_id))
+                    .set(messages::has_reactions.eq(false))
+                    .execute(conn)?;
+            }
+            Ok((message, deleted))
+        })?;
+
+        if deleted > 0 {
+            let member_uids =
+                broadcast_reaction_update(conn, avatars, registry, chat_id, message_id);
+            // Removing a reaction changes the author's unread count too. Notify only
+            // that user rather than making every chat member refetch unread state.
+            if message.sender_uid != uid && member_uids.contains(&message.sender_uid) {
+                registry.broadcast_to_uids(
+                    &[message.sender_uid],
+                    std::sync::Arc::new(ServerWsMessage::Notification(NotificationPayload {
+                        notification_type: NotificationType::Reaction,
+                        chat_id,
+                        message_id,
+                        thread_root_id: message.reply_root_id,
+                        actor_uid: uid,
+                        actor_name: None,
+                    })),
+                );
+            }
+        }
+
+        Ok(())
+    }
 }
 #[cfg(test)]
 mod tests {

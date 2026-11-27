@@ -4,12 +4,12 @@ use crate::dto::stickers::{
     StickerPackDiscoveryResponse, StickerPackListResponse, StickerPackSummary,
 };
 use crate::errors::AppError;
-use crate::rpc::{RpcCallContext, RpcServices};
+use crate::rpc::{AppState, RpcCallContext};
 use crate::services::api::stickers;
 
 pub async fn list_packs(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: StickersListPacksParams,
 ) -> Result<StickerPackDiscoveryResponse, AppError> {
     let uid = context.uid()?;
@@ -19,7 +19,7 @@ pub async fn list_packs(
 
 pub async fn create_pack(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: StickersCreatePackParams,
 ) -> Result<StickerPackSummary, AppError> {
     let uid = context.uid()?;
@@ -37,7 +37,7 @@ pub async fn create_pack(
 
 pub async fn get_pack(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: StickersGetPackParams,
 ) -> Result<StickerPackDetailResponse, AppError> {
     let uid = context.uid()?;
@@ -47,7 +47,7 @@ pub async fn get_pack(
 
 pub async fn update_pack(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: StickersUpdatePackParams,
 ) -> Result<StickerPackSummary, AppError> {
     let uid = context.uid()?;
@@ -64,7 +64,7 @@ pub async fn update_pack(
 
 pub async fn delete_pack(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: StickersDeletePackParams,
 ) -> Result<(), AppError> {
     let uid = context.uid()?;
@@ -79,7 +79,7 @@ pub async fn delete_pack(
 
 pub async fn list_subscribed_packs(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     _: StickersListSubscribedPacksParams,
 ) -> Result<StickerPackListResponse, AppError> {
     let uid = context.uid()?;
@@ -89,7 +89,7 @@ pub async fn list_subscribed_packs(
 
 pub async fn list_owned_packs(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     _: StickersListOwnedPacksParams,
 ) -> Result<StickerPackListResponse, AppError> {
     let uid = context.uid()?;
@@ -99,7 +99,7 @@ pub async fn list_owned_packs(
 
 pub async fn subscribe_to_pack(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: StickersSubscribeToPackParams,
 ) -> Result<(), AppError> {
     let uid = context.uid()?;
@@ -114,7 +114,7 @@ pub async fn subscribe_to_pack(
 
 pub async fn unsubscribe_from_pack(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: StickersUnsubscribeFromPackParams,
 ) -> Result<(), AppError> {
     let uid = context.uid()?;
@@ -129,7 +129,7 @@ pub async fn unsubscribe_from_pack(
 
 pub async fn add_to_pack(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: StickersAddToPackParams,
 ) -> Result<(), AppError> {
     let uid = context.uid()?;
@@ -139,7 +139,7 @@ pub async fn add_to_pack(
 
 pub async fn remove_from_pack(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: StickersRemoveFromPackParams,
 ) -> Result<(), AppError> {
     let uid = context.uid()?;
@@ -149,7 +149,7 @@ pub async fn remove_from_pack(
 
 pub async fn get(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: StickersGetParams,
 ) -> Result<StickerDetailResponse, AppError> {
     let uid = context.uid()?;
@@ -159,7 +159,7 @@ pub async fn get(
 
 pub async fn favorite(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: StickersFavoriteParams,
 ) -> Result<(), AppError> {
     let uid = context.uid()?;
@@ -169,7 +169,7 @@ pub async fn favorite(
 
 pub async fn unfavorite(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: StickersUnfavoriteParams,
 ) -> Result<(), AppError> {
     let uid = context.uid()?;
@@ -179,7 +179,7 @@ pub async fn unfavorite(
 
 pub async fn list_favorites(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     _: StickersListFavoritesParams,
 ) -> Result<FavoriteStickerListResponse, AppError> {
     let uid = context.uid()?;
@@ -189,7 +189,7 @@ pub async fn list_favorites(
 
 pub async fn create_from_message(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: StickersCreateFromMessageParams,
 ) -> Result<crate::dto::stickers::StickerSummary, AppError> {
     stickers::post_pack_sticker_from_message(

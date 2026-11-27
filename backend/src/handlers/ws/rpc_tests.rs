@@ -18,10 +18,7 @@ use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream,
 };
 
-use crate::{
-    rpc::RpcServices,
-    state::{AppInner, AppState},
-};
+use crate::AppState;
 
 type Client = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
@@ -36,30 +33,8 @@ impl Drop for Server {
     }
 }
 
-fn state(services: &RpcServices) -> AppState {
-    AppState::new(AppInner {
-        db: services.db.clone(),
-        id_gen: services.id_gen.clone(),
-        metrics: services.metrics.clone(),
-        config: services.config.clone(),
-        media: services.media.clone(),
-        avatars: services.avatars.clone(),
-        link_previews: services.link_previews.clone(),
-        authz_service: services.authz_service.clone(),
-        ws_registry: services.ws_registry.clone(),
-        presence_service: services.presence_service.clone(),
-        push_service: services.push_service.clone(),
-        unread_service: services.unread_service.clone(),
-        client_tracking: services.client_tracking.clone(),
-        background_service: services.background_service.clone(),
-        message_search: services.message_search.clone(),
-        auth_token_service: services.auth_token_service.clone(),
-        token_generation: services.token_generation.clone(),
-    })
-}
-
-fn router(services: &RpcServices) -> Router {
-    let state = state(services);
+fn router(services: &AppState) -> Router {
+    let state = services.clone();
     Router::new()
         .route("/ws", get(super::ws_handler))
         .route("/activity-probe", get(|| async { "ok" }))
@@ -74,7 +49,7 @@ fn router(services: &RpcServices) -> Router {
         .with_state(state)
 }
 
-async fn server(services: &RpcServices) -> Server {
+async fn server(services: &AppState) -> Server {
     let app = router(services);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -294,7 +269,7 @@ async fn rpc(client: &mut Client, id: &str, method: &str, params: Value) -> Valu
     .expect("RPC response deadline")
 }
 
-async fn wait_removed(services: &RpcServices) {
+async fn wait_removed(services: &AppState) {
     timeout(Duration::from_secs(5), async {
         while !services.ws_registry.online_connections(1).is_empty() {
             tokio::time::sleep(Duration::from_millis(5)).await;
@@ -415,7 +390,7 @@ async fn service_token_authentication_wait_does_not_stall_other_requests() {
             get(|_: crate::services::authentication::Principal| async { "authorized" }),
         )
         .route("/probe", get(|| async { "responsive" }))
-        .with_state(state(&services));
+        .with_state(services.clone());
     let credential = crate::services::service_tokens::generate_credential(
         &services.config.auth.service_token_hash_key,
     )

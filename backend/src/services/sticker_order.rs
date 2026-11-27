@@ -8,6 +8,8 @@ use crate::errors::AppError;
 use crate::models::{NewUserExtra, StickerPackVisibility};
 use crate::schema::{sticker_packs, user_extra, user_sticker_pack_subscriptions};
 
+const MAX_AUTO_SORT_LIMIT: usize = 20;
+
 /// Call inside a transaction, after locking any packs involved in the operation.
 /// The row also serializes an account's changes to different packs.
 pub fn lock_user(conn: &mut PgConnection, uid: i32) -> Result<Vec<StickerPackOrderItem>, AppError> {
@@ -189,7 +191,7 @@ fn merge_order(
             else {
                 continue;
             };
-            if position >= crate::MAX_AUTO_SORT_LIMIT {
+            if position >= MAX_AUTO_SORT_LIMIT {
                 continue;
             }
         }
@@ -223,14 +225,14 @@ mod tests {
 
     #[test]
     fn auto_sort_respects_limit_and_does_not_insert_missing_packs() {
-        let mut current: Vec<_> = (0..=crate::MAX_AUTO_SORT_LIMIT)
+        let mut current: Vec<_> = (0..=MAX_AUTO_SORT_LIMIT)
             .map(|id| StickerPackOrderItem {
                 sticker_pack_id: id.to_string(),
                 last_used_on: -(id as i64),
             })
             .collect();
         let accessible = (0..100).collect();
-        let outside = crate::MAX_AUTO_SORT_LIMIT.to_string();
+        let outside = MAX_AUTO_SORT_LIMIT.to_string();
         merge_order(
             &mut current,
             vec![
@@ -243,9 +245,9 @@ mod tests {
         assert_eq!(current[0].last_used_on, 10);
         assert_eq!(
             current.last().unwrap().last_used_on,
-            -(crate::MAX_AUTO_SORT_LIMIT as i64)
+            -(MAX_AUTO_SORT_LIMIT as i64)
         );
-        assert_eq!(current.len(), crate::MAX_AUTO_SORT_LIMIT + 1);
+        assert_eq!(current.len(), MAX_AUTO_SORT_LIMIT + 1);
     }
 
     #[test]

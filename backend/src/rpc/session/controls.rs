@@ -24,7 +24,7 @@ use crate::{
         ws::OnlineClientStatus,
     },
     services::{
-        api::auth::{self, PostDevSessionDeps},
+        api::auth,
         auth_token::VerifiedSession,
         authentication,
         message_sync::SyncError,
@@ -37,7 +37,7 @@ use crate::{
 use super::super::{
     error::{RpcError, RpcErrorCode, RpcLifecycleFailure},
     events::encode_session_notification,
-    RpcServices,
+    AppState,
 };
 use super::{
     io::RpcOutputSink, publishers::RpcSyncSink, state::SessionShared, REVOCATION_CHECK_INTERVAL,
@@ -132,7 +132,7 @@ impl Drop for SyncControlSlot {
 }
 
 async fn record_bind_activity(
-    services: &RpcServices,
+    services: &AppState,
     session: &VerifiedSession,
     app_version: Option<String>,
 ) -> Result<(), RpcError> {
@@ -153,7 +153,7 @@ async fn record_bind_activity(
 
 fn record_active_rpc_activity(
     activity_tasks: &mut JoinSet<()>,
-    services: &RpcServices,
+    services: &AppState,
     session: &VerifiedSession,
 ) {
     let uid = session.uid;
@@ -168,7 +168,7 @@ fn record_active_rpc_activity(
     }
 }
 
-async fn verify_open(services: &RpcServices, token: String) -> Result<VerifiedSession, RpcError> {
+async fn verify_open(services: &AppState, token: String) -> Result<VerifiedSession, RpcError> {
     let services = services.clone();
     tokio::task::spawn_blocking(move || {
         authentication::verify_session(
@@ -188,7 +188,7 @@ async fn verify_open(services: &RpcServices, token: String) -> Result<VerifiedSe
 
 async fn guard_bound(
     shared: &Arc<SessionShared>,
-    services: &RpcServices,
+    services: &AppState,
 ) -> Result<(Arc<VerifiedSession>, Arc<ConnectionEntry>), RpcError> {
     let identity = shared.bound_identity().await.ok_or_else(|| {
         RpcError::with_message(RpcErrorCode::Unauthorized, "Authentication required")
@@ -220,7 +220,7 @@ fn app_presence_state(
 
 async fn bind_authenticated(
     shared: &Arc<SessionShared>,
-    services: &RpcServices,
+    services: &AppState,
     session: VerifiedSession,
     app_version: Option<String>,
     sync_enabled: bool,
@@ -235,7 +235,7 @@ async fn bind_authenticated(
 pub(super) async fn run_controls(
     mut controls: mpsc::Receiver<RpcControlCommand>,
     shared: Arc<SessionShared>,
-    services: RpcServices,
+    services: AppState,
     sink: RpcOutputSink,
 ) {
     let mut close = shared.transport.close_subscription();
@@ -274,7 +274,7 @@ pub(super) async fn run_controls(
 
 async fn run_sync_control(
     shared: &Arc<SessionShared>,
-    services: &RpcServices,
+    services: &AppState,
     sink: &RpcOutputSink,
     resume: Option<MessageSyncResumeParams>,
     page: Option<MessageSyncPageParams>,
@@ -328,7 +328,7 @@ async fn run_sync_control(
 pub(super) async fn handle_control(
     command: RpcControlCommand,
     shared: &Arc<SessionShared>,
-    services: &RpcServices,
+    services: &AppState,
     sink: &RpcOutputSink,
     activity_tasks: &mut JoinSet<()>,
 ) {
@@ -400,17 +400,10 @@ pub(super) async fn handle_control(
                 let uid = params.uid;
                 let client_id = params.client_id;
                 let issued = tokio::task::spawn_blocking(move || {
-                    auth::post_dev_session(
-                        DevSessionRequest { uid },
-                        client_id,
-                        PostDevSessionDeps {
-                            config: &services_for_issue.config,
-                            auth_token_service: &services_for_issue.auth_token_service,
-                            token_generation: &services_for_issue.token_generation,
-                            db: &services_for_issue.db,
-                        },
-                    )
-                    .map_err(RpcError::from)
+                    services_for_issue
+                        .dev_sessions
+                        .post_dev_session(DevSessionRequest { uid }, client_id)
+                        .map_err(RpcError::from)
                 })
                 .await
                 .map_err(|error| {
@@ -522,7 +515,7 @@ pub(super) async fn handle_control(
 
 pub(super) async fn generation_checks(
     shared: Arc<SessionShared>,
-    services: RpcServices,
+    services: AppState,
     session: Arc<VerifiedSession>,
     guard_failures: mpsc::UnboundedSender<RpcLifecycleFailure>,
 ) {

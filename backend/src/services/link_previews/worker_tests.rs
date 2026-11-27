@@ -241,7 +241,7 @@ async fn link_preview_worker_stale_upload_is_cleaned_and_unpublished_metadata_is
     let metrics = crate::metrics::Metrics::new();
     let services = Context {
         db,
-        media: crate::build_media_store(&config).await,
+        media: crate::bootstrap::build_media_store(&config).await,
         avatars: Arc::new(AvatarService::new(
             config.avatars.clone(),
             metrics.avatars.clone(),

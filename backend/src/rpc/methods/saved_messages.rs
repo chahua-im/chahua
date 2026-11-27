@@ -8,12 +8,12 @@ use crate::dto::{
     saved_messages::{ListSavedMessagesResponse, SavedMessageResponse},
 };
 use crate::errors::AppError;
-use crate::rpc::{RpcCallContext, RpcServices};
+use crate::rpc::{AppState, RpcCallContext};
 use crate::services::api::{chats::saved_messages as chat_api, saved_messages as api};
 
 pub async fn list_for_chat(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: SavedMessagesListForChatParams,
 ) -> Result<ListSavedMessagesResponse, AppError> {
     let SavedMessagesListForChatParams { chat_id, query } = params;
@@ -24,7 +24,7 @@ pub async fn list_for_chat(
 
 pub async fn list(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: SavedMessagesListParams,
 ) -> Result<ListSavedMessagesResponse, AppError> {
     let SavedMessagesListParams { query } = params;
@@ -35,7 +35,7 @@ pub async fn list(
 
 pub async fn save(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: SavedMessagesSaveParams,
 ) -> Result<SavedMessageResponse, AppError> {
     let SavedMessagesSaveParams { message_id } = params;
@@ -54,7 +54,7 @@ pub async fn save(
 
 pub async fn delete_by_message(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: SavedMessagesDeleteByMessageParams,
 ) -> Result<(), AppError> {
     let SavedMessagesDeleteByMessageParams { message_id } = params;
@@ -65,7 +65,7 @@ pub async fn delete_by_message(
 
 pub async fn delete(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: SavedMessagesDeleteParams,
 ) -> Result<(), AppError> {
     let SavedMessagesDeleteParams { saved_message_id } = params;
@@ -76,7 +76,7 @@ pub async fn delete(
 
 pub async fn list_forwarded_messages(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: SavedMessagesListForwardedMessagesParams,
 ) -> Result<ForwardedMessagesResponse, AppError> {
     let SavedMessagesListForwardedMessagesParams { saved_message_id } = params;
@@ -93,7 +93,7 @@ pub async fn list_forwarded_messages(
 
 pub async fn list_forwarded_bundle_messages(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: SavedMessagesListForwardedBundleMessagesParams,
 ) -> Result<ForwardedMessagesResponse, AppError> {
     let SavedMessagesListForwardedBundleMessagesParams {

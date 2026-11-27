@@ -65,7 +65,7 @@ async fn unauthenticated_ordinary_calls_are_rejected_before_scheduling() {
 }
 
 pub(super) async fn open_with_admission(
-    services: RpcServices,
+    services: AppState,
     admission: Arc<admission::Admission>,
     label: &str,
 ) -> (
@@ -121,7 +121,7 @@ pub(super) async fn barrier(input: &RpcSessionInput, output: &mut RpcSessionOutp
     assert!(response.get("result").is_some(), "{response}");
 }
 
-async fn group_count(services: &RpcServices, name: &str) -> i64 {
+async fn group_count(services: &AppState, name: &str) -> i64 {
     crate::schema::groups::table
         .filter(crate::schema::groups::name.eq(name))
         .count()

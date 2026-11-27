@@ -13,7 +13,7 @@ use super::{
 use crate::{
     rpc::{
         protocol::{RpcCall, RpcId, RpcResponse},
-        RpcServices,
+        AppState,
     },
     services::{auth_token::VerifiedSession, unread},
 };
@@ -54,12 +54,12 @@ pub(super) struct RpcSessionTransport {
     pub(super) output: RpcSessionOutput,
 }
 pub(super) struct RpcSessionDeps {
-    services: RpcServices,
+    services: AppState,
     ordinary_admission: Arc<admission::Admission>,
     state: Arc<TransportState>,
 }
 pub(super) fn rpc_session_channels(
-    services: RpcServices,
+    services: AppState,
 ) -> (
     mpsc::Receiver<String>,
     mpsc::Sender<String>,
@@ -131,7 +131,7 @@ async fn receive_json(output: &mut RpcSessionOutput) -> Value {
 }
 
 async fn open_authenticated(
-    services: RpcServices,
+    services: AppState,
     token: String,
 ) -> (
     RpcSessionInput,

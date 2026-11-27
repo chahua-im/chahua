@@ -5,11 +5,11 @@ use crate::dto::threads::{
     UnreadThreadCountResponse,
 };
 use crate::errors::AppError;
-use crate::rpc::{RpcCallContext, RpcServices};
+use crate::rpc::{AppState, RpcCallContext};
 
 pub async fn list(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ThreadsListParams,
 ) -> Result<ListThreadsResponse, AppError> {
     let uid = context.uid()?;
@@ -25,7 +25,7 @@ pub async fn list(
 
 pub async fn get_unread_count(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     _params: ThreadsGetUnreadCountParams,
 ) -> Result<UnreadThreadCountResponse, AppError> {
     let uid = context.uid()?;
@@ -35,7 +35,7 @@ pub async fn get_unread_count(
 
 pub async fn list_for_chat(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ThreadsListForChatParams,
 ) -> Result<ListChatThreadsResponse, AppError> {
     let uid = context.uid()?;
@@ -53,7 +53,7 @@ pub async fn list_for_chat(
 
 pub async fn list_participants(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ThreadsListParticipantsParams,
 ) -> Result<ListThreadParticipantsResponse, AppError> {
     let uid = context.uid()?;
@@ -70,7 +70,7 @@ pub async fn list_participants(
 
 pub async fn mark_as_read(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ThreadsMarkAsReadParams,
 ) -> Result<MarkThreadReadResponse, AppError> {
     let uid = context.uid()?;
@@ -88,7 +88,7 @@ pub async fn mark_as_read(
 
 pub async fn get_read_state(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ThreadsGetReadStateParams,
 ) -> Result<ThreadReadStateResponse, AppError> {
     let uid = context.uid()?;
@@ -104,7 +104,7 @@ pub async fn get_read_state(
 
 pub async fn get_subscription_status(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ThreadsGetSubscriptionStatusParams,
 ) -> Result<ThreadSubscriptionStatusResponse, AppError> {
     let uid = context.uid()?;
@@ -119,7 +119,7 @@ pub async fn get_subscription_status(
 
 pub async fn subscribe(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ThreadsSubscribeParams,
 ) -> Result<(), AppError> {
     let uid = context.uid()?;
@@ -135,7 +135,7 @@ pub async fn subscribe(
 
 pub async fn unsubscribe(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ThreadsUnsubscribeParams,
 ) -> Result<(), AppError> {
     let uid = context.uid()?;
@@ -151,7 +151,7 @@ pub async fn unsubscribe(
 
 pub async fn archive(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ThreadsArchiveParams,
 ) -> Result<(), AppError> {
     let uid = context.uid()?;
@@ -167,7 +167,7 @@ pub async fn archive(
 
 pub async fn unarchive(
     context: &RpcCallContext,
-    services: &RpcServices,
+    services: &AppState,
     params: ThreadsUnarchiveParams,
 ) -> Result<(), AppError> {
     let uid = context.uid()?;

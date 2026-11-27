@@ -8,11 +8,11 @@ use crate::services::authentication::is_valid_client_id;
 use crate::services::token_generation::TokenGenerationService;
 use crate::state::DbPool;
 
-pub struct PostDevSessionDeps<'a> {
-    pub config: &'a Arc<AppConfig>,
-    pub auth_token_service: &'a Arc<AuthTokenService>,
-    pub token_generation: &'a Arc<TokenGenerationService>,
-    pub db: &'a DbPool,
+pub struct DevSessionsService {
+    pub config: Arc<AppConfig>,
+    pub auth_token_service: Arc<AuthTokenService>,
+    pub token_generation: Arc<TokenGenerationService>,
+    pub db: DbPool,
 }
 
 /// The issuer's known identity can be bound directly without verifying its own JWT.
@@ -30,27 +30,29 @@ pub fn post_refresh(
     Ok(AuthTokenResponse { token })
 }
 
-pub fn post_dev_session(
-    request: DevSessionRequest,
-    client_id: Option<String>,
-    deps: PostDevSessionDeps<'_>,
-) -> Result<DevSessionIssued, AppError> {
-    if !deps.config.auth.debug_auth_enabled {
-        return Err(AppError::NotFound("Not found"));
+impl DevSessionsService {
+    pub fn post_dev_session(
+        &self,
+        request: DevSessionRequest,
+        client_id: Option<String>,
+    ) -> Result<DevSessionIssued, AppError> {
+        if !self.config.auth.debug_auth_enabled {
+            return Err(AppError::NotFound("Not found"));
+        }
+        if request.uid <= 0 {
+            return Err(AppError::BadRequest("UID must be a positive i32"));
+        }
+        let client_id = dev_session_client_id(client_id)?;
+        let generation = self.token_generation.required_for(&self.db, request.uid)?;
+        let session = VerifiedSession {
+            uid: request.uid,
+            client_id,
+            generation,
+            version: TokenVersion::V2,
+        };
+        let response = post_refresh(&session, &self.auth_token_service)?;
+        Ok(DevSessionIssued { response, session })
     }
-    if request.uid <= 0 {
-        return Err(AppError::BadRequest("UID must be a positive i32"));
-    }
-    let client_id = dev_session_client_id(client_id)?;
-    let generation = deps.token_generation.required_for(deps.db, request.uid)?;
-    let session = VerifiedSession {
-        uid: request.uid,
-        client_id,
-        generation,
-        version: TokenVersion::V2,
-    };
-    let response = post_refresh(&session, deps.auth_token_service)?;
-    Ok(DevSessionIssued { response, session })
 }
 
 fn dev_session_client_id(value: Option<String>) -> Result<String, AppError> {

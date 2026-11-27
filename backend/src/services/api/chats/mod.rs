@@ -32,7 +32,8 @@ use crate::services::notification_preferences::{
 use crate::services::unread::UnreadService;
 use crate::services::ws_registry::ConnectionRegistry;
 use crate::utils::pagination::validate_limit;
-use crate::MAX_CHATS_LIMIT;
+
+const MAX_CHATS_LIMIT: i64 = 100;
 
 pub async fn get_chats(
     uid: i32,

@@ -11,41 +11,24 @@ use crate::dto::invites::{
     SendInviteMessageBody, SendInviteMessageResponse,
 };
 use crate::errors::AppError;
-use crate::metrics::Metrics;
 use crate::models::{
     GroupJoinReason, GroupRole, Invite, InviteType, MessageType, NewGroupMembership,
 };
 use crate::schema::{group_membership, invites};
 use crate::services::api::{groups::load_group_info, members::require_admin_role};
-use crate::services::avatars::AvatarService;
 use crate::services::invites as invite_service;
-use crate::services::media::MediaStore;
 use crate::services::messages::{
-    authorize_message_send, send_prepared_message, PreparedMessageSend, SendMessageOutcome,
-    SendPreparedMessageDeps,
+    authorize_message_send, MessageWriter, PreparedMessageSend, SendMessageOutcome,
 };
 use crate::services::push::PushService;
 use crate::services::ws_registry::ConnectionRegistry;
-use crate::utils::ids::IdGen;
 use crate::utils::transaction::AsyncTransaction;
 
-pub struct PostSendInviteMessageDeps<'a> {
-    pub restricted_user_group_ids: &'a [i32],
-    pub id_gen: &'a Arc<IdGen>,
-    pub media: &'a MediaStore,
-    pub avatars: &'a Arc<AvatarService>,
-    pub metrics: &'a Arc<Metrics>,
-    pub ws_registry: &'a Arc<ConnectionRegistry>,
-    pub push_service: &'a Arc<PushService>,
-}
-
-pub struct PostRedeemInviteDeps<'a> {
-    pub id_gen: &'a Arc<IdGen>,
-    pub media: &'a MediaStore,
-    pub avatars: &'a Arc<AvatarService>,
-    pub metrics: &'a Arc<Metrics>,
-    pub ws_registry: &'a Arc<ConnectionRegistry>,
-    pub push_service: &'a Arc<PushService>,
+pub struct InvitesService {
+    pub restricted_user_group_ids: Arc<[i32]>,
+    pub writer: Arc<MessageWriter>,
+    pub ws_registry: Arc<ConnectionRegistry>,
+    pub push_service: Arc<PushService>,
 }
 const DEFAULT_INVITES_LIMIT: i64 = 100;
 const MAX_INVITES_LIMIT: i64 = 100;
@@ -198,120 +181,110 @@ fn preview_eligibility(
         }
     }
 }
-pub async fn post_invite(
-    uid: i32,
-    body: CreateInviteBody,
-    conn: &mut PgConnection,
-    id_gen: &IdGen,
-) -> Result<InviteResponse, AppError> {
-    validate_create_body(&body)?;
+impl InvitesService {
+    pub async fn post_invite(
+        &self,
+        uid: i32,
+        body: CreateInviteBody,
+        conn: &mut PgConnection,
+    ) -> Result<InviteResponse, AppError> {
+        validate_create_body(&body)?;
 
-    require_admin_role(conn, body.chat_id, uid)?;
-    let invite = create_invite_from_body(conn, id_gen, uid, &body).await?;
+        require_admin_role(conn, body.chat_id, uid)?;
+        let invite = create_invite_from_body(conn, &self.writer.id_gen, uid, &body).await?;
 
-    Ok(invite_service::invite_to_response(invite))
-}
-pub async fn post_send_invite_message(
-    uid: i32,
-    body: SendInviteMessageBody,
-    conn: &mut PgConnection,
-    deps: PostSendInviteMessageDeps<'_>,
-) -> Result<SendInviteMessageResponse, AppError> {
-    let PostSendInviteMessageDeps {
-        restricted_user_group_ids,
-        id_gen,
-        media,
-        avatars,
-        metrics,
-        ws_registry,
-        push_service,
-    } = deps;
-
-    require_admin_role(conn, body.source_chat_id, uid)?;
-    let (invite, send_result) = {
-        let mut transaction = AsyncTransaction::begin(conn)?;
-        let conn = transaction.connection();
-        let result = async {
-            let target = authorize_message_send(
-                conn,
-                body.destination_chat_id,
-                None,
-                uid,
-                restricted_user_group_ids,
-            )?;
-
-            let now = Utc::now();
-            let invite = if let Some(invite_id) = body.invite_id {
-                let invite = load_invite_by_id(conn, invite_id)?;
-                require_admin_role(conn, invite.chat_id, uid)?;
-                if invite.chat_id != body.source_chat_id {
-                    return Err(AppError::BadRequest(
-                        "Invite does not belong to source chat",
-                    ));
-                }
-                if !validate_invite_is_active(&invite, now) {
-                    return Err(AppError::BadRequest("Invite is no longer active"));
-                }
-                invite
-            } else {
-                invite_service::create_generic_invite(
+        Ok(invite_service::invite_to_response(invite))
+    }
+    pub async fn post_send_invite_message(
+        &self,
+        uid: i32,
+        body: SendInviteMessageBody,
+        conn: &mut PgConnection,
+    ) -> Result<SendInviteMessageResponse, AppError> {
+        require_admin_role(conn, body.source_chat_id, uid)?;
+        let (invite, send_result) = {
+            let mut transaction = AsyncTransaction::begin(conn)?;
+            let conn = transaction.connection();
+            let result = async {
+                let target = authorize_message_send(
                     conn,
-                    id_gen,
-                    body.source_chat_id,
+                    body.destination_chat_id,
+                    None,
                     uid,
-                    body.expires_at,
-                )
-                .await?
-            };
+                    &self.restricted_user_group_ids,
+                )?;
 
-            let send_result = send_prepared_message(
-                conn,
-                SendPreparedMessageDeps {
-                    id_gen,
-                    media,
-                    avatars,
-                    metrics,
-                },
-                PreparedMessageSend {
-                    system_kind: None,
-                    forwarded_from_message_id: None,
-                    metadata: None,
-                    chat_id: body.destination_chat_id,
-                    chat_kind: target.kind,
-                    sender_uid: uid,
-                    message: Some(invite.code.clone()),
-                    message_type: MessageType::Invite,
-                    sticker_id: None,
-                    reply_to_id: None,
-                    reply_root_id: None,
-                    client_generated_id: body.client_generated_id,
-                    attachment_ids: vec![],
-                    publish_immediately: true,
-                    forwarded_bundle_id: None,
-                    forwarded_preview_total: None,
-                    forwarded_preview_contains_forwarded_messages: None,
-                    forwarded_preview_items: None,
-                },
-            )
-            .await?;
-            Ok((invite, send_result))
-        }
-        .await;
-        transaction.finish(result)?
-    };
-    let message = match send_result {
-        SendMessageOutcome::Created(send_result) => {
-            let send_result = *send_result;
-            send_result.side_effects.fire(ws_registry, push_service);
-            send_result.response
-        }
-        SendMessageOutcome::Duplicate(response) => *response,
-    };
+                let now = Utc::now();
+                let invite = if let Some(invite_id) = body.invite_id {
+                    let invite = load_invite_by_id(conn, invite_id)?;
+                    require_admin_role(conn, invite.chat_id, uid)?;
+                    if invite.chat_id != body.source_chat_id {
+                        return Err(AppError::BadRequest(
+                            "Invite does not belong to source chat",
+                        ));
+                    }
+                    if !validate_invite_is_active(&invite, now) {
+                        return Err(AppError::BadRequest("Invite is no longer active"));
+                    }
+                    invite
+                } else {
+                    invite_service::create_generic_invite(
+                        conn,
+                        &self.writer.id_gen,
+                        body.source_chat_id,
+                        uid,
+                        body.expires_at,
+                    )
+                    .await?
+                };
 
-    Ok(SendInviteMessageResponse {
-        invite: invite_service::invite_to_response(invite),
-        message,
-    })
+                let send_result = self
+                    .writer
+                    .send_prepared_message(
+                        conn,
+                        PreparedMessageSend {
+                            system_kind: None,
+                            forwarded_from_message_id: None,
+                            metadata: None,
+                            chat_id: body.destination_chat_id,
+                            chat_kind: target.kind,
+                            sender_uid: uid,
+                            message: Some(invite.code.clone()),
+                            message_type: MessageType::Invite,
+                            sticker_id: None,
+                            reply_to_id: None,
+                            reply_root_id: None,
+                            client_generated_id: body.client_generated_id,
+                            attachment_ids: vec![],
+                            publish_immediately: true,
+                            forwarded_bundle_id: None,
+                            forwarded_preview_total: None,
+                            forwarded_preview_contains_forwarded_messages: None,
+                            forwarded_preview_items: None,
+                        },
+                    )
+                    .await?;
+                Ok((invite, send_result))
+            }
+            .await;
+            transaction.finish(result)?
+        };
+        let message = match send_result {
+            SendMessageOutcome::Created(send_result) => {
+                let send_result = *send_result;
+                send_result
+                    .side_effects
+                    .fire(&self.ws_registry, &self.push_service);
+                send_result.response
+            }
+            SendMessageOutcome::Duplicate(response) => *response,
+        };
+
+        Ok(SendInviteMessageResponse {
+            invite: invite_service::invite_to_response(invite),
+            message,
+        })
+    }
 }
 pub fn get_invites(
     uid: i32,
@@ -412,22 +385,29 @@ pub fn get_invite(
 
     Ok(invite_service::invite_to_response(invite))
 }
-pub fn get_invite_by_code(
-    uid: i32,
-    query: GetInviteByCodeQuery,
-    conn: &mut PgConnection,
-    media: &MediaStore,
-    avatars: &AvatarService,
-) -> Result<InvitePreviewResponse, AppError> {
-    let (invite, eligibility) = load_preview_invite(conn, uid, &query.invite_code)?;
-    let chat = load_group_info(conn, media, avatars, invite.chat_id, uid)?;
+impl InvitesService {
+    pub fn get_invite_by_code(
+        &self,
+        uid: i32,
+        query: GetInviteByCodeQuery,
+        conn: &mut PgConnection,
+    ) -> Result<InvitePreviewResponse, AppError> {
+        let (invite, eligibility) = load_preview_invite(conn, uid, &query.invite_code)?;
+        let chat = load_group_info(
+            conn,
+            &self.writer.media,
+            &self.writer.avatars,
+            invite.chat_id,
+            uid,
+        )?;
 
-    Ok(InvitePreviewResponse {
-        invite: invite_service::invite_to_response(invite),
-        chat,
-        already_member: matches!(eligibility, PreviewEligibility::AlreadyMember),
-        can_join: matches!(eligibility, PreviewEligibility::Eligible),
-    })
+        Ok(InvitePreviewResponse {
+            invite: invite_service::invite_to_response(invite),
+            chat,
+            already_member: matches!(eligibility, PreviewEligibility::AlreadyMember),
+            can_join: matches!(eligibility, PreviewEligibility::Eligible),
+        })
+    }
 }
 
 fn load_preview_invite(
@@ -485,144 +465,136 @@ pub fn delete_invite(uid: i32, invite_id: i64, conn: &mut PgConnection) -> Resul
 
     Ok(())
 }
-pub async fn post_redeem_invite(
-    uid: i32,
-    body: RedeemInviteBody,
-    conn: &mut PgConnection,
-    deps: PostRedeemInviteDeps<'_>,
-) -> Result<RedeemInviteResponse, AppError> {
-    let PostRedeemInviteDeps {
-        id_gen,
-        media,
-        avatars,
-        metrics,
-        ws_registry,
-        push_service,
-    } = deps;
-
-    let code = body.code.trim();
-    if code.is_empty() {
-        return Err(AppError::BadRequest(INVALID_INVITE_CODE_MESSAGE));
-    }
-
-    let outcome = conn
-        .transaction::<RedeemInviteOutcome, RedeemInviteError, _>(|conn| {
-            let (invite, eligibility) = load_preview_invite(conn, uid, code)?;
-            match eligibility {
-                PreviewEligibility::AlreadyMember => return Ok(RedeemInviteOutcome::AlreadyMember),
-                PreviewEligibility::NotInvited => {
-                    return Err(AppError::Forbidden("Not eligible for this invite").into());
-                }
-                PreviewEligibility::Used => {
-                    return Err(AppError::Conflict("Invite already used").into());
-                }
-                PreviewEligibility::Eligible => {}
-            }
-            let now = Utc::now();
-
-            let (last_message_id, chat_kind): (Option<i64>, crate::models::GroupKind) =
-                crate::schema::groups::table
-                    .filter(crate::schema::groups::id.eq(invite.chat_id))
-                    .select((
-                        crate::schema::groups::last_message_id,
-                        crate::schema::groups::kind,
-                    ))
-                    .first(conn)?;
-            match diesel::insert_into(group_membership::table)
-                .values(&NewGroupMembership {
-                    chat_id: invite.chat_id,
-                    uid,
-                    role: GroupRole::Member,
-                    joined_at: now,
-                    join_reason: GroupJoinReason::InviteCode,
-                    join_reason_extra: Some(json!({
-                        "invite_id": invite.id.to_string(),
-                        "code": invite.code,
-                        "creator_uid": invite.creator_uid,
-                    })),
-                    last_read_message_id: last_message_id,
-                })
-                .execute(conn)
-            {
-                Ok(_) => {}
-                Err(diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::UniqueViolation,
-                    _,
-                )) => {
-                    return Ok(RedeemInviteOutcome::AlreadyMember);
-                }
-                Err(other) => return Err(RedeemInviteError::Db(other)),
-            }
-
-            if invite.invite_type == InviteType::Targeted {
-                let updated = diesel::update(
-                    invites::table
-                        .filter(invites::id.eq(invite.id).and(invites::used_at.is_null())),
-                )
-                .set(invites::used_at.eq(now))
-                .execute(conn)?;
-
-                if updated != 1 {
-                    return Err(AppError::Conflict("Invite already used").into());
-                }
-            }
-
-            Ok(RedeemInviteOutcome::Joined(invite.chat_id, chat_kind))
-        })
-        .map_err(|error| match error {
-            RedeemInviteError::App(error) => error,
-            RedeemInviteError::Db(other) => {
-                tracing::error!("redeem invite: {:?}", other);
-                AppError::Internal("Failed to redeem invite")
-            }
-        })?;
-
-    let (chat_id, chat_kind) = match outcome {
-        RedeemInviteOutcome::Joined(chat_id, chat_kind) => (chat_id, chat_kind),
-        RedeemInviteOutcome::AlreadyMember => {
-            return Err(AppError::Conflict("Already a member of this chat"));
+impl InvitesService {
+    pub async fn post_redeem_invite(
+        &self,
+        uid: i32,
+        body: RedeemInviteBody,
+        conn: &mut PgConnection,
+    ) -> Result<RedeemInviteResponse, AppError> {
+        let code = body.code.trim();
+        if code.is_empty() {
+            return Err(AppError::BadRequest(INVALID_INVITE_CODE_MESSAGE));
         }
-    };
 
-    if let Ok(SendMessageOutcome::Created(send_result)) =
-        crate::services::messages::send_prepared_message(
-            conn,
-            crate::services::messages::SendPreparedMessageDeps {
-                id_gen,
-                media,
-                avatars,
-                metrics,
-            },
-            crate::services::messages::PreparedMessageSend {
-                system_kind: Some(crate::models::SystemMessageKind::MemberJoined),
-                forwarded_from_message_id: None,
-                metadata: None,
-                chat_id,
-                chat_kind,
-                sender_uid: uid,
-                message: Some("joined the chat".to_string()),
-                message_type: crate::models::MessageType::System,
-                sticker_id: None,
-                reply_to_id: None,
-                reply_root_id: None,
-                client_generated_id: uuid::Uuid::new_v4().to_string(),
-                attachment_ids: vec![],
-                publish_immediately: true,
-                forwarded_bundle_id: None,
-                forwarded_preview_total: None,
-                forwarded_preview_contains_forwarded_messages: None,
-                forwarded_preview_items: None,
-            },
-        )
-        .await
-    {
-        let send_result = *send_result;
-        send_result.side_effects.fire(ws_registry, push_service);
+        let outcome = conn
+            .transaction::<RedeemInviteOutcome, RedeemInviteError, _>(|conn| {
+                let (invite, eligibility) = load_preview_invite(conn, uid, code)?;
+                match eligibility {
+                    PreviewEligibility::AlreadyMember => {
+                        return Ok(RedeemInviteOutcome::AlreadyMember)
+                    }
+                    PreviewEligibility::NotInvited => {
+                        return Err(AppError::Forbidden("Not eligible for this invite").into());
+                    }
+                    PreviewEligibility::Used => {
+                        return Err(AppError::Conflict("Invite already used").into());
+                    }
+                    PreviewEligibility::Eligible => {}
+                }
+                let now = Utc::now();
+
+                let (last_message_id, chat_kind): (Option<i64>, crate::models::GroupKind) =
+                    crate::schema::groups::table
+                        .filter(crate::schema::groups::id.eq(invite.chat_id))
+                        .select((
+                            crate::schema::groups::last_message_id,
+                            crate::schema::groups::kind,
+                        ))
+                        .first(conn)?;
+                match diesel::insert_into(group_membership::table)
+                    .values(&NewGroupMembership {
+                        chat_id: invite.chat_id,
+                        uid,
+                        role: GroupRole::Member,
+                        joined_at: now,
+                        join_reason: GroupJoinReason::InviteCode,
+                        join_reason_extra: Some(json!({
+                            "invite_id": invite.id.to_string(),
+                            "code": invite.code,
+                            "creator_uid": invite.creator_uid,
+                        })),
+                        last_read_message_id: last_message_id,
+                    })
+                    .execute(conn)
+                {
+                    Ok(_) => {}
+                    Err(diesel::result::Error::DatabaseError(
+                        diesel::result::DatabaseErrorKind::UniqueViolation,
+                        _,
+                    )) => {
+                        return Ok(RedeemInviteOutcome::AlreadyMember);
+                    }
+                    Err(other) => return Err(RedeemInviteError::Db(other)),
+                }
+
+                if invite.invite_type == InviteType::Targeted {
+                    let updated = diesel::update(
+                        invites::table
+                            .filter(invites::id.eq(invite.id).and(invites::used_at.is_null())),
+                    )
+                    .set(invites::used_at.eq(now))
+                    .execute(conn)?;
+
+                    if updated != 1 {
+                        return Err(AppError::Conflict("Invite already used").into());
+                    }
+                }
+
+                Ok(RedeemInviteOutcome::Joined(invite.chat_id, chat_kind))
+            })
+            .map_err(|error| match error {
+                RedeemInviteError::App(error) => error,
+                RedeemInviteError::Db(other) => {
+                    tracing::error!("redeem invite: {:?}", other);
+                    AppError::Internal("Failed to redeem invite")
+                }
+            })?;
+
+        let (chat_id, chat_kind) = match outcome {
+            RedeemInviteOutcome::Joined(chat_id, chat_kind) => (chat_id, chat_kind),
+            RedeemInviteOutcome::AlreadyMember => {
+                return Err(AppError::Conflict("Already a member of this chat"));
+            }
+        };
+
+        if let Ok(SendMessageOutcome::Created(send_result)) = self
+            .writer
+            .send_prepared_message(
+                conn,
+                crate::services::messages::PreparedMessageSend {
+                    system_kind: Some(crate::models::SystemMessageKind::MemberJoined),
+                    forwarded_from_message_id: None,
+                    metadata: None,
+                    chat_id,
+                    chat_kind,
+                    sender_uid: uid,
+                    message: Some("joined the chat".to_string()),
+                    message_type: crate::models::MessageType::System,
+                    sticker_id: None,
+                    reply_to_id: None,
+                    reply_root_id: None,
+                    client_generated_id: uuid::Uuid::new_v4().to_string(),
+                    attachment_ids: vec![],
+                    publish_immediately: true,
+                    forwarded_bundle_id: None,
+                    forwarded_preview_total: None,
+                    forwarded_preview_contains_forwarded_messages: None,
+                    forwarded_preview_items: None,
+                },
+            )
+            .await
+        {
+            let send_result = *send_result;
+            send_result
+                .side_effects
+                .fire(&self.ws_registry, &self.push_service);
+        }
+
+        crate::services::chat::publish_membership_changed(&self.ws_registry, uid, chat_id);
+        let chat = load_group_info(conn, &self.writer.media, &self.writer.avatars, chat_id, uid)?;
+        Ok(RedeemInviteResponse { chat })
     }
-
-    crate::services::chat::publish_membership_changed(ws_registry, uid, chat_id);
-    let chat = load_group_info(conn, media, avatars, chat_id, uid)?;
-    Ok(RedeemInviteResponse { chat })
 }
 
 #[cfg(test)]

@@ -1,10 +1,8 @@
 //! Shared application state.
 //!
-//! [`AppState`] is a newtype over `Arc<AppInner>` that `Deref`s to the inner
-//! struct, which is the shape axum documents for state that needs `FromRef`
-//! substates (see `axum_extra::extract::cookie::PrivateCookieJar`). axum clones
-//! the router state on every request, so keeping the payload behind one `Arc`
-//! makes that clone a single refcount bump no matter how many fields accumulate.
+//! [`AppState`] shares one `Arc<AppServices>` between HTTP handlers and RPC
+//! sessions. Axum clones state for each request; this keeps each clone to one
+//! reference-count increment. Domain services hold only their own dependencies.
 
 use axum::extract::FromRef;
 use diesel::r2d2::{ConnectionManager, Pool};
@@ -31,7 +29,7 @@ use crate::utils::ids::IdGen;
 
 pub type DbPool = Pool<ConnectionManager<PgConnection>>;
 
-pub struct AppInner {
+pub struct AppServices {
     pub db: DbPool,
     pub id_gen: Arc<IdGen>,
     pub metrics: Arc<Metrics>,
@@ -51,21 +49,27 @@ pub struct AppInner {
     pub message_search: Option<Arc<MessageSearchService>>,
     pub auth_token_service: Arc<AuthTokenService>,
     pub token_generation: Arc<TokenGenerationService>,
+    pub messages: Arc<crate::services::api::chats::messages::MessagesService>,
+    pub friends: Arc<crate::services::api::friends::FriendsService>,
+    pub invites: Arc<crate::services::api::invites::InvitesService>,
+    pub members: Arc<crate::services::api::members::MembersService>,
+    pub pins: Arc<crate::services::api::pins::PinsService>,
+    pub reactions: Arc<crate::services::api::chats::reactions::ReactionsService>,
+    pub dev_sessions: Arc<crate::services::api::auth::DevSessionsService>,
 }
 
 #[derive(Clone)]
-pub struct AppState(Arc<AppInner>);
+pub struct AppState(Arc<AppServices>);
 
 impl AppState {
-    pub fn new(inner: AppInner) -> Self {
+    pub fn new(inner: AppServices) -> Self {
         Self(Arc::new(inner))
     }
 }
 
-/// Lets every existing `state.db` / `state.metrics` access keep working while
-/// the payload sits behind a single `Arc`.
+/// Exposes the startup-built services without copying their handles.
 impl Deref for AppState {
-    type Target = AppInner;
+    type Target = AppServices;
 
     fn deref(&self) -> &Self::Target {
         &self.0

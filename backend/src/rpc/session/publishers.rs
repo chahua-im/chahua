@@ -15,7 +15,7 @@ use crate::{
     },
 };
 
-use super::super::{error::RpcLifecycleFailure, events::encode_event, RpcServices};
+use super::super::{error::RpcLifecycleFailure, events::encode_event, AppState};
 use super::{
     controls::handle_lifecycle_failure,
     io::{RpcIoError, RpcOutputSink},
@@ -80,7 +80,7 @@ impl Activation {
     pub(super) fn start_publishers(
         self,
         session: &Arc<SessionShared>,
-        services: &RpcServices,
+        services: &AppState,
         sink: &RpcOutputSink,
     ) {
         let Activation {
