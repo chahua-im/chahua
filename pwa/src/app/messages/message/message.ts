@@ -4,7 +4,7 @@ import { Component, computed, DestroyRef, ElementRef, inject, input, output, sig
 import { TranslocoPipe } from '@jsverse/transloco';
 import { LocalDatePipe } from '../../i18n/local-date.pipe';
 import { IonBadge, IonIcon, IonSpinner } from '@ionic/angular';
-import { alertCircleOutline, arrowUndoOutline } from 'ionicons/icons';
+import { alertCircleOutline, arrowUndoOutline, chatbubbles } from 'ionicons/icons';
 import { ForwardedLabel } from '../forwarded-label';
 import { ForwardedCard } from '../forwarded-card';
 import { showsForwardOrigin } from '../forwarding';
@@ -35,8 +35,10 @@ export type MessageContent = MessageAttachmentSource &
     Pick<
       MessageResponse,
       | 'forwardedFrom'
+      | 'canJumpToOriginalReply'
       | 'forwardedBundleId'
       | 'forwardedPreview'
+      | 'forwardedThreadReplyCount'
       | 'id'
       | 'isEdited'
       | 'mentions'
@@ -124,15 +126,15 @@ export class Message<T extends MessageContent = MessageResponse> {
   readonly toggleSelected = output<void>();
   readonly record = input(false);
   readonly savedId = input<SnowflakeID>();
-  readonly bundleOpened = output<SnowflakeID>();
+  readonly bundleOpened = output<void>();
   protected readonly origin = computed(() =>
     showsForwardOrigin(this.message()) ? this.message().forwardedFrom : undefined,
   );
   protected openBundle() {
     const message = this.message();
-    if (this.preview() || this.selecting()) return;
+    if (!this.canOpenBundle()) return;
     if (this.record()) {
-      if (message.forwardedBundleId != null) this.bundleOpened.emit(message.forwardedBundleId);
+      if (this.preview() || message.forwardedBundleId != null) this.bundleOpened.emit();
     } else if (this.savedId() != null) {
       void this.router.navigate(['/chats/saved', decodeId(this.savedId()!), 'forwarded']);
     } else if (this.canInteract() && message.id != null) {
@@ -153,6 +155,14 @@ export class Message<T extends MessageContent = MessageResponse> {
   readonly showDetails = input(true);
   readonly stickyAvatar = input(false);
   readonly preview = input(false);
+  readonly allowPreviewBundle = input(false);
+  protected readonly canOpenBundle = computed(
+    () =>
+      !this.selecting() &&
+      (this.preview()
+        ? this.record() && this.allowPreviewBundle()
+        : this.canInteract() || this.savedId() != null || this.record()),
+  );
   readonly interactive = input(true);
   readonly contextMenu = input(false);
   readonly outgoingId = input<string>();
@@ -194,6 +204,7 @@ export class Message<T extends MessageContent = MessageResponse> {
   readonly mention = output<MessageContent['sender']>();
   readonly canOpenThread = input(false);
   readonly reply = output<T>();
+  readonly allowOriginalReplyJump = input(false);
   readonly jumpDisabled = input(false);
   readonly jump = output<SnowflakeID>();
   readonly openThread = output<SnowflakeID>();
@@ -261,7 +272,13 @@ export class Message<T extends MessageContent = MessageResponse> {
   protected readonly isSticker = computed(
     () => !this.message().isDeleted && this.message().messageType === MessageType.sticker,
   );
-  protected readonly mediaOverlay = computed(() => !this.message().isDeleted && mediaOverlay(this.message()));
+  protected readonly forwardedReplyCount = computed(() => {
+    const message = this.message();
+    return message.isDeleted ? undefined : message.forwardedThreadReplyCount;
+  });
+  protected readonly mediaOverlay = computed(
+    () => !this.message().isDeleted && this.forwardedReplyCount() == null && mediaOverlay(this.message()),
+  );
   // Voice bars are transparent controls: they carry the overlaid time but keep the bubble's own padding and tail.
   protected readonly mediaOnly = computed(
     () => this.mediaOverlay() && !this.origin() && this.message().messageType !== MessageType.audio,
@@ -277,6 +294,7 @@ export class Message<T extends MessageContent = MessageResponse> {
   });
   protected readonly replyIcon = arrowUndoOutline;
   protected readonly retryIcon = alertCircleOutline;
+  protected readonly topicIcon = chatbubbles;
 
   constructor() {
     const host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;

@@ -73,3 +73,11 @@ chat_thread_params!(ThreadsSubscribeParams);
 chat_thread_params!(ThreadsUnsubscribeParams);
 chat_thread_params!(ThreadsArchiveParams);
 chat_thread_params!(ThreadsUnarchiveParams);
+
+chat_thread_params!(ThreadsListForwardSourcesParams);
+
+#[derive(serde::Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadsListForwardSourcesResponse {
+    pub messages: Vec<crate::dto::messages::MessageResponse>,
+}

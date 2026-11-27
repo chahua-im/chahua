@@ -19,6 +19,7 @@ import {
   untracked,
   viewChild,
   viewChildren,
+  type OnDestroy,
   type Signal,
 } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
@@ -76,8 +77,6 @@ import {
   notificationsOffOutline,
   notificationsOutline,
   optionsOutline,
-  returnDownBackOutline,
-  returnUpForwardOutline,
   searchOutline,
   trashOutline,
 } from 'ionicons/icons';
@@ -92,7 +91,6 @@ import {
   MessageType,
   NotificationType,
   ServerWsMessageType,
-  type MentionInfo,
   type MessageResponse,
   type PinResponse,
   type ThreadUpdatePayload,
@@ -112,7 +110,6 @@ import {
   ForwardSelectionError,
   forwardSourceMessage,
   MAX_FORWARD_MESSAGES,
-  type ForwardSourcesResult,
 } from '../../messages/forwarding';
 import { MessageActions } from '../../messages/message-actions';
 import { isMessageChange, recalledMessageIds, redactDeletedMessage } from '../../messages/message-change';
@@ -120,6 +117,7 @@ import { MessageComposer, type Composition } from '../../messages/message-compos
 import { AvatarMention } from '../../messages/avatar-mention';
 import { MessageDatePipe } from '../../messages/message-date.pipe';
 import { MessageMenu } from '../../messages/message-menu/message-menu';
+import { MessageDelivery } from '../../messages/message-delivery';
 import { MessageOutbox, type OutgoingMessage } from '../../messages/message-outbox';
 import { MessageSync, requiresMessagePurge } from '../../messages/message-sync';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
@@ -137,12 +135,7 @@ import { scrollActivity } from '../../scrolling/scroll-activity';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
 import { LoadError } from '../../ui/load-error/load-error';
-import {
-  ConversationNavigation,
-  ConversationTargetKind,
-  type ConversationTarget,
-  type ForwardDraftLocation,
-} from '../conversation-navigation';
+import { ConversationNavigation, ConversationTargetKind, type ConversationTarget } from '../conversation-navigation';
 import { ConversationError, ConversationStore, PageDirection } from '../conversation-store';
 import type { MessageRange } from '../conversation-window';
 import { ConversationViewportHeader } from '../conversation-viewport-header';
@@ -178,8 +171,8 @@ enum ThreadActionKind {
 
 type SelectedMessage = MessageResponse | OutgoingMessage;
 
-type ViewportPosition =
-  { type: PositionKind.Bottom } | { type: PositionKind.Anchor; messageId: SnowflakeID; offset?: number };
+type ViewportAnchor = { type: PositionKind.Anchor; messageId: SnowflakeID; offset?: number };
+type ViewportPosition = { type: PositionKind.Bottom } | ViewportAnchor;
 
 type ScrollPosition =
   | ViewportPosition
@@ -250,7 +243,7 @@ interface ConversationEntry {
     IonToast,
   ],
 })
-export class ConversationPage {
+export class ConversationPage implements OnDestroy {
   readonly detailsContext = computed(() => ({
     chatId: this.id(),
     threadId: this.threadId(),
@@ -401,7 +394,6 @@ export class ConversationPage {
       )
     )
       return;
-    this.cancelForward();
     this.editTarget.set(message);
     this.editText.set(this.editing()?.message ?? '');
     this.editLinks.set(
@@ -420,8 +412,7 @@ export class ConversationPage {
           row.message.sender.uid === this.session.user()?.uid &&
           !row.message.isDeleted &&
           row.message.messageType === MessageType.text &&
-          !row.message.forwardedFrom &&
-          !row.outgoing?.forwarding,
+          !row.message.forwardedFrom,
       );
     const message = row?.outgoing ?? row?.confirmed;
     if (message) this.startEdit(message);
@@ -448,8 +439,7 @@ export class ConversationPage {
       }
       return true;
     }
-    if (this.pendingForward()) this.cancelForward();
-    else if (this.editing()) {
+    if (this.editing()) {
       const target = this.editTarget();
       if (this.hasEditChanges() && !(await this.discardChanges.confirm(DiscardReason.MessageEdit))) return true;
       if (!this.isCurrent(entry) || target !== this.editTarget()) return true;
@@ -513,20 +503,12 @@ export class ConversationPage {
   private readonly chatInfo = inject(ChatStore);
   private readonly router = inject(Router);
   private readonly drafts = inject(DraftStore);
-  protected readonly pendingForward = computed(() => this.drafts.forward(this.id(), this.threadId()));
-  protected readonly forwardPreview = computed(() => this.pendingForward()?.[0]);
-  protected readonly forwardParticipants = computed(() => {
-    const messages = [...(this.pendingForward() ?? [])].sort((a, b) => a.id - b.id);
-    return [...new Map(messages.map((message) => [message.sender.uid, message.sender])).values()];
-  });
   protected readonly outbox = inject(MessageOutbox);
   private readonly messageActions = inject(MessageActions);
   private selectionVersion = 0;
   protected readonly selectionIcons = {
     cancel: closeOutline,
     forward: arrowRedoOutline,
-    returnForward: returnUpForwardOutline,
-    returnBack: returnDownBackOutline,
     recall: trashOutline,
   };
   protected readonly recalling = signal(false);
@@ -598,10 +580,6 @@ export class ConversationPage {
   }
   protected readonly forwardSources = signal<readonly SelectedMessage[]>([]);
   protected readonly topicForwardOpen = signal(false);
-  protected readonly forwardMove = linkedSignal({
-    source: () => this.entryKey(),
-    computation: (): (ForwardDraftLocation & { messages: readonly MessageResponse[] }) | undefined => undefined,
-  });
   protected readonly selectionLimit = MAX_FORWARD_MESSAGES;
   protected readonly canSelect = (source: SelectedMessage) => {
     const message = forwardSourceMessage(source);
@@ -677,7 +655,7 @@ export class ConversationPage {
     if (
       sources.some((source) => {
         const message = forwardSourceMessage(source);
-        return !message || !canForward(message);
+        return !message || !canForward(message, sources.length);
       })
     ) {
       this.forwardError.set(ForwardSelectionError.Unavailable);
@@ -775,6 +753,10 @@ export class ConversationPage {
   protected readonly composer = viewChild(MessageComposer);
   private readonly unreadSeparator = viewChild<ElementRef<HTMLElement>>('unreadSeparator');
   protected readonly menu = viewChild(MessageMenu);
+  private readonly forwardCovered = computed(
+    () => this.forwardSources().length > 0 || this.topicForwardOpen() || this.menu()?.forwardOpen() === true,
+  );
+  private readonly readingCovered = computed(() => this.panels.covered() || this.forwardCovered());
   private readonly messages = viewChildren(Message);
   private readonly messageElements = viewChildren(Message, { read: ElementRef<HTMLElement> });
   readonly id = input.required<SnowflakeID, string>({ transform: encodeId });
@@ -837,10 +819,11 @@ export class ConversationPage {
     const rootId = this.threadId();
     if (!rootId) return undefined;
     const root = this.threadRoot();
-    if (root && 'threadInfo' in root) return (root.threadInfo?.replyCount ?? 0) + 1;
+    const rootCount = root?.isDeleted ? 0 : 1;
+    if (root && 'threadInfo' in root) return (root.threadInfo?.replyCount ?? 0) + rootCount;
     const replies = this.chatInfo.threadSummary(rootId)?.replyCount;
-    if (replies != null) return replies + 1;
-    return root ? 1 : undefined;
+    if (replies != null) return replies + rootCount;
+    return root ? rootCount : undefined;
   });
   protected readonly canSendMessage = computed(() => {
     if (!this.accessible()) return false;
@@ -858,7 +841,7 @@ export class ConversationPage {
   });
   protected readonly speakingRestriction = computed(() => {
     if (this.groupChatWriteDisabled()) return undefined;
-    const editing = !this.pendingForward() && this.editing();
+    const editing = this.editing();
     const allowed = editing
       ? this.chatInfo.canSpeak(
           this.id(),
@@ -870,28 +853,11 @@ export class ConversationPage {
   });
   protected readonly canForwardTopic = computed(() => {
     const count = this.topicMessageCount();
-    return count != null && count <= MAX_FORWARD_MESSAGES;
+    return count != null && count > 0 && count <= MAX_FORWARD_MESSAGES;
   });
   protected openTopicForward() {
     if (this.canForwardTopic()) this.topicForwardOpen.set(true);
   }
-  /** Read the topic again when a target is chosen so the merge uses every forwardable message present then. */
-  protected readonly loadTopicSources = async (): Promise<ForwardSourcesResult> => {
-    const threadId = this.threadId();
-    if (!threadId) return { error: ForwardSelectionError.TopicUnavailable };
-    try {
-      const page = await firstValueFrom(
-        this.api.messages
-          .list({ chatId: this.id(), threadId, max: MAX_FORWARD_MESSAGES })
-          .pipe(takeUntilDestroyed(this.destroyRef)),
-      );
-      return page.olderCursor
-        ? { error: ForwardSelectionError.TooMany }
-        : { sources: page.messages.filter((message) => this.canSelect(message)) };
-    } catch {
-      return { error: ForwardSelectionError.LoadFailed };
-    }
-  };
   private async loadThreadRoot() {
     const entry = this.entryKey();
     if (!entry.threadId || !this.accessible() || this.threadRoot()) return;
@@ -1077,6 +1043,7 @@ export class ConversationPage {
   private invalidateReadReceipt(privacyChanged = false) {
     void this.refreshReadReceipt(privacyChanged);
   }
+  private readonly olderCursor = computed(() => this.conversation.page()?.olderCursor);
   protected readonly outgoing = computed(() => this.outbox.items().filter((item) => item.chatId === this.id()));
   protected readonly hideMembershipMessages = computed(
     // Membership actions belong to groups; do not flash them while metadata is still loading.
@@ -1116,11 +1083,17 @@ export class ConversationPage {
         outgoing,
       });
     }
+    const olderCursor = this.olderCursor();
     for (const outgoing of this.outgoing()) {
+      const confirmedId = outgoing.confirmed()?.id;
       if (
         outgoing.editId ||
         outgoing.cancelled() ||
         outgoing.threadId !== this.threadId() ||
+        (outgoing.delivery() === MessageDelivery.Sent &&
+          olderCursor != null &&
+          confirmedId != null &&
+          confirmedId < olderCursor) ||
         known.has(outgoing.clientGeneratedId)
       )
         continue;
@@ -1176,8 +1149,8 @@ export class ConversationPage {
   private subscriptionVersion = 0;
   private retryAction = () => {};
   private readonly position = signal<ScrollPosition | undefined>(undefined);
-  private syncWindowNavigation?: { version: number };
-  private membershipScrollPosition?: ViewportPosition;
+  private syncWindowNavigation?: { version: number; scrolledTo?: ViewportAnchor };
+  private membershipScrollAnchor?: ViewportAnchor;
   private viewportPosition?: ViewportPosition;
   private provisionalScrollTop?: number;
   private provisionalScrollVersion = 0;
@@ -1284,7 +1257,6 @@ export class ConversationPage {
     computation: (): MessageResponse | undefined => undefined,
   });
   protected readonly composerContextColors = computed(() => {
-    if (this.pendingForward()) return undefined;
     const sender = this.editing()?.sender ?? this.replyTo()?.sender;
     return sender ? userColors(sender.name ?? String(sender.uid)) : undefined;
   });
@@ -1358,13 +1330,24 @@ export class ConversationPage {
     this.conversation.setSyncWindow(() => {
       if (!this.isCurrent()) return undefined;
       const entry = this.entryKey();
-      const navigation = (this.syncWindowNavigation = { version: this.navigationVersion });
-      const position = this.membershipScrollPosition ?? { type: PositionKind.Bottom as const };
+      const navigation: NonNullable<ConversationPage['syncWindowNavigation']> = { version: this.navigationVersion };
+      this.syncWindowNavigation = navigation;
+      const position = this.refreshViewportPosition();
       return {
         around: position.type === PositionKind.Anchor ? position.messageId : undefined,
+        latestAnchor: () =>
+          this.isCurrent(entry) && navigation.version === this.navigationVersion
+            ? navigation.scrolledTo?.messageId
+            : undefined,
         restore: () => {
+          if (this.syncWindowNavigation === navigation) this.syncWindowNavigation = undefined;
           if (!this.isCurrent(entry) || navigation.version !== this.navigationVersion) return;
-          this.position.set(this.resolveViewportPosition(position));
+          const restore =
+            navigation.scrolledTo ??
+            (position.type === PositionKind.Bottom && this.forwardCovered()
+              ? (this.membershipScrollAnchor ?? position)
+              : position);
+          this.position.set(this.resolveViewportPosition(restore));
         },
       };
     });
@@ -1426,14 +1409,6 @@ export class ConversationPage {
       onCleanup(() => window.removeEventListener('beforeunload', beforeUnload));
     });
     effect(() => {
-      if (this.active() && this.pendingForward()) {
-        untracked(() => {
-          this.cancelSelection();
-          void this.composer()?.setFocus();
-        });
-      }
-    });
-    effect(() => {
       const replyId = this.reply();
       const messageId = replyId ?? this.message();
       this.entryKey();
@@ -1478,7 +1453,12 @@ export class ConversationPage {
     });
     this.realtime.messages$.pipe(takeUntilDestroyed()).subscribe((message) => {
       if (!this.isCurrent() || !this.conversation.accepts(message)) return;
-      const follow = this.atBottom() && this.conversation.atLatest() && !this.position();
+      const follow =
+        !this.forwardCovered() &&
+        this.atBottom() &&
+        this.conversation.atLatest() &&
+        this.contentGeometry?.followingBottom !== false &&
+        !this.position();
       if (!this.messageSync.active()) this.conversation.receive(message);
       if (follow) this.position.set({ type: PositionKind.Bottom });
       else if (!this.threadId()) void this.chatInfo.scheduleReadState(this.id()).catch(() => {});
@@ -1619,12 +1599,13 @@ export class ConversationPage {
     });
     effect(() => {
       if (!this.conversation.atLatest()) return;
-      const messages = this.outgoing()
-        .filter((item) => !item.editId && !item.cancelled() && item.published())
-        .map((item) => item.confirmed()!);
-      untracked(() => {
-        for (const message of messages) this.conversation.receive(message);
-      });
+      const olderCursor = this.olderCursor();
+      for (const item of this.outgoing()) {
+        const confirmed = item.confirmed();
+        if (!confirmed || item.threadId !== this.threadId() || !this.conversation.accepts(confirmed)) continue;
+        const message = this.outbox.handoff(item, olderCursor);
+        if (message) untracked(() => this.conversation.receive(message));
+      }
     });
     effect(() => {
       const target = this.editTarget();
@@ -1656,10 +1637,13 @@ export class ConversationPage {
       this.position();
       this.conversation.provisional();
       this.panels.covered();
-      if (this.active()) void this.positionAndRead();
+      if (this.forwardCovered()) {
+        // Resume from the visible anchor instead of following messages that arrived behind the overlay.
+        if (this.contentGeometry) this.contentGeometry.followingBottom = false;
+      } else if (this.active()) void this.positionAndRead();
     });
     effect(() => {
-      if (this.panels.covered()) {
+      if (this.readingCovered()) {
         // Retain the session and jump targets; discard the covered snapshot until the panel closes.
         this.reactionVisibility?.watch(new Map());
         this.reactionFresh = false;
@@ -1687,8 +1671,13 @@ export class ConversationPage {
         this.changeDetector.detectChanges();
       }
     });
-    this.destroyRef.onDestroy(() => this.leave());
   }
+
+  ngOnDestroy() {
+    this.leave();
+  }
+
+  private releaseOutbox?: () => void;
 
   private activate(id: SnowflakeID, threadId?: SnowflakeID) {
     this.stopReplyLookup();
@@ -1696,9 +1685,13 @@ export class ConversationPage {
     this.retainConversation();
     this.viewportPosition = undefined;
     this.contentGeometry = undefined;
+    this.syncWindowNavigation = undefined;
     this.provisionalScrollTop = undefined;
     this.provisionalScrollVersion = 0;
-    this.membershipScrollPosition = undefined;
+    const previous = this.releaseOutbox;
+    this.releaseOutbox = this.outbox.retainConversation(id, threadId);
+    previous?.();
+    this.membershipScrollAnchor = undefined;
     this.resetReactionSession();
     this.resetMentionSession();
     this.scrolling.reset();
@@ -1777,17 +1770,7 @@ export class ConversationPage {
   }
 
   private isCurrent(entry = this.entryKey()) {
-    const threadId = this.threadId();
-    return (
-      entry === this.entryKey() &&
-      this.active() &&
-      this.router.isActive(`/chats/chat/${decodeId(this.id())}${threadId ? `/thread/${decodeId(threadId)}` : ''}`, {
-        paths: 'exact',
-        queryParams: 'ignored',
-        fragment: 'ignored',
-        matrixParams: 'ignored',
-      })
-    );
+    return entry === this.entryKey() && this.active() && this.navigation.isOpen(this.id(), this.threadId());
   }
 
   private retainConversation() {
@@ -1821,8 +1804,10 @@ export class ConversationPage {
       this.retainConversation();
       this.viewportPosition = undefined;
       this.contentGeometry = undefined;
-      this.membershipScrollPosition = undefined;
+      this.membershipScrollAnchor = undefined;
       this.entryVersion.update((version) => version + 1);
+      this.releaseOutbox?.();
+      this.releaseOutbox = undefined;
       this.conversation.reset();
       this.rows();
       this.draft.set('');
@@ -1954,7 +1939,6 @@ export class ConversationPage {
     this.cancelReply();
     this.cancelEdit();
     this.cancelSelection();
-    this.cancelForward();
     this.forwardSources.set([]);
     this.topicForwardOpen.set(false);
     this.linkPreviewOpen.set(false);
@@ -1971,10 +1955,12 @@ export class ConversationPage {
     return anchor != null ? { ...position, messageId: anchor } : { type: PositionKind.Bottom };
   }
 
-  private async reloadMembershipVisibility(
-    hide: boolean,
-    position = this.membershipScrollPosition ?? { type: PositionKind.Bottom as const },
-  ) {
+  private refreshViewportPosition(): ViewportPosition {
+    if (this.viewportPosition?.type === PositionKind.Bottom && !this.forwardCovered()) return this.viewportPosition;
+    return this.membershipScrollAnchor ?? { type: PositionKind.Bottom };
+  }
+
+  private async reloadMembershipVisibility(hide: boolean, position = this.refreshViewportPosition()) {
     const entry = this.entryKey();
     const version = ++this.navigationVersion;
     this.pendingNavigation.set(undefined);
@@ -2070,7 +2056,7 @@ export class ConversationPage {
   private async enterReactionSession() {
     if (!this.isCurrent()) return;
     this.reactionSessionEntered = true;
-    if (this.document.hidden || this.panels.covered() || this.reactionRequest || this.reactionAck) return;
+    if (this.document.hidden || this.readingCovered() || this.reactionRequest || this.reactionAck) return;
     if (this.reactionFresh) {
       void this.completeReactionViewing();
       return;
@@ -2093,7 +2079,7 @@ export class ConversationPage {
             .listUnreadReactions({ chatId, threadId, after: this.reactionReadThrough })
             .pipe(takeUntilDestroyed(this.destroyRef)),
         );
-        if (this.reactionRequest !== request || !this.isCurrent(entry) || this.document.hidden || this.panels.covered())
+        if (this.reactionRequest !== request || !this.isCurrent(entry) || this.document.hidden || this.readingCovered())
           return;
         // A returned id has a reaction newer than the previous snapshot, even if already visited.
         for (const id of response.messageIds) {
@@ -2128,7 +2114,7 @@ export class ConversationPage {
       !this.reactionFresh ||
       !this.isCurrent() ||
       this.document.hidden ||
-      this.panels.covered()
+      this.readingCovered()
     )
       return;
     const ack = { readThrough };
@@ -2195,7 +2181,7 @@ export class ConversationPage {
       this.positioned() &&
       this.stateWatchVisible() &&
       !this.document.hidden &&
-      !this.panels.covered() &&
+      !this.readingCovered() &&
       !this.conversation.provisional() &&
       !this.conversation.loading() &&
       !this.pendingNavigation() &&
@@ -2372,9 +2358,9 @@ export class ConversationPage {
       const offset = entry === this.entryKey() ? nextTop - top : 0;
       entry = this.entryKey();
       top = nextTop;
-      if (this.position()) return;
+      if (this.position() || this.forwardCovered()) return;
       const scrollTop = scroll.scrollTop;
-      if (this.atBottom() && this.conversation.atLatest()) {
+      if (this.atBottom() && this.conversation.atLatest() && this.contentGeometry?.followingBottom !== false) {
         scroll.scrollTop = scroll.scrollHeight;
       } else if (offset) {
         // A changing header moves the viewport; keep messages at their screen positions.
@@ -2394,7 +2380,7 @@ export class ConversationPage {
     const entry = this.entryKey();
     const version = this.navigationVersion;
     const scroll = await this.content()?.getScrollElement();
-    if (!scroll || !this.isCurrent(entry) || version !== this.navigationVersion) return;
+    if (!scroll || !this.isCurrent(entry) || version !== this.navigationVersion || this.forwardCovered()) return;
     // A response can replace the range while getScrollElement is awaiting.
     // Defer positioning until Angular has rendered the corresponding rows.
     if (this.rows().length !== this.messageElements().length) return;
@@ -2444,7 +2430,7 @@ export class ConversationPage {
     const entry = this.entryKey();
     const version = this.navigationVersion;
     const scroll = await this.content()?.getScrollElement();
-    if (!scroll || !this.isCurrent(entry) || version !== this.navigationVersion) return;
+    if (!scroll || !this.isCurrent(entry) || version !== this.navigationVersion || this.forwardCovered()) return;
     const previous = this.contentGeometry;
     const height = scroll.clientHeight;
     const scrollHeight = scroll.scrollHeight;
@@ -2479,11 +2465,17 @@ export class ConversationPage {
       measured: false,
     };
     this.atBottom.set(bounds.below < 40);
+    const syncNavigation = this.syncWindowNavigation;
+    const trackSyncScroll =
+      fromScrollEvent &&
+      syncNavigation?.version === version &&
+      (syncNavigation.scrolledTo != null || previous?.clampedScrollTop !== incomingTop);
+    const loading = this.conversation.loading() && !provisional;
     if (
       !this.entered ||
       this.document.hidden ||
       this.panels.covered() ||
-      (this.conversation.loading() && !provisional) ||
+      (loading && !trackSyncScroll) ||
       this.position()
     )
       return bounds;
@@ -2491,15 +2483,6 @@ export class ConversationPage {
     const viewport = scroll.getBoundingClientRect();
     const allElements = this.messageElements();
     if (rows.length !== allElements.length) return bounds;
-    bounds.measured = true;
-    let bottomLow = 0,
-      bottomHigh = allElements.length;
-    while (bottomLow < bottomHigh) {
-      const middle = (bottomLow + bottomHigh) >>> 1;
-      if (allElements[middle].nativeElement.getBoundingClientRect().bottom < viewport.bottom) bottomLow = middle + 1;
-      else bottomHigh = middle;
-    }
-    this.updateStickyAvatar(bottomLow, viewport.bottom);
     let first = 0,
       last = allElements.length - 1;
     while (first < last) {
@@ -2509,6 +2492,19 @@ export class ConversationPage {
     }
     const geometryAnchor = allElements[first]?.nativeElement;
     const anchorRect = geometryAnchor?.getBoundingClientRect();
+    this.rememberViewportPositions(first, viewport.top, anchorRect?.bottom);
+    if (trackSyncScroll) syncNavigation.scrolledTo = this.membershipScrollAnchor;
+    if (loading) return bounds;
+
+    bounds.measured = true;
+    let bottomLow = 0,
+      bottomHigh = allElements.length;
+    while (bottomLow < bottomHigh) {
+      const middle = (bottomLow + bottomHigh) >>> 1;
+      if (allElements[middle].nativeElement.getBoundingClientRect().bottom < viewport.bottom) bottomLow = middle + 1;
+      else bottomHigh = middle;
+    }
+    this.updateStickyAvatar(bottomLow, viewport.bottom);
     const currentTop = Math.min(maxTop, bounds.above);
     if (provisional) {
       if (fromScrollEvent && this.provisionalScrollTop != null && incomingTop !== this.provisionalScrollTop)
@@ -2538,7 +2534,6 @@ export class ConversationPage {
       });
     }
     this.visibleDate.set(rows[first]?.message.createdAt);
-    this.rememberViewportPositions(first, viewport.top, anchorRect?.bottom);
     this.updateFloatingDate(first, viewport.top);
     if (!provisional) this.markVisibleMessagesRead(viewport);
     return bounds;
@@ -2562,32 +2557,29 @@ export class ConversationPage {
   }
 
   private rememberViewportPositions(first: number, viewportTop: number, firstBottom?: number) {
-    if (this.atBottom() && !this.conversation.page()?.newerCursor) {
-      this.viewportPosition = { type: PositionKind.Bottom };
-      this.membershipScrollPosition = this.viewportPosition;
-      return;
-    }
     const rows = this.rows();
     const elements = this.messageElements();
     let anchor = first;
     while (rows[anchor] && !rows[anchor].confirmed) anchor++;
     const confirmed = rows[anchor]?.confirmed;
     const bottom = anchor === first ? firstBottom : elements[anchor]?.nativeElement.getBoundingClientRect().bottom;
-    this.viewportPosition =
+    const visibleAnchor: ViewportAnchor | undefined =
       confirmed && bottom != null
         ? { type: PositionKind.Anchor, messageId: confirmed.id, offset: bottom - viewportTop }
         : undefined;
+    this.viewportPosition =
+      this.atBottom() && !this.conversation.page()?.newerCursor ? { type: PositionKind.Bottom } : visibleAnchor;
     // Keep a non-membership anchor for filter changes if one is available.
     while (rows[anchor] && (!rows[anchor].confirmed || isMembershipMessage(rows[anchor].message))) anchor++;
     const membershipAnchor = rows[anchor]?.confirmed;
-    this.membershipScrollPosition =
+    this.membershipScrollAnchor =
       membershipAnchor && membershipAnchor !== confirmed
         ? {
             type: PositionKind.Anchor,
             messageId: membershipAnchor.id,
             offset: elements[anchor].nativeElement.getBoundingClientRect().bottom - viewportTop,
           }
-        : this.viewportPosition;
+        : visibleAnchor;
   }
 
   private updateFloatingDate(first: number, viewportTop: number) {
@@ -2710,7 +2702,14 @@ export class ConversationPage {
     const version = this.navigationVersion;
     const provisional = this.conversation.provisional();
     const bounds = await this.trackScroll(true);
-    if (!bounds || !this.isCurrent(entry) || version !== this.navigationVersion || !this.entered || this.position())
+    if (
+      !bounds ||
+      !this.isCurrent(entry) ||
+      version !== this.navigationVersion ||
+      !this.entered ||
+      this.position() ||
+      this.forwardCovered()
+    )
       return;
     if (provisional || this.conversation.provisional()) return;
     const { height, above, below } = bounds;
@@ -2749,9 +2748,9 @@ export class ConversationPage {
   }
 
   protected updateDraft(text: string) {
-    (!this.pendingForward() && this.editing() ? this.editText : this.draft).set(text);
+    (this.editing() ? this.editText : this.draft).set(text);
     const urls = draftLinkUrls(text);
-    const choices = !this.pendingForward() && this.editing() ? this.editLinks : this.draftLinks;
+    const choices = this.editing() ? this.editLinks : this.draftLinks;
     choices.update((items) => items.filter((item) => urls.includes(item.url)));
     if (!urls.length) this.linkPreviewOpen.set(false);
   }
@@ -2767,29 +2766,6 @@ export class ConversationPage {
     this.replyTo.set(undefined);
     this.savedReplyId.set(undefined);
     this.savedReplyDeleted.set(false);
-  }
-
-  protected cancelForward() {
-    this.drafts.setForward(this.id(), this.threadId());
-  }
-
-  protected changeForwardTarget() {
-    const messages = this.pendingForward();
-    if (messages) this.forwardMove.set({ chatId: this.id(), threadId: this.threadId(), messages });
-  }
-
-  protected sendForward(mentions: MentionInfo[] = []) {
-    const sources = this.pendingForward();
-    if (!sources || !this.isCurrent() || !this.canSendMessage()) return;
-    this.outbox.enqueueForward(this.id(), this.threadId(), sources, {
-      comment: this.draft(),
-      commentMentions: mentions,
-    });
-    this.cancelForward();
-    this.draft.set('');
-    this.saveDraft();
-    this.position.set({ type: PositionKind.Bottom });
-    if (!this.conversation.atLatest()) void this.goTo({ type: ConversationTargetKind.Latest });
   }
 
   private markReplyDeleted() {
@@ -2993,7 +2969,6 @@ export class ConversationPage {
     if (!this.canSendMessage()) return;
     this.stopReplyLookup();
     this.replyNeedsRefresh = false;
-    this.cancelForward();
     this.replyTo.set(this.realtime.redactKnownRecalls(message));
     this.savedReplyId.set(undefined);
     this.savedReplyDeleted.set(false);

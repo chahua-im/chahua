@@ -37,6 +37,11 @@ impl IntoResponse for AppError {
                 (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response()
             }
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg).into_response(),
+            AppError::ForwardPlaceholderRequired(reason) => (
+                StatusCode::BAD_REQUEST,
+                reason.confirmation_required_message(),
+            )
+                .into_response(),
             AppError::PayloadTooLarge(msg) => (StatusCode::PAYLOAD_TOO_LARGE, msg).into_response(),
             AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg).into_response(),
             AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg).into_response(),
@@ -179,9 +184,11 @@ mod tests {
     async fn outbox_conflict_uses_the_same_detail_for_http_and_rpc() {
         use crate::dto::{messages::MessageResponse, users::User};
         let existing = MessageResponse {
+            audio_pending: false,
             system_kind: None,
             system_links: None,
             forwarded_from: None,
+            can_jump_to_original_reply: None,
             id: 9007199254740993,
             message: Some("Already accepted".into()),
             metadata: None,
@@ -202,6 +209,7 @@ mod tests {
             is_deleted: false,
             has_attachments: false,
             thread_info: None,
+            forwarded_thread_reply_count: None,
             reply_to_message: None,
             attachments: Vec::new(),
             reactions: Vec::new(),

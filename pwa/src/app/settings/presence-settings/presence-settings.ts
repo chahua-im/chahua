@@ -1,3 +1,4 @@
+import { ModalButton } from '../../ui/modal-button';
 import { Component, inject, signal } from '@angular/core';
 import {
   IonButton,
@@ -16,7 +17,7 @@ import {
   IonToolbar,
 } from '@ionic/angular';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { chevronBackOutline, eyeOffOutline, eyeOutline, peopleOutline } from 'ionicons/icons';
+import { eyeOffOutline, eyeOutline, peopleOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { RpcApi } from '../../../generated/rpc-api';
 import { PresenceVisibility, PrivacyExceptionKind } from '../../../generated/models';
@@ -31,6 +32,7 @@ import { PrivacyExceptions } from '../privacy-exceptions/privacy-exceptions';
   templateUrl: './presence-settings.html',
   styleUrl: '../settings/settings.scss',
   imports: [
+    ModalButton,
     PrivacyExceptions,
     ContentScrollbars,
     LoadError,
@@ -60,7 +62,6 @@ export class PresenceSettings {
   protected readonly everyoneIcon = eyeOutline;
   protected readonly friendsIcon = peopleOutline;
   protected readonly nobodyIcon = eyeOffOutline;
-  protected readonly backIcon = chevronBackOutline;
   protected readonly Visibility = PresenceVisibility;
   protected readonly loading = signal(true);
   protected readonly saving = signal(false);

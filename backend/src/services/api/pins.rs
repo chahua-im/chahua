@@ -549,12 +549,11 @@ async fn send_pin_system_message(
                 reply_to_id: thread_root_id,
                 reply_root_id: thread_root_id,
                 client_generated_id: Uuid::new_v4().to_string(),
-                attachment_ids: vec![],
+                attachments: Default::default(),
                 publish_immediately: true,
                 forwarded_bundle_id: None,
-                forwarded_preview_total: None,
-                forwarded_preview_contains_forwarded_messages: None,
-                forwarded_preview_items: None,
+                forwarded_preview: None,
+                forward_origin: None,
             },
         )
         .await

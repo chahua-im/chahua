@@ -38,13 +38,18 @@ pub async fn send(
     services: &RpcServices,
     params: MessagesSendParams,
 ) -> Result<MessageResponse, AppError> {
-    let MessagesSendParams { chat_id, body } = params;
+    let MessagesSendParams {
+        chat_id,
+        mark_read,
+        body,
+    } = params;
     let principal = context.principal()?;
     let mut conn = services.db.get()?;
     api::post_message(
         principal,
         chat_id,
         body,
+        mark_read.unwrap_or(true),
         &mut conn,
         api::PostMessageDeps {
             restricted_user_group_ids: &services.config.restricted_user_group_ids,
@@ -298,6 +303,7 @@ pub async fn send_in_thread(
     let MessagesSendInThreadParams {
         chat_id,
         thread_id,
+        mark_read,
         body,
     } = params;
     let uid = context.uid()?;
@@ -307,6 +313,7 @@ pub async fn send_in_thread(
         chat_id,
         thread_id,
         body,
+        mark_read.unwrap_or(true),
         &mut conn,
         api::PostThreadMessageDeps {
             restricted_user_group_ids: &services.config.restricted_user_group_ids,
@@ -334,4 +341,29 @@ pub async fn preview_links(
         crate::services::api::members::check_membership(&mut conn, params.chat_id, uid)?;
     }
     services.link_previews.drafts.fetch(uid, params.urls).await
+}
+
+pub async fn send_forward(
+    context: &RpcCallContext,
+    services: &RpcServices,
+    params: crate::dto::rpc::messages::MessagesSendForwardParams,
+) -> Result<crate::dto::rpc::messages::SendForwardResponse, AppError> {
+    let uid = context.uid()?;
+    let mut conn = services.db.get()?;
+    crate::services::forward_send::send(
+        &mut conn,
+        uid,
+        params,
+        api::ForwardMessageDeps {
+            restricted_user_group_ids: &services.config.restricted_user_group_ids,
+            id_gen: &services.id_gen,
+            media: &services.media,
+            avatars: &services.avatars,
+            metrics: &services.metrics,
+            ws_registry: &services.ws_registry,
+            push_service: &services.push_service,
+            message_search: &services.message_search,
+        },
+    )
+    .await
 }

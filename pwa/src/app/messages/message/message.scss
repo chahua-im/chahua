@@ -19,7 +19,7 @@
   --message-background-opacity: 12%;
   --message-group-background: color-mix(in srgb, var(--message-contrast) 25%, transparent);
   --forward-muted: currentColor;
-  --forward-opacity: 0.75;
+  --message-meta-opacity: 95%;
 }
 
 .bubble,
@@ -100,20 +100,45 @@
   -webkit-touch-callout: default;
 }
 
-.timestamp {
+:host(.compact-preview) .chat-row {
+  padding: 0;
+}
+
+:host(.menu-preview) .chat-row {
+  --bubble-column: minmax(0, 1fr);
+}
+
+.timestamp,
+.forwarded-topic {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  margin-left: 8px;
   font-size: var(--app-font-micro);
   line-height: var(--app-line-micro);
-  color: color-mix(in srgb, currentColor 70%, transparent);
+  color: color-mix(in srgb, currentColor var(--message-meta-opacity, 70%), transparent);
   white-space: nowrap;
+}
+
+.timestamp {
+  margin-left: 8px;
 }
 
 .message-body > .timestamp {
   float: inline-end;
   margin-top: calc(var(--app-line-body) - var(--app-line-micro));
+}
+
+.message-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  margin-top: 4px;
+
+  .timestamp {
+    margin-left: 0;
+    margin-inline-start: auto;
+  }
 }
 
 .retry-button {
@@ -209,8 +234,8 @@
 .bubble.media-only > .bubble-surface {
   padding-bottom: 0;
 }
-// The menu preview row spans the full overlay width, so the album keeps a fixed size there.
-.preview .media-content:has(app-message-attachments.album) {
+// Keep the album's width within the menu preview's measured bubble.
+:host(.menu-preview) .media-content:has(app-message-attachments.album) {
   display: block;
 }
 .media-only app-message-thread {

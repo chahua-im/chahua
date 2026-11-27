@@ -1,12 +1,11 @@
+import { ModalButton } from '../../ui/modal-button';
 import { Component, inject } from '@angular/core';
 import { rxResource } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 import {
-  IonButton,
   IonButtons,
   IonContent,
   IonHeader,
-  IonIcon,
   IonItem,
   IonLabel,
   IonList,
@@ -16,7 +15,6 @@ import {
   IonToolbar,
 } from '@ionic/angular';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { chevronBackOutline } from 'ionicons/icons';
 import { RpcApi } from '../../../generated/rpc-api';
 import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
 import { PanelNavigation } from '../../navigation/panel-navigation';
@@ -27,15 +25,14 @@ import { LoadError } from '../../ui/load-error/load-error';
   selector: 'app-blocked-users',
   templateUrl: './blocked-users.html',
   imports: [
+    ModalButton,
     ContentScrollbars,
     RouterLink,
     TranslocoPipe,
     LoadError,
-    IonButton,
     IonButtons,
     IonContent,
     IonHeader,
-    IonIcon,
     IonItem,
     IonLabel,
     IonList,
@@ -49,7 +46,6 @@ import { LoadError } from '../../ui/load-error/load-error';
 })
 export class BlockedUsers {
   protected readonly panels = inject(PanelNavigation);
-  protected readonly backIcon = chevronBackOutline;
   private readonly api = inject(RpcApi);
   protected readonly blocks = rxResource({ stream: () => this.api.blocks.list() });
   panelResume() {

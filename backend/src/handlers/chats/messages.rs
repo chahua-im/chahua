@@ -192,6 +192,7 @@ async fn post_message(
             principal,
             chat_id,
             body,
+            true,
             &mut conn,
             crate::services::api::chats::messages::PostMessageDeps {
                 restricted_user_group_ids: &state.config.restricted_user_group_ids,
@@ -414,6 +415,7 @@ pub(super) async fn post_thread_message(
             chat_id,
             thread_id,
             body,
+            true,
             &mut conn,
             crate::services::api::chats::messages::PostThreadMessageDeps {
                 restricted_user_group_ids: &state.config.restricted_user_group_ids,

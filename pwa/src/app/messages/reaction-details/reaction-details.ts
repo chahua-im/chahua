@@ -1,6 +1,6 @@
+import { ModalButton } from '../../ui/modal-button';
 import { Component, computed, effect, inject, input, signal } from '@angular/core';
 import {
-  IonButton,
   IonButtons,
   IonContent,
   IonHeader,
@@ -25,6 +25,7 @@ import { LoadError } from '../../ui/load-error/load-error';
 @Component({
   selector: 'app-reaction-details',
   imports: [
+    ModalButton,
     TranslocoPipe,
     ChatAvatar,
     ContentScrollbars,
@@ -33,7 +34,6 @@ import { LoadError } from '../../ui/load-error/load-error';
     IonToolbar,
     IonTitle,
     IonButtons,
-    IonButton,
     IonContent,
     IonSegment,
     IonSegmentButton,

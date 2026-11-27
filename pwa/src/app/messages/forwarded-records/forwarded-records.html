@@ -65,8 +65,9 @@
         [stickyAvatar]="!preferences.showAllAvatars() && stickyRow() === $index"
         [record]="true"
         [canReply]="false"
+        [jumpDisabled]="!row.message.internalReply"
         (jump)="jump($event)"
-        (bundleOpened)="child($event)" />
+        (bundleOpened)="child(row.message.forwardedBundleId!)" />
     }
   </div>
   @if (loading() && !data()) {

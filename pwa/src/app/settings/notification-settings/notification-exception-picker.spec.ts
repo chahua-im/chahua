@@ -43,6 +43,8 @@ describe('notification exception picker', () => {
     const { fixture, component, peer, store, release } = setup(kind, muted);
     expect(component['targets']()).toHaveLength(1);
     const saving = component['select'](testChat.id);
+    expect(component['canDismiss'](undefined, 'escape')).toBe(false);
+    expect(component['canDismiss'](undefined, 'backdrop')).toBe(false);
     peer.expect('groups.updateNotificationSetting', { chatId: '9007199254740993', mode }).flush({
       chatId: '9007199254740993',
       kind,
@@ -53,6 +55,7 @@ describe('notification exception picker', () => {
     });
     await saving;
     expect(component['open']()).toBe(false);
+    expect(component['canDismiss']()).toBe(true);
     expect(store.chatState(testChat.id)?.archived).toBe(true);
     fixture.destroy();
     expect(release).toHaveBeenCalledTimes(2);

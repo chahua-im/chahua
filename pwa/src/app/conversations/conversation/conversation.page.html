@@ -227,6 +227,7 @@
           [groupChatWriteDisabled]="groupChatWriteDisabled()"
           [canMention]="!speakingRestriction() && !groupChatWriteDisabled()"
           (mention)="composer()?.insertMention($event)"
+          [allowOriginalReplyJump]="(row.message.replyRootId ?? undefined) === threadId()"
           [jumpDisabled]="!!pendingNavigation()"
           [canOpenThread]="!threadId()"
           (reply)="row.confirmed && startReply(row.confirmed)"
@@ -371,12 +372,10 @@
     [writePermissionPending]="groupChatWriteDisabled() && !groupChatWriteRestricted()"
     [chatId]="id()"
     [mentionsEnabled]="mentionsEnabled()"
-    [text]="!pendingForward() && editing() ? editText() : draft()"
+    [text]="editing() ? editText() : draft()"
     (textChange)="updateDraft($event)"
     [editing]="editing()"
     [editingUploads]="editingUploads()"
-    [forwarding]="!!pendingForward()"
-    (forwardSubmitted)="sendForward($event)"
     (submitted)="sendMessage($event)"
     (editLast)="editLastMessage()">
     <ng-template #linkContextIcon>
@@ -409,68 +408,20 @@
         </a>
       }
     </ng-template>
-    @if (!pendingForward()) {
-      <app-draft-link-previews
-        [colors]="draftPreviewColors()"
-        [chatId]="id()"
-        [scope]="linkPreviewScope()"
-        [text]="linkPreviewText()"
-        [automatic]="!editing() && active() && !speakingRestriction() && !groupChatWriteDisabled()"
-        [initial]="editing()?.metadata?.linkPreviews ?? []"
-        [choices]="linkPreviewChoices()"
-        (choicesChange)="setLinkChoices($event)"
-        [(open)]="linkPreviewOpen" />
-      @if (!editing() && (replyTo() || savedReplyId())) {
-        <ng-container [ngTemplateOutlet]="firstLinkPreview" />
-      }
+    <app-draft-link-previews
+      [colors]="draftPreviewColors()"
+      [chatId]="id()"
+      [scope]="linkPreviewScope()"
+      [text]="linkPreviewText()"
+      [automatic]="!editing() && active() && !speakingRestriction() && !groupChatWriteDisabled()"
+      [initial]="editing()?.metadata?.linkPreviews ?? []"
+      [choices]="linkPreviewChoices()"
+      (choicesChange)="setLinkChoices($event)"
+      [(open)]="linkPreviewOpen" />
+    @if (!editing() && (replyTo() || savedReplyId())) {
+      <ng-container [ngTemplateOutlet]="firstLinkPreview" />
     }
-    @if (pendingForward(); as sources) {
-      <div class="reply-context forward-context">
-        <button
-          type="button"
-          class="forward-target-button"
-          [title]="'messages.forward.changeTarget' | transloco"
-          (click)="changeForwardTarget()">
-          <ion-icon [icon]="selectionIcons.forward" />
-          <span class="forward-target-icon">
-            <ion-icon class="forward-target-upper" [icon]="selectionIcons.returnForward" />
-            <ion-icon class="forward-target-lower" [icon]="selectionIcons.returnBack" />
-          </span>
-        </button>
-        <div class="reply-description">
-          @if (sources.length === 1) {
-            @if (forwardPreview(); as preview) {
-              @let sender = preview.forwardedFrom?.sender ?? preview.sender;
-              <strong>{{ sender.name ?? sender.uid }}</strong>
-              <span><app-message-preview [message]="preview" /></span>
-            }
-          } @else {
-            @let participants = forwardParticipants();
-            @let first = participants[0].name ?? participants[0].uid;
-            <strong>
-              @switch (participants.length) {
-                @case (1) {
-                  {{ first }}
-                }
-                @case (2) {
-                  {{
-                    'messages.forward.twoParticipants'
-                      | transloco: { first, second: participants[1].name ?? participants[1].uid }
-                  }}
-                }
-                @default {
-                  {{ 'messages.forward.otherParticipants' | transloco: { first, count: participants.length - 1 } }}
-                }
-              }
-            </strong>
-            <span>{{ 'messages.forward.pendingCount' | transloco: { count: sources.length } }}</span>
-          }
-        </div>
-        <button type="button" class="reply-close" (click)="cancelForward()">
-          <ion-icon [icon]="closeIcon" />
-        </button>
-      </div>
-    } @else if (editing(); as edit) {
+    @if (editing(); as edit) {
       <div class="reply-context">
         <ng-container [ngTemplateOutlet]="linkContextIcon" />
         <div class="reply-description">
@@ -630,18 +581,14 @@
 <ion-toast #muteError [message]="'conversation.muteFailed' | transloco" [duration]="3000" />
 
 @if (forwardSources().length) {
-  <app-forward-picker [messages]="forwardSources()" (closed)="forwardSources.set([])" />
+  <app-forward-picker [messages]="forwardSources()" (sent)="cancelSelection()" (closed)="forwardSources.set([])" />
 }
 
 @if (topicForwardOpen()) {
   <app-forward-picker
     [title]="'messages.forward.topicTo' | transloco"
-    [load]="loadTopicSources"
+    [topic]="{ chatId: id(), threadId: threadId()! }"
     (closed)="topicForwardOpen.set(false)" />
-}
-
-@if (forwardMove(); as move) {
-  <app-forward-picker [messages]="move.messages" [moveFrom]="move" (closed)="forwardMove.set(undefined)" />
 }
 
 <ion-alert

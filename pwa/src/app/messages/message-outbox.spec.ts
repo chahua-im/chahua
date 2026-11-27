@@ -2,7 +2,6 @@ import { signal, type WritableSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
-import { AlertController } from '@ionic/angular';
 import {
   AttachmentUploadPurpose,
   LinkPreviewStatus,
@@ -34,31 +33,29 @@ function wireAccepted(clientGeneratedId: string, id = '9007199254741100', messag
 
 describe('MessageOutbox', () => {
   let outbox: MessageOutbox;
+  let leaveConversation: () => void;
   let peer: RpcTestPeer;
   let live: Subject<MessageResponse>;
   let resync: Subject<void>;
   let events: Subject<ServerWsMessage>;
   let session: { user: WritableSignal<typeof testUser | undefined> };
 
-  let alertController: Pick<AlertController, 'create'>;
-
   beforeEach(() => {
     events = new Subject();
     live = new Subject();
     resync = new Subject();
     session = { user: signal<typeof testUser | undefined>(testUser) };
-    alertController = { create: vi.fn() };
     TestBed.configureTestingModule({
       providers: [
         ...provideRpcTesting(),
         { provide: Connection, useValue: mockRealtime({ messages$: live, resync$: resync, events$: events }) },
         { provide: SessionStore, useValue: session },
-        { provide: AlertController, useValue: alertController },
       ],
     });
     peer = TestBed.inject(RpcTestPeer);
     peer.authenticate();
     outbox = TestBed.inject(MessageOutbox);
+    leaveConversation = outbox.retainConversation(testChat.id);
   });
 
   afterEach(() => {
@@ -117,6 +114,28 @@ describe('MessageOutbox', () => {
     await vi.waitFor(() => expect(reply.delivery()).toBe(MessageDelivery.Failed));
     expect(reply.message().replyToMessage).toBe(quote);
     expect(reply.message().message).toBe('回复正文');
+  });
+
+  it('retains a failed forward comment in its destination and retries just that message', async () => {
+    leaveConversation();
+    const comment = outbox.enqueue(testChat.id, encodeId('99'), 'comment', { ...text, markRead: false });
+    const request = {
+      chatId,
+      threadId: '99',
+      markRead: false,
+      clientGeneratedId: comment.clientGeneratedId,
+      message: 'comment',
+      ...text,
+    };
+    peer.expect('messages.sendInThread', request).error(RpcErrorCode.Unavailable);
+    await comment.operation;
+    expect(outbox.items()).toEqual([comment]);
+    expect(comment.delivery()).toBe(MessageDelivery.Failed);
+    const retry = outbox.retry(comment);
+    peer.expect('messages.sendInThread', request).flush({ ...accepted(comment), replyRootId: '99' });
+    await retry;
+    peer.expectNone('messages.sendForward');
+    expect(outbox.items()).toEqual([]);
   });
 
   it('sends link choices in creates and metadata-only edits', async () => {
@@ -273,41 +292,6 @@ describe('MessageOutbox', () => {
     expect(item.message().message).toBe('latest edit');
   });
 
-  it('copies only ready preview snapshots for a single optimistic forward and keeps acknowledged metadata', async () => {
-    const ready = { url: 'https://example.com/', status: LinkPreviewStatus.ready, title: 'Example' };
-    const pending = {
-      url: 'https://pending.example/',
-      status: LinkPreviewStatus.pending,
-      expiresAt: '2099-01-01T00:00:00Z',
-    };
-    const source = {
-      ...testMessage,
-      metadata: { linkPreviews: [{ ...ready, expiresAt: '2099-01-01T00:00:00Z' }, pending] },
-    };
-    const item = outbox.enqueueForward(testChat.id, undefined, [source]);
-    expect(item.message().metadata?.linkPreviews).toEqual([{ ...ready, image: undefined }]);
-    const metadata = { linkPreviews: [ready] };
-    peer.expect('messages.forwardOne').flush({ ...accepted(item), metadata });
-    await item.operation;
-    expect(item.confirmed()?.metadata).toEqual(metadata);
-    expect(item.message().metadata).toEqual(metadata);
-  });
-
-  it('does not copy pending-only previews into a forward', async () => {
-    const source = {
-      ...testMessage,
-      metadata: {
-        linkPreviews: [
-          { url: 'https://example.com/', status: LinkPreviewStatus.pending, expiresAt: '2099-01-01T00:00:00Z' },
-        ],
-      },
-    };
-    const item = outbox.enqueueForward(testChat.id, undefined, [source]);
-    expect(item.message().metadata).toBeUndefined();
-    peer.expect('messages.forwardOne').flush(accepted(item));
-    await item.operation;
-  });
-
   it('discards metadata from a cancelled acknowledgement and deletion event', async () => {
     const changes = vi.fn();
     events.subscribe(changes);
@@ -343,219 +327,6 @@ describe('MessageOutbox', () => {
     expect(item.message().message).toBeUndefined();
   });
 
-  it('sends forward placeholders only after an explicit BadRequest confirmation', async () => {
-    let dismiss!: (detail: { role?: string }) => void;
-    const dismissal = new Promise<{ role?: string }>((resolve) => {
-      dismiss = resolve;
-    });
-    const alert = {
-      present: vi.fn(async () => {}),
-      dismiss: vi.fn(async () => true),
-      onDidDismiss: () => dismissal,
-    };
-    alertController.create = vi.fn(async () => alert as never);
-    const item = outbox.enqueueForward(testChat.id, undefined, [testMessage]);
-    peer
-      .expect('messages.forwardOne')
-      .error(RpcErrorCode.BadRequest, 'Audio messages cannot be forwarded until transcoding finishes');
-    await vi.waitFor(() => expect(alert.present).toHaveBeenCalledOnce());
-    dismiss({ role: 'confirm' });
-    await vi.waitFor(() => {
-      const retry = peer.expect('messages.forwardOne');
-      if (!retry.params) throw new Error('Forward retry had no named params');
-      expect(retry.params['allowPlaceholders']).toBe(true);
-      retry.flush(wireAccepted(item.clientGeneratedId));
-    });
-    await item.operation;
-  });
-
-  it('sends a single selection to a thread through forwardOne and confirms forwarded audio immediately', async () => {
-    const threadId = encodeId('9007199254741888');
-    const source = { ...testMessage, messageType: MessageType.audio };
-    const item = outbox.enqueueForward(testChat.id, threadId, [source]);
-    peer
-      .expect('messages.forwardOne', (params) => params['threadId'] === decodeId(threadId))
-      .flush({
-        ...accepted(item),
-        messageType: MessageType.audio,
-        replyRootId: decodeId(threadId),
-      });
-    await item.operation;
-    expect(item.published()).toBe(true);
-  });
-
-  it('serializes merged forwards with ordinary sends and retains their retry key', async () => {
-    const first = outbox.enqueue(testChat.id, undefined, 'before', text);
-    const forward = outbox.enqueueForward(testChat.id, undefined, [
-      { ...testMessage, id: encodeId('9007199254741999') },
-      testMessage,
-    ]);
-    peer.expect('messages.send').flush(accepted(first));
-    await first.operation;
-    const request = peer.expect('messages.forward');
-    expect(request.params?.['messageIds']).toEqual([decodeId(testMessage.id), '9007199254741999']);
-    request.error(RpcErrorCode.Unavailable);
-    await forward.operation;
-    const retry = outbox.retry(forward);
-    peer.expect('messages.forward').flush(accepted(forward));
-    await retry;
-  });
-
-  it('forwards a nested card without another bundle or visible origin', () => {
-    const source = {
-      ...testMessage,
-      messageType: MessageType.forwarded,
-      forwardedBundleId: encodeId('999'),
-      forwardedPreview: { total: 3, containsForwardedMessages: true, messages: [] },
-    };
-    const item = outbox.enqueueForward(testChat.id, undefined, [source]);
-    expect(item.message().forwardedBundleId).toBe(source.forwardedBundleId);
-    expect(item.message().forwardedFrom).toBeUndefined();
-    peer.expect('messages.forwardOne').error(RpcErrorCode.Forbidden);
-  });
-
-  it('lets a realtime confirmation win over a failed forward response', async () => {
-    const item = outbox.enqueueForward(testChat.id, undefined, [testMessage]);
-    const request = peer.expect('messages.forwardOne');
-    live.next({ ...testMessage, sender: item.message().sender, clientGeneratedId: item.clientGeneratedId });
-    request.error(RpcErrorCode.Internal);
-    await item.operation;
-    expect(item.delivery()).toBe(MessageDelivery.Sent);
-  });
-
-  it.each([
-    { count: 1, threadId: undefined },
-    { count: 2, threadId: encodeId('999') },
-  ])('sends the comment to the destination after forwarding $count messages', async ({ count, threadId }) => {
-    const item = outbox.enqueueForward(
-      testChat.id,
-      threadId,
-      Array.from({ length: count }, (_, index) => ({ ...testMessage, id: encodeId(String(100 + index)) })),
-      { comment: '  看看这个\n很有意思  ' },
-    );
-    peer.expect(count === 1 ? 'messages.forwardOne' : 'messages.forward').flush(accepted(item));
-    await item.operation;
-    const comment = outbox.items()[1];
-    peer
-      .expect(
-        threadId ? 'messages.sendInThread' : 'messages.send',
-        (params) => params['message'] === '看看这个\n很有意思',
-      )
-      .flush(accepted(comment, 1, '看看这个\n很有意思'));
-    await comment.operation;
-    expect(comment.delivery()).toBe(MessageDelivery.Sent);
-  });
-
-  it('retains a comment through forward failure and retries only its failed send', async () => {
-    const forward = outbox.enqueueForward(testChat.id, undefined, [testMessage], { comment: '附言' });
-    peer.expect('messages.forwardOne').error(RpcErrorCode.Unavailable);
-    await forward.operation;
-    const forwarding = outbox.retry(forward);
-    peer.expect('messages.forwardOne').flush(accepted(forward));
-    await forwarding;
-    const comment = outbox.items()[1];
-    peer.expect('messages.send').error(RpcErrorCode.Unavailable);
-    await comment.operation;
-    const retry = outbox.retry(comment);
-    peer.expect('messages.send').flush(accepted(comment, 2, '附言'));
-    await retry;
-  });
-
-  it('sends one comment when a realtime echo confirms a failed forward', async () => {
-    const item = outbox.enqueueForward(testChat.id, undefined, [testMessage], { comment: '附言' });
-    const request = peer.expect('messages.forwardOne');
-    live.next({ ...testMessage, sender: item.message().sender, clientGeneratedId: item.clientGeneratedId });
-    request.error(RpcErrorCode.Internal);
-    await item.operation;
-    const comment = outbox.items()[1];
-    peer.expect('messages.send').flush(accepted(comment, 1, '附言'));
-    await comment.operation;
-  });
-
-  it.each(['', ' \n '])('does not send an empty forward comment (%j)', async (comment) => {
-    const item = outbox.enqueueForward(testChat.id, undefined, [testMessage], { comment });
-    peer.expect('messages.forwardOne').flush(accepted(item));
-    await item.operation;
-    peer.expectNone('messages.send');
-  });
-
-  it('discards a forward comment cancelled before a late acknowledgement', async () => {
-    const item = outbox.enqueueForward(testChat.id, undefined, [testMessage], { comment: '附言' });
-    const request = peer.expect('messages.forwardOne');
-    await outbox.cancel(item);
-    request.flush(accepted(item));
-    await item.operation;
-    peer.expect('messages.delete').flush(null);
-    peer.expectNone('messages.send');
-  });
-
-  it('discards unsent forward comments on account change', async () => {
-    const item = outbox.enqueueForward(testChat.id, undefined, [testMessage], { comment: '附言' });
-    const request = peer.expect('messages.forwardOne');
-    session.user.set({ ...testUser, uid: 2 });
-    await vi.waitFor(() => expect(outbox.items()).toEqual([]));
-    request.flush(accepted(item));
-    await item.operation;
-    peer.expectNone('messages.delete');
-    peer.expectNone('messages.send');
-  });
-
-  it.each([
-    'Audio messages cannot be forwarded until transcoding finishes',
-    'Forwarded messages cannot include nested forwarded messages',
-  ])('retries the same forward key only after fallback consent: %s', async (message) => {
-    let dismiss!: (result: { role?: string }) => void;
-    const dismissed = new Promise<{ role?: string }>((resolve) => (dismiss = resolve));
-    const alert = { present: vi.fn(), dismiss: vi.fn(), onDidDismiss: () => dismissed };
-    alertController.create = vi.fn(async () => alert as never);
-    const item = outbox.enqueueForward(testChat.id, undefined, [testMessage]);
-    peer.expect('messages.forwardOne').error(RpcErrorCode.BadRequest, message);
-    await vi.waitFor(() => expect(alert.present).toHaveBeenCalledOnce());
-    dismiss({ role: 'confirm' });
-    const retry = await vi.waitFor(() => peer.expect('messages.forwardOne'));
-    expect(retry.params?.['allowPlaceholders']).toBe(true);
-    retry.flush(accepted(item));
-    await item.operation;
-  });
-
-  it('leaves a rejected fallback failed without automatic retry', async () => {
-    let dismiss!: (result: { role?: string }) => void;
-    const dismissed = new Promise<{ role?: string }>((resolve) => (dismiss = resolve));
-    const alert = { present: vi.fn(), dismiss: vi.fn(), onDidDismiss: () => dismissed };
-    alertController.create = vi.fn(async () => alert as never);
-    const item = outbox.enqueueForward(testChat.id, undefined, [testMessage]);
-    peer
-      .expect('messages.forwardOne')
-      .error(RpcErrorCode.BadRequest, 'Audio messages cannot be forwarded until transcoding finishes');
-    await vi.waitFor(() => expect(alert.present).toHaveBeenCalledOnce());
-    dismiss({ role: 'cancel' });
-    await item.operation;
-    expect(item.delivery()).toBe(MessageDelivery.Failed);
-    resync.next();
-    peer.expectNone('messages.forwardOne');
-  });
-
-  it('dismisses fallback confirmation on account change', async () => {
-    let dismiss!: (result: { role?: string }) => void;
-    const dismissed = new Promise<{ role?: string }>((resolve) => (dismiss = resolve));
-    const alert = {
-      present: vi.fn(),
-      dismiss: vi.fn(async (_data?: unknown, role?: string) => {
-        dismiss({ role });
-        return true;
-      }),
-      onDidDismiss: () => dismissed,
-    };
-    alertController.create = vi.fn(async () => alert as never);
-    const item = outbox.enqueueForward(testChat.id, undefined, [testMessage]);
-    peer
-      .expect('messages.forwardOne')
-      .error(RpcErrorCode.BadRequest, 'Audio messages cannot be forwarded until transcoding finishes');
-    await vi.waitFor(() => expect(alert.present).toHaveBeenCalledOnce());
-    session.user.set({ ...testUser, uid: 2 });
-    await item.operation;
-    expect(alert.dismiss).toHaveBeenCalledWith(undefined, 'cancel');
-  });
   it('stages acknowledged audio as server data and releases its upload only after range handoff', async () => {
     const media = upload();
     media.finish(encodeId('123'));
@@ -1130,16 +901,13 @@ describe('MessageOutbox', () => {
 describe('MessageOutbox with message sync', () => {
   it.each([false, true])('settles a send once when the batch arrives before a send failure: %s', async (fails) => {
     TestBed.configureTestingModule({
-      providers: [
-        ...provideRpcTesting(),
-        { provide: SessionStore, useValue: { user: signal(testUser) } },
-        { provide: AlertController, useValue: { create: vi.fn() } },
-      ],
+      providers: [...provideRpcTesting(), { provide: SessionStore, useValue: { user: signal(testUser) } }],
     });
     const peer = TestBed.inject(RpcTestPeer);
     try {
       const connection = TestBed.inject(Connection);
       const outbox = TestBed.inject(MessageOutbox);
+      outbox.retainConversation(testChat.id);
       const rows = new Map<SnowflakeID, MessageResponse>();
       const arrivals = vi.fn((message: MessageResponse) => rows.set(message.id, message));
       connection.messages$.subscribe(arrivals);

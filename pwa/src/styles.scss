@@ -15,6 +15,7 @@
 
 :root {
   --app-sidebar-width: 360px;
+  --app-conversation-background: var(--ion-background-color, #fff);
   --ion-color-primary: #2b7acd;
   --ion-color-primary-rgb: 43, 122, 205;
   --ion-color-primary-contrast: #ffffff;
@@ -470,12 +471,41 @@ ion-toast {
     flex-shrink: 0;
   }
 
+  &.forward-sent-toast::part(button) {
+    font-size: var(--app-font-compact);
+  }
+
   &::part(wrapper) {
     bottom: calc(var(--app-footer-height, 0px) + 8px);
   }
 }
 
 // These elements are created by Ionic outside Angular's template style scope.
+ion-alert.upload-failure-dialog {
+  .alert-button-group {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .alert-button.upload-error-copy {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    justify-self: center;
+    width: auto;
+    min-width: 0;
+    height: auto;
+    min-height: 0;
+    margin: 0 0 8px;
+    padding: 4px 8px;
+    border: 0;
+    color: var(--ion-color-medium);
+    font-size: var(--app-font-caption);
+    line-height: var(--app-line-caption);
+    font-weight: normal;
+    text-transform: none;
+  }
+}
+
 ion-alert.notification-prompt {
   .alert-wrapper {
     outline: none;

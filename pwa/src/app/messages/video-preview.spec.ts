@@ -6,15 +6,12 @@ import { VideoPreview } from './video-preview';
 
 @Component({
   imports: [MediaLoaded, VideoPreview],
-  template: `<video appMediaLoaded [appVideoPreview]="!sticker" [autoplay]="sticker" preload="metadata"></video>`,
+  template: `<video appMediaLoaded appVideoPreview preload="metadata"></video>`,
 })
-class PreviewHost {
-  sticker = false;
-}
+class PreviewHost {}
 
 describe('VideoPreview', () => {
   let intersect: (visible: boolean) => void;
-  const observe = vi.fn();
   const disconnect = vi.fn();
 
   beforeEach(() => {
@@ -28,7 +25,7 @@ describe('VideoPreview', () => {
               this as unknown as IntersectionObserver,
             );
         }
-        observe = observe;
+        observe() {}
         disconnect = disconnect;
       },
     );
@@ -41,13 +38,11 @@ describe('VideoPreview', () => {
     vi.unstubAllGlobals();
   });
 
-  function render(sticker = false) {
+  function render() {
     const fixture = TestBed.createComponent(PreviewHost);
-    fixture.componentInstance.sticker = sticker;
     fixture.detectChanges();
     const video: HTMLVideoElement = fixture.nativeElement.querySelector('video');
     const readyState = vi.spyOn(video, 'readyState', 'get').mockReturnValue(HTMLMediaElement.HAVE_NOTHING);
-    vi.spyOn(video, 'duration', 'get').mockReturnValue(10);
     const play = vi.spyOn(video, 'play');
     return { fixture, video, readyState, play };
   }
@@ -69,7 +64,7 @@ describe('VideoPreview', () => {
         expect(video.currentTime).toBe(0);
         intersect(true);
       }
-      expect(video.currentTime).toBe(0.1);
+      expect(video.currentTime).toBe(0.000001);
       expect(play).not.toHaveBeenCalled();
 
       readyState.mockReturnValue(HTMLMediaElement.HAVE_CURRENT_DATA);
@@ -87,14 +82,6 @@ describe('VideoPreview', () => {
     },
   );
 
-  it('seeks inside a very short clip', () => {
-    const { video, readyState } = render();
-    readyState.mockReturnValue(HTMLMediaElement.HAVE_METADATA);
-    vi.spyOn(video, 'duration', 'get').mockReturnValue(0.04);
-    intersect(true);
-    expect(video.currentTime).toBe(0.02);
-  });
-
   it('prepares a replacement source in the same element', () => {
     const { fixture, video, readyState } = render();
     readyState.mockReturnValue(HTMLMediaElement.HAVE_METADATA);
@@ -111,7 +98,7 @@ describe('VideoPreview', () => {
     video.dispatchEvent(new Event('loadedmetadata'));
     fixture.detectChanges();
     expect(video.classList.contains('loaded')).toBe(false);
-    expect(video.currentTime).toBe(0.1);
+    expect(video.currentTime).toBe(0.000001);
   });
 
   it('reduces preloading offscreen and on failure without starting playback', () => {
@@ -124,18 +111,5 @@ describe('VideoPreview', () => {
     video.dispatchEvent(new Event('error'));
     expect(video.preload).toBe('metadata');
     expect(play).not.toHaveBeenCalled();
-  });
-
-  it('leaves autoplay stickers alone and waits for their frame', () => {
-    const { fixture, video } = render(true);
-    expect(observe).not.toHaveBeenCalled();
-    video.dispatchEvent(new Event('loadedmetadata'));
-    fixture.detectChanges();
-    expect(video.classList.contains('loaded')).toBe(false);
-    expect(video.currentTime).toBe(0);
-    expect(video.autoplay).toBe(true);
-    video.dispatchEvent(new Event('loadeddata'));
-    fixture.detectChanges();
-    expect(video.classList.contains('loaded')).toBe(true);
   });
 });

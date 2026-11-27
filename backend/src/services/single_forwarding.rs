@@ -4,22 +4,37 @@ use std::collections::{HashMap, HashSet};
 
 use chrono::Utc;
 use diesel::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::{
-    dto::messages::{ForwardMessageBody, ForwardedFromInfo},
+    dto::{
+        messages::{ForwardMessageBody, ForwardedFromInfo},
+        rpc::messages::ForwardTarget,
+    },
     errors::AppError,
-    models::{Attachment, GroupKind, Message, MessageType, NewAttachment, TranscodeStatus},
+    models::{Attachment, GroupKind, Message, MessageType},
     schema::{attachments, messages},
     services::{
-        forwarding::{acquire_forward_retry_lock, check_source_membership, source_placeholder},
+        avatars::AvatarService,
+        forwarding::{acquire_forward_retry_lock, load_forward_sources, source_placeholder},
+        media::MediaStore,
         messages::{
-            attachment_previews, build_message_preview, build_sender, extract_mention_uids,
-            MessagePreviewInput, PreparedMessageSend, MESSAGE_ID_CONFLICT,
+            attachment_previews, build_message_preview, build_sender,
+            capture_forwarded_thread_reply_counts, extract_mention_uids,
+            redact_forwarded_invite_preview, MessagePreviewInput, PreparedForwardOrigin,
+            PreparedMessageSend, MESSAGE_ID_CONFLICT,
         },
         user::UserProfile,
     },
     utils::ids::{self, IdGen},
 };
+
+#[derive(Clone, Copy)]
+pub(crate) struct SingleForwardDeps<'a> {
+    pub id_gen: &'a IdGen,
+    pub media: &'a MediaStore,
+    pub avatars: &'a AvatarService,
+}
 
 pub(crate) enum PreparedSingleForward {
     Existing(Box<Message>),
@@ -50,7 +65,7 @@ fn validate_retry(
 /// copies of the same flattened origin are equivalent for this API.
 pub(crate) async fn prepare_single_forward(
     conn: &mut PgConnection,
-    id_gen: &IdGen,
+    deps: SingleForwardDeps<'_>,
     uid: i32,
     destination_chat_id: i64,
     destination_kind: GroupKind,
@@ -58,26 +73,10 @@ pub(crate) async fn prepare_single_forward(
     body: &ForwardMessageBody,
 ) -> Result<PreparedSingleForward, AppError> {
     acquire_forward_retry_lock(conn, &body.client_generated_id)?;
-    check_source_membership(conn, body.source_chat_id, uid)?;
-    // Edits lock the message before replacing its attachments. Hold the same
-    // lock through copying so both reads see one version of the source.
-    let source = messages::table
-        .filter(messages::id.eq(source_message_id))
-        .filter(messages::chat_id.eq(body.source_chat_id))
-        .filter(messages::deleted_at.is_null())
-        .filter(
-            messages::is_published.eq(true).or(messages::sender_uid
-                .eq(uid)
-                .and(messages::message_type.eq(MessageType::Audio))
-                .and(
-                    messages::transcode_status
-                        .eq_any([TranscodeStatus::None, TranscodeStatus::Pending]),
-                )),
-        )
-        .for_update()
-        .select(Message::as_select())
-        .first::<Message>(conn)
-        .optional()?
+    // The shared source lock prevents an edit from replacing attachments during the copy.
+    let source = load_forward_sources(conn, uid, body.source_chat_id, &[source_message_id])?
+        .selected
+        .pop()
         .ok_or(AppError::NotFound("Message not found"))?;
     let origin_id = source.forwarded_from_message_id.unwrap_or(source.id);
     if let Some(existing) = messages::table
@@ -87,6 +86,16 @@ pub(crate) async fn prepare_single_forward(
         .first::<Message>(conn)
         .optional()?
     {
+        if source.message_type == MessageType::Sticker
+            && existing.message_type == MessageType::Sticker
+            && existing.forwarded_from_message_id.is_none()
+            && existing.sticker_id == source.sticker_id
+            && existing.sender_uid == uid
+            && existing.chat_id == destination_chat_id
+            && existing.reply_root_id == body.thread_id
+        {
+            return Ok(PreparedSingleForward::Existing(Box::new(existing)));
+        }
         validate_retry(
             &existing,
             uid,
@@ -98,94 +107,200 @@ pub(crate) async fn prepare_single_forward(
         return Ok(PreparedSingleForward::Existing(Box::new(existing)));
     }
 
-    if let Some(reason) = source_placeholder(&source, body.allow_placeholders)? {
-        return Ok(PreparedSingleForward::New(Box::new(PreparedMessageSend {
-            system_kind: None,
+    let prepared = capture_single_forward(
+        conn,
+        deps,
+        uid,
+        &ForwardTarget {
             chat_id: destination_chat_id,
+            thread_id: body.thread_id,
+            client_generated_id: body.client_generated_id.clone(),
+        },
+        destination_kind,
+        &source,
+        body.allow_placeholders,
+    )
+    .await?;
+    Ok(PreparedSingleForward::New(Box::new(prepared)))
+}
+
+/// Capture content while the source row is locked against edits and recalls.
+pub(super) async fn capture_single_forward(
+    conn: &mut PgConnection,
+    deps: SingleForwardDeps<'_>,
+    uid: i32,
+    target: &ForwardTarget,
+    destination_kind: GroupKind,
+    source: &Message,
+    allow_pending_audio: bool,
+) -> Result<PreparedMessageSend, AppError> {
+    let origin_id = source.forwarded_from_message_id.unwrap_or(source.id);
+    let placeholder = source_placeholder(source, allow_pending_audio)?;
+    let thread_reply_counts =
+        capture_forwarded_thread_reply_counts(conn, std::slice::from_ref(source))?;
+    let mut metadata = placeholder
+        .is_none()
+        .then(|| super::messages::snapshot_link_metadata(source))
+        .flatten()
+        .map(|metadata| serde_json::to_value(metadata).expect("snapshot metadata is serializable"));
+    let thread_reply_count = thread_reply_counts.get(&source.id).copied();
+    let origin = capture_forward_origin(conn, deps, uid, source).await?;
+    let (quoted_origin, forward_origin) = match origin {
+        Some(PreparedForwardOrigin::Resolved(info)) if info.original_reply_to.is_some() => {
+            (Some(info), None)
+        }
+        other => (None, other),
+    };
+    if quoted_origin.is_some() || thread_reply_count.is_some() {
+        let forward = ForwardMetadata {
+            origin: quoted_origin,
+            thread_reply_count,
+        };
+        metadata.get_or_insert_with(|| serde_json::json!({}))["forward"] =
+            serde_json::to_value(forward).expect("forward metadata is serializable");
+    }
+    if let Some(reason) = placeholder {
+        let prepared = PreparedMessageSend {
+            system_kind: None,
+            chat_id: target.chat_id,
             chat_kind: destination_kind,
             sender_uid: uid,
             message: Some(reason.as_str().to_owned()),
-            metadata: None,
+            metadata,
             message_type: MessageType::Placeholder,
             sticker_id: None,
             reply_to_id: None,
-            reply_root_id: body.thread_id,
-            client_generated_id: body.client_generated_id.clone(),
-            attachment_ids: Vec::new(),
+            reply_root_id: target.thread_id,
+            client_generated_id: target.client_generated_id.clone(),
+            attachments: super::messages::PreparedAttachments::ForwardCopies(vec![]),
             publish_immediately: true,
             forwarded_from_message_id: Some(origin_id),
             forwarded_bundle_id: None,
-            forwarded_preview_total: None,
-            forwarded_preview_contains_forwarded_messages: None,
-            forwarded_preview_items: None,
-        })));
+            forwarded_preview: None,
+            forward_origin,
+        };
+        return Ok(prepared);
     }
 
-    let source_attachments = attachments::table
-        .filter(attachments::message_id.eq(source.id))
-        .filter(attachments::deleted_at.is_null())
-        .order((attachments::order.asc(), attachments::id.asc()))
-        .select(Attachment::as_select())
-        .load::<Attachment>(conn)?;
-    let mut cloned = Vec::with_capacity(source_attachments.len());
-    for attachment in source_attachments {
-        let id = ids::next_id(id_gen).await.map_err(|error| {
+    let source_attachments = if source.has_attachments {
+        attachments::table
+            .filter(attachments::message_id.eq(source.id))
+            .filter(attachments::deleted_at.is_null())
+            .order((attachments::order.asc(), attachments::id.asc()))
+            .select(Attachment::as_select())
+            .load::<Attachment>(conn)?
+    } else {
+        Vec::new()
+    };
+    let mut copies = source_attachments;
+    for row in &mut copies {
+        row.id = ids::next_id(deps.id_gen).await.map_err(|error| {
             tracing::error!(?error, "failed to allocate forwarded attachment ID");
             AppError::Internal("ID generation failed")
         })?;
-        cloned.push(NewAttachment {
-            id,
-            message_id: None,
-            uploader_uid: Some(uid),
-            file_name: attachment.file_name,
-            kind: attachment.kind,
-            external_reference: attachment.external_reference,
-            size: attachment.size,
-            created_at: Utc::now(),
-            deleted_at: None,
-            width: attachment.width,
-            height: attachment.height,
-            order: attachment.order,
-        });
+        row.message_id = None;
+        row.uploader_uid = Some(uid);
+        row.created_at = Utc::now();
     }
-    let attachment_ids = cloned.iter().map(|attachment| attachment.id).collect();
-    if !cloned.is_empty() {
-        diesel::insert_into(attachments::table)
-            .values(&cloned)
-            .execute(conn)?;
-    }
-    let metadata = super::messages::snapshot_link_metadata(&source)
-        .map(|metadata| serde_json::to_value(metadata).expect("snapshot metadata is serializable"));
-    Ok(PreparedSingleForward::New(Box::new(PreparedMessageSend {
+    let prepared = PreparedMessageSend {
         system_kind: None,
-        chat_id: destination_chat_id,
+        chat_id: target.chat_id,
         chat_kind: destination_kind,
         sender_uid: uid,
-        message: source.message,
+        message: source.message.clone(),
         metadata,
-        message_type: source.message_type,
+        message_type: source.message_type.clone(),
         sticker_id: source.sticker_id,
         reply_to_id: None,
-        reply_root_id: body.thread_id,
-        client_generated_id: body.client_generated_id.clone(),
-        attachment_ids,
+        reply_root_id: target.thread_id,
+        client_generated_id: target.client_generated_id.clone(),
+        attachments: super::messages::PreparedAttachments::ForwardCopies(copies),
         publish_immediately: true,
-        forwarded_from_message_id: Some(origin_id),
+        forwarded_from_message_id: (source.message_type != MessageType::Sticker)
+            .then_some(origin_id),
         // Bundles are immutable. Reuse the selected bundle without adding a nesting level;
         // the normal message hydrator loads its compact preview for the send response.
         forwarded_bundle_id: source.forwarded_bundle_id,
-        forwarded_preview_total: None,
-        forwarded_preview_contains_forwarded_messages: None,
-        forwarded_preview_items: None,
-    })))
+        forwarded_preview: None,
+        forward_origin,
+    };
+    Ok(prepared)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ForwardMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    origin: Option<ForwardedFromInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thread_reply_count: Option<i64>,
+}
+
+async fn capture_forward_origin(
+    conn: &mut PgConnection,
+    deps: SingleForwardDeps<'_>,
+    uid: i32,
+    source: &Message,
+) -> Result<Option<PreparedForwardOrigin>, AppError> {
+    if source.message_type == MessageType::Sticker {
+        return Ok(None);
+    }
+    if let Some(origin) = frozen_origin(source) {
+        return Ok(Some(PreparedForwardOrigin::Resolved(origin)));
+    }
+    if source.reply_to_id.is_none() && source.forwarded_from_message_id.is_none() {
+        return Ok(Some(PreparedForwardOrigin::Source {
+            chat_id: source.chat_id,
+            message_id: source.id,
+            sender_uid: source.sender_uid,
+        }));
+    }
+    if source.message_type == MessageType::Forwarded {
+        // A reforwarded card points at the first card, not the selected copy.
+        return Ok(None);
+    }
+    // A pre-snapshot forward may still refer to an original that quoted another message.
+    let attribution = Message {
+        has_thread: false,
+        has_reactions: false,
+        message: None,
+        ..source.clone()
+    };
+    let original = super::messages::hydrate_messages(
+        conn,
+        vec![attribution],
+        deps.media,
+        deps.avatars,
+        uid,
+        None,
+        super::messages::HydrationMode::ForwardOrigin,
+    )
+    .await
+    .into_iter()
+    .next()
+    .ok_or(AppError::Internal("Failed to capture forward origin"))?;
+    Ok(original
+        .forwarded_from
+        .or_else(|| {
+            original.reply_to_message.map(|reply| ForwardedFromInfo {
+                sender: original.sender,
+                original_chat_id: original.chat_id,
+                original_message_id: original.id,
+                original_reply_to: Some(reply),
+            })
+        })
+        .map(redact_invite_origin)
+        .map(PreparedForwardOrigin::Resolved))
 }
 
 /// Loaded once for a page, including origins used by ordinary reply previews and
 /// by the original reply context inside a forwarded message.
 #[derive(Default)]
 pub(crate) struct ForwardOrigins {
+    frozen: HashMap<i64, ForwardedFromInfo>,
     originals: HashMap<i64, Message>,
     replies: HashMap<i64, Message>,
+    reply_scopes: HashMap<i64, (i64, Option<i64>)>,
 }
 
 fn load_messages(
@@ -205,47 +320,108 @@ fn load_messages(
 impl ForwardOrigins {
     /// Lightweight previews only need attribution, without original replies.
     pub(crate) fn load_attribution<'a>(
+        &mut self,
         conn: &mut PgConnection,
         sources: impl Iterator<Item = &'a Message>,
-    ) -> QueryResult<Self> {
-        let ids = sources
-            .filter(|message| message.deleted_at.is_none())
-            .filter_map(|message| message.forwarded_from_message_id)
-            .collect();
-        Ok(Self {
-            originals: load_messages(conn, &ids)?,
-            replies: HashMap::new(),
-        })
+    ) -> QueryResult<()> {
+        let mut ids = HashSet::new();
+        for message in sources {
+            if message.deleted_at.is_some()
+                || message.message_type == MessageType::Sticker
+                || self.frozen.contains_key(&message.id)
+            {
+                continue;
+            }
+            if let Some(origin) = frozen_origin(message) {
+                self.frozen.insert(message.id, origin);
+            } else if let Some(id) = message.forwarded_from_message_id {
+                if !self.originals.contains_key(&id) {
+                    ids.insert(id);
+                }
+            }
+        }
+        self.originals.extend(load_messages(conn, &ids)?);
+        Ok(())
     }
 
     pub(crate) fn load<'a>(
+        &mut self,
         conn: &mut PgConnection,
-        sources: impl Iterator<Item = &'a Message>,
-    ) -> QueryResult<Self> {
-        let mut origins = Self::load_attribution(conn, sources)?;
-        let reply_ids = origins
-            .originals
-            .values()
-            .filter_map(|message| message.reply_to_id)
-            .collect();
+        displayed: &'a [Message],
+        quoted: impl Iterator<Item = &'a Message>,
+        include_reply_scopes: bool,
+    ) -> QueryResult<()> {
+        self.load_attribution(conn, displayed.iter().chain(quoted))?;
+        let mut frozen_replies = HashSet::new();
+        let mut reply_ids = HashSet::new();
+        for message in displayed {
+            if message.deleted_at.is_some() || message.message_type == MessageType::Sticker {
+                continue;
+            }
+            if let Some(origin) = self.frozen.get(&message.id) {
+                if include_reply_scopes && origin.original_chat_id == message.chat_id {
+                    if let Some(reply) = origin
+                        .original_reply_to
+                        .as_deref()
+                        .filter(|r| !r.is_deleted)
+                    {
+                        frozen_replies.insert(reply.id);
+                    }
+                }
+            } else if let Some(reply_id) = message
+                .forwarded_from_message_id
+                .and_then(|id| self.originals.get(&id))
+                .and_then(|original| original.reply_to_id)
+            {
+                reply_ids.insert(reply_id);
+            }
+        }
+        let scope_ids: Vec<_> = frozen_replies.difference(&reply_ids).copied().collect();
+        if !scope_ids.is_empty() {
+            self.reply_scopes = messages::table
+                .filter(messages::id.eq_any(scope_ids))
+                .filter(messages::is_published.eq(true))
+                .filter(messages::deleted_at.is_null())
+                .select((messages::id, (messages::chat_id, messages::reply_root_id)))
+                .load::<(i64, (i64, Option<i64>))>(conn)?
+                .into_iter()
+                .collect();
+        }
         let mut replies = load_messages(conn, &reply_ids)?;
         replies.retain(|_, message| {
             message.is_published && !message.system_kind.is_some_and(|kind| kind.is_membership())
         });
-        let nested_origin_ids = replies
-            .values()
-            .filter_map(|message| message.forwarded_from_message_id)
-            .filter(|id| !origins.originals.contains_key(id))
-            .collect();
-        origins
-            .originals
-            .extend(load_messages(conn, &nested_origin_ids)?);
-        origins.replies = replies;
-        Ok(origins)
+        self.load_attribution(conn, replies.values())?;
+        self.replies = replies;
+        Ok(())
     }
 
     pub(crate) fn replies(&self) -> impl Iterator<Item = &Message> {
         self.replies.values()
+    }
+
+    pub(crate) fn can_jump_to_original_reply(
+        &self,
+        message: &Message,
+        origin: &ForwardedFromInfo,
+    ) -> bool {
+        let Some(reply) = origin
+            .original_reply_to
+            .as_deref()
+            .filter(|r| !r.is_deleted)
+        else {
+            return false;
+        };
+        let scope = self.reply_scopes.get(&reply.id).copied().or_else(|| {
+            self.replies
+                .get(&reply.id)
+                .filter(|m| m.deleted_at.is_none())
+                .map(|m| (m.chat_id, m.reply_root_id))
+        });
+        scope.is_some_and(|(chat_id, root)| {
+            chat_id == message.chat_id
+                && (root == message.reply_root_id || message.reply_root_id == Some(reply.id))
+        })
     }
 
     pub(crate) fn collect_uids(&self, uids: &mut HashSet<i32>) {
@@ -271,6 +447,9 @@ impl ForwardOrigins {
         if message.deleted_at.is_some() || message.message_type == MessageType::Sticker {
             return None;
         }
+        if let Some(origin) = self.frozen.get(&message.id) {
+            return origin.sender.name.clone();
+        }
         let original = self.originals.get(&message.forwarded_from_message_id?)?;
         profiles.get(&original.sender_uid)?.username.clone()
     }
@@ -286,10 +465,21 @@ impl ForwardOrigins {
         if message.deleted_at.is_some() || message.message_type == MessageType::Sticker {
             return None;
         }
+        if let Some(origin) = self.frozen.get(&message.id) {
+            return Some(origin.clone());
+        }
         let original = self.originals.get(&message.forwarded_from_message_id?)?;
         let original_reply_to = original
             .reply_to_id
             .and_then(|id| self.replies.get(&id))
+            .filter(|reply| {
+                reply.chat_id == original.chat_id
+                    && super::messages::reply_in_scope(
+                        reply.id,
+                        reply.reply_root_id,
+                        original.reply_root_id,
+                    )
+            })
             .map(|reply| {
                 Box::new(build_message_preview(
                     MessagePreviewInput {
@@ -316,19 +506,33 @@ impl ForwardOrigins {
                     profiles,
                 ))
             });
-        Some(ForwardedFromInfo {
+        Some(redact_invite_origin(ForwardedFromInfo {
             sender: build_sender(original.sender_uid, avatars, profiles),
             original_chat_id: original.chat_id,
             original_message_id: original.id,
             original_reply_to,
-        })
+        }))
     }
+}
+
+fn redact_invite_origin(mut origin: ForwardedFromInfo) -> ForwardedFromInfo {
+    if let Some(reply) = origin.original_reply_to.as_deref_mut() {
+        redact_forwarded_invite_preview(reply);
+    }
+    origin
+}
+
+fn frozen_origin(message: &Message) -> Option<ForwardedFromInfo> {
+    let origin = message.metadata.as_ref()?.pointer("/forward/origin")?;
+    ForwardedFromInfo::deserialize(origin)
+        .ok()
+        .map(redact_invite_origin)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::TranscodeStatus;
+    use crate::models::{ForwardPlaceholder, TranscodeStatus};
 
     fn test_id_gen() -> &'static IdGen {
         static GENERATOR: std::sync::OnceLock<IdGen> = std::sync::OnceLock::new();
@@ -362,32 +566,41 @@ mod tests {
     }
 
     #[test]
-    fn retry_matches_origin_and_destination_without_comparing_mutable_content() {
-        let mut existing = message(100);
-        existing.forwarded_from_message_id = Some(1);
-        existing.reply_root_id = Some(80);
-        existing.message = Some("copied before source edit".into());
-        assert!(validate_retry(&existing, 7, 42, Some(80), 1, None).is_ok());
-        for (uid, chat, thread, origin) in [
-            (8, 42, Some(80), 1),
-            (7, 43, Some(80), 1),
-            (7, 42, None, 1),
-            (7, 42, Some(81), 1),
-            (7, 42, Some(80), 2),
+    fn only_unfinished_audio_requires_placeholder_consent() {
+        let mut source = message(42);
+        for (kind, status, pending) in [
+            (MessageType::Text, TranscodeStatus::None, false),
+            (MessageType::Audio, TranscodeStatus::None, true),
+            (MessageType::Audio, TranscodeStatus::Pending, true),
+            (MessageType::Audio, TranscodeStatus::Done, false),
+            (MessageType::Audio, TranscodeStatus::Failed, false),
         ] {
-            assert!(matches!(
-                validate_retry(&existing, uid, chat, thread, origin, None),
-                Err(AppError::Conflict(_))
-            ));
+            source.message_type = kind;
+            source.transcode_status = status;
+            let reason = ForwardPlaceholder::PendingAudio;
+            assert_eq!(
+                source_placeholder(&source, true).unwrap(),
+                pending.then_some(reason)
+            );
+            assert_eq!(source_placeholder(&source, false).is_err(), pending);
         }
-        existing.forwarded_from_message_id = None;
-        assert!(validate_retry(&existing, 7, 42, Some(80), 1, None).is_err());
     }
 
     #[test]
-    fn bundle_retry_requires_the_same_origin_bundle_and_destination() {
+    fn rejects_system_messages_and_single_invites() {
+        let mut source = message(42);
+        for kind in [MessageType::System, MessageType::Invite] {
+            source.message_type = kind;
+            assert!(matches!(
+                source_placeholder(&source, true),
+                Err(AppError::BadRequest(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn retry_matches_sender_destination_origin_and_bundle() {
         let mut existing = message(100);
-        existing.message_type = MessageType::Forwarded;
         existing.forwarded_from_message_id = Some(1);
         existing.forwarded_bundle_id = Some(90);
         existing.reply_root_id = Some(80);
@@ -398,16 +611,12 @@ mod tests {
             (7, 42, None, 1, Some(90)),
             (7, 42, Some(80), 2, Some(90)),
             (7, 42, Some(80), 1, Some(91)),
-            (7, 42, Some(80), 1, None),
         ] {
             assert!(matches!(
                 validate_retry(&existing, uid, chat, thread, origin, bundle),
                 Err(AppError::Conflict(_))
             ));
         }
-        // A merged send using the same bundle is a different operation.
-        existing.forwarded_from_message_id = None;
-        assert!(validate_retry(&existing, 7, 42, Some(80), 1, Some(90)).is_err());
     }
 
     #[test]
@@ -424,6 +633,7 @@ mod tests {
         let mut origins = ForwardOrigins {
             originals: HashMap::from([(1, original), (3, reply_origin)]),
             replies: HashMap::from([(2, reply)]),
+            ..Default::default()
         };
         let profiles = [7, 8, 9]
             .into_iter()
@@ -462,18 +672,22 @@ mod tests {
             .unwrap();
         assert_eq!(info.sender.uid, 8);
         assert_eq!(info.original_message_id, 1);
-        let preview = info.original_reply_to.unwrap();
+        let preview = info.original_reply_to.as_ref().unwrap();
         assert_eq!(preview.forwarded_from_name.as_deref(), Some("user-9"));
         assert_eq!(preview.attachments[0].kind, "image/png");
         assert_eq!(preview.mentions[0].username.as_deref(), Some("user-9"));
 
+        assert!(origins.can_jump_to_original_reply(&forwarded, &info));
+        forwarded.chat_id = 43;
+        assert!(!origins.can_jump_to_original_reply(&forwarded, &info));
+        forwarded.chat_id = 42;
         let reply = origins.replies.get_mut(&2).unwrap();
         reply.message_type = MessageType::Sticker;
         reply.sticker_id = Some(50);
         let info = origins
             .info_for(&forwarded, &avatars, &profiles, &emojis, &attachments)
             .unwrap();
-        let preview = info.original_reply_to.unwrap();
+        let preview = info.original_reply_to.as_ref().unwrap();
         assert_eq!(
             preview
                 .sticker
@@ -484,6 +698,8 @@ mod tests {
         assert!(preview.forwarded_from_name.is_none());
 
         origins.replies.get_mut(&2).unwrap().deleted_at = Some(Utc::now());
+        assert!(!preview.is_deleted);
+        assert!(!origins.can_jump_to_original_reply(&forwarded, &info));
         let info = origins
             .info_for(&forwarded, &avatars, &profiles, &emojis, &attachments)
             .unwrap();
@@ -493,6 +709,13 @@ mod tests {
         assert!(preview.attachments.is_empty());
         assert!(preview.mentions.is_empty());
         assert!(preview.sticker.is_none());
+
+        origins.replies.get_mut(&2).unwrap().reply_root_id = Some(50);
+        assert!(origins
+            .info_for(&forwarded, &avatars, &profiles, &emojis, &attachments)
+            .unwrap()
+            .original_reply_to
+            .is_none());
 
         // Removing the original content does not remove attribution on copies.
         origins.originals.get_mut(&1).unwrap().deleted_at = Some(Utc::now());
@@ -545,6 +768,13 @@ mod tests {
                     (-76004, -76001, 'application/pdf', 'deleted', 3, NOW(), 'deleted.pdf', 1, NOW());",
         ).unwrap();
         let id_gen = test_id_gen();
+        let media = crate::services::media::test_media_store("https://media.example");
+        let avatars = AvatarService::new(None, crate::metrics::Metrics::new().avatars);
+        let deps = SingleForwardDeps {
+            id_gen,
+            media: &media,
+            avatars: &avatars,
+        };
         let body = ForwardMessageBody {
             allow_placeholders: false,
             source_chat_id: -76000,
@@ -553,7 +783,7 @@ mod tests {
         };
         let PreparedSingleForward::New(prepared) = prepare_single_forward(
             &mut conn,
-            id_gen,
+            deps,
             76000,
             -76000,
             GroupKind::Group,
@@ -564,13 +794,8 @@ mod tests {
         .unwrap() else {
             panic!("first attempt must prepare a new copy")
         };
-        assert_eq!(prepared.attachment_ids.len(), 2);
-        let copies = attachments::table
-            .filter(attachments::id.eq_any(&prepared.attachment_ids))
-            .order(attachments::order.asc())
-            .select(Attachment::as_select())
-            .load::<Attachment>(&mut conn)
-            .unwrap();
+        let copies = prepared.attachments.forward_copies();
+        assert_eq!(copies.len(), 2);
         assert_eq!(
             copies
                 .iter()
@@ -578,29 +803,20 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["first", "last"]
         );
-        assert_eq!(
-            copies.iter().map(|a| a.id).collect::<Vec<_>>(),
-            prepared.attachment_ids
-        );
         assert!(copies
             .iter()
             .all(|a| a.uploader_uid == Some(76000) && a.message_id.is_none()));
 
-        // Simulate the committed send, then retry: no attachment copies added.
+        // Simulate the committed send, then retry the same operation.
         conn.batch_execute(
             "INSERT INTO messages(id, chat_id, sender_uid, message_type, client_generated_id,
                                   created_at, forwarded_from_message_id)
              VALUES (-76005, -76000, 76000, 'file', 'single-forward-retry-test', NOW(), -76001);",
         )
         .unwrap();
-        let before = attachments::table
-            .filter(attachments::uploader_uid.eq(Some(76000)))
-            .count()
-            .get_result::<i64>(&mut conn)
-            .unwrap();
         let PreparedSingleForward::Existing(existing) = prepare_single_forward(
             &mut conn,
-            id_gen,
+            deps,
             76000,
             -76000,
             GroupKind::Group,
@@ -612,20 +828,12 @@ mod tests {
             panic!("retry must reuse the existing message")
         };
         assert_eq!(existing.id, -76005);
-        assert_eq!(
-            attachments::table
-                .filter(attachments::uploader_uid.eq(Some(76000)))
-                .count()
-                .get_result::<i64>(&mut conn)
-                .unwrap(),
-            before
-        );
         conn.batch_execute("UPDATE messages SET deleted_at=NOW() WHERE id=-76001;")
             .unwrap();
         assert!(matches!(
             prepare_single_forward(
                 &mut conn,
-                id_gen,
+                deps,
                 76000,
                 -76000,
                 GroupKind::Group,
@@ -643,7 +851,7 @@ mod tests {
         assert!(matches!(
             prepare_single_forward(
                 &mut conn,
-                id_gen,
+                deps,
                 76000,
                 -76000,
                 GroupKind::Group,
@@ -701,6 +909,13 @@ mod tests {
                     (-76211, -76210, 76200, 'text', 'thread root', 'bundle-thread', NOW());",
         ).unwrap();
         let id_gen = test_id_gen();
+        let media = crate::services::media::test_media_store("https://media.example");
+        let avatars = AvatarService::new(None, crate::metrics::Metrics::new().avatars);
+        let deps = SingleForwardDeps {
+            id_gen,
+            media: &media,
+            avatars: &avatars,
+        };
         let mut flat_bundle_id = None;
         for (source_id, selection) in [
             (-76203, vec![-76201, -76202]),
@@ -736,7 +951,7 @@ mod tests {
             };
             let PreparedSingleForward::New(prepared) = prepare_single_forward(
                 &mut conn,
-                id_gen,
+                deps,
                 76200,
                 -76210,
                 GroupKind::Group,
@@ -752,24 +967,9 @@ mod tests {
             assert_eq!(prepared.forwarded_bundle_id, Some(bundle_id));
             assert_eq!(prepared.forwarded_from_message_id, Some(source_id));
             assert_eq!(prepared.reply_root_id, Some(-76211));
-            assert!(prepared.attachment_ids.is_empty());
+            assert!(prepared.attachments.forward_copies().is_empty());
             let copy_id = source_id - 10;
             persist(&mut conn, copy_id, &prepared);
-            let PreparedSingleForward::Existing(existing) = prepare_single_forward(
-                &mut conn,
-                id_gen,
-                76200,
-                -76210,
-                GroupKind::Group,
-                source_id,
-                &body,
-            )
-            .await
-            .unwrap() else {
-                panic!("retry must reuse the existing copy")
-            };
-            assert_eq!(existing.id, copy_id);
-
             // Deleting the source wrapper leaves the destination's bundle and
             // its child details accessible through destination membership.
             diesel::update(messages::table.find(source_id))
@@ -794,25 +994,11 @@ mod tests {
                 flat_bundle_id = Some(root);
             }
             assert!(load_chat_forwarded_bundle_id(&mut conn, -76210, copy_id, 76201).is_err());
-            assert!(matches!(
-                prepare_single_forward(
-                    &mut conn,
-                    id_gen,
-                    76200,
-                    -76210,
-                    GroupKind::Group,
-                    source_id,
-                    &body
-                )
-                .await,
-                Err(AppError::NotFound(_))
-            ));
-
             // Re-forwarding a copy retains the root origin even after deletion,
             // and must not add a bundle or increase the nesting depth.
             let PreparedSingleForward::New(repeated) = prepare_single_forward(
                 &mut conn,
-                id_gen,
+                deps,
                 76200,
                 -76210,
                 GroupKind::Group,
@@ -888,6 +1074,13 @@ mod tests {
              BEGIN;",
         ).unwrap();
         let id_gen = test_id_gen();
+        let media = crate::services::media::test_media_store("https://media.example");
+        let avatars = AvatarService::new(None, crate::metrics::Metrics::new().avatars);
+        let deps = SingleForwardDeps {
+            id_gen,
+            media: &media,
+            avatars: &avatars,
+        };
         let body = ForwardMessageBody {
             allow_placeholders: false,
             source_chat_id: -76100,
@@ -896,7 +1089,7 @@ mod tests {
         };
         let PreparedSingleForward::New(prepared) = prepare_single_forward(
             &mut conn,
-            id_gen,
+            deps,
             76100,
             -76100,
             GroupKind::Group,
@@ -907,6 +1100,14 @@ mod tests {
         .unwrap() else {
             panic!("expected a new copy");
         };
+        // A second forward can update its destination root while both hold the source.
+        editor
+            .batch_execute("BEGIN; SET LOCAL lock_timeout = '1s';")
+            .unwrap();
+        load_forward_sources(&mut editor, 76100, -76100, &[-76101]).unwrap();
+        editor
+            .batch_execute("UPDATE messages SET has_thread=true WHERE id=-76101; ROLLBACK;")
+            .unwrap();
         // Match patch_message's lock-before-replacing-attachments protocol.
         let edit = "BEGIN;
                     SET LOCAL lock_timeout = '100ms';
@@ -920,11 +1121,7 @@ mod tests {
             .expect_err("edit must wait for the source lock");
         assert!(error.to_string().contains("lock timeout"), "{error}");
         editor.batch_execute("ROLLBACK").unwrap();
-        let copied_file = attachments::table
-            .filter(attachments::id.eq(prepared.attachment_ids[0]))
-            .select(attachments::file_name)
-            .first::<String>(&mut conn)
-            .unwrap();
+        let copied_file = &prepared.attachments.forward_copies()[0].file_name;
         assert_eq!(prepared.message.as_deref(), Some("old caption"));
         assert_eq!(copied_file, "old.png");
         conn.batch_execute("ROLLBACK").unwrap();
@@ -935,7 +1132,7 @@ mod tests {
         conn.batch_execute("BEGIN").unwrap();
         let PreparedSingleForward::New(prepared) = prepare_single_forward(
             &mut conn,
-            id_gen,
+            deps,
             76100,
             -76100,
             GroupKind::Group,
@@ -946,13 +1143,34 @@ mod tests {
         .unwrap() else {
             panic!("expected a new copy");
         };
-        let copied_file = attachments::table
-            .filter(attachments::id.eq(prepared.attachment_ids[0]))
-            .select(attachments::file_name)
-            .first::<String>(&mut conn)
-            .unwrap();
+        let copied_file = &prepared.attachments.forward_copies()[0].file_name;
         assert_eq!(prepared.message.as_deref(), Some("new caption"));
         assert_eq!(copied_file, "new.png");
         conn.batch_execute("ROLLBACK").unwrap();
+
+        conn.batch_execute(
+            "INSERT INTO messages(id, chat_id, sender_uid, message_type, client_generated_id, created_at, reply_to_id)
+             VALUES (-76099, -76100, 76100, 'text', 'forward-lock-reply', NOW(), -76101),
+                    (-76098, -76100, 76100, 'text', 'forward-lock-other', NOW(), NULL);",
+        ).unwrap();
+        std::thread::scope(|scope| {
+            let forward = editor.transaction::<_, AppError, _>(|editor| {
+                editor.batch_execute("SET LOCAL statement_timeout = '5s';
+                    SELECT id FROM messages WHERE id = -76101 FOR UPDATE;")?;
+                let forward = scope.spawn(|| load_forward_sources(&mut conn, 76100, -76100, &[-76099, -76098]));
+                // Resume the bulk recall only once the forward is waiting for its quote.
+                editor.batch_execute("DO $$ BEGIN WHILE NOT EXISTS (
+                    SELECT 1 FROM pg_stat_activity WHERE pg_backend_pid() = ANY(pg_blocking_pids(pid))
+                ) LOOP PERFORM pg_sleep(0.01); END LOOP; END $$;")?;
+                crate::services::message_deletion::delete_selection(editor, -76100, 76100, false, &[-76101, -76099])?;
+                Ok(forward)
+            }).unwrap();
+            let sources = forward.join().unwrap().unwrap();
+            assert_eq!(
+                sources.selected.iter().map(|m| m.id).collect::<Vec<_>>(),
+                [-76098]
+            );
+            assert!(sources.external_replies.is_empty());
+        });
     }
 }

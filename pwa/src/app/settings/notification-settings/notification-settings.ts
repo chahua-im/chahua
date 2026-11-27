@@ -1,3 +1,4 @@
+import { ModalButton } from '../../ui/modal-button';
 import { LoadError } from '../../ui/load-error/load-error';
 import { afterRenderEffect, Component, DestroyRef, inject, viewChild } from '@angular/core';
 import {
@@ -19,7 +20,7 @@ import {
 } from '@ionic/angular';
 import type { ToggleCustomEvent } from '@ionic/core';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { chevronBackOutline, notificationsOutline, refreshOutline } from 'ionicons/icons';
+import { notificationsOutline, refreshOutline } from 'ionicons/icons';
 import { GroupKind } from '../../../generated/models';
 import { ChatStore } from '../../chats/chat-store';
 import { PanelNavigation } from '../../navigation/panel-navigation';
@@ -31,6 +32,7 @@ import { NotificationCategory } from './notification-category';
   selector: 'app-notification-settings',
   templateUrl: './notification-settings.html',
   imports: [
+    ModalButton,
     LoadError,
     ContentScrollbars,
     NotificationCategory,
@@ -59,7 +61,6 @@ export class NotificationSettings {
   protected readonly panels = inject(PanelNavigation);
   protected readonly notifications = inject(PushNotifications);
   protected readonly PushError = PushNotificationError;
-  protected readonly backIcon = chevronBackOutline;
   protected readonly updateIcon = refreshOutline;
   protected readonly notificationIcon = notificationsOutline;
   private readonly permissionToast = viewChild.required(IonToast);

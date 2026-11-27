@@ -1,6 +1,7 @@
+import { ModalButton } from '../ui/modal-button';
 import { Component, computed, DestroyRef, effect, inject, input, linkedSignal, model, untracked } from '@angular/core';
-import { IonButton, IonIcon, IonModal } from '@ionic/angular';
-import { closeOutline, linkOutline } from 'ionicons/icons';
+import { IonIcon, IonModal } from '@ionic/angular';
+import { linkOutline } from 'ionicons/icons';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { firstValueFrom } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -17,7 +18,7 @@ import { draftLinkUrls } from './draft-link-urls';
 
 @Component({
   selector: 'app-draft-link-previews',
-  imports: [IonButton, IonIcon, IonModal, TranslocoPipe, MessageLinkPreviews],
+  imports: [ModalButton, IonIcon, IonModal, TranslocoPipe, MessageLinkPreviews],
   template: `
     <ion-modal
       class="draft-link-preview-modal"
@@ -34,9 +35,7 @@ import { draftLinkUrls } from './draft-link-urls';
                 <span class="count">{{ selected().length }}/{{ maxPreviews }}</span>
               </div>
             </div>
-            <ion-button fill="clear" color="medium" (click)="open.set(false)"
-              ><ion-icon slot="icon-only" [icon]="closeIcon"
-            /></ion-button>
+            <app-modal-button (pressed)="open.set(false)" />
           </div>
           <div class="entries">
             @for (url of urls(); track url) {
@@ -124,10 +123,6 @@ import { draftLinkUrls } from './draft-link-urls';
       color: var(--ion-color-medium);
       font-size: var(--app-font-caption);
       font-variant-numeric: tabular-nums;
-    }
-    .heading ion-button {
-      flex-shrink: 0;
-      margin: 0;
     }
     .entries {
       min-height: 0;
@@ -259,7 +254,6 @@ export class DraftLinkPreviews {
   protected readonly urls = computed(() => draftLinkUrls(this.text()));
   protected readonly Status = LinkPreviewStatus;
   protected readonly maxPreviews = 3;
-  protected readonly closeIcon = closeOutline;
   protected readonly linkIcon = linkOutline;
   protected hostname(url: string) {
     return new URL(url).hostname;

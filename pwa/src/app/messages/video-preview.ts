@@ -1,4 +1,4 @@
-import { afterNextRender, DestroyRef, Directive, ElementRef, inject, input } from '@angular/core';
+import { afterNextRender, DestroyRef, Directive, ElementRef, inject } from '@angular/core';
 
 /** Fetch a still frame for visible, non-playing videos without starting playback. */
 @Directive({
@@ -11,7 +11,6 @@ import { afterNextRender, DestroyRef, Directive, ElementRef, inject, input } fro
   },
 })
 export class VideoPreview {
-  readonly appVideoPreview = input(true);
   private readonly video = inject<ElementRef<HTMLVideoElement>>(ElementRef).nativeElement;
   private visible = false;
   private requested = false;
@@ -19,7 +18,6 @@ export class VideoPreview {
   constructor() {
     const destroyRef = inject(DestroyRef);
     afterNextRender(() => {
-      if (!this.appVideoPreview()) return;
       const observer = new IntersectionObserver(([entry]) => {
         this.visible = entry.isIntersecting;
         if (this.visible) this.preview();
@@ -39,8 +37,8 @@ export class VideoPreview {
     if (this.video.readyState < HTMLMediaElement.HAVE_METADATA) return;
     this.requested = true;
     // Seeking clears the initial poster state and asks the browser to decode a frame.
-    // Keep the target inside even a clip shorter than 0.1 seconds.
-    this.video.currentTime = this.video.duration > 0 ? Math.min(0.1, this.video.duration / 2) : 0.1;
+    // One microsecond requests the first frame, including on browsers that skip a seek to zero.
+    this.video.currentTime = 0.000001;
   }
 
   protected reset() {
@@ -48,6 +46,6 @@ export class VideoPreview {
   }
 
   protected settle() {
-    if (this.appVideoPreview()) this.video.preload = 'metadata';
+    this.video.preload = 'metadata';
   }
 }

@@ -26,6 +26,7 @@ import { Message, type MessageContent } from './message';
 
 describe('Message', () => {
   beforeEach(() => {
+    vi.stubGlobal('localStorage', { getItem: () => null, setItem: vi.fn() });
     vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: false }));
     vi.stubGlobal(
       'IntersectionObserver',
@@ -215,12 +216,20 @@ describe('Message', () => {
     });
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.link-card-content')).toBeNull();
+    fixture.componentRef.setInput('preview', true);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.media-content').hasAttribute('inert')).toBe(true);
+    fixture.componentRef.setInput('preview', false);
     fixture.componentRef.setInput('message', message);
     fixture.componentRef.setInput('interactive', false);
     fixture.componentRef.setInput('record', true);
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.reply-preview').textContent).toContain('Quoted message');
     expect(fixture.nativeElement.querySelector('app-message-link-previews a')).not.toBeNull();
+    fixture.componentRef.setInput('preview', true);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-message-link-previews').textContent).toContain('Example');
+    expect(fixture.nativeElement.querySelector('app-message-link-previews a')).toBeNull();
     fixture.componentRef.setInput('message', { ...message, message: undefined, isDeleted: true });
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.link-card-content')).toBeNull();
@@ -546,6 +555,30 @@ describe('Message', () => {
     fixture.detectChanges();
     expect(element.querySelector('.thread-entry')).toBeNull();
     expect(element.textContent).not.toContain('发起话题');
+  });
+
+  it('renders the forwarded topic as static text alongside the current chat topic, when present', async () => {
+    const fixture = await render();
+    const open = vi.fn();
+    fixture.componentInstance.openThread.subscribe(open);
+    fixture.componentRef.setInput('canOpenThread', true);
+    fixture.componentRef.setInput('message', {
+      ...testMessage,
+      forwardedThreadReplyCount: 12,
+      threadInfo: { replyCount: 2 },
+    });
+    fixture.detectChanges();
+
+    const element: HTMLElement = fixture.nativeElement;
+    const forwarded = element.querySelector<HTMLElement>('.message-metadata > span.forwarded-topic')!;
+    expect(forwarded.textContent?.trim()).toBe('12 条回复');
+    forwarded.click();
+    expect(open).not.toHaveBeenCalled();
+
+    const live = element.querySelector<HTMLButtonElement>('button.thread-entry')!;
+    expect(live.textContent?.trim()).toBe('2 条回复');
+    live.click();
+    expect(open).toHaveBeenCalledWith(testMessage.id);
   });
 
   it.each([
@@ -939,7 +972,7 @@ describe('Message', () => {
     const element = fixture.nativeElement as HTMLElement;
     const bubble = element.querySelector('.bubble') as HTMLElement;
     expect(bubble.hasAttribute('inert')).toBe(false);
-    expect(element.querySelector('.reply-preview')?.hasAttribute('inert')).toBe(true);
+    expect(element.querySelector('.reply-preview')?.tagName).toBe('DIV');
     expect(element.querySelector('ion-avatar')).not.toBeNull();
     expect(element.querySelector('.reply-button, ion-button')).toBeNull();
     expect(element.querySelector('.reaction')?.textContent).toMatch(/❤️\s*2/);

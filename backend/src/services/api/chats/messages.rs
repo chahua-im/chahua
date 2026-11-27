@@ -30,11 +30,13 @@ use crate::services::message_visibility::{history_query, MessageVisibility};
 use crate::services::messages::{
     attach_metadata, attachment_position, authorize_message_send, load_username_by_uid,
     parse_attachment_ids, project_message_id_conflict, send_client_message,
-    sync_edited_message_mentions, validate_message, PreparedMessageSend, SendMessageOutcome,
-    SendPreparedMessageDeps, MESSAGE_ID_CONFLICT,
+    sync_edited_message_mentions, validate_message, PreparedAttachments, PreparedMessageSend,
+    SendMessageOutcome, SendPreparedMessageDeps, MESSAGE_ID_CONFLICT,
 };
 use crate::services::push::PushService;
-use crate::services::single_forwarding::{prepare_single_forward, PreparedSingleForward};
+use crate::services::single_forwarding::{
+    prepare_single_forward, PreparedSingleForward, SingleForwardDeps,
+};
 use crate::services::social;
 use crate::services::ws_registry::ConnectionRegistry;
 use crate::utils::ids::IdGen;
@@ -558,6 +560,7 @@ pub async fn post_message(
     principal: Principal,
     chat_id: i64,
     body: CreateMessageBody,
+    mark_read: bool,
     conn: &mut PgConnection,
     deps: PostMessageDeps<'_>,
 ) -> Result<MessageResponse, AppError> {
@@ -607,30 +610,25 @@ pub async fn post_message(
                     reply_to_id: body.reply_to_id,
                     reply_root_id: None,
                     client_generated_id: body.client_generated_id,
-                    attachment_ids,
+                    attachments: PreparedAttachments::Uploads(attachment_ids),
                     publish_immediately,
                     forwarded_bundle_id: None,
-                    forwarded_preview_total: None,
-                    forwarded_preview_contains_forwarded_messages: None,
-                    forwarded_preview_items: None,
+                    forwarded_preview: None,
+                    forward_origin: None,
                 },
             )
             .await?;
-            let receipt_advanced = if let SendMessageOutcome::Created(send_result) = &send_result {
-                crate::services::chat::mark_chat_as_read(
-                    conn,
-                    chat_id,
-                    uid,
-                    send_result.response.id,
-                )?;
-                crate::services::read_receipts::advance_chat_read_receipt(
-                    conn,
-                    chat_id,
-                    uid,
-                    send_result.response.id,
-                )?
-            } else {
-                false
+            let receipt_advanced = match &send_result {
+                SendMessageOutcome::Created(sent) if mark_read => {
+                    crate::services::chat::mark_chat_as_read(conn, chat_id, uid, sent.response.id)?;
+                    crate::services::read_receipts::advance_chat_read_receipt(
+                        conn,
+                        chat_id,
+                        uid,
+                        sent.response.id,
+                    )?
+                }
+                _ => false,
             };
             Ok((send_result, receipt_advanced))
         }
@@ -737,8 +735,11 @@ pub async fn forward_messages(
                     &created.response,
                     &created.member_uids,
                     root,
-                    true,
-                    false,
+                    crate::services::threads::ThreadSendOptions {
+                        publish_immediately: true,
+                        subscribe_mentioned_users: false,
+                        mark_read: true,
+                    },
                 )?;
                 (
                     thread_state.receipt_advanced,
@@ -832,7 +833,11 @@ pub async fn forward_message(
             )?;
             let prepared = match prepare_single_forward(
                 conn,
-                deps.id_gen.as_ref(),
+                SingleForwardDeps {
+                    id_gen: deps.id_gen,
+                    media: deps.media,
+                    avatars: deps.avatars,
+                },
                 uid,
                 chat_id,
                 target.kind,
@@ -891,8 +896,11 @@ pub async fn forward_message(
                     &created.response,
                     &created.member_uids,
                     root,
-                    true,
-                    false,
+                    crate::services::threads::ThreadSendOptions {
+                        publish_immediately: true,
+                        subscribe_mentioned_users: false,
+                        mark_read: true,
+                    },
                 )?;
                 (
                     thread_state.receipt_advanced,
@@ -923,7 +931,7 @@ pub async fn forward_message(
         .side_effects
         .fire(deps.ws_registry, deps.push_service);
     if let Some(search) = deps.message_search {
-        search.upsert_message_best_effort(created.inserted_message);
+        search.upsert_response_best_effort(&created.response);
     }
     if receipt_advanced {
         crate::services::read_receipts::broadcast_read_receipt_changed_if_dm(
@@ -991,6 +999,7 @@ pub async fn post_thread_message(
     chat_id: i64,
     thread_id: i64,
     body: CreateMessageBody,
+    mark_read: bool,
     conn: &mut PgConnection,
     deps: PostThreadMessageDeps<'_>,
 ) -> Result<MessageResponse, AppError> {
@@ -1043,12 +1052,11 @@ pub async fn post_thread_message(
                     reply_to_id: body.reply_to_id,
                     reply_root_id: Some(thread_id),
                     client_generated_id: body.client_generated_id,
-                    attachment_ids,
+                    attachments: PreparedAttachments::Uploads(attachment_ids),
                     publish_immediately,
                     forwarded_bundle_id: None,
-                    forwarded_preview_total: None,
-                    forwarded_preview_contains_forwarded_messages: None,
-                    forwarded_preview_items: None,
+                    forwarded_preview: None,
+                    forward_origin: None,
                 },
             )
             .await?;
@@ -1063,8 +1071,11 @@ pub async fn post_thread_message(
                 &send_result.response,
                 &send_result.member_uids,
                 &root_msg,
-                publish_immediately,
-                true,
+                crate::services::threads::ThreadSendOptions {
+                    publish_immediately,
+                    subscribe_mentioned_users: true,
+                    mark_read,
+                },
             )?;
             Ok((
                 SendMessageOutcome::Created(Box::new(send_result)),
@@ -1093,7 +1104,7 @@ pub async fn post_thread_message(
         ));
     }
     if let Some(search_service) = deps.message_search {
-        search_service.upsert_response_best_effort(response.clone());
+        search_service.upsert_response_best_effort(&response);
     }
     if matches!(response.message_type, MessageType::Audio) {
         crate::services::audio_transcode::enqueue_message(response.id);
@@ -1135,13 +1146,13 @@ pub async fn post_thread_message(
     Ok(response)
 }
 
-struct ThreadSendUpdateDeps<'a> {
-    media: &'a MediaStore,
-    avatars: &'a Arc<AvatarService>,
-    ws_registry: &'a Arc<ConnectionRegistry>,
+pub(crate) struct ThreadSendUpdateDeps<'a> {
+    pub media: &'a MediaStore,
+    pub avatars: &'a Arc<AvatarService>,
+    pub ws_registry: &'a Arc<ConnectionRegistry>,
 }
 
-async fn broadcast_thread_send_updates(
+pub(crate) async fn broadcast_thread_send_updates(
     conn: &mut PgConnection,
     deps: ThreadSendUpdateDeps<'_>,
     chat_id: i64,
@@ -1356,34 +1367,35 @@ pub async fn delete_message(
 ) -> Result<(), AppError> {
     check_membership(conn, chat_id, uid)?;
     social::require_chat_writable(conn, chat_id, uid, deps.restricted_user_group_ids)?;
-    let message: Message = messages::table
-        .filter(dsl::id.eq(message_id).and(dsl::chat_id.eq(chat_id)))
-        .select(Message::as_select())
-        .first(conn)
-        .optional()?
-        .ok_or(AppError::NotFound("Message not found"))?;
-    if message.system_kind.is_some_and(|kind| kind.is_membership())
-        && !crate::services::user::load_chat_settings_for_chat(conn, uid, chat_id)?
-            .2
-            .can_view
-    {
-        return Err(AppError::NotFound("Message not found"));
-    }
-    if message.sender_uid != uid {
-        let role = load_requester_group_role(conn, chat_id, uid)?;
-        if role != Some(GroupRole::Admin) {
-            return Err(AppError::Forbidden("You can only delete your own messages"));
+    let deleted_message: Message = conn.transaction::<_, AppError, _>(|conn| {
+        let message: Message = messages::table
+            .filter(dsl::id.eq(message_id).and(dsl::chat_id.eq(chat_id)))
+            .for_update()
+            .select(Message::as_select())
+            .first(conn)
+            .optional()?
+            .ok_or(AppError::NotFound("Message not found"))?;
+        if message.system_kind.is_some_and(|kind| kind.is_membership())
+            && !crate::services::user::load_chat_settings_for_chat(conn, uid, chat_id)?
+                .2
+                .can_view
+        {
+            return Err(AppError::NotFound("Message not found"));
         }
-    }
-    crate::services::message_deletion::validate_deletable_message_type(&message.message_type)?;
-    if message.deleted_at.is_some() {
-        return Err(AppError::Gone("Message already deleted"));
-    }
-    if !message.is_published {
-        return Err(AppError::BadRequest("Cannot delete unpublished message"));
-    }
-    let now = Utc::now();
-    let deleted_message: Message = conn.transaction::<_, diesel::result::Error, _>(|conn| {
+        if message.sender_uid != uid {
+            let role = load_requester_group_role(conn, chat_id, uid)?;
+            if role != Some(GroupRole::Admin) {
+                return Err(AppError::Forbidden("You can only delete your own messages"));
+            }
+        }
+        crate::services::message_deletion::validate_deletable_message_type(&message.message_type)?;
+        if message.deleted_at.is_some() {
+            return Err(AppError::Gone("Message already deleted"));
+        }
+        if !message.is_published {
+            return Err(AppError::BadRequest("Cannot delete unpublished message"));
+        }
+        let now = Utc::now();
         let deleted_message: Message =
             diesel::update(messages::table.filter(dsl::id.eq(message_id)))
                 .set(dsl::deleted_at.eq(Some(now)))
@@ -1426,12 +1438,15 @@ pub async fn delete_message(
     if let Some(search_service) = deps.message_search {
         search_service.delete_message_best_effort(message_id);
     }
+    let is_membership = deleted_message
+        .system_kind
+        .is_some_and(|kind| kind.is_membership());
     let response = attach_metadata(conn, vec![deleted_message], deps.media, deps.avatars, uid)
         .await
         .into_iter()
         .next()
         .unwrap();
-    let member_uids: Vec<i32> = if message.system_kind.is_some_and(|kind| kind.is_membership()) {
+    let member_uids: Vec<i32> = if is_membership {
         group_membership::table
             .inner_join(groups::table)
             .filter(groups::id.eq(chat_id))

@@ -1,3 +1,4 @@
+import { ModalButton } from '../../ui/modal-button';
 import { Router } from '@angular/router';
 import {
   afterRenderEffect,
@@ -15,18 +16,8 @@ import {
 import { TranslocoPipe } from '@jsverse/transloco';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { LocalDatePipe } from '../../i18n/local-date.pipe';
-import {
-  IonBadge,
-  IonIcon,
-  IonModal,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
-  IonButtons,
-  IonButton,
-  IonContent,
-} from '@ionic/angular';
-import { alertCircleOutline, documentAttachOutline, downloadOutline, playCircle } from 'ionicons/icons';
+import { IonBadge, IonIcon, IonModal, IonHeader, IonToolbar, IonTitle, IonButtons, IonContent } from '@ionic/angular';
+import { alertCircleOutline, documentAttachOutline, downloadOutline, micOutline, playCircle } from 'ionicons/icons';
 import { type MessageResponse, MessageType } from '../../../generated/models';
 import type { SnowflakeID } from '../../api/snowflake-id';
 import { openMediaViewer } from '../media-viewer/media-viewer';
@@ -59,6 +50,7 @@ export type MessageAttachmentSource = Pick<MessageResponse, 'messageType' | 'cre
   templateUrl: './message-attachments.html',
   styleUrl: './message-attachments.scss',
   imports: [
+    ModalButton,
     ContentScrollbars,
     MediaLoaded,
     VideoPreview,
@@ -70,7 +62,6 @@ export type MessageAttachmentSource = Pick<MessageResponse, 'messageType' | 'cre
     IonToolbar,
     IonTitle,
     IonButtons,
-    IonButton,
     IonContent,
     UploadProgress,
     UploadFailure,
@@ -103,6 +94,8 @@ export class MessageAttachments {
     );
   }
   readonly message = input.required<MessageAttachmentSource>();
+  readonly staticPreview = input(false);
+  protected readonly voiceIcon = micOutline;
   readonly dockEnabled = input(true);
   readonly overlayTime = input(false);
   readonly outgoing = input(false);

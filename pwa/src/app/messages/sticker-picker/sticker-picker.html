@@ -3,9 +3,7 @@
     <ion-toolbar>
       @if (!selectable() && panels.paths().length > 1) {
         <ion-buttons slot="start">
-          <ion-button (click)="panels.back()">
-            <ion-icon slot="icon-only" [icon]="icons.chevronBackOutline" />
-          </ion-button>
+          <app-modal-button back (pressed)="panels.back()" />
         </ion-buttons>
       }
       <ion-title>
@@ -15,7 +13,7 @@
         }
       </ion-title>
       <ion-buttons slot="end">
-        <ion-button (click)="panels.close()">{{ 'common.done' | transloco }}</ion-button>
+        <app-modal-button (pressed)="panels.close()" />
       </ion-buttons>
     </ion-toolbar>
   </ion-header>

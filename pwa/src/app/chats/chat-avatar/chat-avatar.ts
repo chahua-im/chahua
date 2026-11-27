@@ -1,7 +1,7 @@
 import { afterRenderEffect, Component, computed, ElementRef, input, linkedSignal, viewChild } from '@angular/core';
 import { IonAvatar, IonIcon } from '@ionic/angular';
 import { chatbubbles } from 'ionicons/icons';
-import { GroupKind, type MessagePreview } from '../../../generated/models';
+import { GroupKind, type MessagePreview, type ThreadListItem } from '../../../generated/models';
 import type { ChatInfo } from '../chat-store';
 import { AvatarColor, AvatarTextPipe } from '../avatar-text.pipe';
 
@@ -65,5 +65,19 @@ export function conversationAvatar(
     badgeName: thread && !dm && root ? (root.sender.name ?? String(root.sender.uid)) : undefined,
     badgeAvatar: thread && !dm ? root?.sender.avatarUrl : undefined,
     badgeIcon: thread && dm ? chatbubbles : undefined,
+  };
+}
+
+export function threadAvatar(thread: ThreadListItem, chat?: ChatInfo): ChatAvatarData {
+  const isDm = thread.chatKind === GroupKind.dm;
+  const { sender } = thread.threadRootMessage;
+  return {
+    avatarName: isDm
+      ? (chat?.peer?.username ?? thread.peer?.username ?? thread.chatName)
+      : (chat?.name ?? thread.chatName),
+    avatar: isDm ? (chat?.peer?.avatarUrl ?? thread.peer?.avatarUrl) : (chat?.avatar ?? thread.chatAvatar),
+    badgeName: !isDm ? (sender.name ?? String(sender.uid)) : undefined,
+    badgeAvatar: !isDm ? sender.avatarUrl : undefined,
+    badgeIcon: isDm ? chatbubbles : undefined,
   };
 }

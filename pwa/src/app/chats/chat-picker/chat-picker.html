@@ -1,20 +1,38 @@
 <ion-modal
+  [class.with-selection-content]="selectionContent() != null"
+  [style.--selection-panel-height.px]="!mobile() && showingSelection() ? selectionHeight() : null"
   [isOpen]="open()"
-  [initialBreakpoint]="mobile() ? 0.5 : 1"
+  [initialBreakpoint]="mobile() && !selectionContent() ? 0.5 : 1"
   [breakpoints]="mobile() ? [0, 0.5, 1] : [0, 1]"
   [handle]="mobile()"
   [expandToScroll]="false"
   [canDismiss]="canDismiss"
+  (ionDragStart)="keepSheetHeight($event)"
+  (ionBreakpointDidChange)="keepSheetHeight($event)"
   (didPresent)="presented($event)"
   (willDismiss)="dismissing()"
   (didDismiss)="open.set(false); closed.emit()">
   <ng-template>
-    <ion-header>
+    @if (selectionContent() && mobile()) {
+      <div #sheetHandleSpace class="sheet-handle-space"></div>
+    }
+    <ion-header [hidden]="showingSelection()">
       <ion-toolbar>
-        <ion-title>{{ title() }}</ion-title>
-        <ion-buttons slot="end">
-          <ion-button [disabled]="submitted()" (click)="close()">{{ 'common.cancel' | transloco }}</ion-button>
-        </ion-buttons>
+        @let showBack = returningToSelection() || backButton();
+        @if (showBack) {
+          <ion-buttons slot="start">
+            <app-modal-button
+              back
+              [disabled]="submitted()"
+              (pressed)="returningToSelection() ? backToSelection() : close()" />
+          </ion-buttons>
+        }
+        <ion-title>{{ returningToSelection() ? (reselectionTitle() ?? title()) : title() }}</ion-title>
+        @if (!showBack) {
+          <ion-buttons slot="end">
+            <app-modal-button [disabled]="submitted()" (pressed)="close()" />
+          </ion-buttons>
+        }
       </ion-toolbar>
       <ion-searchbar
         [value]="query()"
@@ -33,6 +51,7 @@
         " />
     </ion-header>
     <ion-content
+      [hidden]="showingSelection()"
       appScrollbars
       [scrollEvents]="true"
       (ionScroll)="rememberPosition()"
@@ -117,5 +136,10 @@
         </ion-infinite-scroll>
       }
     </ion-content>
+    @if (hasSelection()) {
+      <div class="picker-selection" [hidden]="!showingSelection()">
+        <ng-container [ngTemplateOutlet]="selectionContent() ?? null" />
+      </div>
+    }
   </ng-template>
 </ion-modal>

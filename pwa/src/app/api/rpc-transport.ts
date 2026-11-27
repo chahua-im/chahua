@@ -192,7 +192,7 @@ export class RpcTransport {
   call<T>(method: string, params?: object): Observable<T> {
     return new Observable<T>((subscriber) => {
       if (!this.canCall(method)) {
-        const error = new RpcTransportError('disconnected', 'The RPC session is not authenticated');
+        const error = new RpcTransportError('disconnected', 'The RPC session is not authenticated', false);
         subscriber.error(this.admissionError(method, undefined, error));
         return;
       }
@@ -447,6 +447,8 @@ export class RpcTransport {
     try {
       this.socket.send(pending.wire);
     } catch {
+      this.freeSentSlot(pending);
+      pending.sent = false;
       this.stopCurrent(new RpcTransportError('disconnected', 'The RPC socket failed while sending'), true);
     }
   }
@@ -497,9 +499,16 @@ export class RpcTransport {
       durationMs: Math.round(performance.now() - pending.startedAt),
       sent: pending.sent,
     };
+    if (error instanceof RpcTransportError && pending.sent !== error.sent)
+      error = new RpcTransportError(error.kind, error.message, pending.sent);
     if (correlate) this.diagnostics.correlate(error, details);
     this.diagnostics.recordError('rpc.failed', error, details);
     pending.reject(error);
+  }
+
+  private freeSentSlot(pending: PendingCall) {
+    if (pending.lane === 'ordinary') this.ordinarySent--;
+    else this.controlSent = false;
   }
 
   private release(pending: PendingCall) {
@@ -510,8 +519,7 @@ export class RpcTransport {
     window.clearTimeout(pending.leaseTimer);
     this.queuedBytes -= pending.bytes;
     if (pending.sent) {
-      if (pending.lane === 'ordinary') this.ordinarySent--;
-      else this.controlSent = false;
+      this.freeSentSlot(pending);
     } else {
       const queue = pending.lane === 'ordinary' ? this.ordinaryQueue : this.controlQueue;
       const index = queue.indexOf(pending);

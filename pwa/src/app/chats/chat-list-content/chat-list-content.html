@@ -138,12 +138,10 @@
                 ">
                 <app-message-preview slot="title" [message]="row.thread.threadRootMessage"></app-message-preview>
                 <span slot="preview">
-                  @if (row.draft || row.forward?.length) {
+                  @if (row.draft) {
                     <ion-text color="danger">{{ 'chats.content.draft' | transloco }}</ion-text>
-                    @if (row.forward?.length) {
-                      {{ 'messages.forward.pendingCount' | transloco: { count: row.forward!.length } }}
-                    } @else if (row.draft && row.draft.text.trim()) {
-                      <app-markdown-summary [text]="row.draft!.text" />
+                    @if (row.draft.text.trim()) {
+                      <app-markdown-summary [text]="row.draft.text" />
                     }
                   } @else if (row.preview; as last) {
                     <app-message-preview [message]="last"></app-message-preview>
@@ -197,12 +195,10 @@
                 ]"
                 (selected)="navigation.goTo(row.chat.id, { type: latestTarget })">
                 <span slot="preview">
-                  @if (row.draft || row.forward?.length) {
+                  @if (row.draft) {
                     <ion-text color="danger">{{ 'chats.content.draft' | transloco }}</ion-text>
-                    @if (row.forward?.length) {
-                      {{ 'messages.forward.pendingCount' | transloco: { count: row.forward!.length } }}
-                    } @else if (row.draft && row.draft.text.trim()) {
-                      <app-markdown-summary [text]="row.draft!.text" />
+                    @if (row.draft.text.trim()) {
+                      <app-markdown-summary [text]="row.draft.text" />
                     }
                   } @else if (row.preview; as last) {
                     <app-message-preview [message]="last"></app-message-preview>

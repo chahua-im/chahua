@@ -1,3 +1,4 @@
+import { ModalButton } from '../../ui/modal-button';
 import { Component, computed, inject, isDevMode, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import {
@@ -38,6 +39,7 @@ import { Preferences } from '../preferences';
   templateUrl: './settings.html',
   styleUrl: './settings.scss',
   imports: [
+    ModalButton,
     ChatAvatar,
     RouterLink,
     ContentScrollbars,
@@ -59,7 +61,7 @@ import { Preferences } from '../preferences';
   host: { class: 'ion-page' },
 })
 export class Settings {
-  private readonly panels = inject(PanelNavigation);
+  protected readonly panels = inject(PanelNavigation);
 
   protected readonly session = inject(SessionStore);
   protected readonly updates = inject(AppUpdates);

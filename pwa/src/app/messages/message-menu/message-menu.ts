@@ -133,6 +133,7 @@ export class MessageMenu {
   readonly allowSelect = input(false);
   readonly select = output<MessageResponse | OutgoingMessage>();
   protected readonly forwarding = signal<readonly ForwardSource[]>([]);
+  readonly forwardOpen = computed(() => this.forwarding().length > 0);
   protected readonly stickerSource = signal<{ message: MessageResponse; packs: StickerPackSummary[] } | undefined>(
     undefined,
   );
@@ -297,7 +298,6 @@ export class MessageMenu {
       !message.isDeleted &&
       message.messageType === MessageType.text &&
       !message.forwardedFrom &&
-      !this.queued()?.forwarding &&
       (this.groupChatWriteDisabled() ||
         this.chatInfo.canSpeak(
           this.chatId(),
@@ -482,22 +482,32 @@ export class MessageMenu {
         stack.style.setProperty('--menu-from', `translate(0px, ${fromY}px)`);
         this.placed.set(true);
       };
-      const observer = new ResizeObserver(place);
+      let frame: number | undefined;
+      const schedulePlacement = () => {
+        if (frame != null) return;
+        // Placement changes the observed sizes, so run it outside the resize notification batch.
+        frame = requestAnimationFrame(() => {
+          frame = undefined;
+          place();
+        });
+      };
+      const observer = new ResizeObserver(schedulePlacement);
       observer.observe(preview);
       observer.observe(actions!);
-      const labels = new MutationObserver(place);
+      const labels = new MutationObserver(schedulePlacement);
       labels.observe(actions!, { childList: true, characterData: true, subtree: true });
       if (bar) observer.observe(bar);
-      window.addEventListener('resize', place);
-      window.visualViewport?.addEventListener('resize', place);
-      window.visualViewport?.addEventListener('scroll', place);
+      window.addEventListener('resize', schedulePlacement);
+      window.visualViewport?.addEventListener('resize', schedulePlacement);
+      window.visualViewport?.addEventListener('scroll', schedulePlacement);
       place();
       onCleanup(() => {
+        if (frame != null) cancelAnimationFrame(frame);
         observer.disconnect();
         labels.disconnect();
-        window.removeEventListener('resize', place);
-        window.visualViewport?.removeEventListener('resize', place);
-        window.visualViewport?.removeEventListener('scroll', place);
+        window.removeEventListener('resize', schedulePlacement);
+        window.visualViewport?.removeEventListener('resize', schedulePlacement);
+        window.visualViewport?.removeEventListener('scroll', schedulePlacement);
       });
     });
   }

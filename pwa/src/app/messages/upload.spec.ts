@@ -1,18 +1,22 @@
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Blob as NodeBlob, File as NodeFile } from 'node:buffer';
 import { type Mock, vi } from 'vitest';
-import { RpcApi } from '../../generated/rpc-api';
 import { AttachmentUploadPurpose, type SnowflakeID } from '../../generated/models';
 import { RpcErrorCode } from '../api/rpc-error';
 import { provideRpcTesting, RpcTestPeer } from '../api/rpc-testing';
 import { decodeId, encodeId } from '../api/snowflake-id';
-import { AttachmentUpload, UploadStatus, uploadBlob } from './upload';
+import { SessionStore } from '../session/session-store';
+import { AttachmentUploads, AttachmentUpload, UploadStatus, uploadBlob } from './upload';
 import { UploadErrorCode, UploadStage } from './upload-error';
+import { Diagnostics } from '../pwa/diagnostics';
 
 class FakeUpload {
   static requests: FakeUpload[] = [];
   status = 200;
+  responseText = '';
   upload = {
+    onload: undefined as (() => void) | undefined,
     onprogress: undefined as
       ((event: { lengthComputable: boolean; loaded: number; total: number }) => void) | undefined,
   };
@@ -32,8 +36,9 @@ class FakeUpload {
     FakeUpload.requests.push(this);
   }
 
-  finish(status = 200) {
+  finish(status = 200, responseText = '') {
     this.status = status;
+    this.responseText = responseText;
     this.onload?.();
     this.onloadend?.();
   }
@@ -76,12 +81,28 @@ describe('Signed upload', () => {
 
   it('rejects HTTP errors and aborts removed uploads', async () => {
     let pending = uploadBlob('https://storage.invalid/signed', new Blob(), {});
-    FakeUpload.requests[0].finish(403);
+    FakeUpload.requests[0].finish(403, '<html><Code>AccessDenied</Code></html>');
     await expect(pending).rejects.toThrow('上传失败');
+    await expect(pending).rejects.toHaveProperty('storage', { status: 403 });
     const controller = new AbortController();
     pending = uploadBlob('https://storage.invalid/signed', new Blob(), {}, controller.signal);
     controller.abort();
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('detects expired links from an S3 error and keeps only safe diagnostics', async () => {
+    const pending = uploadBlob('https://storage.invalid/signed', new Blob(), {});
+    FakeUpload.requests[0].finish(
+      403,
+      '<Error><Code>AccessDenied</Code><Message>Request has expired</Message>' +
+        '<RequestId>mock-request</RequestId><CanonicalRequest>private details</CanonicalRequest></Error>',
+    );
+    await expect(pending).rejects.toHaveProperty('storage', {
+      status: 403,
+      code: 'AccessDenied',
+      requestId: 'mock-request',
+      expired: true,
+    });
   });
 
   it('does not send an already aborted upload', async () => {
@@ -115,12 +136,24 @@ describe('Upload activity deadlines', () => {
   it('aborts when progress stalls, including repeated events with the same byte count', async () => {
     vi.useFakeTimers();
     const pending = uploadBlob('https://storage.invalid/stalled', new Blob(['file']), {});
-    const rejected = expect(pending).rejects.toMatchObject({ name: 'TimeoutError' });
+    const rejected = expect(pending).rejects.toMatchObject({ code: UploadErrorCode.TransferStalled });
     const xhr = FakeUpload.requests[0];
     xhr.progress(1, 4);
     await vi.advanceTimersByTimeAsync(20_000);
     xhr.progress(1, 4);
     await vi.advanceTimersByTimeAsync(10_000);
+    await rejected;
+    expect(xhr.abort).toHaveBeenCalledOnce();
+  });
+
+  it('reports a confirmation timeout after XHR finishes sending the file', async () => {
+    vi.useFakeTimers();
+    const pending = uploadBlob('https://storage.invalid/stalled', new Blob(['file']), {});
+    const rejected = expect(pending).rejects.toMatchObject({ code: UploadErrorCode.StorageResponseTimeout });
+    const xhr = FakeUpload.requests[0];
+    xhr.progress(4, 4);
+    xhr.upload.onload?.();
+    await vi.advanceTimersByTimeAsync(30_000);
     await rejected;
     expect(xhr.abort).toHaveBeenCalledOnce();
   });
@@ -142,16 +175,17 @@ describe('Upload activity deadlines', () => {
 
 describe('Attachment upload tasks', () => {
   let peer: RpcTestPeer;
-  let api: RpcApi;
   let tasks: AttachmentUpload[];
+  const user = signal({ uid: 1 });
   let convertToBlob: Mock<() => Promise<Blob>>;
   let createBitmap: Mock;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [...provideRpcTesting()] });
+    sessionStorage.removeItem('chahua.diagnostics');
+    user.set({ uid: 1 });
+    TestBed.configureTestingModule({ providers: [provideRpcTesting(), { provide: SessionStore, useValue: { user } }] });
     peer = TestBed.inject(RpcTestPeer);
     peer.authenticate();
-    api = TestBed.inject(RpcApi);
     tasks = [];
     let nextUrl = 0;
     vi.spyOn(URL, 'createObjectURL').mockImplementation(() => `blob:mock-${++nextUrl}`);
@@ -194,10 +228,38 @@ describe('Attachment upload tasks', () => {
   });
 
   function create(purpose = AttachmentUploadPurpose.file, file = new File(['hello'], 'note.txt')) {
-    const task = new AttachmentUpload(api, file, purpose);
+    const task = TestBed.inject(AttachmentUploads).create(file, purpose);
     tasks.push(task);
     return task;
   }
+
+  it('shares pending and successful configuration while signing each file separately', async () => {
+    const first = create();
+    const second = create();
+    config();
+    const signed = [await peer.expectAsync('attachments.createUploadUrl')];
+    const third = create();
+    peer.expectNone('attachments.getConfig');
+    signed.push(
+      await peer.expectAsync('attachments.createUploadUrl'),
+      await peer.expectAsync('attachments.createUploadUrl'),
+    );
+    for (const task of [first, second, third]) task.dispose();
+    for (const request of signed) request.error(RpcErrorCode.Unavailable);
+    await Promise.all([first, second, third].map((task) => task.retry()));
+    expect(FakeUpload.requests).toHaveLength(0);
+  });
+
+  it('reads the upload limit again after switching accounts', async () => {
+    const first = create();
+    config(1);
+    await first.retry();
+    user.set({ uid: 2 });
+    const second = create();
+    config(2);
+    await second.retry();
+    expect(second.state().error?.code).toBe(UploadErrorCode.TooLarge);
+  });
 
   function photo() {
     return new File([new Uint8Array(100)], 'photo.jpg', { type: 'image/jpeg' });
@@ -337,7 +399,7 @@ describe('Attachment upload tasks', () => {
     const retry = task.retry();
     expect(task.state().progress).toBeUndefined();
     expect(task.retry()).toBe(retry);
-    config();
+    peer.expectNone('attachments.getConfig');
     await sign(encodeId('101'));
     await vi.waitFor(() => expect(FakeUpload.requests).toHaveLength(2));
     expect(FakeUpload.requests[1].send.mock.calls[0][0]).toBe(FakeUpload.requests[0].send.mock.calls[0][0]);
@@ -451,7 +513,8 @@ describe('Attachment upload tasks', () => {
 
   it.each([
     ['', 'empty.txt', UploadErrorCode.Empty],
-    ['text', 'x'.repeat(256), UploadErrorCode.Filename],
+    ['text', '  ', UploadErrorCode.FilenameMissing],
+    ['text', 'x'.repeat(256), UploadErrorCode.FilenameTooLong],
   ])('validates %s / %s before requesting config', async (contents, name, code) => {
     const task = create(AttachmentUploadPurpose.file, new File([contents], name));
     await task.retry();
@@ -461,6 +524,7 @@ describe('Attachment upload tasks', () => {
 
   it.each([
     [RpcErrorCode.BadRequest, 'Attachment content type is invalid', UploadErrorCode.InvalidType, false],
+    [RpcErrorCode.InvalidParams, 'Invalid params', UploadErrorCode.Protocol, false],
     [RpcErrorCode.Unauthorized, 'Expired token', UploadErrorCode.Authentication, false],
     [RpcErrorCode.Forbidden, 'Forbidden', UploadErrorCode.Forbidden, false],
     [RpcErrorCode.Overloaded, 'Too many requests', UploadErrorCode.RateLimited, true],
@@ -472,28 +536,120 @@ describe('Attachment upload tasks', () => {
     const pending = task.retry();
     peer.expect('attachments.getConfig').error(rpcCode, detail);
     await pending;
-    expect(task.state().error).toMatchObject({ code, stage: UploadStage.Config, autoRetry });
+    expect(task.state().error).toMatchObject({ code, stage: UploadStage.Config, autoRetry, rpcCode });
     expect(task.retryable).toBe(autoRetry);
+    const report = JSON.parse(await TestBed.inject(Diagnostics).export());
+    const failure = report.events.find((entry: { event: string }) => entry.event === 'upload.failed');
+    expect(failure.details).toMatchObject({
+      method: 'attachments.getConfig',
+      requestId: expect.any(String),
+      errorCode: rpcCode,
+    });
+  });
+
+  it('reports a file type detection deadline as a processing timeout', async () => {
+    vi.useFakeTimers();
+    const file = new File(['data'], 'example.bin');
+    const header = file.slice();
+    vi.spyOn(file, 'slice').mockReturnValue(header);
+    const readHeader = vi.spyOn(header, 'arrayBuffer').mockImplementation(() => new Promise(() => {}));
+    const task = create(AttachmentUploadPurpose.file, file);
+    const pending = task.retry();
+    config();
+    await vi.waitFor(() => expect(readHeader).toHaveBeenCalled());
+    await vi.advanceTimersByTimeAsync(30_000);
+    await pending;
+    expect(task.state().error).toMatchObject({
+      code: UploadErrorCode.ProcessingTimeout,
+      stage: UploadStage.Processing,
+      autoRetry: false,
+      canRetry: true,
+    });
+    peer.expectNone('attachments.createUploadUrl');
+  });
+
+  it.each([
+    [413, ''],
+    [400, 'EntityTooLarge'],
+  ])('does not report the chat size limit when storage rejects the size with HTTP %s', async (status, storageCode) => {
+    const task = create();
+    const pending = task.retry();
+    config();
+    (await sign()).finish(status, storageCode ? `<Error><Code>${storageCode}</Code></Error>` : '');
+    await pending;
+    expect(task.state().error).toMatchObject({
+      code: UploadErrorCode.TooLarge,
+      stage: UploadStage.Storage,
+      autoRetry: false,
+      canRetry: false,
+      storage: { status, ...(storageCode ? { code: storageCode } : {}) },
+    });
+    expect(task.state().error).not.toHaveProperty('maxSizeMiB');
   });
 
   it('keeps a storage rejection distinct from account permission and renews the URL on retry', async () => {
     const task = create();
     const pending = task.retry();
     config();
-    (await sign()).finish(403);
+    (await sign()).finish(403, '<Error><Code>SignatureDoesNotMatch</Code><RequestId>mock-request</RequestId></Error>');
     await pending;
     expect(task.state().error).toMatchObject({
       code: UploadErrorCode.StorageRejected,
       stage: UploadStage.Storage,
       autoRetry: false,
       canRetry: true,
+      storage: { status: 403, code: 'SignatureDoesNotMatch', requestId: 'mock-request' },
     });
+    const failedAttempt = task.diagnosticDetails();
+    expect(failedAttempt).toMatchObject({ attempt: 1, errorStatus: 403, requestId: 'mock-request' });
     const retry = task.retry();
+    expect(task.diagnosticDetails()).toEqual(failedAttempt);
     expect(task.state().error?.code).toBe(UploadErrorCode.StorageRejected);
-    config();
+    peer.expectNone('attachments.getConfig');
     (await sign(encodeId('101'))).finish();
     await retry;
     expect(task.state().error).toBeUndefined();
+    const report = JSON.parse(await TestBed.inject(Diagnostics).export());
+    const events = report.events.filter((entry: { event: string }) => entry.event.startsWith('upload.'));
+    const failure = events.find((entry: { event: string }) => entry.event === 'upload.failed');
+    expect(failure.details).toMatchObject({
+      uploadId: expect.any(String),
+      attempt: 1,
+      state: UploadStage.Storage,
+      fileSizeBytes: 5,
+      errorStatus: 403,
+      storageCode: 'SignatureDoesNotMatch',
+      requestId: 'mock-request',
+      durationMs: expect.any(Number),
+    });
+    expect(events.at(-1)).toMatchObject({
+      event: 'upload.ready',
+      details: { uploadId: failure.details.uploadId, attempt: 2 },
+    });
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: 'upload.stage',
+          details: expect.objectContaining({ state: UploadStage.Config }),
+        }),
+        expect.objectContaining({
+          event: 'upload.stage',
+          details: expect.objectContaining({ state: UploadStage.Signing }),
+        }),
+        expect.objectContaining({
+          event: 'upload.stage',
+          details: expect.objectContaining({ state: UploadStage.Storage }),
+        }),
+      ]),
+    );
+    const nextStages = events.filter(
+      (e: { event: string; details: { attempt: number } }) => e.event === 'upload.stage' && e.details.attempt === 2,
+    );
+    expect(nextStages.length).toBeGreaterThan(0);
+    for (const { details } of nextStages) {
+      for (const key of ['reason', 'storageCode', 'errorStatus', 'requestId']) expect(details).not.toHaveProperty(key);
+    }
+    expect(JSON.stringify(events)).not.toMatch(/note\.txt|storage\.invalid|uploadUrl/);
   });
 
   it.each(['config', 'upload-url'])('disposes a pending %s RPC request and ignores its late reply', async (stage) => {
@@ -602,7 +758,7 @@ describe('Attachment upload tasks', () => {
     expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(task.url);
     window.dispatchEvent(new Event('online'));
     const retry = task.retry();
-    config();
+    peer.expectNone('attachments.getConfig');
     (await sign(encodeId('101'))).finish();
     await expect(retry).resolves.toBe(encodeId('101'));
     expect(task.url).toBe('blob:mock-1');

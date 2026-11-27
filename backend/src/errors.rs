@@ -1,3 +1,6 @@
+use crate::models::ForwardPlaceholder;
+use std::collections::HashMap;
+
 /// Shared semantic application failures; transports own their response mapping.
 ///
 /// Database and pool errors implement `From` for propagation with `?`.
@@ -9,6 +12,8 @@ pub enum AppError {
     DbQuery(diesel::result::Error),
     /// 400 Bad Request with a static message.
     BadRequest(&'static str),
+    /// This forward can proceed after the user agrees to a placeholder.
+    ForwardPlaceholderRequired(ForwardPlaceholderConsent),
     /// 413 Payload Too Large with a static message.
     PayloadTooLarge(&'static str),
 
@@ -32,6 +37,25 @@ pub enum AppError {
     ServiceUnavailable(&'static str),
     /// Generic internal server error with a static message (for non-diesel/pool errors).
     Internal(&'static str),
+}
+
+#[derive(Debug)]
+pub struct ForwardPlaceholderConsent {
+    pub by_message: HashMap<i64, ForwardPlaceholder>,
+}
+
+impl ForwardPlaceholderConsent {
+    pub fn confirmation_required_message(&self) -> &'static str {
+        if self
+            .by_message
+            .values()
+            .any(|&item| item == ForwardPlaceholder::PendingAudio)
+        {
+            "Audio messages cannot be forwarded until transcoding finishes"
+        } else {
+            "Forwarded messages cannot include nested forwarded messages"
+        }
+    }
 }
 
 impl From<diesel::r2d2::PoolError> for AppError {

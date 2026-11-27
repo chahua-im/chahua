@@ -31,6 +31,8 @@ import type {
   CreateStickerFromMessageBody,
   EmptyResult,
   ExceptionsQuery,
+  ForwardPlaceholder,
+  ForwardTarget,
   FriendsAcceptRequestParams,
   FriendsArchiveRequestParams,
   FriendsCreateRequestParams,
@@ -95,6 +97,7 @@ import type {
   MessagesListParams,
   MessagesPreviewLinksParams,
   MessagesSearchParams,
+  MessagesSendForwardParams,
   MessagesSendInThreadParams,
   MessagesSendParams,
   PinsCreateForThreadParams,
@@ -129,6 +132,7 @@ import type {
   SavedMessagesSaveParams,
   SearchMessagesQuery,
   SearchUsersQuery,
+  SendForwardResponse,
   ServiceTokensCreateParams,
   ServiceTokensDeleteParams,
   ServiceTokensListParams,
@@ -165,6 +169,8 @@ import type {
   ThreadsGetSubscriptionStatusParams,
   ThreadsGetUnreadCountParams,
   ThreadsListForChatParams,
+  ThreadsListForwardSourcesParams,
+  ThreadsListForwardSourcesResponse,
   ThreadsListParams,
   ThreadsListParticipantsParams,
   ThreadsMarkAsReadParams,
@@ -236,6 +242,7 @@ export class RpcApi {
     deleteMany: (params: MessagesDeleteManyParams) =>
       this.#call<Shared.BulkDeletedPayload>('messages.deleteMany', params),
     forward: (params: MessagesForwardParams) => this.#call<Shared.MessageResponse>('messages.forward', params),
+    sendForward: (params: MessagesSendForwardParams) => this.#call<SendForwardResponse>('messages.sendForward', params),
     forwardOne: (params: MessagesForwardOneParams) => this.#call<Shared.MessageResponse>('messages.forwardOne', params),
     listForwardedMessages: (params: MessagesListForwardedMessagesParams) =>
       this.#call<Shared.ForwardedMessagesResponse>('messages.listForwardedMessages', params),
@@ -301,6 +308,8 @@ export class RpcApi {
 
   readonly threads = {
     list: (params: ThreadsListParams = {}) => this.#call<Shared.ListThreadsResponse>('threads.list', params),
+    listForwardSources: (params: ThreadsListForwardSourcesParams) =>
+      this.#call<ThreadsListForwardSourcesResponse>('threads.listForwardSources', params),
     getUnreadCount: (params: ThreadsGetUnreadCountParams = {}) =>
       this.#call<Shared.UnreadThreadCountResponse>('threads.getUnreadCount', params),
     listForChat: (params: ThreadsListForChatParams) =>

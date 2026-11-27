@@ -57,9 +57,11 @@ export function redactDeletedMessage(message: MessageResponse): MessageResponse 
     ...message,
     isDeleted: true,
     forwardedFrom: undefined,
+    canJumpToOriginalReply: undefined,
     forwardedPreview: undefined,
+    forwardedThreadReplyCount: undefined,
     forwardedBundleId: undefined,
-    message: undefined,
+    message: message.message == null ? message.message : undefined,
     metadata: undefined,
     attachments: [],
     mentions: [],
@@ -117,10 +119,10 @@ export function redactRecalledPreview<T extends ReplyPreview>(quote: T | undefin
 export function redactRecalledCitations(message: MessageResponse, recalledIds: MessageIdLookup): MessageResponse {
   if (!recalledIds.size) return message;
   const updated = redactRecalledReply(message, recalledIds);
-  const origin = updated.forwardedFrom;
-  const originalReplyTo = redactRecalledPreview(origin?.originalReplyTo, recalledIds);
-  return origin && originalReplyTo !== origin.originalReplyTo
-    ? { ...updated, forwardedFrom: { ...origin, originalReplyTo } }
+  const originalReply = updated.forwardedFrom?.originalReplyTo;
+  // A forwarded quote is a snapshot. The recall only invalidates its live jump target.
+  return updated.canJumpToOriginalReply && originalReply && recalledIds.has(originalReply.id)
+    ? { ...updated, canJumpToOriginalReply: undefined }
     : updated;
 }
 

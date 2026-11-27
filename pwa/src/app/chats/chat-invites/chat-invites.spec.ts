@@ -350,9 +350,13 @@ describe('Invite management', () => {
     },
   );
   it('checks private recipients selected in the generic invite picker', async () => {
-    const component = (await page()).componentInstance;
+    const fixture = await page();
+    const component = fixture.componentInstance;
     const alerts = vi.spyOn(TestBed.inject(AlertController), 'create');
     await component['startShare'](invite);
+    fixture.detectChanges();
+    const picker = fixture.debugElement.query(By.directive(ChatPicker)).componentInstance as ChatPicker;
+    expect(picker.backButton()).toBe(false);
     const sending = component['chooseChat'](
       { chatId: encodeId('11'), name: '好友', kind: GroupKind.dm, avatar: {}, time: 0 },
       () => true,
@@ -673,11 +677,12 @@ describe('Invite management', () => {
   });
 
   it.each([InviteType.targeted, InviteType.membership])(
-    'opens the %s picker immediately, allows reselection and resets to anyone on cancel',
+    'opens the %s picker immediately and returns to the same form on cancel',
     async (type) => {
       const fixture = await page();
       const component = fixture.componentInstance;
       component['startCreate']();
+      component['changeExpiry']('never');
       fixture.detectChanges();
       const modal = fixture.debugElement.query(By.directive(ModalStub)).componentInstance as ModalStub;
       modal.didPresent.emit();
@@ -685,6 +690,7 @@ describe('Invite management', () => {
       fixture.detectChanges();
       if (type === InviteType.membership) peer.expect('groups.list').flush({ groups: [] });
       const picker = fixture.debugElement.query(By.directive(ChatPicker)).componentInstance as ChatPicker;
+      expect(picker.backButton()).toBe(true);
       expect(picker.scope()).toBe(type === InviteType.targeted ? ChatPickerScope.Users : ChatPickerScope.JoinedGroups);
       if (type === InviteType.targeted) picker.userSelected.emit({ uid: 9, username: '用户A', gender: 0 });
       else
@@ -702,8 +708,11 @@ describe('Invite management', () => {
       fixture.detectChanges();
       if (type === InviteType.membership) peer.expect('groups.list').flush({ groups: [] });
       const reopened = fixture.debugElement.query(By.directive(ChatPicker)).componentInstance as ChatPicker;
+      expect(reopened.backButton()).toBe(true);
       reopened.closed.emit();
       fixture.detectChanges();
+      expect(modal.isOpen()).toBe(true);
+      expect(component['expiry']()).toBe(component['Expiry'].Never);
       expect(component['type']()).toBe(InviteType.generic);
       expect(component['target']()).toBeUndefined();
       expect(component['requiredGroup']()).toBeUndefined();

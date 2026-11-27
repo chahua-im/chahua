@@ -193,6 +193,12 @@ impl From<AppError> for RpcError {
     fn from(error: AppError) -> Self {
         match error {
             AppError::BadRequest(message) => Self::with_message(RpcErrorCode::BadRequest, message),
+            AppError::ForwardPlaceholderRequired(consent) => Self {
+                code: RpcErrorCode::BadRequest,
+                message: consent.confirmation_required_message(),
+                data: Some(json!({ "forwardPlaceholdersById": consent.by_message })),
+                lifecycle: None,
+            },
             AppError::Unauthorized(message) => {
                 Self::with_message(RpcErrorCode::Unauthorized, message)
             }
@@ -242,6 +248,26 @@ impl From<AppError> for RpcError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn forward_consent_keeps_bad_request_with_a_machine_readable_reason() {
+        use crate::{
+            errors::ForwardPlaceholderConsent,
+            models::ForwardPlaceholder::{NestedForward, PendingAudio},
+        };
+        let error = RpcError::from(AppError::ForwardPlaceholderRequired(
+            ForwardPlaceholderConsent {
+                by_message: [(9007199254740993, PendingAudio), (42, NestedForward)].into(),
+            },
+        ));
+        assert_eq!(error.code, RpcErrorCode::BadRequest);
+        assert_eq!(
+            error.data,
+            Some(json!({
+                "forwardPlaceholdersById": {"9007199254740993": "pendingAudio", "42": "nestedForward"}
+            }))
+        );
+    }
 
     #[test]
     fn every_error_has_a_native_metric_code_and_http_equivalent() {
