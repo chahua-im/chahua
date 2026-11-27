@@ -58,10 +58,6 @@ pub mod sql_types {
     pub struct PresenceVisibility;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "push_environment"))]
-    pub struct PushEnvironment;
-
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "push_provider"))]
     pub struct PushProvider;
 
@@ -446,18 +442,16 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use super::sql_types::PushProvider;
-    use super::sql_types::PushEnvironment;
 
     push_subscriptions (id) {
         id -> Int8,
         user_id -> Int4,
-        endpoint -> Nullable<Text>,
         created_at -> Timestamp,
         #[max_length = 64]
-        client_id -> Nullable<Varchar>,
+        client_id -> Varchar,
         provider -> PushProvider,
-        device_token -> Nullable<Text>,
-        apns_environment -> Nullable<PushEnvironment>,
+        scope -> Text,
+        target -> Text,
         provider_data -> Jsonb,
         delivery_failure_count -> Int4,
         last_delivery_error -> Nullable<Text>,

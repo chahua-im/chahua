@@ -297,9 +297,8 @@ impl ClientTrackingService {
                     }
                     if inserted || rebound {
                         diesel::update(
-                            push_subscriptions::table.filter(
-                                push_subscriptions::client_id.eq(Some(client_id.to_owned())),
-                            ),
+                            push_subscriptions::table
+                                .filter(push_subscriptions::client_id.eq(client_id)),
                         )
                         .set(push_subscriptions::user_id.eq(uid))
                         .execute(conn)?;

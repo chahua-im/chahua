@@ -49,7 +49,9 @@
 # [list_sync]
 # retention_days = 30
 
-# [push]
+# Web Push, APNs and FCM can be enabled independently; the server requires at least one.
+# Web Push requires all three VAPID values, or none to disable it.
+# [push.web]
 # vapid_subject = "mailto:admin@example.com"
 # vapid_public_key = "..." # Public metadata; VAPID_PRIVATE_KEY stays in env.
 
@@ -57,7 +59,11 @@
 # key_id = "..."
 # team_id = "..."
 # topic = "app.example.chahua"
-# APNS_PRIVATE_KEY_PATH stays in env and points to the existing private-key file.
+# private_key_path = "/run/secrets/apns-private-key.p8"
+
+# [push.fcm]
+# project_id = "Your FCM project ID"
+# service_account_path = "/run/secrets/fcm-service-account.json"
 
 # [avatars]
 # public_url = "https://avatars.example.com"

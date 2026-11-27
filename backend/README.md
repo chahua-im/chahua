@@ -28,7 +28,7 @@ request-body streaming stays on the async side.
 - **Discuz** currently supplies user profiles and group information. Authentication
   uses JWT sessions; application authorization is checked for each operation.
 - **S3-compatible storage** holds media; **Meilisearch** provides message search.
-- Background workers handle push delivery through Web Push/APNs, media processing,
+- Background workers handle push delivery through Web Push/APNs/FCM, media processing,
   search indexing, activity persistence, and maintenance.
 
 Mutations commit before publishing their resulting events. Client ownership changes

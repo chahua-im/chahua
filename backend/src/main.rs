@@ -65,7 +65,7 @@ const MESSAGE_SEARCH_REINDEX_COMMAND: &str = "message-search-reindex";
 
 #[tokio::main]
 async fn main() {
-    dotenvy::dotenv().ok();
+    load_dotenv();
 
     let command = read_command();
     if let Some(BackendCommand::ExportApiSchemas(directory)) = command.as_ref() {
@@ -129,7 +129,7 @@ async fn main() {
     let push_config = config
         .push
         .clone()
-        .expect("VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT must be set for the server");
+        .expect("at least one push provider must be configured for the server");
 
     let message_search = build_message_search_service(
         config
@@ -393,6 +393,27 @@ async fn build_media_store(config: &AppConfig) -> services::media::MediaStore {
 enum BackendCommand {
     MessageSearchReindex,
     ExportApiSchemas(PathBuf),
+}
+
+/// Load `.env` before configuration is resolved.
+///
+/// A missing file is normal (production supplies real environment variables),
+/// but a malformed line must be reported: dotenv stops at the first bad line,
+/// silently dropping every setting after it.
+fn load_dotenv() {
+    let Err(error) = dotenvy::dotenv() else {
+        return;
+    };
+    if error.not_found() {
+        return;
+    }
+    // The line contents may hold secrets, so only the line number is printed.
+    match &error {
+        dotenvy::Error::LineParse(_, line) => eprintln!(
+            "warning: .env has invalid syntax at line {line}; settings after that line were ignored"
+        ),
+        _ => eprintln!("warning: .env could not be loaded: {error}"),
+    }
 }
 
 fn read_command() -> Option<BackendCommand> {
