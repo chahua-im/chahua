@@ -600,14 +600,14 @@ mod tests {
         conn.batch_execute(
             "CREATE TEMP TABLE push_subscriptions (LIKE public.push_subscriptions INCLUDING ALL);
              INSERT INTO push_subscriptions
-                 (id, user_id, client_id, provider, endpoint, provider_data,
+                 (id, user_id, client_id, provider, scope, target, provider_data,
                   delivery_failure_count, last_delivery_error, last_delivery_error_at)
              VALUES
-                 (1, 7, 'client', 'web_push', 'https://example.test/1', '{\"p256dh\":\"key\",\"auth\":\"secret\"}', 2, 'old', now()),
-                 (2, 7, 'client', 'web_push', 'https://example.test/2', '{\"p256dh\":\"key\",\"auth\":\"secret\"}', 0, NULL, NULL),
-                 (3, 7, 'client', 'web_push', 'https://example.test/3', '{\"p256dh\":\"key\",\"auth\":\"secret\"}', 2, 'old', now()),
-                 (4, 7, 'client', 'web_push', 'https://example.test/4', '{\"p256dh\":\"key\",\"auth\":\"secret\"}', 0, NULL, NULL),
-                 (5, 7, 'client', 'web_push', 'https://example.test/5', '{\"p256dh\":\"key\",\"auth\":\"secret\"}', 2, 'unchanged', now());",
+                 (1, 7, 'client', 'web_push', '', 'https://example.test/1', '{\"p256dh\":\"key\",\"auth\":\"secret\"}', 2, 'old', now()),
+                 (2, 7, 'client', 'web_push', '', 'https://example.test/2', '{\"p256dh\":\"key\",\"auth\":\"secret\"}', 0, NULL, NULL),
+                 (3, 7, 'client', 'web_push', '', 'https://example.test/3', '{\"p256dh\":\"key\",\"auth\":\"secret\"}', 2, 'old', now()),
+                 (4, 7, 'client', 'web_push', '', 'https://example.test/4', '{\"p256dh\":\"key\",\"auth\":\"secret\"}', 0, NULL, NULL),
+                 (5, 7, 'client', 'web_push', '', 'https://example.test/5', '{\"p256dh\":\"key\",\"auth\":\"secret\"}', 2, 'unchanged', now());",
         ).unwrap();
         let unchanged_before = push_subscriptions::table
             .find(5)

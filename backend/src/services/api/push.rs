@@ -6,10 +6,7 @@ use crate::dto::push::{
     UnsubscribeBody, VapidPublicKeyResponse,
 };
 use crate::errors::AppError;
-use crate::models::{
-    ApnsSubscriptionData, NewPushSubscription, PushEnvironment, PushProvider,
-    WebPushSubscriptionData,
-};
+use crate::models::{NewPushSubscription, PushProvider, WebPushSubscriptionData};
 use crate::services::push::{
     subscriptions::{self, SubscriptionIdentity},
     PushService,
@@ -19,9 +16,8 @@ use crate::utils::ids::{self, IdGen};
 #[derive(Debug, Clone)]
 struct ValidatedSubscription {
     provider: PushProvider,
-    endpoint: Option<String>,
-    device_token: Option<String>,
-    apns_environment: Option<PushEnvironment>,
+    scope: String,
+    target: String,
     provider_data: serde_json::Value,
 }
 
@@ -41,9 +37,8 @@ impl SubscribeBody {
 
                 Ok(ValidatedSubscription {
                     provider: PushProvider::WebPush,
-                    endpoint: Some(endpoint),
-                    device_token: None,
-                    apns_environment: None,
+                    scope: String::new(),
+                    target: endpoint,
                     provider_data: serde_json::to_value(WebPushSubscriptionData {
                         p256dh: keys.p256dh,
                         auth: keys.auth,
@@ -63,11 +58,9 @@ impl SubscribeBody {
 
                 Ok(ValidatedSubscription {
                     provider: PushProvider::Apns,
-                    endpoint: None,
-                    device_token: Some(device_token),
-                    apns_environment: Some(environment),
-                    provider_data: serde_json::to_value(ApnsSubscriptionData { environment })
-                        .map_err(|_| AppError::Internal("failed to serialize APNs data"))?,
+                    scope: environment.as_scope().to_owned(),
+                    target: device_token,
+                    provider_data: serde_json::json!({}),
                 })
             }
             ApiPushProvider::Fcm => {
@@ -79,9 +72,8 @@ impl SubscribeBody {
 
                 Ok(ValidatedSubscription {
                     provider: PushProvider::Fcm,
-                    endpoint: None,
-                    device_token: Some(device_token),
-                    apns_environment: None,
+                    scope: String::new(),
+                    target: device_token,
                     provider_data: serde_json::json!({}),
                 })
             }
@@ -124,12 +116,11 @@ pub async fn post_subscribe(
         id: sub_id,
         user_id: uid,
         provider: validated.provider,
-        endpoint: validated.endpoint.clone(),
-        device_token: validated.device_token.clone(),
-        apns_environment: validated.apns_environment,
-        provider_data: validated.provider_data.clone(),
+        scope: validated.scope,
+        target: validated.target,
+        provider_data: validated.provider_data,
         created_at: Utc::now().naive_utc(),
-        client_id: Some(client_id),
+        client_id,
         delivery_failure_count: 0,
         last_delivery_error: None,
         last_delivery_error_at: None,
@@ -219,8 +210,9 @@ mod tests {
 
         let validated = body.validate().expect("validate APNs body");
         assert_eq!(validated.provider, PushProvider::Apns);
-        assert_eq!(validated.device_token.as_deref(), Some("token-123"));
-        assert_eq!(validated.apns_environment, Some(PushEnvironment::Sandbox));
+        assert_eq!(validated.scope, "sandbox");
+        assert_eq!(validated.target, "token-123");
+        assert_eq!(validated.provider_data, serde_json::json!({}));
     }
 
     #[test]
@@ -231,9 +223,8 @@ mod tests {
 
         let validated = body.validate().expect("validate FCM body");
         assert_eq!(validated.provider, PushProvider::Fcm);
-        assert_eq!(validated.device_token.as_deref(), Some("fcm-token-123"));
-        assert_eq!(validated.apns_environment, None);
-        assert_eq!(validated.endpoint, None);
+        assert_eq!(validated.scope, "");
+        assert_eq!(validated.target, "fcm-token-123");
         assert_eq!(validated.provider_data, serde_json::json!({}));
     }
 

@@ -66,13 +66,13 @@ impl WebPushSender {
         sub: &PushSubscription,
         input: &RecipientNotification<'_>,
     ) -> Result<(), DeliveryFailureDetails> {
-        let endpoint = sub.endpoint.as_ref().ok_or_else(|| {
-            failure(
+        if sub.target.trim().is_empty() {
+            return Err(failure(
                 DeliveryFailureClass::InvalidSubscription,
                 "missing_endpoint",
                 DeliveryFailureAction::PruneImmediate,
-            )
-        })?;
+            ));
+        }
         let data = sub.web_push_data().map_err(|_| {
             failure(
                 DeliveryFailureClass::InvalidSubscription,
@@ -81,7 +81,7 @@ impl WebPushSender {
             )
         })?;
         let subscription =
-            web_push::SubscriptionInfo::new(endpoint.clone(), data.p256dh, data.auth);
+            web_push::SubscriptionInfo::new(sub.target.clone(), data.p256dh, data.auth);
         let signature = web_push::VapidSignatureBuilder::from_base64_no_sub(
             &self.vapid_private_key,
         )

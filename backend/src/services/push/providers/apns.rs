@@ -129,17 +129,13 @@ impl ApnsSender {
         sub: &PushSubscription,
         input: &RecipientNotification<'_>,
     ) -> Result<(), DeliveryFailureDetails> {
-        let device_token = sub
-            .device_token
-            .as_deref()
-            .ok_or_else(|| invalid_subscription("missing_device_token"))?;
-        sub.apns_data()
-            .map_err(|_| invalid_subscription("invalid_provider_data"))?;
-        let environment = sub
-            .apns_environment
+        if sub.target.trim().is_empty() {
+            return Err(invalid_subscription("missing_device_token"));
+        }
+        let environment = PushEnvironment::from_scope(&sub.scope)
             .ok_or_else(|| invalid_subscription("missing_environment"))?;
         let notification = build_notification(input);
-        self.send_notification(device_token, &environment, &notification)
+        self.send_notification(&sub.target, &environment, &notification)
             .await
     }
 

@@ -14,140 +14,97 @@ pub(crate) enum SubscriptionIdentity<'a> {
     Fcm(&'a str),
 }
 
+impl SubscriptionIdentity<'_> {
+    fn provider(&self) -> PushProvider {
+        match self {
+            Self::WebPush(_) => PushProvider::WebPush,
+            Self::Apns { .. } => PushProvider::Apns,
+            Self::Fcm(_) => PushProvider::Fcm,
+        }
+    }
+
+    fn scope(&self) -> &'static str {
+        match self {
+            Self::WebPush(_) | Self::Fcm(_) => "",
+            Self::Apns { environment, .. } => environment.as_scope(),
+        }
+    }
+
+    fn target(&self) -> &str {
+        match self {
+            Self::WebPush(endpoint) => endpoint,
+            Self::Apns { device_token, .. } => device_token,
+            Self::Fcm(device_token) => device_token,
+        }
+    }
+}
+
+#[derive(AsChangeset)]
+#[diesel(table_name = push_subscriptions, treat_none_as_null = true)]
+struct SubscriptionUpsertUpdate<'a> {
+    user_id: i32,
+    client_id: &'a str,
+    created_at: chrono::NaiveDateTime,
+    provider_data: &'a serde_json::Value,
+    delivery_failure_count: i32,
+    last_delivery_error: Option<&'a str>,
+    last_delivery_error_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl<'a> SubscriptionUpsertUpdate<'a> {
+    fn from_new(new_sub: &'a NewPushSubscription) -> Self {
+        Self {
+            user_id: new_sub.user_id,
+            client_id: &new_sub.client_id,
+            created_at: new_sub.created_at,
+            provider_data: &new_sub.provider_data,
+            delivery_failure_count: 0,
+            last_delivery_error: None,
+            last_delivery_error_at: None,
+        }
+    }
+}
+
+fn delete_replaced_subscriptions(
+    conn: &mut PgConnection,
+    new_sub: &NewPushSubscription,
+) -> Result<(), diesel::result::Error> {
+    diesel::delete(
+        push_subscriptions::table
+            .filter(push_subscriptions::user_id.eq(new_sub.user_id))
+            .filter(push_subscriptions::client_id.eq(&new_sub.client_id))
+            .filter(push_subscriptions::provider.eq(new_sub.provider))
+            .filter(push_subscriptions::scope.eq(&new_sub.scope))
+            .filter(push_subscriptions::target.ne(&new_sub.target)),
+    )
+    .execute(conn)?;
+    Ok(())
+}
+
 pub(crate) fn upsert(
     conn: &mut PgConnection,
     new_sub: &NewPushSubscription,
 ) -> Result<(), diesel::result::Error> {
     conn.transaction::<_, diesel::result::Error, _>(|conn| {
-        let provider = new_sub.provider;
-        let endpoint = new_sub.endpoint.clone();
-        let device_token = new_sub.device_token.clone();
-        let apns_environment = new_sub.apns_environment;
-        let provider_data = new_sub.provider_data.clone();
-        let created_at = new_sub.created_at;
-        let current_client_id = new_sub.client_id.clone();
+        delete_replaced_subscriptions(conn, new_sub)?;
 
-        let mut replace_scope = push_subscriptions::table
-            .filter(push_subscriptions::dsl::user_id.eq(new_sub.user_id))
-            .filter(push_subscriptions::dsl::client_id.eq(current_client_id.clone()))
-            .filter(push_subscriptions::dsl::provider.eq(provider))
-            .into_boxed();
-
-        match provider {
-            PushProvider::WebPush => {
-                if let Some(endpoint) = &endpoint {
-                    replace_scope = replace_scope
-                        .filter(push_subscriptions::dsl::endpoint.ne(Some(endpoint.clone())));
-                }
-            }
-            PushProvider::Apns => {
-                if let Some(device_token) = &device_token {
-                    replace_scope = replace_scope
-                        .filter(push_subscriptions::dsl::apns_environment.eq(apns_environment))
-                        .filter(
-                            push_subscriptions::dsl::device_token.ne(Some(device_token.clone())),
-                        );
-                }
-            }
-            PushProvider::Fcm => {
-                if let Some(device_token) = &device_token {
-                    replace_scope = replace_scope.filter(
-                        push_subscriptions::dsl::device_token.ne(Some(device_token.clone())),
-                    );
-                }
-            }
-        }
-
-        let replace_ids = replace_scope
-            .select(push_subscriptions::dsl::id)
-            .load::<i64>(conn)?;
-        if !replace_ids.is_empty() {
-            diesel::delete(
-                push_subscriptions::table.filter(push_subscriptions::dsl::id.eq_any(&replace_ids)),
-            )
+        // `(provider, scope, target)` uniquely identifies one physical push
+        // destination; re-registering it (e.g. after switching accounts on the
+        // same device or browser) transfers ownership to the new user/client.
+        let update = SubscriptionUpsertUpdate::from_new(new_sub);
+        diesel::insert_into(push_subscriptions::table)
+            .values(new_sub)
+            .on_conflict((
+                push_subscriptions::provider,
+                push_subscriptions::scope,
+                push_subscriptions::target,
+            ))
+            .do_update()
+            .set(&update)
             .execute(conn)?;
-        }
-
-        // FCM tokens are unique per provider rather than per user, so a token
-        // that already exists (e.g. after switching accounts on one device)
-        // moves to the current user instead of being inserted again.
-        let existing_id = match provider {
-            PushProvider::WebPush => push_subscriptions::table
-                .filter(push_subscriptions::dsl::user_id.eq(new_sub.user_id))
-                .filter(push_subscriptions::dsl::provider.eq(provider))
-                .filter(push_subscriptions::dsl::endpoint.eq(endpoint.clone()))
-                .select(push_subscriptions::dsl::id)
-                .first::<i64>(conn)
-                .optional()?,
-            PushProvider::Apns => None,
-            PushProvider::Fcm => find_fcm_subscription(conn, device_token.as_deref())?,
-        };
-
-        if let Some(existing_id) = existing_id {
-            diesel::update(push_subscriptions::table.find(existing_id))
-                .set((
-                    push_subscriptions::user_id.eq(new_sub.user_id),
-                    push_subscriptions::client_id.eq(&current_client_id),
-                    push_subscriptions::created_at.eq(created_at),
-                    push_subscriptions::provider_data.eq(&provider_data),
-                    push_subscriptions::delivery_failure_count.eq(0),
-                    push_subscriptions::last_delivery_error.eq::<Option<String>>(None),
-                    push_subscriptions::last_delivery_error_at
-                        .eq::<Option<chrono::DateTime<chrono::Utc>>>(None),
-                ))
-                .execute(conn)?;
-        } else {
-            match provider {
-                PushProvider::WebPush | PushProvider::Fcm => {
-                    diesel::insert_into(push_subscriptions::table)
-                        .values(new_sub)
-                        .execute(conn)?;
-                }
-                PushProvider::Apns => {
-                    diesel::insert_into(push_subscriptions::table)
-                        .values(new_sub)
-                        .on_conflict((
-                            push_subscriptions::provider,
-                            push_subscriptions::device_token,
-                            push_subscriptions::apns_environment,
-                        ))
-                        .do_update()
-                        .set((
-                            push_subscriptions::user_id.eq(new_sub.user_id),
-                            push_subscriptions::client_id.eq(&current_client_id),
-                            push_subscriptions::created_at.eq(created_at),
-                            push_subscriptions::provider_data.eq(&provider_data),
-                            push_subscriptions::delivery_failure_count.eq(0),
-                            push_subscriptions::last_delivery_error.eq::<Option<String>>(None),
-                            push_subscriptions::last_delivery_error_at.eq::<Option<
-                                chrono::DateTime<chrono::Utc>,
-                            >>(
-                                None
-                            ),
-                        ))
-                        .execute(conn)?;
-                }
-            }
-        }
 
         Ok(())
     })
-}
-
-/// Look up an FCM subscription by device token, regardless of its current owner.
-fn find_fcm_subscription(
-    conn: &mut PgConnection,
-    device_token: Option<&str>,
-) -> Result<Option<i64>, diesel::result::Error> {
-    let Some(device_token) = device_token else {
-        return Ok(None);
-    };
-    push_subscriptions::table
-        .filter(push_subscriptions::dsl::provider.eq(PushProvider::Fcm))
-        .filter(push_subscriptions::dsl::device_token.eq(Some(device_token)))
-        .select(push_subscriptions::dsl::id)
-        .first::<i64>(conn)
-        .optional()
 }
 
 pub(crate) fn unsubscribe(
@@ -156,35 +113,15 @@ pub(crate) fn unsubscribe(
     client_id: &str,
     identity: &SubscriptionIdentity<'_>,
 ) -> Result<(), diesel::result::Error> {
-    let provider = match identity {
-        SubscriptionIdentity::WebPush(_) => PushProvider::WebPush,
-        SubscriptionIdentity::Apns { .. } => PushProvider::Apns,
-        SubscriptionIdentity::Fcm(_) => PushProvider::Fcm,
-    };
-    let mut query = push_subscriptions::table
-        .filter(push_subscriptions::user_id.eq(uid))
-        .filter(push_subscriptions::client_id.eq(Some(client_id)))
-        .filter(push_subscriptions::provider.eq(provider))
-        .into_boxed();
-    query = match identity {
-        SubscriptionIdentity::WebPush(endpoint) => {
-            query.filter(push_subscriptions::endpoint.eq(Some(*endpoint)))
-        }
-        SubscriptionIdentity::Apns {
-            device_token,
-            environment,
-        } => query
-            .filter(push_subscriptions::device_token.eq(Some(*device_token)))
-            .filter(push_subscriptions::apns_environment.eq(Some(*environment))),
-        SubscriptionIdentity::Fcm(device_token) => {
-            query.filter(push_subscriptions::device_token.eq(Some(*device_token)))
-        }
-    };
-    let ids = query.select(push_subscriptions::id).load::<i64>(conn)?;
-    if !ids.is_empty() {
-        diesel::delete(push_subscriptions::table.filter(push_subscriptions::id.eq_any(&ids)))
-            .execute(conn)?;
-    }
+    diesel::delete(
+        push_subscriptions::table
+            .filter(push_subscriptions::user_id.eq(uid))
+            .filter(push_subscriptions::client_id.eq(client_id))
+            .filter(push_subscriptions::provider.eq(identity.provider()))
+            .filter(push_subscriptions::scope.eq(identity.scope()))
+            .filter(push_subscriptions::target.eq(identity.target())),
+    )
+    .execute(conn)?;
     Ok(())
 }
 
@@ -198,31 +135,22 @@ pub(crate) fn status(
     let active = diesel::select(diesel::dsl::exists(
         push_subscriptions::table
             .filter(push_subscriptions::user_id.eq(uid))
-            .filter(push_subscriptions::client_id.eq(Some(client_id)))
+            .filter(push_subscriptions::client_id.eq(client_id))
             .filter(push_subscriptions::provider.eq(provider)),
     ))
     .get_result(conn)?;
     let matching = if let Some(identity) = identity {
-        let query = push_subscriptions::table
-            .filter(push_subscriptions::user_id.eq(uid))
-            .filter(push_subscriptions::client_id.eq(Some(client_id)))
-            .filter(push_subscriptions::provider.eq(provider))
-            .into_boxed();
-        let query = match identity {
-            SubscriptionIdentity::WebPush(endpoint) => {
-                query.filter(push_subscriptions::endpoint.eq(Some(*endpoint)))
-            }
-            SubscriptionIdentity::Apns {
-                device_token,
-                environment,
-            } => query
-                .filter(push_subscriptions::device_token.eq(Some(*device_token)))
-                .filter(push_subscriptions::apns_environment.eq(Some(*environment))),
-            SubscriptionIdentity::Fcm(device_token) => {
-                query.filter(push_subscriptions::device_token.eq(Some(*device_token)))
-            }
-        };
-        Some(diesel::select(diesel::dsl::exists(query)).get_result(conn)?)
+        Some(
+            diesel::select(diesel::dsl::exists(
+                push_subscriptions::table
+                    .filter(push_subscriptions::user_id.eq(uid))
+                    .filter(push_subscriptions::client_id.eq(client_id))
+                    .filter(push_subscriptions::provider.eq(identity.provider()))
+                    .filter(push_subscriptions::scope.eq(identity.scope()))
+                    .filter(push_subscriptions::target.eq(identity.target())),
+            ))
+            .get_result(conn)?,
+        )
     } else {
         None
     };
@@ -307,16 +235,17 @@ mod tests {
         uid: i32,
         client: &str,
         provider: PushProvider,
-        identity: &str,
+        target: &str,
         environment: Option<PushEnvironment>,
     ) -> NewPushSubscription {
         NewPushSubscription {
             id,
             user_id: uid,
             provider,
-            endpoint: matches!(provider, PushProvider::WebPush).then(|| identity.to_owned()),
-            device_token: (!matches!(provider, PushProvider::WebPush)).then(|| identity.to_owned()),
-            apns_environment: environment,
+            scope: environment
+                .map(|env| env.as_scope().to_owned())
+                .unwrap_or_default(),
+            target: target.to_owned(),
             provider_data: match provider {
                 PushProvider::WebPush => serde_json::json!({
                     "fixture": id,
@@ -326,7 +255,7 @@ mod tests {
                 _ => serde_json::json!({"fixture": id}),
             },
             created_at: chrono::Utc::now().naive_utc(),
-            client_id: Some(client.to_owned()),
+            client_id: client.to_owned(),
             delivery_failure_count: 2,
             last_delivery_error: Some("old failure".into()),
             last_delivery_error_at: Some(chrono::Utc::now()),
@@ -349,6 +278,7 @@ mod tests {
         let sandbox = Some(PushEnvironment::Sandbox);
         let production = Some(PushEnvironment::Production);
         for sub in [
+            fixture(0, 1, "one", PushProvider::WebPush, "web-transfer", None),
             fixture(1, 1, "one", PushProvider::Fcm, "fcm-transfer", None),
             fixture(2, 1, "one", PushProvider::Apns, "apns-transfer", sandbox),
             fixture(3, 2, "two", PushProvider::Apns, "apns-old", sandbox),
@@ -397,17 +327,22 @@ mod tests {
         apns.provider_data = serde_json::json!({"updated": "apns"});
         apns.created_at = fcm.created_at;
         upsert(&mut conn, &apns).unwrap();
-        upsert(
-            &mut conn,
-            &fixture(13, 2, "two", PushProvider::WebPush, "web-new", None),
-        )
-        .unwrap();
+        let mut web_updated = fixture(13, 2, "two", PushProvider::WebPush, "web-transfer", None);
+        web_updated.provider_data = serde_json::json!({
+            "updated": "web",
+            "p256dh": "updated-key",
+            "auth": "updated-auth",
+        });
+        web_updated.created_at = fcm.created_at;
+        upsert(&mut conn, &web_updated).unwrap();
 
+        let web_identity = SubscriptionIdentity::WebPush("web-transfer");
         let fcm_identity = SubscriptionIdentity::Fcm("fcm-transfer");
         let apns_identity = SubscriptionIdentity::Apns {
             device_token: "apns-transfer",
             environment: PushEnvironment::Sandbox,
         };
+        unsubscribe(&mut conn, 1, "one", &web_identity).unwrap();
         unsubscribe(&mut conn, 1, "one", &fcm_identity).unwrap();
         unsubscribe(&mut conn, 1, "one", &apns_identity).unwrap();
         let rows = push_subscriptions::table
@@ -417,17 +352,32 @@ mod tests {
             .unwrap();
         assert_eq!(
             rows.iter().map(|row| row.id).collect::<Vec<_>>(),
-            vec![1, 2, 4, 5, 6, 8, 9, 13]
+            vec![0, 1, 2, 4, 5, 6, 8, 9]
         );
-        for (row, expected) in [(&rows[0], &fcm), (&rows[1], &apns)] {
+        for (row, expected) in [
+            (&rows[0], &web_updated),
+            (&rows[1], &fcm),
+            (&rows[2], &apns),
+        ] {
             assert_eq!(row.user_id, 2);
-            assert_eq!(row.client_id.as_deref(), Some("two"));
+            assert_eq!(row.client_id, "two");
             assert_eq!(row.provider_data, expected.provider_data);
             assert_eq!(row.created_at, expected.created_at);
             assert_eq!(row.delivery_failure_count, 0);
             assert_eq!(row.last_delivery_error, None);
             assert_eq!(row.last_delivery_error_at, None);
         }
+        assert_eq!(
+            status(
+                &mut conn,
+                1,
+                "one",
+                PushProvider::WebPush,
+                Some(&web_identity)
+            )
+            .unwrap(),
+            (false, Some(false))
+        );
         assert_eq!(
             status(&mut conn, 2, "two", PushProvider::Fcm, None).unwrap(),
             (true, None)
@@ -466,14 +416,27 @@ mod tests {
             .unwrap(),
             (true, Some(false))
         );
-        let web = SubscriptionIdentity::WebPush("web-new");
         assert_eq!(
-            status(&mut conn, 2, "two", PushProvider::WebPush, Some(&web)).unwrap(),
+            status(
+                &mut conn,
+                2,
+                "two",
+                PushProvider::WebPush,
+                Some(&web_identity)
+            )
+            .unwrap(),
             (true, Some(true))
         );
-        unsubscribe(&mut conn, 2, "two", &web).unwrap();
+        unsubscribe(&mut conn, 2, "two", &web_identity).unwrap();
         assert_eq!(
-            status(&mut conn, 2, "two", PushProvider::WebPush, Some(&web)).unwrap(),
+            status(
+                &mut conn,
+                2,
+                "two",
+                PushProvider::WebPush,
+                Some(&web_identity)
+            )
+            .unwrap(),
             (false, Some(false))
         );
     }

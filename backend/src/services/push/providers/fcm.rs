@@ -109,17 +109,15 @@ impl FcmSender {
         sub: &PushSubscription,
         input: &RecipientNotification<'_>,
     ) -> Result<(), DeliveryFailureDetails> {
-        let device_token = sub
-            .device_token
-            .as_deref()
-            .filter(|t| !t.trim().is_empty())
-            .ok_or_else(|| DeliveryFailureDetails {
+        if sub.target.trim().is_empty() {
+            return Err(DeliveryFailureDetails {
                 class: DeliveryFailureClass::InvalidSubscription,
                 reason: "missing_device_token".to_string(),
                 action: DeliveryFailureAction::PruneImmediate,
-            })?;
+            });
+        }
         let notification = build_notification(input);
-        self.send_notification(device_token, &notification).await
+        self.send_notification(&sub.target, &notification).await
     }
 
     pub(in crate::services::push) fn from_config(

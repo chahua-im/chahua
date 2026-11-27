@@ -322,22 +322,28 @@ impl PushProvider {
     }
 }
 
-#[derive(
-    diesel_derive_enum::DbEnum,
-    Debug,
-    Clone,
-    Copy,
-    Serialize,
-    Deserialize,
-    PartialEq,
-    Eq,
-    utoipa::ToSchema,
-)]
-#[ExistingTypePath = "crate::schema::sql_types::PushEnvironment"]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PushEnvironment {
     Sandbox,
     Production,
+}
+
+impl PushEnvironment {
+    pub fn as_scope(self) -> &'static str {
+        match self {
+            Self::Sandbox => "sandbox",
+            Self::Production => "production",
+        }
+    }
+
+    pub fn from_scope(scope: &str) -> Option<Self> {
+        match scope {
+            "sandbox" => Some(Self::Sandbox),
+            "production" => Some(Self::Production),
+            _ => None,
+        }
+    }
 }
 
 #[derive(
@@ -365,11 +371,6 @@ pub enum PermissionResourceType {
 pub struct WebPushSubscriptionData {
     pub p256dh: String,
     pub auth: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ApnsSubscriptionData {
-    pub environment: PushEnvironment,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, Serialize, Insertable)]
@@ -1086,12 +1087,11 @@ pub struct PushSubscription {
     pub id: i64,
     pub user_id: i32,
     pub provider: PushProvider,
-    pub endpoint: Option<String>,
-    pub device_token: Option<String>,
-    pub apns_environment: Option<PushEnvironment>,
+    pub scope: String,
+    pub target: String,
     pub provider_data: serde_json::Value,
     pub created_at: chrono::NaiveDateTime,
-    pub client_id: Option<String>,
+    pub client_id: String,
     pub delivery_failure_count: i32,
     pub last_delivery_error: Option<String>,
     pub last_delivery_error_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -1099,10 +1099,6 @@ pub struct PushSubscription {
 
 impl PushSubscription {
     pub fn web_push_data(&self) -> Result<WebPushSubscriptionData, serde_json::Error> {
-        serde_json::from_value(self.provider_data.clone())
-    }
-
-    pub fn apns_data(&self) -> Result<ApnsSubscriptionData, serde_json::Error> {
         serde_json::from_value(self.provider_data.clone())
     }
 }
@@ -1113,12 +1109,11 @@ pub struct NewPushSubscription {
     pub id: i64,
     pub user_id: i32,
     pub provider: PushProvider,
-    pub endpoint: Option<String>,
-    pub device_token: Option<String>,
-    pub apns_environment: Option<PushEnvironment>,
+    pub scope: String,
+    pub target: String,
     pub provider_data: serde_json::Value,
     pub created_at: chrono::NaiveDateTime,
-    pub client_id: Option<String>,
+    pub client_id: String,
     pub delivery_failure_count: i32,
     pub last_delivery_error: Option<String>,
     pub last_delivery_error_at: Option<chrono::DateTime<chrono::Utc>>,
