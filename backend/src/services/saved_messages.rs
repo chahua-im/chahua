@@ -24,6 +24,7 @@ use crate::{
 
 pub const DEFAULT_SAVED_MESSAGES_LIMIT: i64 = 30;
 pub const MAX_SAVED_MESSAGES_LIMIT: i64 = 100;
+const PAGE_ENVELOPE_RESERVE: usize = 4096;
 const INVALID_SAVED_MESSAGE_SNAPSHOT: &str = "Saved message snapshot is invalid";
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -542,6 +543,37 @@ pub fn delete_saved_message_by_id(
     Ok(())
 }
 
+fn fit_saved_messages_page(response: &mut ListSavedMessagesResponse, max_frame_bytes: usize) {
+    if response.saved_messages.is_empty() {
+        return;
+    }
+    let shell_bytes = serde_json::to_vec(&ListSavedMessagesResponse {
+        saved_messages: Vec::new(),
+        next_cursor: Some(i64::MAX),
+    })
+    .expect("saved messages shell serializes")
+    .len();
+    let budget = max_frame_bytes.saturating_sub(PAGE_ENVELOPE_RESERVE + shell_bytes);
+    let mut keep = 1;
+    let mut used = serde_json::to_vec(&response.saved_messages[0])
+        .expect("saved message serializes")
+        .len();
+    while keep < response.saved_messages.len() {
+        let next = serde_json::to_vec(&response.saved_messages[keep])
+            .expect("saved message serializes")
+            .len();
+        if used + 1 + next > budget {
+            break;
+        }
+        used += 1 + next;
+        keep += 1;
+    }
+    if keep < response.saved_messages.len() {
+        response.saved_messages.truncate(keep);
+        response.next_cursor = response.saved_messages.last().map(|message| message.id);
+    }
+}
+
 pub fn list_saved_messages(
     conn: &mut PgConnection,
     media: &MediaStore,
@@ -586,10 +618,12 @@ pub fn list_saved_messages(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    Ok(ListSavedMessagesResponse {
+    let mut response = ListSavedMessagesResponse {
         saved_messages,
         next_cursor,
-    })
+    };
+    fit_saved_messages_page(&mut response, crate::rpc::session::MAX_FRAME_BYTES);
+    Ok(response)
 }
 
 #[cfg(test)]
@@ -806,5 +840,40 @@ mod tests {
             err,
             AppError::Internal("Saved message snapshot is invalid")
         ));
+    }
+
+    #[test]
+    fn fit_saved_messages_page_truncates_prefix_and_updates_next_cursor() {
+        let media = media_store("https://media.example");
+        let saved = [500_i64, 400, 300, 200]
+            .into_iter()
+            .map(|id| {
+                let mut row = saved_row();
+                row.id = id;
+                row.snapshot_message = Some("x".repeat(200));
+                saved_message_row_to_response(row, true, &media).unwrap()
+            })
+            .collect::<Vec<_>>();
+        let two_item_frame = super::PAGE_ENVELOPE_RESERVE
+            + serde_json::to_vec(&super::ListSavedMessagesResponse {
+                saved_messages: saved[..2].to_vec(),
+                next_cursor: Some(i64::MAX),
+            })
+            .unwrap()
+            .len()
+            + 32;
+
+        let mut response = super::ListSavedMessagesResponse {
+            saved_messages: saved,
+            next_cursor: None,
+        };
+        super::fit_saved_messages_page(&mut response, two_item_frame);
+        let ids: Vec<i64> = response.saved_messages.iter().map(|m| m.id).collect();
+        assert_eq!(ids, vec![500, 400]);
+        assert_eq!(response.next_cursor, Some(400));
+        assert!(
+            super::PAGE_ENVELOPE_RESERVE + serde_json::to_vec(&response).unwrap().len()
+                <= two_item_frame
+        );
     }
 }

@@ -302,9 +302,21 @@ describe('RpcTransport', () => {
       request.flush(null);
 
     const oversized = vi.fn();
-    const oversizedQuery = '€'.repeat(Math.ceil((64 * 1024 * 1024) / 3));
+    const oversizedQuery = '€'.repeat(Math.ceil((1024 * 1024) / 3));
     transport.call('messages.search', { query: oversizedQuery }).subscribe({ error: oversized });
-    expect(oversized).toHaveBeenCalledWith(expect.objectContaining({ kind: 'overloaded' }));
+    expect(oversized).toHaveBeenCalledWith(
+      expect.objectContaining({ code: RpcErrorCode.PayloadTooLarge, message: 'Payload too large' }),
+    );
+    expect(transport.state()).toBe(RpcConnectionState.Authenticated);
+    peer.expectNone('messages.search');
+
+    const oversizedIncoming = vi.fn();
+    transport.call('messages.list').subscribe({ error: oversizedIncoming });
+    const pending = peer.expect('messages.list');
+    peer.latest.receiveRaw(JSON.stringify({ jsonrpc: '2.0', id: pending.id, result: 'x'.repeat(1024 * 1024) }));
+    pending.flush(null);
+    expect(oversizedIncoming).toHaveBeenCalledWith(expect.objectContaining({ kind: 'protocol' }));
+    expect(transport.state()).toBe(RpcConnectionState.Closed);
     peer.verify();
   });
 

@@ -201,3 +201,126 @@ async fn disconnect_cancels_queued_mutation_before_capacity_is_released() {
     assert_eq!(group_count(&services, name).await, 0);
     drop(probe);
 }
+
+#[tokio::test]
+async fn batch_with_revoked_control_and_queued_ordinary_call_completes_and_invalidates() {
+    let Some(services) = crate::rpc::test_support::services().await else {
+        return;
+    };
+    let admission = admission::Admission::new(1, 1, 256, 64);
+    let (input, mut output, task) = open_with_admission(
+        services.clone(),
+        admission.clone(),
+        "admission-revoked-batch",
+    )
+    .await;
+    {
+        let mut connection = services.db.get().unwrap();
+        services.token_generation.bump(&mut connection, 1).unwrap();
+    }
+    let held = hold_capacity(&admission).await;
+    let name = "revoked batch ordinary must not execute";
+    input
+        .send(
+            json!([
+                {"jsonrpc":"2.0","id":"control","method":"session.ping","params":{}},
+                {"jsonrpc":"2.0","id":"ordinary","method":"groups.create","params":{"name":name}}
+            ])
+            .to_string(),
+        )
+        .await
+        .unwrap();
+    tokio::task::yield_now().await;
+    drop(held);
+
+    let batch = receive_json(&mut output).await;
+    let responses = batch.as_array().expect("correlated batch reply");
+    assert_eq!(responses.len(), 2);
+    let control = responses
+        .iter()
+        .find(|item| item["id"] == "control")
+        .expect("control response");
+    assert_eq!(control["error"]["code"], 1001);
+    let ordinary = responses
+        .iter()
+        .find(|item| item["id"] == "ordinary")
+        .expect("ordinary response");
+    assert_eq!(ordinary["error"]["code"], 1503);
+
+    let invalidated = receive_json(&mut output).await;
+    assert_eq!(invalidated["method"], "session.invalidated");
+    assert_eq!(invalidated["params"]["reason"], "revoked");
+    close_session(input, output, task).await;
+    assert_eq!(group_count(&services, name).await, 0);
+}
+
+#[tokio::test]
+async fn full_queue_rejects_immediately_with_overloaded_for_single_and_batch() {
+    let Some(services) = crate::rpc::test_support::services().await else {
+        return;
+    };
+    let admission = admission::Admission::new(1, 1, 1, 1);
+    let (input, mut output, task) =
+        open_with_admission(services.clone(), admission.clone(), "admission-full-queue").await;
+    let held = hold_capacity(&admission).await;
+    input
+        .send(json!({"jsonrpc":"2.0","id":"queued","method":"users.getMe"}).to_string())
+        .await
+        .unwrap();
+    barrier(&input, &mut output).await;
+
+    input
+        .send(json!({"jsonrpc":"2.0","id":"single-overflow","method":"users.getMe"}).to_string())
+        .await
+        .unwrap();
+    let single = receive_json(&mut output).await;
+    assert_eq!(single["id"], "single-overflow");
+    assert_eq!(single["error"]["code"], 1429);
+
+    input
+        .send(
+            json!([
+                {"jsonrpc":"2.0","id":"batch-overflow","method":"users.getMe"},
+                {"jsonrpc":"2.0","id":"batch-ping","method":"session.ping","params":{"state":"inactive"}}
+            ])
+            .to_string(),
+        )
+        .await
+        .unwrap();
+    let batch = receive_json(&mut output).await;
+    let responses = batch.as_array().expect("batch reply");
+    assert_eq!(responses.len(), 2);
+    let overflow = responses
+        .iter()
+        .find(|item| item["id"] == "batch-overflow")
+        .expect("overflow item");
+    assert_eq!(overflow["error"]["code"], 1429);
+    let ping = responses
+        .iter()
+        .find(|item| item["id"] == "batch-ping")
+        .expect("ping item");
+    assert!(ping.get("result").is_some());
+
+    drop(held);
+    let queued = receive_json(&mut output).await;
+    assert_eq!(queued["id"], "queued");
+    assert_eq!(queued["result"]["uid"], 1);
+    close_session(input, output, task).await;
+}
+
+#[tokio::test]
+async fn direct_handle_text_rejects_oversized_frame_with_payload_too_large_and_closes() {
+    let Some(services) = crate::rpc::test_support::services().await else {
+        return;
+    };
+    let (mut session, mut output) = RpcSession::new(services.clone());
+    let oversized = "x".repeat(MAX_FRAME_BYTES + 1);
+    assert!(session.handle_text(oversized).await.is_break());
+    assert!(!session.accepts_input());
+    assert!(output.recv().await.is_none());
+    let metrics = services.metrics.render().unwrap();
+    assert!(metrics.contains(
+        "api_requests_total{api=\"unknown\",error_code=\"1013\",status=\"413\",transport=\"rpc\"} 1\n"
+    ));
+    session.shutdown().await;
+}

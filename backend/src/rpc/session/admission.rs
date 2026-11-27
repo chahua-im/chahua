@@ -237,9 +237,13 @@ impl Request {
                 RequestInner::Immediate(permit) => permit,
                 RequestInner::Queued { .. } => unreachable!(),
             },
-            RequestInner::Queued { receiver, .. } => receiver
-                .await
-                .expect("admission sender dropped before request"),
+            RequestInner::Queued { receiver, .. } => {
+                let permit = receiver
+                    .await
+                    .expect("admission sender dropped before request");
+                self.inner = None;
+                permit
+            }
         }
     }
 }

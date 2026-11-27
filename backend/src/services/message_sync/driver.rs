@@ -168,7 +168,7 @@ impl SyncDriver {
                 };
                 self.installed.insert(chat_id, payload.cursor);
             }
-            Advance::Batch { .. } => {
+            Advance::Batches(_) => {
                 self.apply(chat_id, cursor, advance, named, send).await?;
                 send.send(&ServerWsMessage::MessageSyncReady(MessageSyncReady {
                     chat_id,
@@ -298,17 +298,26 @@ impl SyncDriver {
                     reason,
                 })
             }
-            Advance::Batch { to, changes } => ServerWsMessage::MessageSyncBatch(MessageSyncBatch {
-                chat_id,
-                from: from.expect("batch requires a previous cursor"),
-                to,
-                changes,
-            }),
+            Advance::Batches(batches) => {
+                let mut current_from = from.expect("batch requires a previous cursor");
+                for batch in batches {
+                    let to = batch.to;
+                    let event = ServerWsMessage::MessageSyncBatch(MessageSyncBatch {
+                        chat_id,
+                        from: current_from,
+                        to: to.clone(),
+                        changes: batch.changes,
+                    });
+                    send.send(&event).await?;
+                    self.installed.insert(chat_id, to.clone());
+                    current_from = to;
+                }
+                return Ok(());
+            }
         };
         send.send(&event).await?;
         let cursor = match event {
             ServerWsMessage::MessageSyncReset(payload) => payload.cursor,
-            ServerWsMessage::MessageSyncBatch(payload) => payload.to,
             _ => unreachable!(),
         };
         self.installed.insert(chat_id, cursor);

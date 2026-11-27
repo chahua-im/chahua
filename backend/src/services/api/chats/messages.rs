@@ -121,6 +121,144 @@ pub struct SearchMessagesDeps<'a> {
 
 const DEFAULT_SEARCH_LIMIT: i64 = 20;
 const MAX_SEARCH_RESULT_WINDOW: usize = 1_000;
+const PAGE_ENVELOPE_RESERVE: usize = 4096;
+
+#[derive(Clone, Copy)]
+enum MessagePageTrimMode {
+    Before,
+    After,
+    Around(i64),
+}
+
+fn fit_messages_page(
+    response: &mut ListMessagesResponse,
+    mode: MessagePageTrimMode,
+    max_frame_bytes: usize,
+) {
+    if response.messages.is_empty() {
+        return;
+    }
+    let shell = ListMessagesResponse {
+        membership_message_policy: response.membership_message_policy.clone(),
+        chat_settings: response.chat_settings,
+        messages: Vec::new(),
+        next_cursor: Some(i64::MAX),
+        prev_cursor: Some(i64::MAX),
+        older_cursor: Some(i64::MAX),
+        newer_cursor: Some(i64::MAX),
+    };
+    let shell_bytes = serde_json::to_vec(&shell)
+        .expect("list messages shell serializes")
+        .len();
+    let budget = max_frame_bytes.saturating_sub(PAGE_ENVELOPE_RESERVE + shell_bytes);
+    let sizes: Vec<usize> = response
+        .messages
+        .iter()
+        .map(|message| {
+            serde_json::to_vec(message)
+                .expect("message serializes")
+                .len()
+        })
+        .collect();
+
+    match mode {
+        MessagePageTrimMode::Before => {
+            let mut start = sizes.len() - 1;
+            let mut used = sizes[start];
+            while start > 0 {
+                let next = sizes[start - 1];
+                if used + 1 + next > budget {
+                    break;
+                }
+                used += 1 + next;
+                start -= 1;
+            }
+            if start > 0 {
+                response.messages.drain(..start);
+                response.older_cursor = response.messages.first().map(|message| message.id);
+                response.next_cursor = response.older_cursor;
+            }
+        }
+        MessagePageTrimMode::After => {
+            let mut keep = 1;
+            let mut used = sizes[0];
+            while keep < sizes.len() {
+                let next = sizes[keep];
+                if used + 1 + next > budget {
+                    break;
+                }
+                used += 1 + next;
+                keep += 1;
+            }
+            if keep < response.messages.len() {
+                response.messages.truncate(keep);
+                response.newer_cursor = response.messages.last().map(|message| message.id);
+                response.prev_cursor = response.newer_cursor;
+            }
+        }
+        MessagePageTrimMode::Around(target) => {
+            let pivot = response
+                .messages
+                .iter()
+                .position(|message| message.id == target)
+                .or_else(|| {
+                    response
+                        .messages
+                        .iter()
+                        .position(|message| message.id > target)
+                })
+                .unwrap_or(sizes.len() - 1);
+            let mut left = pivot;
+            let mut right = pivot;
+            let mut used = sizes[pivot];
+            let mut prefer_right = true;
+            loop {
+                let try_right = |right: usize, used: usize| -> Option<usize> {
+                    (right + 1 < sizes.len())
+                        .then(|| used + 1 + sizes[right + 1])
+                        .filter(|next| *next <= budget)
+                };
+                let try_left = |left: usize, used: usize| -> Option<usize> {
+                    (left > 0)
+                        .then(|| used + 1 + sizes[left - 1])
+                        .filter(|next| *next <= budget)
+                };
+                if prefer_right {
+                    if let Some(next_used) = try_right(right, used) {
+                        right += 1;
+                        used = next_used;
+                    } else if let Some(next_used) = try_left(left, used) {
+                        left -= 1;
+                        used = next_used;
+                    } else {
+                        break;
+                    }
+                } else if let Some(next_used) = try_left(left, used) {
+                    left -= 1;
+                    used = next_used;
+                } else if let Some(next_used) = try_right(right, used) {
+                    right += 1;
+                    used = next_used;
+                } else {
+                    break;
+                }
+                prefer_right = !prefer_right;
+            }
+            if left > 0 {
+                response.older_cursor = Some(response.messages[left].id);
+                response.next_cursor = response.older_cursor;
+            }
+            if right + 1 < response.messages.len() {
+                response.newer_cursor = Some(response.messages[right].id);
+                response.prev_cursor = response.newer_cursor;
+            }
+            if left > 0 || right + 1 < response.messages.len() {
+                response.messages.truncate(right + 1);
+                response.messages.drain(..left);
+            }
+        }
+    }
+}
 fn search_limit(limit: Option<i64>) -> usize {
     validate_limit(
         Some(limit.unwrap_or(DEFAULT_SEARCH_LIMIT)),
@@ -218,7 +356,7 @@ pub async fn get_messages(
         }
         let messages_vec = attach_metadata(conn, combined, media, avatars, uid).await;
 
-        return Ok(ListMessagesResponse {
+        let mut response = ListMessagesResponse {
             membership_message_policy,
             chat_settings,
             messages: messages_vec,
@@ -226,7 +364,13 @@ pub async fn get_messages(
             prev_cursor: newer_cursor,
             older_cursor,
             newer_cursor,
-        });
+        };
+        fit_messages_page(
+            &mut response,
+            MessagePageTrimMode::Around(target),
+            crate::rpc::session::MAX_FRAME_BYTES,
+        );
+        return Ok(response);
     }
 
     // after=<id>: fetch messages newer than `after`, ascending order
@@ -245,7 +389,7 @@ pub async fn get_messages(
             .flatten();
         let messages_vec = attach_metadata(conn, messages_to_process, media, avatars, uid).await;
 
-        return Ok(ListMessagesResponse {
+        let mut response = ListMessagesResponse {
             membership_message_policy,
             chat_settings,
             messages: messages_vec,
@@ -253,7 +397,13 @@ pub async fn get_messages(
             prev_cursor: newer_cursor,
             older_cursor: None,
             newer_cursor,
-        });
+        };
+        fit_messages_page(
+            &mut response,
+            MessagePageTrimMode::After,
+            crate::rpc::session::MAX_FRAME_BYTES,
+        );
+        return Ok(response);
     }
 
     // Default: before cursor, descending (newest first in response, reversed by client)
@@ -281,7 +431,7 @@ pub async fn get_messages(
     let messages_to_process: Vec<Message> = messages_to_process.into_iter().rev().collect();
     let messages_vec = attach_metadata(conn, messages_to_process, media, avatars, uid).await;
 
-    Ok(ListMessagesResponse {
+    let mut response = ListMessagesResponse {
         membership_message_policy,
         chat_settings,
         messages: messages_vec,
@@ -289,7 +439,13 @@ pub async fn get_messages(
         prev_cursor: None,
         older_cursor,
         newer_cursor: None,
-    })
+    };
+    fit_messages_page(
+        &mut response,
+        MessagePageTrimMode::Before,
+        crate::rpc::session::MAX_FRAME_BYTES,
+    );
+    Ok(response)
 }
 pub async fn search_messages(
     uid: i32,
@@ -1585,5 +1741,128 @@ mod message_write_tests {
         assert!(
             matches!(err, AppError::BadRequest(msg) if msg == FORWARDED_MESSAGE_TYPE_FORBIDDEN)
         );
+    }
+}
+
+#[cfg(test)]
+mod page_budget_tests {
+    use super::{
+        fit_messages_page, ListMessagesResponse, MessagePageTrimMode, MessageResponse,
+        PAGE_ENVELOPE_RESERVE,
+    };
+    use crate::dto::groups::MembershipMessagePolicy;
+    use crate::dto::users::{ChatSettings, User};
+    use crate::models::{MembershipMessageVisibility, MessageType};
+    use chrono::Utc;
+
+    fn sample_message(id: i64, body_len: usize) -> MessageResponse {
+        MessageResponse {
+            system_kind: None,
+            system_links: None,
+            forwarded_from: None,
+            id,
+            message: Some("a".repeat(body_len)),
+            metadata: None,
+            message_type: MessageType::Text,
+            sticker: None,
+            reply_root_id: None,
+            client_generated_id: format!("cid-{id}"),
+            sender: User {
+                uid: 1,
+                avatar_url: None,
+                name: Some("user".into()),
+                gender: 0,
+                user_group: None,
+            },
+            chat_id: 1,
+            created_at: Utc::now(),
+            is_edited: false,
+            is_deleted: false,
+            has_attachments: false,
+            thread_info: None,
+            reply_to_message: None,
+            attachments: Vec::new(),
+            reactions: Vec::new(),
+            mentions: Vec::new(),
+            forwarded_bundle_id: None,
+            forwarded_preview: None,
+        }
+    }
+
+    fn sample_response(ids: &[i64], body_len: usize) -> ListMessagesResponse {
+        ListMessagesResponse {
+            membership_message_policy: MembershipMessagePolicy {
+                visibility: MembershipMessageVisibility::Members,
+                can_view: true,
+            },
+            chat_settings: ChatSettings {
+                show_membership_messages: true,
+                show_unread_message_count: false,
+            },
+            messages: ids.iter().map(|id| sample_message(*id, body_len)).collect(),
+            next_cursor: None,
+            prev_cursor: None,
+            older_cursor: None,
+            newer_cursor: None,
+        }
+    }
+
+    fn frame_for_count(count: usize, body_len: usize) -> usize {
+        let mut base = sample_response(&(1..=(count as i64)).collect::<Vec<_>>(), body_len);
+        base.next_cursor = Some(i64::MAX);
+        base.prev_cursor = Some(i64::MAX);
+        base.older_cursor = Some(i64::MAX);
+        base.newer_cursor = Some(i64::MAX);
+        PAGE_ENVELOPE_RESERVE + serde_json::to_vec(&base).unwrap().len() + 32
+    }
+
+    #[test]
+    fn before_mode_keeps_newest_suffix_and_updates_older_cursor() {
+        let mut response = sample_response(&[10, 20, 30, 40], 200);
+        let max_frame = frame_for_count(2, 200);
+        fit_messages_page(&mut response, MessagePageTrimMode::Before, max_frame);
+        let ids: Vec<i64> = response.messages.iter().map(|m| m.id).collect();
+        assert_eq!(ids, vec![30, 40]);
+        assert_eq!(response.older_cursor, Some(30));
+        assert_eq!(response.next_cursor, Some(30));
+        assert_eq!(response.newer_cursor, None);
+        assert!(PAGE_ENVELOPE_RESERVE + serde_json::to_vec(&response).unwrap().len() <= max_frame);
+    }
+
+    #[test]
+    fn after_mode_keeps_oldest_prefix_and_updates_newer_cursor() {
+        let mut response = sample_response(&[10, 20, 30, 40], 200);
+        let max_frame = frame_for_count(2, 200);
+        fit_messages_page(&mut response, MessagePageTrimMode::After, max_frame);
+        let ids: Vec<i64> = response.messages.iter().map(|m| m.id).collect();
+        assert_eq!(ids, vec![10, 20]);
+        assert_eq!(response.newer_cursor, Some(20));
+        assert_eq!(response.prev_cursor, Some(20));
+        assert_eq!(response.older_cursor, None);
+        assert!(PAGE_ENVELOPE_RESERVE + serde_json::to_vec(&response).unwrap().len() <= max_frame);
+    }
+
+    #[test]
+    fn around_mode_expands_from_target_and_updates_trimmed_cursors() {
+        let mut response = sample_response(&[10, 20, 30, 40, 50], 200);
+        let max_frame = frame_for_count(3, 200);
+        fit_messages_page(&mut response, MessagePageTrimMode::Around(30), max_frame);
+        let ids: Vec<i64> = response.messages.iter().map(|m| m.id).collect();
+        assert_eq!(ids, vec![20, 30, 40]);
+        assert_eq!(response.older_cursor, Some(20));
+        assert_eq!(response.next_cursor, Some(20));
+        assert_eq!(response.newer_cursor, Some(40));
+        assert_eq!(response.prev_cursor, Some(40));
+        assert!(PAGE_ENVELOPE_RESERVE + serde_json::to_vec(&response).unwrap().len() <= max_frame);
+    }
+
+    #[test]
+    fn single_oversized_message_is_retained_so_page_is_never_empty() {
+        let mut response = sample_response(&[10, 20], 4000);
+        fit_messages_page(&mut response, MessagePageTrimMode::Before, 5000);
+        let ids: Vec<i64> = response.messages.iter().map(|m| m.id).collect();
+        assert_eq!(ids, vec![20]);
+        assert_eq!(response.older_cursor, Some(20));
+        assert_eq!(response.next_cursor, Some(20));
     }
 }

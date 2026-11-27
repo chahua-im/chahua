@@ -88,9 +88,11 @@ async fn replay_coalesces_changes_and_projects_each_viewer_like_history() {
             UPDATE messages SET message = 'final' WHERE id = 9876750002;")?;
         flush(conn)?;
         for (uid, from, reacted) in [(AUTHOR, author_at, true), (VIEWER, viewer_at, false)] {
-            let Advance::Batch { changes, .. } = service.advance_in_snapshot(conn, uid, CHAT, Some(&from))? else {
+            let Advance::Batches(batches) = service.advance_in_snapshot(conn, uid, CHAT, Some(&from))? else {
                 panic!("expected replay batch");
             };
+            assert_eq!(batches.len(), 1);
+            let changes = &batches[0].changes;
             assert_eq!(changes.len(), 2);
             assert!(changes.iter().any(|change| matches!(change, Change::Delete { message_id, thread_root_id: None } if *message_id == CHAT + 1)));
             let Some(Change::Upsert { appeared, message }) = changes.iter().find(|change| matches!(change, Change::Upsert { .. })) else {
@@ -109,9 +111,11 @@ async fn replay_coalesces_changes_and_projects_each_viewer_like_history() {
         conn.batch_execute("INSERT INTO messages (id, message_type, system_kind, client_generated_id, sender_uid, chat_id, created_at)
             VALUES (9876750003, 'system', 'member_joined', 'sync-replay-hidden', 4000305, 9876750000, now());")?;
         flush(conn)?;
-        let Advance::Batch { to, changes } = service.advance_in_snapshot(conn, VIEWER, CHAT, Some(&at))? else { panic!("expected checkpoint advance for hidden message"); };
-        assert!(changes.is_empty());
-        assert!(matches!(service.advance_in_snapshot(conn, VIEWER, CHAT, Some(&to))?, Advance::Unchanged));
+        let Advance::Batches(batches) = service.advance_in_snapshot(conn, VIEWER, CHAT, Some(&at))? else { panic!("expected checkpoint advance for hidden message"); };
+        assert_eq!(batches.len(), 1);
+        assert!(batches[0].changes.is_empty());
+        let to = &batches[0].to;
+        assert!(matches!(service.advance_in_snapshot(conn, VIEWER, CHAT, Some(to))?, Advance::Unchanged));
 
         conn.batch_execute("INSERT INTO messages (id, message_type, client_generated_id, sender_uid, chat_id, created_at, message)
             VALUES (9876750004, 'text', 'sync-replay-shell', 4000305, 9876750000, now(), 'redact this');
@@ -119,10 +123,10 @@ async fn replay_coalesces_changes_and_projects_each_viewer_like_history() {
             VALUES (9876750005, 'text', 'sync-replay-shell-reply', 4000305, 9876750000, now(), 9876750004);
             UPDATE messages SET deleted_at = now(), has_thread = true WHERE id = 9876750004;")?;
         flush(conn)?;
-        let Advance::Batch { changes, .. } = service.advance_in_snapshot(conn, VIEWER, CHAT, Some(&to))? else {
+        let Advance::Batches(batches) = service.advance_in_snapshot(conn, VIEWER, CHAT, Some(to))? else {
             panic!("expected the new thread shell and reply");
         };
-        assert!(changes.iter().any(|change| matches!(change,
+        assert!(batches.iter().flat_map(|batch| &batch.changes).any(|change| matches!(change,
             Change::Upsert { appeared: true, message } if message.id == CHAT + 4
                 && message.is_deleted && message.message.is_none() && message.attachments.is_empty())));
         Ok(())
